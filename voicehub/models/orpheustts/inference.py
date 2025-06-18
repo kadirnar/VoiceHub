@@ -220,3 +220,5 @@ class OrpheusTTS:
                 audio.detach().squeeze().cpu().numpy(),
                 24000
             )
+
+        return code_lists

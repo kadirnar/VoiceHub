@@ -1,10 +1,6 @@
 MODEL_TYPE_TO_MODEL_CLASS_NAME = {
     "orpheustts": "OrpheusTTS",
-}
-
-# Dictionary mapping model types to their module names
-MODEL_TYPE_TO_MODULE_NAME = {
-    "orpheustts": "orpheus",
+    "dia": "DiaTTS",
 }
 
 
@@ -24,12 +20,9 @@ class AutoInferenceModel:
         """
         # Get the model class name from the mapping
         model_class_name = MODEL_TYPE_TO_MODEL_CLASS_NAME[model_type]
-        
-        # Get the module name for this model type
-        module_name = MODEL_TYPE_TO_MODULE_NAME.get(model_type, model_type)
-        
+
         # Import the module dynamically
-        module = __import__(f"voicehub.models.{model_type}.{module_name}", fromlist=[model_class_name])
+        module = __import__(f"voicehub.models.{model_type}.{"inference"}", fromlist=[model_class_name])
         
         # Get the model class from the module
         InferenceModel = getattr(module, model_class_name)

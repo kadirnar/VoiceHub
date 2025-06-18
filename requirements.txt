@@ -2,3 +2,6 @@ transformers
 snac
 librosa
 soundfile
+torchaudio
+pydantic
+descript-audio-codec
