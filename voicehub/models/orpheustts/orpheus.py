@@ -1,127 +1,222 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
 from snac import SNAC
 import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 import soundfile as sf
-from typing import Optional
+from typing import List
+
 
 class OrpheusTTS:
-    def __init__(self,
-                 model_path: str = None,
-                 device: Optional[str] = None
-    ):
-        self.model = None
-        self.snac_model = None
-        self.device = None
-        self.load_models(model_path, device)
-
-    def load_models(self,
-                    model_path: str = None,
-                    device: Optional[str] = None):
+    """
+    A neural speech synthesis model that converts text to speech using SNAC audio codec.
+    
+    This class integrates a causal language model with SNAC (Speech Neural Audio Codec) 
+    to generate natural-sounding speech with paralinguistic features like laughter, 
+    sighing, and other vocal expressions.
+    
+    Example:
+        >>> generator = SpeechGenerator()
+        >>> prompts = ["Hello, I'm excited to meet you!"]
+        >>> generator(prompts, voice="Sarah", output_prefix="greeting")
+        # Creates greeting_0.wav file
+        
+    Attributes:
+        device (str): Computation device ('cuda' or 'cpu')
+        model: The causal language model for text-to-audio-token generation
+        tokenizer: Tokenizer for text preprocessing
+        snac_model: SNAC model for audio token decoding
+    """
+    
+    def __init__(self, model_path: str = "canopylabs/orpheus-3b-0.1-ft", device: str = "cuda"):
         """
-        Load the text generation model, tokenizer, and SNAC codec model.
+        Initialize the speech generator with specified model and device.
+        
+        Args:
+            model_path: HuggingFace model path for the language model
+            device: Computing device ('cuda' for GPU, 'cpu' for CPU)
         """
-        self.model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.bfloat16).to(self.device)
+        self.device = device
+        self._load_models(model_path)
+        
+    def _load_models(self, model_path: str):
+        """Load SNAC and language models"""
+        # Load SNAC audio codec model for decoding audio tokens
+        self.snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").to("cpu")
+        
+        # Load the main language model for text-to-audio-token generation
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_path, torch_dtype=torch.bfloat16
+        ).to(self.device)
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").to(self.device)
-
-    def _prepare_inputs(self,
-                        prompt: str,
-                        chosen_voice: str):
+        
+    def _prepare_inputs(self, prompts: List[str], voice: str):
         """
-        Tokenize, add special tokens, pad, and build attention masks.
+        Tokenize and format inputs for generation.
+        
+        Args:
+            prompts: List of text strings to convert to speech
+            voice: Voice identifier to prepend to each prompt
+            
+        Returns:
+            Tuple of (input_ids, attention_mask) tensors ready for model generation
         """
+        # Add voice prefix to each prompt
+        prompts = [f"{voice}: {p}" for p in prompts]
+        
+        # Tokenize all prompts
+        input_ids_list = [
+            self.tokenizer(prompt, return_tensors="pt").input_ids 
+            for prompt in prompts
+        ]
+        
+        # Add special tokens: Start of Human (SOH) and End of Text/Human (EOT/EOH)
         start_token = torch.tensor([[128259]], dtype=torch.int64)  # SOH
         end_tokens = torch.tensor([[128009, 128260]], dtype=torch.int64)  # EOT, EOH
-
-        formatted_prompt = f"{chosen_voice}: " + prompt
-        ids = self.tokenizer(formatted_prompt, return_tensors="pt").input_ids
-        ids = torch.cat([start_token, ids, end_tokens], dim=1)
-
-        # Create attention mask (no padding needed for single prompt)
-        attention_mask = torch.ones(1, ids.shape[1], dtype=torch.int64)
-        input_ids = ids.to(self.device)
-        attention_mask = attention_mask.to(self.device)
-        return input_ids, attention_mask
-
-    # _generate method has been merged into __call__
-
-    def _decode_audio(self, generated_ids: torch.Tensor) -> list[torch.Tensor]:
+        
+        formatted_inputs = [
+            torch.cat([start_token, ids, end_tokens], dim=1)
+            for ids in input_ids_list
+        ]
+        
+        # Pad to same length for batch processing
+        max_len = max(inp.shape[1] for inp in formatted_inputs)
+        pad_token = 128263  # Padding token ID
+        
+        padded_inputs = []
+        attention_masks = []
+        
+        for inp in formatted_inputs:
+            padding_len = max_len - inp.shape[1]
+            padding = torch.full((1, padding_len), pad_token, dtype=torch.int64)
+            
+            padded = torch.cat([padding, inp], dim=1)
+            mask = torch.cat([
+                torch.zeros((1, padding_len), dtype=torch.int64),
+                torch.ones((1, inp.shape[1]), dtype=torch.int64)
+            ], dim=1)
+            
+            padded_inputs.append(padded)
+            attention_masks.append(mask)
+        
+        return (
+            torch.cat(padded_inputs, dim=0).to(self.device),
+            torch.cat(attention_masks, dim=0).to(self.device)
+        )
+    
+    def _redistribute_codes(self, codes: List[int]):
         """
-        Strip special tokens, rebatch into SNAC code layers, and decode to audio.
+        Convert token codes to SNAC format and decode to audio.
+        
+        SNAC uses a hierarchical codec with 3 layers. This method redistributes
+        the flat token sequence into the proper layer structure.
+        
+        Args:
+            codes: List of integer codes from the language model
+            
+        Returns:
+            Decoded audio tensor
         """
-        # locate last human speech token (128257), crop thereafter
-        token_to_find = 128257
-        token_to_remove = 128258
-
-        idxs = (generated_ids == token_to_find).nonzero(as_tuple=True)
-        if len(idxs[1]) > 0:
-            last = idxs[1][-1].item()
-            cropped = generated_ids[:, last + 1:]
+        # SNAC processes audio in groups of 7 tokens
+        n_groups = (len(codes) + 1) // 7
+        
+        layer_1, layer_2, layer_3 = [], [], []
+        
+        for i in range(n_groups):
+            base_idx = 7 * i
+            # Layer 1: Coarse audio features (every 7th token)
+            layer_1.append(codes[base_idx])
+            # Layer 2: Medium resolution features
+            layer_2.extend([codes[base_idx + 1] - 4096, codes[base_idx + 4] - 4 * 4096])
+            # Layer 3: Fine-grained audio details
+            layer_3.extend([
+                codes[base_idx + 2] - 2 * 4096,
+                codes[base_idx + 3] - 3 * 4096,
+                codes[base_idx + 5] - 5 * 4096,
+                codes[base_idx + 6] - 6 * 4096
+            ])
+        
+        snac_codes = [
+            torch.tensor(layer_1).unsqueeze(0),
+            torch.tensor(layer_2).unsqueeze(0),
+            torch.tensor(layer_3).unsqueeze(0)
+        ]
+        
+        return self.snac_model.decode(snac_codes)
+    
+    def _postprocess_tokens(self, generated_ids: torch.Tensor) -> List[List[int]]:
+        """
+        Extract and clean generated audio tokens.
+        
+        Args:
+            generated_ids: Raw token output from language model
+            
+        Returns:
+            List of cleaned token sequences, one per input prompt
+        """
+        # Find last occurrence of start token (128257) to locate audio tokens
+        start_token, end_token = 128257, 128258
+        start_positions = (generated_ids == start_token).nonzero(as_tuple=True)
+        
+        if len(start_positions[1]) > 0:
+            last_start = start_positions[1][-1].item()
+            tokens = generated_ids[:, last_start + 1:]
         else:
-            cropped = generated_ids
-
-        # remove end-token padding
-        rows = []
-        for row in cropped:
-            filtered = row[row != token_to_remove]
-            rows.append(filtered)
-
-        # group into codec code-lists of 7, remap token IDs to codebook indices
-        def _redistribute(codes: list[int]):
-            l1, l2, l3 = [], [], []
-            for i in range((len(codes)//7)):
-                base = 7 * i
-                l1.append(codes[base] - 128266)
-                l2.append(codes[base+1] - 128266 - 4096)
-                # layer 3 accumulates several:
-                l3.extend([
-                    codes[base+2] - 128266 - 2*4096,
-                    codes[base+3] - 128266 - 3*4096,
-                    codes[base+5] - 128266 - 5*4096,
-                    codes[base+6] - 128266 - 6*4096
-                ])
-                l2.append(codes[base+4] - 128266 - 4*4096)
-            return [
-                torch.tensor(l1, device=self.device).unsqueeze(0),
-                torch.tensor(l2, device=self.device).unsqueeze(0),
-                torch.tensor(l3, device=self.device).unsqueeze(0),
-            ]
-
-        audios = []
-        for row in rows:
-            codes = _redistribute(row.tolist())
-            codes = [c.to(self.device) for c in codes]
-            audio = self.snac_model.decode(codes)  # [1, T]
-            audios.append(audio.squeeze(0))
-        return audios
-
-    def __call__(self,
-                 prompt: str,
-                 chosen_voice: str = "tara",
-                 max_new_tokens: int = 1200,
-                 temperature: float = 0.6,
-                 top_p: float = 0.95,
-                 repetition_penalty: float = 1.1,
-                 output_path: str = "output.wav") -> str:
+            tokens = generated_ids
+        
+        # Process each sequence
+        code_lists = []
+        for row in tokens:
+            # Remove end tokens to get clean audio token sequence
+            clean_tokens = row[row != end_token]
+            
+            # Trim to multiple of 7 (SNAC requirement) and adjust token values
+            trim_len = (clean_tokens.size(0) // 7) * 7
+            trimmed = clean_tokens[:trim_len]
+            # Adjust token IDs to SNAC's expected range
+            adjusted = [t.item() - 128266 for t in trimmed]
+            
+            code_lists.append(adjusted)
+        
+        return code_lists
+    
+    def __call__(self, prompts: List[str], voice: str, output_prefix: str = "sample"):
         """
-        Main entry point. Takes a list of raw prompt strings,
-        generates speech, saves .wav files, and returns file paths.
+        Generate speech from text prompts.
+        
+        Args:
+            prompts: List of text strings to convert to speech
+            voice: Voice identifier (e.g., "Sarah", "John")
+            output_prefix: Prefix for output WAV files (default: "sample")
+            
+        Example:
+            >>> generator = SpeechGenerator()
+            >>> prompts = ["Hello world!", "How are you today?"]
+            >>> generator.generate(prompts, "Emma", "greeting")
+            # Creates greeting_0.wav and greeting_1.wav
         """
-        input_ids, attention_mask = self._prepare_inputs(prompt, chosen_voice)
-        # Generate raw token sequences directly in __call__
+        input_ids, attention_mask = self._prepare_inputs(prompts, voice)
+        
+        # Generate audio tokens using the language model
         with torch.no_grad():
-            generated = self.model.generate(
+            generated_ids = self.model.generate(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                max_new_tokens=max_new_tokens,
+                max_new_tokens=1200,
                 do_sample=True,
-                temperature=temperature,
-                top_p=top_p,
-                repetition_penalty=repetition_penalty,
+                temperature=0.6,
+                top_p=0.95,
+                repetition_penalty=1.1,
+                num_return_sequences=1,
                 eos_token_id=128258,
             )
-        audio_tensors = self._decode_audio(generated)
-        # Since we're only processing one prompt, we only have one audio tensor
-        audio = audio_tensors[0]
-        sf.write(output_path, audio.cpu().numpy(), 24000)
-        return output_path
+        
+        code_lists = self._postprocess_tokens(generated_ids)
+        
+        # Generate and save audio files
+        for i, codes in enumerate(code_lists):
+            audio = self._redistribute_codes(codes)
+            # Save as 24kHz WAV file
+            sf.write(
+                f"{output_prefix}_{i}.wav",
+                audio.detach().squeeze().cpu().numpy(),
+                24000
+            )
