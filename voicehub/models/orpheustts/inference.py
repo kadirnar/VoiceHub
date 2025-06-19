@@ -145,7 +145,7 @@ class OrpheusTTS:
 
         return adjusted
 
-    def __call__(self, prompt: str, voice: str, output_prefix: str = "sample"):
+    def __call__(self, prompt: str, voice: str, output_file: str = "sample"):
         """
         Generate speech from text prompts.
 
@@ -181,7 +181,7 @@ class OrpheusTTS:
         audio = self._redistribute_codes(codes)
         # Save as 24kHz WAV file
         sf.write(
-            f"{output_prefix}.wav",
+            f"{output_file}.wav",
             audio.detach().squeeze().cpu().numpy(),
             24000,
         )

@@ -26,7 +26,9 @@ model = AutoInferenceModel.from_pretrained(
 )
 
 # Generate speech with the model
-output = model("Hello, how are you today?", voice="tara", output_prefix="output")
+output = model(
+    "Hello, how are you today?", voice="tara", output_file="output"
+)  # voice param is only for orpheustts
 ```
 
 ## 🤗 Contributing
