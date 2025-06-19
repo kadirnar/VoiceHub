@@ -1,13 +1,16 @@
 import torchaudio
+from voicehub.models.vui.inference import render
+from voicehub.models.vui.model import Vui
 
-from vui.inference import render
-from vui.model import Vui
+class VuiTTS:
+    def __init__(self, model_path: str, device: str = "cuda"):
+        self.model_path = model_path
+        self.model = None
 
-model = Vui.from_pretrained().cuda()
-waveform = render(
-    model,
-    "Hey, here is some random stuff, usually something quite long as the shorter the text the less likely the model can cope!",
-)
-print(waveform.shape)
-torchaudio.save("out.opus", waveform[0], 22050)
+    def load_model(self):
+        model = Vui.from_pretrained(checkpoint_path=self.model_path).to(self.device)
+        self.model = model
 
+    def __call__(self, text: str, output_file: str = "output.wav"):
+        waveform = render(self.model, text)
+        torchaudio.save(output_file, waveform[0], 22050)
