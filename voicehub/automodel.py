@@ -1,8 +1,8 @@
 MODEL_TYPE_TO_MODEL_CLASS_NAME = {
     "orpheustts": "OrpheusTTS",
     "dia": "DiaTTS",
+    "vui": "VuiTTS"
 }
-
 
 class AutoInferenceModel:
     def from_pretrained(model_type: str = "orpheustts", model_path: str = "canopylabs/orpheus-3b-0.1-ft", device: str = "cuda", **kwargs):
