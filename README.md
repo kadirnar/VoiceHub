@@ -15,22 +15,20 @@ uv pip install voicehub
 
 ## 📚 Usage
 
-### Orpheus-TTS Model
+VoiceHub provides a simple, unified interface for working with various Text-to-Speech (TTS) models. Below are examples showing how to use different supported TTS models with the same consistent approach.
+
+### OrpheusTTS Model
 
 ```python
 from voicehub.automodel import AutoInferenceModel
 
-# Create model using the static from_pretrained method
 model = AutoInferenceModel.from_pretrained(
     model_type="orpheustts",  # or "dia" or "vui"
     model_path="canopylabs/orpheus-3b-0.1-ft",
     device="cuda",
 )
 
-# Generate speech with the model
-output = model(
-    "Hello, how are you today?", voice="tara", output_file="output.wav"
-)  # voice param is only for orpheustts
+output = model("Hello, how are you today?", voice="tara", output_file="output.wav")
 ```
 
 ### DiaTTS Model
@@ -38,14 +36,12 @@ output = model(
 ```python
 from voicehub.automodel import AutoInferenceModel
 
-# Create model using the static from_pretrained method
 model = AutoInferenceModel.from_pretrained(
     model_type="dia",  # or "dia" or "vui"
     model_path="dia/dia-100m-base.pt",
     device="cuda",
 )
 
-# Generate speech with the model
 output = model(
     text="Hey, here is some random stuff, the text the less likely the model can cope!",
     output_file="output.wav",
@@ -57,14 +53,12 @@ output = model(
 ```python
 from voicehub.automodel import AutoInferenceModel
 
-# Create model using the static from_pretrained method
 model = AutoInferenceModel.from_pretrained(
     model_type="vui",  # or "dia" or "vui"
     model_path="vui-100m-base.pt",
     device="cuda",
 )
 
-# Generate speech with the model
 output = model(
     text="Hey, here is some random stuff, the text the less likely the model can cope!",
     output_file="output.wav",
@@ -83,4 +77,4 @@ pre-commit run --all-files
 
 - [Orpheus-TTS](https://github.com/canopyai/Orpheus-TTS)
 - [Dia](https://github.com/nari-labs/dia)
-- [VUI](https://github.com/fluxions-ai/vui)
+- [Vui](https://github.com/fluxions-ai/vui)
