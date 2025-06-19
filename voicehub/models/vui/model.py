@@ -386,8 +386,8 @@ class Vui(nn.Module):
                 from huggingface_hub import hf_hub_download
 
                 checkpoint_path = hf_hub_download(
-                    "fluxions/vui",
-                    checkpoint_path,
+                    repo_id="fluxions/vui",
+                    filename=checkpoint_path,
                 )
             checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
 
