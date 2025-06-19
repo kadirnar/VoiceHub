@@ -4,9 +4,7 @@ from torch import Tensor
 
 def multinomial(input: Tensor, num_samples: int, replacement=False, *, generator=None):
     input_ = input.reshape(-1, input.shape[-1])
-    output_ = torch.multinomial(
-        input_, num_samples=num_samples, replacement=replacement, generator=generator
-    )
+    output_ = torch.multinomial(input_, num_samples=num_samples, replacement=replacement, generator=generator)
     output = output_.reshape(*list(input.shape[:-1]), -1)
     return output
 

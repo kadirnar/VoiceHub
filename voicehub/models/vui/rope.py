@@ -13,9 +13,7 @@ def rotate_half(x):
 
 
 @autocast("cuda", enabled=False)
-def apply_rotary_emb(
-    freqs: Tensor, t: Tensor, start_index: int = 0, scale: float = 1.0, seq_dim=-2
-):
+def apply_rotary_emb(freqs: Tensor, t: Tensor, start_index: int = 0, scale: float = 1.0, seq_dim=-2):
     dtype = t.dtype
 
     if t.ndim == 3:
@@ -46,9 +44,9 @@ def precompute_freqs_cis(
     theta_rescale_factor: float = 1.0,
     dtype: torch.dtype = torch.float32,
 ):
-    theta *= theta_rescale_factor ** (dim / (dim - 2))
+    theta *= theta_rescale_factor**(dim / (dim - 2))
     pos = torch.arange(max_seqlen, dtype=dtype)
-    inv_freqs = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=dtype) / dim))
+    inv_freqs = 1.0 / (theta**(torch.arange(0, dim, 2, dtype=dtype) / dim))
     freqs = torch.einsum("..., f -> ... f", pos.to(inv_freqs.dtype), inv_freqs)
     freqs = repeat(freqs, "... n -> ... (n r)", r=2)
     return freqs

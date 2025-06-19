@@ -3,6 +3,7 @@ from transformers import ByT5Tokenizer
 
 
 class CustomByT5Tokenizer(ByT5Tokenizer):
+
     def encode(self, text, add_special_tokens=False, **kwargs):
         """
         Override the encode method.

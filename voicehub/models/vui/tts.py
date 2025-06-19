@@ -17,21 +17,13 @@ def ensure_spaces_around_tags(text: str):
     # Add space before '[' if not preceded by space, '<', or '['
     text = re.sub(
         r"(?<![<\[\s])(\[)",
-        lambda m: (
-            f"\n{m.group(1)}"
-            if m.start() > 0 and text[m.start() - 1] == "\n"
-            else f" {m.group(1)}"
-        ),
+        lambda m: (f"\n{m.group(1)}" if m.start() > 0 and text[m.start() - 1] == "\n" else f" {m.group(1)}"),
         text,
     )
     # Add space after ']' if not preceded by digit+']' and not followed by space, '>', or ']'
     text = re.sub(
         r"(?<!\d\])(\])(?![>\]\s])",
-        lambda m: (
-            f"{m.group(1)}\n"
-            if m.end() < len(text) and text[m.end()] == "\n"
-            else f"{m.group(1)} "
-        ),
+        lambda m: (f"{m.group(1)}\n" if m.end() < len(text) and text[m.end()] == "\n" else f"{m.group(1)} "),
         text,
     )
     text = text.strip()
@@ -60,9 +52,7 @@ def asr(chunk, model=None, prefix=None):
 
     chunk = whisper.pad_or_trim(chunk)
     mel = whisper.log_mel_spectrogram(chunk, n_mels=wm.dims.n_mels).to(wm.device)
-    options = whisper.DecodingOptions(
-        language="en", without_timestamps=True, prefix=prefix
-    )
+    options = whisper.DecodingOptions(language="en", without_timestamps=True, prefix=prefix)
     result = whisper.decode(wm, mel[None], options)
     return result[0].text
 
@@ -89,6 +79,7 @@ valid_non_speech = [f"[{v}]" for v in valid_non_speech]
 def remove_all_invalid_non_speech(txt):
     """
     Remove all non-speech markers that are not in the valid_non_speech list.
+
     Only keeps valid non-speech markers like [breath], [sigh], etc.
     """
     # Find all text within square brackets
@@ -141,18 +132,18 @@ def simple_clean(text):
 
 @torch.inference_mode()
 def generate(
-    self: Vui,
-    text: str,
-    prompt_codes: Tensor | None = None,
-    temperature: float = 0.5,
-    top_k: int | None = 150,
-    top_p: float | None = None,
-    max_gen_len: int = int(120 * 21.53),
+        self: Vui,
+        text: str,
+        prompt_codes: Tensor | None = None,
+        temperature: float = 0.5,
+        top_k: int | None = 150,
+        top_p: float | None = None,
+        max_gen_len: int = int(120 * 21.53),
 ):
     text = simple_clean(text)
     with (
-        torch.autocast("cuda", torch.bfloat16, True),
-        sdpa_kernel([SDPBackend.MATH]),
+            torch.autocast("cuda", torch.bfloat16, True),
+            sdpa_kernel([SDPBackend.MATH]),
     ):
         t1 = time.perf_counter()
         batch_size = 1
@@ -175,9 +166,7 @@ def generate(
         Q = self.config.model.n_quantizers
 
         if prompt_codes is None:
-            prompt_codes = torch.zeros(
-                (batch_size, Q, 0), dtype=torch.int64, device=device
-            )
+            prompt_codes = torch.zeros((batch_size, Q, 0), dtype=torch.int64, device=device)
         else:
             prompt_codes = prompt_codes[:, :Q].repeat(batch_size, 1, 1)
 
@@ -189,16 +178,12 @@ def generate(
         special_token_id = self.config.model.special_token_id
 
         # we generate codes up to the max_gen_len that will be mapped to the pattern sequence
-        codes = torch.full(
-            (B, Q, max_gen_len), unknown_token, dtype=torch.int64, device=device
-        )
+        codes = torch.full((B, Q, max_gen_len), unknown_token, dtype=torch.int64, device=device)
         print("codes", codes.shape)
 
         codes[:, :, :start_offset] = prompt_codes
 
-        sequence, indexes, mask = pattern.build_pattern_sequence(
-            codes, special_token_id
-        )
+        sequence, indexes, mask = pattern.build_pattern_sequence(codes, special_token_id)
         # retrieve the start_offset in the sequence:
         # it is the first sequence step that contains the `start_offset` timestep
         start_offset_sequence = pattern.get_first_step_with_timesteps(start_offset)
@@ -213,10 +198,7 @@ def generate(
         for offset in range(start_offset_sequence, S):
             # print(f"{prev_offset}:{offset}")
             curr_sequence = sequence[..., prev_offset:offset]
-            audio_embeddings = (
-                sum([self.audio_embeddings[q](curr_sequence[:, q]) for q in range(Q)])
-                / Q
-            )
+            audio_embeddings = (sum([self.audio_embeddings[q](curr_sequence[:, q]) for q in range(Q)]) / Q)
 
             if do_prefill:
                 embeddings = torch.cat((text_embeddings, audio_embeddings), dim=1)
@@ -233,9 +215,7 @@ def generate(
             if offset == 15:
                 print("TTFB", time.perf_counter() - t1)
 
-            logits = torch.stack(
-                [self.audio_heads[q](out[:, -1]) for q in range(Q)], dim=1
-            )
+            logits = torch.stack([self.audio_heads[q](out[:, -1]) for q in range(Q)], dim=1)
 
             repetition_penalty = 1.4
             history_window = 12
@@ -254,9 +234,7 @@ def generate(
 
                 if len(unique_tokens) > 0:
                     # Apply penalty by dividing the logits for tokens that have appeared recently
-                    logits[0, q, unique_tokens] = (
-                        logits[0, q, unique_tokens] / repetition_penalty
-                    )
+                    logits[0, q, unique_tokens] = (logits[0, q, unique_tokens] / repetition_penalty)
 
             if offset < 24.53 * 4:
                 logits[..., eos] = -float("inf")
@@ -279,26 +257,25 @@ def generate(
                 print("breaking at", offset)
                 break
 
-            valid_mask = mask[..., offset : offset + 1].expand(B, -1, -1)
+            valid_mask = mask[..., offset:offset + 1].expand(B, -1, -1)
             next_codes[~valid_mask] = special_token_id
 
-            sequence[..., offset : offset + 1] = torch.where(
-                sequence[..., offset : offset + 1] == unknown_token,
+            sequence[..., offset:offset + 1] = torch.where(
+                sequence[..., offset:offset + 1] == unknown_token,
                 next_codes,
-                sequence[..., offset : offset + 1],
+                sequence[..., offset:offset + 1],
             )
 
             prev_offset = offset
 
         # print(sequence.shape)
         out_codes, out_indexes, out_mask = pattern.revert_pattern_sequence(
-            sequence, special_token=unknown_token
-        )
+            sequence, special_token=unknown_token)
 
         # sanity checks over the returned codes and corresponding masks
         # assert (out_codes[..., :max_gen_len] != unknown_token).all()
         # assert (out_mask[..., :max_gen_len] == 1).all()
-        out_codes = out_codes[..., prompt_codes.shape[-1] : offset]
+        out_codes = out_codes[..., prompt_codes.shape[-1]:offset]
         return out_codes[[0]]
 
 
@@ -313,8 +290,10 @@ def render(
     max_secs: int = 100,
 ):
     """
-    Render audio from text. Uses generate for text < 1000 characters,
-    otherwise breaks text into sections and uses chunking with context.
+    Render audio from text.
+
+    Uses generate for text < 1000 characters, otherwise breaks text into sections and uses chunking with
+    context.
     """
     text = remove_all_invalid_non_speech(text)
     text = simple_clean(text)
@@ -323,9 +302,7 @@ def render(
     max_gen_len = int(HZ * max_secs)
 
     if len(text) < 1000:
-        codes = generate(
-            self, text, prompt_codes, temperature, top_k, top_p, max_gen_len
-        )
+        codes = generate(self, text, prompt_codes, temperature, top_k, top_p, max_gen_len)
         codes = codes[..., :-10]
         audio = self.codec.from_indices(codes)
         paudio = torchaudio.functional.resample(audio[0], 22050, 16000)
@@ -334,7 +311,7 @@ def render(
         if len(results):
             # Cut the audio based on VAD results, add 200ms silence at end
             s, e = results[0][0], results[-1][1]
-            return audio[..., int(s * SR) : int((e + 0.2) * SR)].cpu()
+            return audio[..., int(s * SR):int((e + 0.2) * SR)].cpu()
 
         raise Exception("Failed to render")
 
@@ -361,8 +338,8 @@ def render(
             try:
                 print("rendering", current_text)
                 with (
-                    torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.MATH),
-                    torch.autocast("cuda", dtype=torch.bfloat16, enabled=True),
+                        torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.MATH),
+                        torch.autocast("cuda", dtype=torch.bfloat16, enabled=True),
                 ):
                     codes = generate(
                         self,
@@ -386,9 +363,9 @@ def render(
                     prev_text = line
                     # Cut the audio based on VAD results, add 200ms silence at end
                     s, e = results[0][0], results[0][1]
-                    codes = codes[..., int(s * HZ) : int(e * HZ)]
+                    codes = codes[..., int(s * HZ):int(e * HZ)]
                     prev_codes = codes
-                    audio = audio[..., int(s * SR) : int((e + 0.2) * SR)].cpu()
+                    audio = audio[..., int(s * SR):int((e + 0.2) * SR)].cpu()
                     audios.append(audio)
                 else:
                     prev_codes = orig_codes

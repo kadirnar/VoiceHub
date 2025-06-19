@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Pattern:
-    """Base implementation of a pattern over a sequence with multiple codebooks.
+    """
+    Base implementation of a pattern over a sequence with multiple codebooks.
 
     The codebook pattern consists in a layout, defining for each sequence step
     the list of coordinates of each codebook timestep in the resulting interleaved sequence.
@@ -46,11 +47,9 @@ class Pattern:
         assert len(self.layout) > 0
         self._validate_layout()
         self._build_reverted_sequence_scatter_indexes = lru_cache(100)(
-            self._build_reverted_sequence_scatter_indexes
-        )
+            self._build_reverted_sequence_scatter_indexes)
         self._build_pattern_sequence_scatter_indexes = lru_cache(100)(
-            self._build_pattern_sequence_scatter_indexes
-        )
+            self._build_pattern_sequence_scatter_indexes)
         logger.info(
             "New pattern, time steps: %d, sequence steps: %d",
             self.timesteps,
@@ -58,7 +57,9 @@ class Pattern:
         )
 
     def _validate_layout(self):
-        """Runs checks on the layout to ensure a valid pattern is defined.
+        """
+        Runs checks on the layout to ensure a valid pattern is defined.
+
         A pattern is considered invalid if:
             - Multiple timesteps for a same codebook are defined in the same sequence step
             - The timesteps for a given codebook are not in ascending order as we advance in the sequence
@@ -77,8 +78,7 @@ class Pattern:
                     q_timesteps[coord.q] = coord.t
                 # each sequence step contains at max 1 coordinate per codebook
                 assert len(qs) == len(
-                    seq_coords
-                ), f"Multiple entries for a same codebook are found at step {s}"
+                    seq_coords), f"Multiple entries for a same codebook are found at step {s}"
 
     @property
     def num_sequence_steps(self):
@@ -101,17 +101,17 @@ class Pattern:
         return self.layout[0] == []
 
     def get_sequence_coords_with_timestep(self, t: int, q: int | None = None):
-        """Get codebook coordinates in the layout that corresponds to the specified timestep t
-        and optionally to the codebook q. Coordinates are returned as a tuple with the sequence step
-        and the actual codebook coordinates.
         """
-        assert (
-            t <= self.timesteps
-        ), "provided timesteps is greater than the pattern's number of timesteps"
+        Get codebook coordinates in the layout that corresponds to the specified timestep t and optionally to
+        the codebook q.
+
+        Coordinates are returned as a tuple with the sequence step and the actual codebook coordinates.
+        """
+        assert (t <= self.timesteps), "provided timesteps is greater than the pattern's number of timesteps"
         if q is not None:
             assert (
-                q <= self.n_q
-            ), "provided number of codebooks is greater than the pattern's number of codebooks"
+                q
+                <= self.n_q), "provided number of codebooks is greater than the pattern's number of codebooks"
         coords = []
         for s, seq_codes in enumerate(self.layout):
             for code in seq_codes:
@@ -133,7 +133,8 @@ class Pattern:
         keep_only_valid_steps: bool,
         device: torch.device | str = "cpu",
     ):
-        """Build scatter indexes corresponding to the pattern, up to the provided sequence_steps.
+        """
+        Build scatter indexes corresponding to the pattern, up to the provided sequence_steps.
 
         Args:
             timesteps (int): Maximum number of timesteps steps to consider.
@@ -147,8 +148,8 @@ class Pattern:
             n_q == self.n_q
         ), f"invalid number of codebooks for the sequence and the pattern: {n_q} != {self.n_q}"
         assert (
-            timesteps <= self.timesteps
-        ), "invalid number of timesteps used to build the sequence from the pattern"
+            timesteps
+            <= self.timesteps), "invalid number of timesteps used to build the sequence from the pattern"
         # use the proper layout based on whether we limit ourselves to valid steps only or not,
         # note that using the valid_layout will result in a truncated sequence up to the valid steps
         ref_layout = self.valid_layout if keep_only_valid_steps else self.layout
@@ -170,11 +171,10 @@ class Pattern:
         return indexes, mask
 
     def build_pattern_sequence(
-        self, z: torch.Tensor, special_token: int, keep_only_valid_steps: bool = False
-    ):
-        """Build sequence corresponding to the pattern from the input tensor z.
-        The sequence is built using up to sequence_steps if specified, and non-pattern
-        coordinates are filled with the special token.
+            self, z: torch.Tensor, special_token: int, keep_only_valid_steps: bool = False):
+        """
+        Build sequence corresponding to the pattern from the input tensor z. The sequence is built using up to
+        sequence_steps if specified, and non-pattern coordinates are filled with the special token.
 
         Args:
             z (torch.Tensor): Input tensor of multi-codebooks sequence, of shape [B, K, T].
@@ -189,8 +189,7 @@ class Pattern:
         """
         B, K, T = z.shape
         indexes, mask = self._build_pattern_sequence_scatter_indexes(
-            T, K, keep_only_valid_steps=keep_only_valid_steps, device=str(z.device)
-        )
+            T, K, keep_only_valid_steps=keep_only_valid_steps, device=str(z.device))
         z = z.reshape(B, -1)
         # we append the special token as the last index of our flattened z tensor
         z = torch.cat([z, torch.zeros_like(z[:, :1]) + special_token], dim=1)
@@ -206,8 +205,9 @@ class Pattern:
         is_model_output: bool = False,
         device: torch.device | str = "cpu",
     ):
-        """Builds scatter indexes required to retrieve the original multi-codebook sequence
-        from interleaving pattern.
+        """
+        Builds scatter indexes required to retrieve the original multi-codebook sequence from interleaving
+        pattern.
 
         Args:
             sequence_steps (int): Sequence steps.
@@ -249,10 +249,10 @@ class Pattern:
         return indexes, mask
 
     def revert_pattern_sequence(
-        self, s: torch.Tensor, special_token: int, keep_only_valid_steps: bool = False
-    ):
-        """Revert a sequence built from the pattern back to the original multi-codebook sequence without interleaving.
-        The sequence is reverted using up to timesteps if specified, and non-pattern coordinates
+            self, s: torch.Tensor, special_token: int, keep_only_valid_steps: bool = False):
+        """
+        Revert a sequence built from the pattern back to the original multi-codebook sequence without
+        interleaving. The sequence is reverted using up to timesteps if specified, and non-pattern coordinates
         are filled with the special token.
 
         Args:
@@ -266,8 +266,7 @@ class Pattern:
         """
         B, K, S = s.shape
         indexes, mask = self._build_reverted_sequence_scatter_indexes(
-            S, K, keep_only_valid_steps, is_model_output=False, device=str(s.device)
-        )
+            S, K, keep_only_valid_steps, is_model_output=False, device=str(s.device))
         s = s.view(B, -1)
         # we append the special token as the last index of our flattened z tensor
         s = torch.cat([s, torch.zeros_like(s[:, :1]) + special_token], dim=1)
@@ -281,8 +280,9 @@ class Pattern:
         special_token: float,
         keep_only_valid_steps: bool = False,
     ):
-        """Revert model logits obtained on a sequence built from the pattern
-        back to a tensor matching the original sequence.
+        """
+        Revert model logits obtained on a sequence built from the pattern back to a tensor matching the
+        original sequence.
 
         This method is similar to ``revert_pattern_sequence`` with the following specificities:
         1. It is designed to work with the extra cardinality dimension
@@ -292,20 +292,19 @@ class Pattern:
         """
         B, n, Q, S = logits.shape
         indexes, mask = self._build_reverted_sequence_scatter_indexes(
-            S, Q, keep_only_valid_steps, is_model_output=True, device=logits.device
-        )
+            S, Q, keep_only_valid_steps, is_model_output=True, device=logits.device)
         logits = logits.reshape(B, n, -1)
         # we append the special token as the last index of our flattened z tensor
-        logits = torch.cat(
-            [logits, torch.zeros_like(logits[:, :, :1]) + special_token], dim=-1
-        )  # [B, card, K x S]
+        logits = torch.cat([logits, torch.zeros_like(logits[:, :, :1]) + special_token],
+                           dim=-1)  # [B, card, K x S]
         values = logits[:, :, indexes.view(-1)]
         values = values.view(B, n, Q, indexes.shape[-1])
         return values, indexes, mask
 
 
 class CodebooksPatternProvider(ABC):
-    """Abstraction around providing pattern for interleaving codebooks.
+    """
+    Abstraction around providing pattern for interleaving codebooks.
 
     The CodebooksPatternProvider abstraction allows to implement various strategies to
     define interleaving pattern of sequences composed of multiple codebooks. For a given
@@ -330,7 +329,8 @@ class CodebooksPatternProvider(ABC):
 
     @abstractmethod
     def get_pattern(self, timesteps: int) -> Pattern:
-        """Builds pattern with specific interleaving between codebooks.
+        """
+        Builds pattern with specific interleaving between codebooks.
 
         Args:
             timesteps (int): Total number of timesteps.
@@ -339,9 +339,9 @@ class CodebooksPatternProvider(ABC):
 
 
 class DelayedPatternProvider(CodebooksPatternProvider):
-    """Provider for delayed pattern across delayed codebooks.
-    Codebooks are delayed in the sequence and sequence steps will contain codebooks
-    from different timesteps.
+    """
+    Provider for delayed pattern across delayed codebooks. Codebooks are delayed in the sequence and sequence
+    steps will contain codebooks from different timesteps.
 
     Example:
         Taking timesteps=4 and n_q=3, delays=None, the multi-codebook sequence:

@@ -20,9 +20,9 @@ from voicehub.automodel import AutoInferenceModel
 
 # Create model using the static from_pretrained method
 model = AutoInferenceModel.from_pretrained(
-    model_type="orpheustts", # or "dia" or "vui"
+    model_type="orpheustts",  # or "dia" or "vui"
     model_path="canopylabs/orpheus-3b-0.1-ft",
-    device="cuda"
+    device="cuda",
 )
 
 # Generate speech with the model

@@ -8,15 +8,15 @@ from einops import rearrange
 from torch import Tensor
 from transformers import AutoTokenizer
 
-from voicehub.models.vui.fluac import Fluac
-from voicehub.models.vui.utils import load_what_you_can
-
 from voicehub.models.vui.config import Config
+from voicehub.models.vui.fluac import Fluac
 from voicehub.models.vui.patterns import DelayedPatternProvider
 from voicehub.models.vui.rope import apply_rotary_emb, precompute_freqs_cis
+from voicehub.models.vui.utils import load_what_you_can
 
 
 class KVCache(nn.Module):
+
     def __init__(
         self,
         batch_size: int,
@@ -36,7 +36,6 @@ class KVCache(nn.Module):
         # input_pos: (T,), k_val: (B, nh, T, d)
         assert input_pos.size(0) == k_val.size(-2)
 
-        
         k_out = self.k_cache
         v_out = self.v_cache
         input_pos = input_pos.int()
@@ -51,13 +50,12 @@ def repeat_kv(x: torch.Tensor, n_reps: int) -> torch.Tensor:
     bs, n_kv_heads, T, head_dim = x.shape
 
     return (
-        x[:, :, :, None, :]
-        .expand(bs, n_kv_heads, n_reps, T, head_dim)
-        .reshape(bs, n_kv_heads * n_reps, T, head_dim)
-    )
+        x[:, :, :, None, :].expand(bs, n_kv_heads, n_reps, T,
+                                   head_dim).reshape(bs, n_kv_heads * n_reps, T, head_dim))
 
 
 class MHA(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -102,9 +100,7 @@ class MHA(nn.Module):
 
         qkv = self.Wqkv(x)
         if self.n_heads == self.n_kv_heads:
-            qkv = rearrange(
-                qkv, "B T (three h d) -> B three h T d", three=3, h=self.n_heads
-            )
+            qkv = rearrange(qkv, "B T (three h d) -> B three h T d", three=3, h=self.n_heads)
             q, k, v = qkv.unbind(dim=1)  # (B, h, T, d)
         else:
             q, k, v = torch.split(
@@ -146,9 +142,8 @@ class MHA(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(
-        self, *, d_model: int, bias: bool, dropout: float, act=nn.GELU, **kwargs
-    ):
+
+    def __init__(self, *, d_model: int, bias: bool, dropout: float, act=nn.GELU, **kwargs):
         super().__init__()
         self.fc1 = nn.Linear(d_model, 4 * d_model, bias=bias)
         self.act = act()
@@ -160,9 +155,8 @@ class MLP(nn.Module):
 
 
 class LlamaMLP(nn.Module):
-    def __init__(
-        self, *, d_model: int, multiple_of: int = 256, bias: bool = False, **kwargs
-    ) -> None:
+
+    def __init__(self, *, d_model: int, multiple_of: int = 256, bias: bool = False, **kwargs) -> None:
         super().__init__()
         hidden_dim = 4 * d_model
         hidden_dim = int(2 * hidden_dim / 3)
@@ -176,6 +170,7 @@ class LlamaMLP(nn.Module):
 
 
 class RMSNorm(nn.Module):
+
     def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__()
         self.eps = eps
@@ -190,6 +185,7 @@ class RMSNorm(nn.Module):
 
 
 class Block(nn.Module):
+
     def __init__(
         self,
         *,
@@ -242,6 +238,7 @@ class Block(nn.Module):
 
 
 class Decoder(nn.Module):
+
     def __init__(
         self,
         *,
@@ -264,21 +261,18 @@ class Decoder(nn.Module):
         self.use_rotary_emb = use_rotary_emb
 
         self.max_seqlen = max_seqlen
-        self.blocks = nn.ModuleList(
-            [
-                Block(
-                    d_model=d_model,
-                    n_heads=n_heads,
-                    n_kv_heads=n_kv_heads,
-                    block_idx=block_idx,
-                    bias=bias,
-                    dropout=dropout,
-                    norm_eps=norm_eps,
-                    use_rotary_emb=use_rotary_emb,
-                )
-                for block_idx in range(n_layers)
-            ]
-        )
+        self.blocks = nn.ModuleList([
+            Block(
+                d_model=d_model,
+                n_heads=n_heads,
+                n_kv_heads=n_kv_heads,
+                block_idx=block_idx,
+                bias=bias,
+                dropout=dropout,
+                norm_eps=norm_eps,
+                use_rotary_emb=use_rotary_emb,
+            ) for block_idx in range(n_layers)
+        ])
         self.norm = RMSNorm(d_model, eps=norm_eps)
 
         self.attn_mask = None
@@ -297,20 +291,14 @@ class Decoder(nn.Module):
         )
         self.register_buffer("freqs_cis", freqs_cis, persistent=False)
 
-    def allocate_inference_cache(
-        self, batch_size: int, device: str, dtype=torch.bfloat16
-    ):
+    def allocate_inference_cache(self, batch_size: int, device: str, dtype=torch.bfloat16):
         for block in self.blocks:
             block.attn.kv_cache = KVCache(
-                batch_size, self.max_seqlen, block.n_kv_heads, block.head_dim, dtype
-            ).to(device)
+                batch_size, self.max_seqlen, block.n_kv_heads, block.head_dim, dtype).to(device)
 
         # I don't understand why this is needed
         self.attn_mask = torch.tril(
-            torch.ones(
-                self.max_seqlen, self.max_seqlen, dtype=torch.bool, device=device
-            )
-        )
+            torch.ones(self.max_seqlen, self.max_seqlen, dtype=torch.bool, device=device))
 
     def deallocate_kv_cache(self):
         for block in self.blocks:
@@ -324,11 +312,7 @@ class Decoder(nn.Module):
         else:
             freqs_cis = None
 
-        attn_mask = (
-            self.attn_mask[None, None, input_pos]
-            if self.attn_mask is not None
-            else None
-        )
+        attn_mask = (self.attn_mask[None, None, input_pos] if self.attn_mask is not None else None)
 
         for block in self.blocks:
             x = block(x, freqs_cis=freqs_cis, input_pos=input_pos, attn_mask=attn_mask)
@@ -355,11 +339,7 @@ class Vui(nn.Module):
         self.pattern_provider = DelayedPatternProvider(n_q=cfg.n_quantizers)
 
         self.audio_embeddings = nn.ModuleList(
-            [
-                nn.Embedding(cfg.codebook_size + 8, cfg.d_model)
-                for _ in range(cfg.n_quantizers)
-            ]
-        )
+            [nn.Embedding(cfg.codebook_size + 8, cfg.d_model) for _ in range(cfg.n_quantizers)])
 
         n_kv_heads = cfg.n_heads
 
@@ -378,19 +358,13 @@ class Vui(nn.Module):
         )
 
         self.audio_heads = nn.ModuleList(
-            [
-                nn.Linear(cfg.d_model, cfg.codebook_size + 8, bias=cfg.bias)
-                for _ in range(cfg.n_quantizers)
-            ]
-        )
+            [nn.Linear(cfg.d_model, cfg.codebook_size + 8, bias=cfg.bias) for _ in range(cfg.n_quantizers)])
 
         self.apply(self._init_weights)
 
         for pn, p in self.named_parameters():
             if pn.endswith("out_proj.weight"):
-                torch.nn.init.normal_(
-                    p, mean=0.0, std=0.02 / math.sqrt(2 * cfg.n_layers)
-                )
+                torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * cfg.n_layers))
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -415,18 +389,14 @@ class Vui(nn.Module):
                     "fluxions/vui",
                     checkpoint_path,
                 )
-            checkpoint = torch.load(
-                checkpoint_path, map_location="cpu", weights_only=True
-            )
+            checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
 
         config = {**checkpoint["config"], **config_kwargs}
         config = Config(**config)
         state_dict = checkpoint["model"]
 
         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-        state_dict = {
-            k.replace("text_embedding.", "token_emb."): v for k, v in state_dict.items()
-        }
+        state_dict = {k.replace("text_embedding.", "token_emb."): v for k, v in state_dict.items()}
         model = Vui(config)
         load_what_you_can(state_dict, model)
         return model

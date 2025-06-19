@@ -11,7 +11,6 @@ from voicehub.models.dia.config import DiaConfig
 from voicehub.models.dia.layers import DiaModel
 from voicehub.models.dia.state import DecoderInferenceState, DecoderOutput, EncoderInferenceState
 
-
 DEFAULT_SAMPLE_RATE = 44100
 SAMPLE_RATE_RATIO = 512
 
@@ -60,8 +59,7 @@ def _sample_next_token(
 
         indices_to_remove_BCxV = torch.zeros_like(sorted_indices_to_remove_BCxV)
         indices_to_remove_BCxV = indices_to_remove_BCxV.scatter(
-            dim=-1, index=sorted_indices_BCxV, src=sorted_indices_to_remove_BCxV
-        )
+            dim=-1, index=sorted_indices_BCxV, src=sorted_indices_to_remove_BCxV)
         logits_BCxV = logits_BCxV.masked_fill(indices_to_remove_BCxV, -torch.inf)
 
     final_probs_BCxV = torch.softmax(logits_BCxV, dim=-1)
@@ -88,6 +86,7 @@ class ComputeDtype(str, Enum):
 
 
 class Dia:
+
     def __init__(
         self,
         config: DiaConfig,
@@ -95,7 +94,8 @@ class Dia:
         device: torch.device | None = None,
         load_dac: bool = True,
     ):
-        """Initializes the Dia model.
+        """
+        Initializes the Dia model.
 
         Args:
             config: The configuration object for the model.
@@ -132,7 +132,8 @@ class Dia:
         device: torch.device | None = None,
         load_dac: bool = True,
     ) -> "Dia":
-        """Loads the Dia model from local configuration and checkpoint files.
+        """
+        Loads the Dia model from local configuration and checkpoint files.
 
         Args:
             config_path: Path to the configuration JSON file.
@@ -176,7 +177,8 @@ class Dia:
         device: torch.device | None = None,
         load_dac: bool = True,
     ) -> "Dia":
-        """Loads the Dia model from a Hugging Face Hub repository.
+        """
+        Loads the Dia model from a Hugging Face Hub repository.
 
         Downloads the configuration and checkpoint files from the specified
         repository ID and then loads the model.
@@ -214,7 +216,8 @@ class Dia:
         return dia
 
     def _load_dac_model(self):
-        """Loads the Descript Audio Codec (DAC) model.
+        """
+        Loads the Descript Audio Codec (DAC) model.
 
         Downloads the DAC model if necessary and loads it onto the specified device.
         Sets the DAC model to evaluation mode.
@@ -233,7 +236,8 @@ class Dia:
         self.dac_model = dac_model
 
     def _encode_text(self, text: str) -> torch.Tensor:
-        """Encodes the input text string into a tensor of token IDs using byte-level encoding.
+        """
+        Encodes the input text string into a tensor of token IDs using byte-level encoding.
 
         Special tokens [S1] and [S2] are replaced by their byte values. The resulting
         sequence is truncated to the maximum configured text length.
@@ -274,8 +278,10 @@ class Dia:
             src_tokens[i, 0, :current_len] = text_tokens[i]
         return src_tokens
 
-    def _prepare_audio_prompt(self, audio_prompts: list[torch.Tensor | None]) -> tuple[torch.Tensor, list[int]]:
-        """Prepares the audio prompt tensor for the decoder.
+    def _prepare_audio_prompt(self,
+                              audio_prompts: list[torch.Tensor | None]) -> tuple[torch.Tensor, list[int]]:
+        """
+        Prepares the audio prompt tensor for the decoder.
 
         Handles padding, adds the beginning-of-sequence (BOS) token, applies the
         delay pattern, and determines the number of prefill steps for each item
@@ -298,7 +304,7 @@ class Dia:
         max_delay_pattern = max(delay_pattern)
         batch_size = len(audio_prompts)
 
-        max_len = max(p.shape[0] if p is not None else 0 for p in audio_prompts) + max_delay_pattern
+        max_len = (max(p.shape[0] if p is not None else 0 for p in audio_prompts) + max_delay_pattern)
         prefill_steps = []
 
         prefill = torch.full(
@@ -314,7 +320,7 @@ class Dia:
             prompt = audio_prompts[i]
             if prompt is not None:
                 prompt = prompt.to(device=self.device, dtype=torch.int)
-                prefill[i, 1 : prompt.shape[0] + 1, :] = prompt
+                prefill[i, 1:prompt.shape[0] + 1, :] = prompt
                 prefill_steps.append(prompt.shape[0] + 1)
             else:
                 prefill_steps.append(1)
@@ -341,7 +347,8 @@ class Dia:
         audio_prompts: list[torch.Tensor | None],
         max_tokens: int | None = None,
     ):
-        """Initializes the model state for generation.
+        """
+        Initializes the model state for generation.
 
         Encodes the text input (conditional and unconditional), prepares the
         encoder and decoder states (including KV caches and cross-attention),
@@ -369,8 +376,7 @@ class Dia:
         encoder_out = self.model.encoder(enc_input, enc_state)
 
         dec_cross_attn_cache = self.model.decoder.precompute_cross_attn_cache(
-            encoder_out, enc_state.positions, enc_state.padding_mask
-        )
+            encoder_out, enc_state.positions, enc_state.padding_mask)
         dec_state = DecoderInferenceState.new(
             self.config,
             enc_state,
@@ -402,7 +408,8 @@ class Dia:
         top_k: int,
         current_idx: int,
     ) -> torch.Tensor:
-        """Performs a single step of the decoder inference.
+        """
+        Performs a single step of the decoder inference.
 
         Takes the tokens from the previous step, runs them through the decoder
         (for both conditional and unconditional paths), applies classifier-free
@@ -435,8 +442,8 @@ class Dia:
         cond_logits_BxCxV = logits_last_Bx2xCxV[:, 1, :, :]  # Shape [B, C, V]
         logits_BxCxV = cond_logits_BxCxV + cfg_scale * (cond_logits_BxCxV - uncond_logits_BxCxV)
 
-        logits_BxCxV[:, :, audio_eos_value + 1 :] = torch.full_like(
-            logits_BxCxV[:, :, audio_eos_value + 1 :],
+        logits_BxCxV[:, :, audio_eos_value + 1:] = torch.full_like(
+            logits_BxCxV[:, :, audio_eos_value + 1:],
             fill_value=-torch.inf,
         )
         logits_BxCxV[:, 1:, audio_eos_value:] = torch.full_like(
@@ -459,7 +466,8 @@ class Dia:
         return pred_BxC
 
     def _generate_output(self, generated_codes: torch.Tensor, lengths_Bx: torch.Tensor) -> list[np.ndarray]:
-        """Converts generated delayed codes into audio waveforms.
+        """
+        Converts generated delayed codes into audio waveforms.
 
         Reverts the delay pattern applied during generation, decodes the resulting
         codebook using the DAC model (if loaded), and returns a list of audio
@@ -507,20 +515,18 @@ class Dia:
 
         if self.load_dac:
             for i in range(batch_size):
-                audio = self._decode(codebook[i, : lengths_Bx[i], :])
+                audio = self._decode(codebook[i, :lengths_Bx[i], :])
                 audio_np = audio.cpu().numpy()
                 audios.append(audio_np)
         else:
             for i in range(batch_size):
-                audios.append(codebook[i, : lengths_Bx[i], :].cpu().numpy())
+                audios.append(codebook[i, :lengths_Bx[i], :].cpu().numpy())
         return audios
 
     @torch.no_grad()
     @torch.inference_mode()
     def _encode(self, audio: torch.Tensor) -> torch.Tensor:
-        """
-        Encodes the given audio waveform into a tensor of DAC codebook indices
-        """
+        """Encodes the given audio waveform into a tensor of DAC codebook indices."""
         audio = audio.unsqueeze(0)
         audio_data = self.dac_model.preprocess(audio, DEFAULT_SAMPLE_RATE)
         _, encoded_frame, _, _, _ = self.dac_model.encode(audio_data)
@@ -530,9 +536,7 @@ class Dia:
     @torch.no_grad()
     @torch.inference_mode()
     def _decode(self, audio_codes: torch.Tensor) -> torch.Tensor:
-        """
-        Decodes the given frames into an output audio waveform
-        """
+        """Decodes the given frames into an output audio waveform."""
         audio_codes = audio_codes.unsqueeze(0).transpose(1, 2)
         audio_values, _, _ = self.dac_model.quantizer.from_codes(audio_codes)
         audio_values = self.dac_model.decode(audio_values)
@@ -540,7 +544,8 @@ class Dia:
         return audio_values.squeeze()
 
     def load_audio(self, audio_path: str) -> torch.Tensor:
-        """Loads and preprocesses an audio file for use as a prompt.
+        """
+        Loads and preprocesses an audio file for use as a prompt.
 
         Loads the audio file, resamples it to the target sample rate if necessary,
         preprocesses it using the DAC model's preprocessing, and encodes it into
@@ -569,7 +574,8 @@ class Dia:
         return self._encode(audio.to(self.device))
 
     def save_audio(self, path: str, audio: np.ndarray):
-        """Saves the generated audio waveform to a file.
+        """
+        Saves the generated audio waveform to a file.
 
         Uses the soundfile library to write the NumPy audio array to the specified
         path with the default sample rate.
@@ -597,7 +603,8 @@ class Dia:
         use_cfg_filter: bool | None = None,
         verbose: bool = False,
     ) -> np.ndarray | list[np.ndarray]:
-        """Generates audio corresponding to the input text.
+        """
+        Generates audio corresponding to the input text.
 
         Args:
             text: The input text prompt, or a list of text prompts for batch generation.
@@ -661,7 +668,7 @@ class Dia:
         elif audio_prompt is None:
             audio_prompt = [None] * batch_size
 
-        assert len(audio_prompt) == batch_size, "Number of audio prompts must match batch size"
+        assert (len(audio_prompt) == batch_size), "Number of audio prompts must match batch size"
 
         if isinstance(text, list):
             text = [self._encode_text(t) for t in text]
@@ -673,9 +680,9 @@ class Dia:
         dec_step = min(dec_output.prefill_steps) - 1
         current_idx = torch.tensor([dec_step], device=self.device)
 
-        eos_detected_Bx = torch.zeros((batch_size,), dtype=torch.bool, device=self.device)
-        eos_countdown_Bx = torch.full((batch_size,), -1, dtype=torch.long, device=self.device)
-        finished_step_Bx = torch.full((batch_size,), -1, dtype=torch.long, device=self.device)
+        eos_detected_Bx = torch.zeros((batch_size, ), dtype=torch.bool, device=self.device)
+        eos_countdown_Bx = torch.full((batch_size, ), -1, dtype=torch.long, device=self.device)
+        finished_step_Bx = torch.full((batch_size, ), -1, dtype=torch.long, device=self.device)
 
         bos_over = False
 
@@ -710,7 +717,8 @@ class Dia:
             active_mask_Bx = eos_countdown_Bx != 0
             eos_trigger_Bx = torch.zeros_like(active_mask_Bx)
             if active_mask_Bx.any():
-                is_eos_token = (~eos_detected_Bx[active_mask_Bx]) & (pred_BxC[active_mask_Bx, 0] == audio_eos_value)
+                is_eos_token = (~eos_detected_Bx[active_mask_Bx]) & (
+                    pred_BxC[active_mask_Bx, 0] == audio_eos_value)
                 is_max_len = current_step_idx >= max_tokens - max_delay_pattern
                 eos_trigger_Bx[active_mask_Bx] = is_eos_token | is_max_len
             eos_detected_Bx |= eos_trigger_Bx
@@ -736,8 +744,7 @@ class Dia:
             # --- Update BOS flag (Original) ---
             if not bos_over:
                 bos_over = all(
-                    dec_step - prefill_step > max_delay_pattern for prefill_step in dec_output.prefill_steps
-                )
+                    dec_step - prefill_step > max_delay_pattern for prefill_step in dec_output.prefill_steps)
 
             dec_output.update_one(pred_BxC, current_step_idx, not bos_over)
 
@@ -777,7 +784,7 @@ class Dia:
                 start_step = dec_output.prefill_steps[i]
                 actual_len = lengths_Bx[i].item() + max_delay_pattern
                 if actual_len > 0:
-                    tokens_to_copy = dec_output.generated_tokens[i, start_step : start_step + actual_len, :]
+                    tokens_to_copy = dec_output.generated_tokens[i, start_step:start_step + actual_len, :]
                     generated_codes[i, :actual_len, :] = tokens_to_copy
 
             if verbose:
