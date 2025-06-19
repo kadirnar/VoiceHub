@@ -12,9 +12,7 @@ def create_attn_mask(
     device: torch.device,
     is_causal: bool = False,
 ) -> torch.Tensor:
-    """
-    Creates the attention mask (self or cross) mimicking JAX segment ID logic.
-    """
+    """Creates the attention mask (self or cross) mimicking JAX segment ID logic."""
     # B1, Tq = q_padding_mask_1d.shape
     # B2, Tk = k_padding_mask_1d.shape
 
@@ -32,7 +30,8 @@ def create_attn_mask(
 
     if is_causal:
         # assert Tq == Tk, "Causal mask requires query and key sequence lengths to be equal"
-        causal_mask_2d = torch.tril(torch.ones_like(mask[0], dtype=torch.bool, device=device))  # Shape [B, Tq, Tk]
+        causal_mask_2d = torch.tril(
+            torch.ones_like(mask[0], dtype=torch.bool, device=device))  # Shape [B, Tq, Tk]
         causal_mask = mask & causal_mask_2d  # Shape [B, Tq, Tk]
         return causal_mask.unsqueeze(1)  # Shape [B, 1, Tq, Tk]
     else:
@@ -55,7 +54,8 @@ class EncoderInferenceState:
         device = cond_src.device
 
         positions = torch.arange(config.data.text_length, dtype=torch.float32, device=device).unsqueeze(0)
-        padding_mask = (cond_src.squeeze(1) != config.data.text_pad_value).to(device).repeat_interleave(2, dim=0)
+        padding_mask = ((cond_src.squeeze(1)
+                         != config.data.text_pad_value).to(device).repeat_interleave(2, dim=0))
         attn_mask = create_attn_mask(padding_mask, padding_mask, device, is_causal=False)
 
         return cls(
@@ -82,8 +82,18 @@ class KVCache(torch.nn.Module):
         k: torch.Tensor | None = None,
         v: torch.Tensor | None = None,
     ):
-        k = torch.zeros((2 * batch_size, num_heads, max_len, head_dim), dtype=dtype, device=device) if k is None else k
-        v = torch.zeros((2 * batch_size, num_heads, max_len, head_dim), dtype=dtype, device=device) if v is None else v
+        k = (
+            torch.zeros(
+                (2 * batch_size, num_heads, max_len, head_dim),
+                dtype=dtype,
+                device=device,
+            ) if k is None else k)
+        v = (
+            torch.zeros(
+                (2 * batch_size, num_heads, max_len, head_dim),
+                dtype=dtype,
+                device=device,
+            ) if v is None else v)
         super().__init__()
 
         self.register_buffer("k", k)
@@ -102,7 +112,8 @@ class KVCache(torch.nn.Module):
             v=v,
         )
 
-    def update(self, k: torch.Tensor, v: torch.Tensor, current_idx: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def update(self, k: torch.Tensor, v: torch.Tensor,
+               current_idx: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         k_out, v_out = self.k, self.v
         k_out[:, :, current_idx, :] = k
         v_out[:, :, current_idx, :] = v
@@ -156,8 +167,7 @@ class DecoderInferenceState:
                 config.model.decoder.gqa_head_dim,
                 compute_dtype,
                 device,
-            )
-            for _ in range(config.model.decoder.n_layer)
+            ) for _ in range(config.model.decoder.n_layer)
         ]
 
         return cls(
@@ -175,7 +185,8 @@ class DecoderInferenceState:
     def prepare_step(self, step_from: int, step_to: int | None = None) -> None:
         if step_to is None:
             step_to = step_from + 1
-        self.dec_positions = torch.arange(step_from, step_to, dtype=torch.int32, device=self.device).unsqueeze(0)
+        self.dec_positions = torch.arange(
+            step_from, step_to, dtype=torch.int32, device=self.device).unsqueeze(0)
 
 
 @dataclass

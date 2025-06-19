@@ -15,14 +15,13 @@ from tqdm import tqdm
 
 VAD_SEGMENTATION_URL = "https://whisperx.s3.eu-west-2.amazonaws.com/model_weights/segmentation/0b5b3216d60a2d32fc086b47ea8c67589aaeb26b7e07fcbe620d6d0b83e209ea/pytorch_model.bin"
 
-
 pipeline = None
 pipeline_name = "pyannote/voice-activity-detection"
 
 
 @torch.autocast("cuda", enabled=False)
 def detect_voice_activity(waveform, pipe=None):
-    """16khz"""
+    """16khz."""
     waveform = waveform.flatten().float()[None]
     global pipeline
 
@@ -41,9 +40,7 @@ def detect_voice_activity(waveform, pipe=None):
         pipeline = pipeline.to(device)
 
     vad = pipeline({"waveform": waveform, "sample_rate": 16000})
-    segments = [
-        (segment.start, segment.end) for segment in vad.get_timeline().support()
-    ]
+    segments = [(segment.start, segment.end) for segment in vad.get_timeline().support()]
 
     return segments
 
@@ -65,15 +62,15 @@ def load_vad_model(
 
     if not os.path.isfile(model_fp):
         with (
-            urllib.request.urlopen(VAD_SEGMENTATION_URL) as source,
-            open(model_fp, "wb") as output,
+                urllib.request.urlopen(VAD_SEGMENTATION_URL) as source,
+                open(model_fp, "wb") as output,
         ):
             with tqdm(
-                total=int(source.info().get("Content-Length")),
-                ncols=80,
-                unit="iB",
-                unit_scale=True,
-                unit_divisor=1024,
+                    total=int(source.info().get("Content-Length")),
+                    ncols=80,
+                    unit="iB",
+                    unit_scale=True,
+                    unit_divisor=1024,
             ) as loop:
                 while True:
                     buffer = source.read(8192)
@@ -97,16 +94,16 @@ def load_vad_model(
         "min_duration_off": 0.1,
     }
     vad_pipeline = VoiceActivitySegmentation(
-        segmentation=vad_model, device=torch.device(device), batch_size=batch_size
-    )
+        segmentation=vad_model, device=torch.device(device), batch_size=batch_size)
     vad_pipeline.instantiate(hyperparameters)
 
     return vad_pipeline
 
 
 class Binarize:
-    """Binarize detection scores using hysteresis thresholding, with min-cut operation
-    to ensure not segments are longer than max_duration.
+    """
+    Binarize detection scores using hysteresis thresholding, with min-cut operation to ensure not segments are
+    longer than max_duration.
 
     Parameters
     ----------
@@ -138,14 +135,14 @@ class Binarize:
     """
 
     def __init__(
-        self,
-        onset: float = 0.5,
-        offset: float | None = None,
-        min_duration_on: float = 0.0,
-        min_duration_off: float = 0.0,
-        pad_onset: float = 0.0,
-        pad_offset: float = 0.0,
-        max_duration: float = float("inf"),
+            self,
+            onset: float = 0.5,
+            offset: float | None = None,
+            min_duration_on: float = 0.0,
+            min_duration_off: float = 0.0,
+            pad_onset: float = 0.0,
+            pad_offset: float = 0.0,
+            max_duration: float = float("inf"),
     ):
         super().__init__()
 
@@ -161,7 +158,9 @@ class Binarize:
         self.max_duration = max_duration
 
     def __call__(self, scores: SlidingWindowFeature) -> Annotation:
-        """Binarize detection scores
+        """
+        Binarize detection scores.
+
         Parameters
         ----------
         scores : SlidingWindowFeature
@@ -194,17 +193,13 @@ class Binarize:
                     if curr_duration > self.max_duration:
                         search_after = len(curr_scores) // 2
                         # divide segment
-                        min_score_div_idx = search_after + np.argmin(
-                            curr_scores[search_after:]
-                        )
+                        min_score_div_idx = search_after + np.argmin(curr_scores[search_after:])
                         min_score_t = curr_timestamps[min_score_div_idx]
-                        region = Segment(
-                            start - self.pad_onset, min_score_t + self.pad_offset
-                        )
+                        region = Segment(start - self.pad_onset, min_score_t + self.pad_offset)
                         active[region, k] = label
                         start = curr_timestamps[min_score_div_idx]
-                        curr_scores = curr_scores[min_score_div_idx + 1 :]
-                        curr_timestamps = curr_timestamps[min_score_div_idx + 1 :]
+                        curr_scores = curr_scores[min_score_div_idx + 1:]
+                        curr_timestamps = curr_timestamps[min_score_div_idx + 1:]
                     # switching from active to inactive
                     elif y < self.offset:
                         region = Segment(start - self.pad_onset, t + self.pad_offset)
@@ -244,6 +239,7 @@ class Binarize:
 
 
 class VoiceActivitySegmentation(VoiceActivityDetection):
+
     def __init__(
         self,
         segmentation: PipelineModel = "pyannote/segmentation",
@@ -259,7 +255,8 @@ class VoiceActivitySegmentation(VoiceActivityDetection):
         )
 
     def apply(self, file: AudioFile, hook: Callable | None = None) -> Annotation:
-        """Apply voice activity detection
+        """
+        Apply voice activity detection.
 
         Parameters
         ----------
@@ -292,9 +289,7 @@ class VoiceActivitySegmentation(VoiceActivityDetection):
         return segmentations
 
 
-def merge_vad(
-    vad_arr, pad_onset=0.0, pad_offset=0.0, min_duration_off=0.0, min_duration_on=0.0
-):
+def merge_vad(vad_arr, pad_onset=0.0, pad_offset=0.0, min_duration_off=0.0, min_duration_on=0.0):
     active = Annotation()
     for k, vad_t in enumerate(vad_arr):
         region = Segment(vad_t[0] - pad_onset, vad_t[1] + pad_offset)
@@ -320,9 +315,7 @@ def merge_chunks(
     onset: float = 0.5,
     offset: float | None = None,
 ):
-    """
-    Merge operation described in paper
-    """
+    """Merge operation described in paper."""
     curr_end = 0
     merged_segments = []
     seg_idxs = []
@@ -343,21 +336,17 @@ def merge_chunks(
 
     for seg in segments_list:
         if seg.end - curr_start > chunk_size and curr_end - curr_start > 0:
-            merged_segments.append(
-                {
-                    "start": curr_start,
-                    "end": curr_end,
-                }
-            )
+            merged_segments.append({
+                "start": curr_start,
+                "end": curr_end,
+            })
             curr_start = seg.start
             seg_idxs = []
         curr_end = seg.end
         seg_idxs.append((seg.start, seg.end))
 
-    merged_segments.append(
-        {
-            "start": curr_start,
-            "end": curr_end,
-        }
-    )
+    merged_segments.append({
+        "start": curr_start,
+        "end": curr_end,
+    })
     return merged_segments

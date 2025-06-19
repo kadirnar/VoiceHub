@@ -1,8 +1,11 @@
 import torchaudio
+
 from voicehub.models.vui.inference import render
 from voicehub.models.vui.model import Vui
 
+
 class VuiTTS:
+
     def __init__(self, model_path: str, device: str = "cuda"):
         self.model_path = model_path
         self.model = None

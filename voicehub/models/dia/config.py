@@ -1,5 +1,5 @@
-
-"""Configuration management module for the Dia model.
+"""
+Configuration management module for the Dia model.
 
 This module provides comprehensive configuration management for the Dia model,
 utilizing Pydantic for validation. It defines configurations for data processing,
@@ -21,7 +21,8 @@ from pydantic import BaseModel, BeforeValidator, Field
 
 
 class DataConfig(BaseModel, frozen=True):
-    """Configuration for data loading and preprocessing.
+    """
+    Configuration for data loading and preprocessing.
 
     Attributes:
         text_length: Maximum length of text sequences (must be multiple of 128).
@@ -34,33 +35,35 @@ class DataConfig(BaseModel, frozen=True):
         delay_pattern: List of delay values for each audio channel.
     """
 
-    text_length: Annotated[int, BeforeValidator(lambda x: (x + 127) // 128 * 128)] = Field(gt=0, multiple_of=128)
-    audio_length: Annotated[int, BeforeValidator(lambda x: (x + 127) // 128 * 128)] = Field(gt=0, multiple_of=128)
+    text_length: Annotated[int, BeforeValidator(lambda x: (x + 127) // 128 * 128)] = Field(
+        gt=0, multiple_of=128)
+    audio_length: Annotated[int, BeforeValidator(lambda x: (x + 127) // 128 * 128)] = Field(
+        gt=0, multiple_of=128)
     channels: int = Field(default=9, gt=0, multiple_of=1)
     text_pad_value: int = Field(default=0)
     audio_eos_value: int = Field(default=1024)
     audio_pad_value: int = Field(default=1025)
     audio_bos_value: int = Field(default=1026)
-    delay_pattern: list[Annotated[int, Field(ge=0)]] = Field(default_factory=lambda: [0, 8, 9, 10, 11, 12, 13, 14, 15])
+    delay_pattern: list[Annotated[int, Field(ge=0)]] = Field(
+        default_factory=lambda: [0, 8, 9, 10, 11, 12, 13, 14, 15])
 
     def __hash__(self) -> int:
         """Generate a hash based on all fields of the config."""
-        return hash(
-            (
-                self.text_length,
-                self.audio_length,
-                self.channels,
-                self.text_pad_value,
-                self.audio_pad_value,
-                self.audio_bos_value,
-                self.audio_eos_value,
-                tuple(self.delay_pattern),
-            )
-        )
+        return hash((
+            self.text_length,
+            self.audio_length,
+            self.channels,
+            self.text_pad_value,
+            self.audio_pad_value,
+            self.audio_bos_value,
+            self.audio_eos_value,
+            tuple(self.delay_pattern),
+        ))
 
 
 class EncoderConfig(BaseModel, frozen=True):
-    """Configuration for the encoder component of the Dia model.
+    """
+    Configuration for the encoder component of the Dia model.
 
     Attributes:
         n_layer: Number of transformer layers.
@@ -78,7 +81,8 @@ class EncoderConfig(BaseModel, frozen=True):
 
 
 class DecoderConfig(BaseModel, frozen=True):
-    """Configuration for the decoder component of the Dia model.
+    """
+    Configuration for the decoder component of the Dia model.
 
     Attributes:
         n_layer: Number of transformer layers.
@@ -102,7 +106,8 @@ class DecoderConfig(BaseModel, frozen=True):
 
 
 class ModelConfig(BaseModel, frozen=True):
-    """Main configuration container for the Dia model architecture.
+    """
+    Main configuration container for the Dia model architecture.
 
     Attributes:
         encoder: Configuration for the encoder component.
@@ -132,7 +137,8 @@ class TrainingConfig(BaseModel, frozen=True):
 
 
 class DiaConfig(BaseModel, frozen=True):
-    """Master configuration for the Dia model.
+    """
+    Master configuration for the Dia model.
 
     Combines all sub-configurations into a single validated object.
 
@@ -150,7 +156,8 @@ class DiaConfig(BaseModel, frozen=True):
     data: DataConfig
 
     def save(self, path: str) -> None:
-        """Save the current configuration instance to a JSON file.
+        """
+        Save the current configuration instance to a JSON file.
 
         Ensures the parent directory exists and the file has a .json extension.
 
@@ -167,7 +174,8 @@ class DiaConfig(BaseModel, frozen=True):
 
     @classmethod
     def load(cls, path: str) -> "DiaConfig | None":
-        """Load and validate a Dia configuration from a JSON file.
+        """
+        Load and validate a Dia configuration from a JSON file.
 
         Args:
             path: The path to the configuration file.
@@ -181,7 +189,7 @@ class DiaConfig(BaseModel, frozen=True):
             pydantic.ValidationError: If the JSON content fails validation against the DiaConfig schema.
         """
         try:
-            with open(path, "r") as f:
+            with open(path) as f:
                 content = f.read()
             return cls.model_validate_json(content)
         except FileNotFoundError:

@@ -3,7 +3,8 @@ import typing as tp
 import torch
 
 
-def build_delay_indices(B: int, T: int, C: int, delay_pattern: tp.List[int]) -> tp.Tuple[torch.Tensor, torch.Tensor]:
+def build_delay_indices(B: int, T: int, C: int,
+                        delay_pattern: tp.List[int]) -> tp.Tuple[torch.Tensor, torch.Tensor]:
     """
     Precompute (t_idx_BxTxC, indices_BTCx3) so that out[t, c] = in[t - delay[c], c].
     Negative t_idx => BOS; t_idx >= T => PAD.
@@ -48,8 +49,8 @@ def apply_audio_delay(
     precomp: tp.Tuple[torch.Tensor, torch.Tensor],
 ) -> torch.Tensor:
     """
-    Applies the delay pattern to batched audio tokens using precomputed indices,
-    inserting BOS where t_idx < 0 and PAD where t_idx >= T.
+    Applies the delay pattern to batched audio tokens using precomputed indices, inserting BOS where t_idx < 0
+    and PAD where t_idx >= T.
 
     Args:
         audio_BxTxC: [B, T, C] int16 audio tokens (or int32/float)
@@ -85,7 +86,8 @@ def apply_audio_delay(
     return result_BxTxC
 
 
-def build_revert_indices(B: int, T: int, C: int, delay_pattern: tp.List[int]) -> tp.Tuple[torch.Tensor, torch.Tensor]:
+def build_revert_indices(B: int, T: int, C: int,
+                         delay_pattern: tp.List[int]) -> tp.Tuple[torch.Tensor, torch.Tensor]:
     """
     Precompute indices for the revert operation using PyTorch.
 
@@ -158,6 +160,7 @@ def revert_audio_delay(
     # Create T tensor on the correct device for comparison
     T_tensor = torch.tensor(T, device=device)
 
-    result_BxTxC = torch.where(t_idx_BxTxC >= T_tensor, pad_tensor, gathered_BxTxC)  # Changed np.where to torch.where
+    result_BxTxC = torch.where(
+        t_idx_BxTxC >= T_tensor, pad_tensor, gathered_BxTxC)  # Changed np.where to torch.where
 
     return result_BxTxC

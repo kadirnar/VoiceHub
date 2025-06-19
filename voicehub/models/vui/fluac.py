@@ -30,6 +30,7 @@ def default(*args):
 
 
 def maybe(fn):
+
     @wraps(fn)
     def inner(x, *args, **kwargs):
         if not exists(x):
@@ -54,6 +55,7 @@ def round_ste(z: Tensor) -> Tensor:
 
 
 class FSQ(Module):
+
     def __init__(
         self,
         levels: List[int],
@@ -92,14 +94,10 @@ class FSQ(Module):
         has_projections = self.dim != effective_codebook_dim
         self.project_in = (
             nn.Linear(self.dim, effective_codebook_dim, bias=projection_has_bias)
-            if has_projections
-            else nn.Identity()
-        )
+            if has_projections else nn.Identity())
         self.project_out = (
             nn.Linear(effective_codebook_dim, self.dim, bias=projection_has_bias)
-            if has_projections
-            else nn.Identity()
-        )
+            if has_projections else nn.Identity())
 
         self.has_projections = has_projections
 
@@ -107,9 +105,7 @@ class FSQ(Module):
         if return_indices:
             self.codebook_size = self._levels.prod().item()
             implicit_codebook = self._indices_to_codes(torch.arange(self.codebook_size))
-            self.register_buffer(
-                "implicit_codebook", implicit_codebook, persistent=False
-            )
+            self.register_buffer("implicit_codebook", implicit_codebook, persistent=False)
 
         self.allowed_dtypes = allowed_dtypes
         self.force_quantization_f32 = force_quantization_f32
@@ -147,7 +143,9 @@ class FSQ(Module):
         return (zhat * self._basis).sum(dim=-1).to(int32)
 
     def indices_to_level_indices(self, indices):
-        """Converts indices to indices at each level, perhaps needed for a transformer with factorized embeddings"""
+        """Converts indices to indices at each level, perhaps needed for a transformer with factorized
+        embeddings.
+        """
         indices = rearrange(indices, "... -> ... 1")
         codes_non_centered = (indices // self._basis) % self._levels
         return codes_non_centered
@@ -172,7 +170,8 @@ class FSQ(Module):
 
     def forward(self, z: Tensor):
         """
-        einstein notation
+        Einstein notation.
+
         b - batch
         n - sequence (or flattened spatial dimensions)
         d - feature dimension
@@ -197,10 +196,7 @@ class FSQ(Module):
 
             force_f32 = self.force_quantization_f32
             quantization_context = (
-                partial(autocast, device_type=device_type, enabled=False)
-                if force_f32
-                else nullcontext
-            )
+                partial(autocast, device_type=device_type, enabled=False) if force_f32 else nullcontext)
 
             with quantization_context():
                 orig_dtype = z.dtype
@@ -260,6 +256,7 @@ def snake(x, alpha):
 
 
 class Snake1d(nn.Module):
+
     def __init__(self, channels):
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(1, channels, 1))
@@ -275,6 +272,7 @@ def init_weights(m):
 
 
 class ResidualUnit(nn.Module):
+
     def __init__(self, dim: int = 16, dilation: int = 1):
         super().__init__()
         pad = ((7 - 1) * dilation) // 2
@@ -294,6 +292,7 @@ class ResidualUnit(nn.Module):
 
 
 class EncoderBlock(nn.Module):
+
     def __init__(self, dim: int = 16, stride: int = 1):
         super().__init__()
         self.block = nn.Sequential(
@@ -315,6 +314,7 @@ class EncoderBlock(nn.Module):
 
 
 class Encoder(nn.Module):
+
     def __init__(
         self,
         d_model: int = 64,
@@ -345,6 +345,7 @@ class Encoder(nn.Module):
 
 
 class DecoderBlock(nn.Module):
+
     def __init__(self, input_dim: int = 16, output_dim: int = 8, stride: int = 1):
         super().__init__()
         self.block = nn.Sequential(
@@ -366,6 +367,7 @@ class DecoderBlock(nn.Module):
 
 
 class Decoder(nn.Module):
+
     def __init__(
         self,
         input_channel: int,
@@ -381,7 +383,7 @@ class Decoder(nn.Module):
         # Add upsampling + MRF blocks
         for i, stride in enumerate(rates):
             input_dim = channels // 2**i
-            output_dim = channels // 2 ** (i + 1)
+            output_dim = channels // 2**(i + 1)
             layers += [DecoderBlock(input_dim, output_dim, stride)]
 
         # Add final conv layer
@@ -399,9 +401,8 @@ class Decoder(nn.Module):
 
 
 class FiniteScalarQuantize(nn.Module):
-    def __init__(
-        self, latent_dim: int, levels: list[int], *, stride: int = 1, mlp: bool = False
-    ):
+
+    def __init__(self, latent_dim: int, levels: list[int], *, stride: int = 1, mlp: bool = False):
         super().__init__()
 
         self.stride = stride
@@ -456,6 +457,7 @@ class FiniteScalarQuantize(nn.Module):
 
 
 class ResidualFiniteScalarQuantize(nn.Module):
+
     def __init__(
         self,
         *,
@@ -473,29 +475,22 @@ class ResidualFiniteScalarQuantize(nn.Module):
 
         strides = [1] * n_quantizers if strides is None else strides
 
-        assert (
-            len(strides) == n_quantizers
-        ), "Strides must be provided for each codebook"
+        assert (len(strides) == n_quantizers), "Strides must be provided for each codebook"
 
         scales = []
         quantizers = []
         levels_tensor = torch.tensor(levels, dtype=torch.float32)
 
         for i in range(n_quantizers):
-            scales.append((levels_tensor - 1) ** -i)
+            scales.append((levels_tensor - 1)**-i)
             quantizers.append(
-                FiniteScalarQuantize(
-                    latent_dim=latent_dim, levels=levels, stride=strides[i], mlp=mlp
-                )
-            )
+                FiniteScalarQuantize(latent_dim=latent_dim, levels=levels, stride=strides[i], mlp=mlp))
 
         self.quantizers = nn.ModuleList(quantizers)
 
         self.register_buffer("scales", torch.stack(scales), persistent=False)
 
-        codebooks = [
-            quantizer.quantize.implicit_codebook for quantizer in self.quantizers
-        ]
+        codebooks = [quantizer.quantize.implicit_codebook for quantizer in self.quantizers]
         self.codebooks = torch.stack(codebooks, dim=0)
 
     def from_indices(self, indices: Tensor):
@@ -510,8 +505,10 @@ class ResidualFiniteScalarQuantize(nn.Module):
         return z_q
 
     def forward(self, z: Tensor, n_quantizers: int | None = None):
-        """Quantized the input tensor using a fixed set of `n` codebooks and returns
-        the corresponding codebook vectors
+        """
+        Quantized the input tensor using a fixed set of `n` codebooks and returns the corresponding codebook
+        vectors.
+
         Parameters
         ----------
         z : Tensor[B x D x T]
@@ -544,8 +541,8 @@ class ResidualFiniteScalarQuantize(nn.Module):
             n_quantizers = self.n_quantizers
 
         if self.training:
-            n_quantizers = torch.ones((B,)) * self.n_quantizers + 1
-            dropout = torch.randint(1, self.n_quantizers + 1, (B,))
+            n_quantizers = torch.ones((B, )) * self.n_quantizers + 1
+            dropout = torch.randint(1, self.n_quantizers + 1, (B, ))
             n_dropout = int(B * self.quantizer_dropout)
             n_quantizers[:n_dropout] = dropout[:n_dropout]
             n_quantizers = n_quantizers.to(z.device)
@@ -558,7 +555,7 @@ class ResidualFiniteScalarQuantize(nn.Module):
 
             residual = residual - z_q_i.detach()
 
-            mask = torch.full((B,), fill_value=i, device=z.device) < n_quantizers
+            mask = torch.full((B, ), fill_value=i, device=z.device) < n_quantizers
             z_q = z_q + z_q_i * mask[:, None, None]
 
             indices.append(indices_i)
@@ -590,7 +587,7 @@ class FluacConfig(BaseModel):
 
     @property
     def latent_dim(self) -> int:
-        return self.encoder_dim * (2 ** len(self.encoder_rates))
+        return self.encoder_dim * (2**len(self.encoder_rates))
 
     @property
     def effective_codebook_size(self) -> int:
@@ -605,9 +602,7 @@ class Fluac(nn.Module):
 
         self.config = config
 
-        self.encoder = Encoder(
-            config.encoder_dim, config.encoder_rates, config.latent_dim
-        )
+        self.encoder = Encoder(config.encoder_dim, config.encoder_rates, config.latent_dim)
 
         self.quantizer = ResidualFiniteScalarQuantize(
             latent_dim=config.latent_dim,

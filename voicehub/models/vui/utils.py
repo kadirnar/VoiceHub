@@ -28,9 +28,7 @@ def load_what_you_can(checkpoint: dict, model):
             # Completely different shapes so probably unwise to merge
             continue
 
-        min_shape = [
-            min(param.shape[i], model_state.shape[i]) for i in range(len(param.shape))
-        ]
+        min_shape = [min(param.shape[i], model_state.shape[i]) for i in range(len(param.shape))]
         print(name, "model:", mshape, "chkpt:", pshape, "loading:", min_shape)
         idxs = torch.meshgrid(*[torch.arange(s) for s in min_shape])
         model_state[tuple(idxs)].copy_(param[tuple(idxs)])

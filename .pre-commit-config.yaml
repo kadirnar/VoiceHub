@@ -1,0 +1,61 @@
+# Define bot property if installed via https://github.com/marketplace/pre-commit-ci
+ci:
+  autofix_prs: true
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit suggestions'
+  autoupdate_schedule: monthly
+  # submodules: true
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-case-conflict
+      # - id: no-commit-to-branch
+      # - id: check-yaml
+      - id: detect-private-key
+      - id: detect-aws-credentials
+        args:
+          - --allow-missing-credentials
+
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.20.0
+    hooks:
+      - id: pyupgrade
+        name: Upgrade code
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 6.0.1
+    hooks:
+      - id: isort
+        name: Sort imports
+
+  - repo: https://github.com/google/yapf
+    rev: v0.43.0
+    hooks:
+      - id: yapf
+        name: YAPF formatting
+        args:
+          - -i
+
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.22
+    hooks:
+      - id: mdformat
+        name: MD formatting
+        additional_dependencies:
+          - mdformat-gfm
+          - mdformat-black
+        exclude: 'docs/.*\.md'
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.2.0
+    hooks:
+      - id: flake8
+        name: Flake8 linting
+
+  - repo: https://github.com/PyCQA/docformatter
+    rev: v1.7.7
+    hooks:
+      - id: docformatter

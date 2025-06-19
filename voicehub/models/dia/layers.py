@@ -35,7 +35,7 @@ class DenseGeneral(nn.Module):
         self,
         in_shapes: tuple[int, ...],
         out_features: tuple[int, ...],
-        axis: tuple[int, ...] = (-1,),
+        axis: tuple[int, ...] = (-1, ),
         weight_dtype: torch.dtype | None = None,
         device: torch.device | None = None,
     ):
@@ -68,16 +68,16 @@ class MlpBlock(nn.Module):
         self.dtype = compute_dtype
 
         self.wi_fused = DenseGeneral(
-            in_shapes=(embed_dim,),
+            in_shapes=(embed_dim, ),
             out_features=(2, intermediate_dim),
-            axis=(-1,),
+            axis=(-1, ),
             weight_dtype=compute_dtype,
         )
 
         self.wo = DenseGeneral(
-            in_shapes=(intermediate_dim,),
-            out_features=(embed_dim,),
-            axis=(-1,),
+            in_shapes=(intermediate_dim, ),
+            out_features=(embed_dim, ),
+            axis=(-1, ),
             weight_dtype=compute_dtype,
         )
 
@@ -114,7 +114,8 @@ class RotaryEmbedding(nn.Module):
 
         half_embedding_dim = embedding_dims // 2
         fraction = (2.0 * torch.arange(0, half_embedding_dim)) / embedding_dims
-        timescale = (self.min_timescale * (self.max_timescale / self.min_timescale) ** fraction).to(torch.float32)
+        timescale = (self.min_timescale * (self.max_timescale / self.min_timescale)**fraction).to(
+            torch.float32)
         self.register_buffer("timescale", timescale, persistent=False)
 
     def forward(self, inputs: torch.Tensor, position: torch.Tensor):
@@ -126,13 +127,19 @@ class RotaryEmbedding(nn.Module):
         first_half, second_half = torch.chunk(inputs.to(torch.float32), 2, dim=-1)
         first_part = first_half * cos - second_half * sin
         second_part = second_half * cos + first_half * sin
-        return torch.cat((first_part.to(self.compute_dtype), second_part.to(self.compute_dtype)), dim=-1)
+        return torch.cat(
+            (first_part.to(self.compute_dtype), second_part.to(self.compute_dtype)),
+            dim=-1,
+        )
 
     def apply_rope(self, inputs: torch.Tensor, sin: torch.Tensor, cos: torch.Tensor):
         first_half, second_half = torch.chunk(inputs.to(torch.float32), 2, dim=-1)
         first_part = first_half * cos - second_half * sin
         second_part = second_half * cos + first_half * sin
-        return torch.cat((first_part.to(self.compute_dtype), second_part.to(self.compute_dtype)), dim=-1)
+        return torch.cat(
+            (first_part.to(self.compute_dtype), second_part.to(self.compute_dtype)),
+            dim=-1,
+        )
 
 
 def custom_scaled_dot_product_attention(
@@ -209,31 +216,32 @@ class CrossAttention(nn.Module):
         self.output_dim = out_embed_dim if out_embed_dim is not None else q_embed_dim
         self.projected_query_dim = num_query_heads * head_dim
         if num_query_heads % num_kv_heads != 0:
-            raise ValueError(f"num_query_heads ({num_query_heads}) must be divisible by num_kv_heads ({num_kv_heads})")
+            raise ValueError(
+                f"num_query_heads ({num_query_heads}) must be divisible by num_kv_heads ({num_kv_heads})")
         self.num_gqa_groups = num_query_heads // num_kv_heads
 
         # --- Projection Layers using DenseGeneral ---
         self.q_proj = DenseGeneral(
-            in_shapes=(q_embed_dim,),
+            in_shapes=(q_embed_dim, ),
             out_features=(num_query_heads, head_dim),
-            axis=(-1,),
+            axis=(-1, ),
             weight_dtype=compute_dtype,
         )
         self.k_proj = DenseGeneral(
-            in_shapes=(kv_embed_dim,),
+            in_shapes=(kv_embed_dim, ),
             out_features=(num_kv_heads, head_dim),
-            axis=(-1,),
+            axis=(-1, ),
             weight_dtype=compute_dtype,
         )
         self.v_proj = DenseGeneral(
-            in_shapes=(kv_embed_dim,),
+            in_shapes=(kv_embed_dim, ),
             out_features=(num_kv_heads, head_dim),
-            axis=(-1,),
+            axis=(-1, ),
             weight_dtype=compute_dtype,
         )
         self.o_proj = DenseGeneral(
             in_shapes=(num_query_heads, head_dim),
-            out_features=(self.output_dim,),
+            out_features=(self.output_dim, ),
             axis=(-2, -1),
             weight_dtype=compute_dtype,
         )
@@ -314,6 +322,7 @@ class CrossAttention(nn.Module):
 
 
 class FusedQKV(nn.Module):
+
     def __init__(
         self,
         in_features: int,
@@ -368,33 +377,34 @@ class SelfAttention(nn.Module):
         self.output_dim = out_embed_dim if out_embed_dim is not None else q_embed_dim
         self.projected_query_dim = num_query_heads * head_dim
         if num_query_heads % num_kv_heads != 0:
-            raise ValueError(f"num_query_heads ({num_query_heads}) must be divisible by num_kv_heads ({num_kv_heads})")
+            raise ValueError(
+                f"num_query_heads ({num_query_heads}) must be divisible by num_kv_heads ({num_kv_heads})")
         self.num_gqa_groups = num_query_heads // num_kv_heads
         self.kv_embed_dim = kv_embed_dim
         self.q_embed_dim = q_embed_dim
 
         # --- Projection Layers using DenseGeneral ---
         self.q_proj = DenseGeneral(
-            in_shapes=(q_embed_dim,),
+            in_shapes=(q_embed_dim, ),
             out_features=(num_query_heads, head_dim),
-            axis=(-1,),
+            axis=(-1, ),
             weight_dtype=compute_dtype,
         )
         self.k_proj = DenseGeneral(
-            in_shapes=(kv_embed_dim,),
+            in_shapes=(kv_embed_dim, ),
             out_features=(num_kv_heads, head_dim),
-            axis=(-1,),
+            axis=(-1, ),
             weight_dtype=compute_dtype,
         )
         self.v_proj = DenseGeneral(
-            in_shapes=(kv_embed_dim,),
+            in_shapes=(kv_embed_dim, ),
             out_features=(num_kv_heads, head_dim),
-            axis=(-1,),
+            axis=(-1, ),
             weight_dtype=compute_dtype,
         )
         self.o_proj = DenseGeneral(
             in_shapes=(num_query_heads, head_dim),
-            out_features=(self.output_dim,),
+            out_features=(self.output_dim, ),
             axis=(-2, -1),
             weight_dtype=compute_dtype,
         )
@@ -568,7 +578,11 @@ class EncoderLayer(nn.Module):
             eps=model_config.normalization_layer_epsilon,
             dtype=torch.float32,
         )
-        self.mlp = MlpBlock(embed_dim=embed_dim, intermediate_dim=enc_config.n_hidden, compute_dtype=compute_dtype)
+        self.mlp = MlpBlock(
+            embed_dim=embed_dim,
+            intermediate_dim=enc_config.n_hidden,
+            compute_dtype=compute_dtype,
+        )
 
     def forward(
         self,
@@ -748,15 +762,12 @@ class Decoder(nn.Module):
         self.num_channels = data_config.channels
         self.num_layers = dec_config.n_layer
 
-        self.embeddings = nn.ModuleList(
-            [
-                nn.Embedding(model_config.tgt_vocab_size, dec_config.n_embd, dtype=compute_dtype)
-                for _ in range(self.num_channels)
-            ]
-        )
+        self.embeddings = nn.ModuleList([
+            nn.Embedding(model_config.tgt_vocab_size, dec_config.n_embd, dtype=compute_dtype)
+            for _ in range(self.num_channels)
+        ])
         self.layers = nn.ModuleList(
-            [DecoderLayer(config=config, compute_dtype=compute_dtype) for _ in range(self.num_layers)]
-        )
+            [DecoderLayer(config=config, compute_dtype=compute_dtype) for _ in range(self.num_layers)])
 
         self.norm = RMSNorm(
             dec_config.n_embd,
@@ -765,9 +776,9 @@ class Decoder(nn.Module):
         )
 
         self.logits_dense = DenseGeneral(
-            in_shapes=(dec_config.n_embd,),
+            in_shapes=(dec_config.n_embd, ),
             out_features=(self.num_channels, model_config.tgt_vocab_size),
-            axis=(-1,),
+            axis=(-1, ),
             weight_dtype=compute_dtype,
         )
 
@@ -777,9 +788,7 @@ class Decoder(nn.Module):
         enc_positions: torch.Tensor,  # (B, S)
         k_padding_mask: torch.Tensor | None = None,
     ) -> list[KVCache]:
-        """
-        Computes the Key and Value tensors for cross-attention for each layer from the encoder output.
-        """
+        """Computes the Key and Value tensors for cross-attention for each layer from the encoder output."""
         per_layer_kv_cache: list[KVCache] = []
 
         for layer in self.layers:
@@ -870,7 +879,13 @@ class Decoder(nn.Module):
         for i, layer in enumerate(self.layers):
             self_cache = state.self_attn_cache[i]
             cross_cache = state.cross_attn_cache[i]
-            x = layer(x, state, self_attn_cache=self_cache, cross_attn_cache=cross_cache, prefill=True)
+            x = layer(
+                x,
+                state,
+                self_attn_cache=self_cache,
+                cross_attn_cache=cross_cache,
+                prefill=True,
+            )
 
         # Final Norm
         x = self.norm(x)
@@ -880,17 +895,17 @@ class Decoder(nn.Module):
 
 
 class DiaModel(
-    nn.Module,
-    PyTorchModelHubMixin,
-    repo_url="https://github.com/nari-labs/dia",
-    pipeline_tag="text-to-speech",
-    license="apache-2.0",
-    coders={
-        DiaConfig: (
-            lambda x: x.model_dump(),
-            lambda data: DiaConfig.model_validate(data),
-        ),
-    },
+        nn.Module,
+        PyTorchModelHubMixin,
+        repo_url="https://github.com/nari-labs/dia",
+        pipeline_tag="text-to-speech",
+        license="apache-2.0",
+        coders={
+            DiaConfig: (
+                lambda x: x.model_dump(),
+                lambda data: DiaConfig.model_validate(data),
+            ),
+        },
 ):
     """PyTorch Dia Model using DenseGeneral."""
 
