@@ -15,7 +15,7 @@ uv pip install voicehub
 
 ## 📚 Usage
 
-### Orpheus-TTS
+### Orpheus-TTS Model
 
 ```python
 from voicehub.automodel import AutoInferenceModel
@@ -33,7 +33,7 @@ output = model(
 )  # voice param is only for orpheustts
 ```
 
-### Dia
+### DiaTTS Model
 
 ```python
 from voicehub.automodel import AutoInferenceModel
@@ -52,7 +52,7 @@ output = model(
 )
 ```
 
-### VUI
+### VuiTTS Model
 
 ```python
 from voicehub.automodel import AutoInferenceModel
