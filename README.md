@@ -2,7 +2,7 @@
 <h2>
     VoiceHub: A Unified Inference Interface for TTS Models
 </h2>
-<img width="500" alt="teaser" src="assets/logo.png">
+<img width="480" alt="teaser" src="assets/logo.png">
 </div>
 
 ## 🛠️ Installation
