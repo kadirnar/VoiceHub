@@ -15,6 +15,8 @@ uv pip install voicehub
 
 ## 📚 Usage
 
+### Orpheus-TTS
+
 ```python
 from voicehub.automodel import AutoInferenceModel
 
@@ -29,6 +31,44 @@ model = AutoInferenceModel.from_pretrained(
 output = model(
     "Hello, how are you today?", voice="tara", output_file="output.wav"
 )  # voice param is only for orpheustts
+```
+
+### Dia
+
+```python
+from voicehub.automodel import AutoInferenceModel
+
+# Create model using the static from_pretrained method
+model = AutoInferenceModel.from_pretrained(
+    model_type="dia",  # or "dia" or "vui"
+    model_path="dia/dia-100m-base.pt",
+    device="cuda",
+)
+
+# Generate speech with the model
+output = model(
+    text="Hey, here is some random stuff, the text the less likely the model can cope!",
+    output_file="output.wav",
+)
+```
+
+### VUI
+
+```python
+from voicehub.automodel import AutoInferenceModel
+
+# Create model using the static from_pretrained method
+model = AutoInferenceModel.from_pretrained(
+    model_type="vui",  # or "dia" or "vui"
+    model_path="vui-100m-base.pt",
+    device="cuda",
+)
+
+# Generate speech with the model
+output = model(
+    text="Hey, here is some random stuff, the text the less likely the model can cope!",
+    output_file="output.wav",
+)
 ```
 
 ## 🤗 Contributing
