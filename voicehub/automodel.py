@@ -1,3 +1,5 @@
+from voicehub.providers.base import ProviderNames, VoiceHubProvider
+
 MODEL_TYPE_TO_MODEL_CLASS_NAME = {"orpheustts": "OrpheusTTS", "dia": "DiaTTS", "vui": "VuiTTS"}
 
 
@@ -33,3 +35,19 @@ class AutoInferenceModel:
             model_path=model_path,
             device=device,
         )
+
+    def from_provider(
+        self,
+        *,
+        provider: str,
+        model_name: str,
+    ) -> VoiceHubProvider:
+
+        match provider.lower():
+            case ProviderNames.DEEPINFRA.value:
+                from voicehub.providers.deepinfra import DeepInfraProvider
+                return DeepInfraProvider(model_name=model_name)
+            case _:
+                raise ValueError(
+                    f"Provider '{provider}' is not supported. Supported providers: {list(ProviderNames.__members__.keys())}"
+                )

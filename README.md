@@ -65,6 +65,22 @@ output = model(
 )
 ```
 
+### Providers
+
+```python
+from voicehub.automodel import AutoInferenceModel
+from dotenv import load_dotenv, find_dotenv
+
+_ = load_dotenv(find_dotenv())
+
+provider = AutoInferenceModel().from_provider(provider="deepinfra", model_name="kokoro")
+
+response = provider(
+    text="Hello, this is a test of the Kokoro TTS model from DeepInfra.",
+    output_file="output.mp3",
+)
+```
+
 ## 🤗 Contributing
 
 ```bash
