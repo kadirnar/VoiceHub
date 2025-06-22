@@ -1,4 +1,10 @@
-MODEL_TYPE_TO_MODEL_CLASS_NAME = {"orpheustts": "OrpheusTTS", "dia": "DiaTTS", "vui": "VuiTTS"}
+MODEL_TYPE_TO_MODEL_CLASS_NAME = {
+    "orpheustts": "OrpheusTTS",
+    "dia": "DiaTTS",
+    "vui": "VuiTTS",
+    "llasa": "LlasaTTS",
+    "llasa_voice_clone": "LlasaVoiceClone"
+}
 
 
 class AutoInferenceModel:
@@ -23,7 +29,10 @@ class AutoInferenceModel:
         model_class_name = MODEL_TYPE_TO_MODEL_CLASS_NAME[model_type]
 
         # Import the module dynamically
-        module = __import__(f"voicehub.models.{model_type}.inference", fromlist=[model_class_name])
+        if model_type == "llasa_voice_clone":
+            module = __import__("voicehub.models.llasa.inference_voice_clone", fromlist=[model_class_name])
+        else:
+            module = __import__(f"voicehub.models.{model_type}.inference", fromlist=[model_class_name])
 
         # Get the model class from the module
         InferenceModel = getattr(module, model_class_name)

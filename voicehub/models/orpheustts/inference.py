@@ -33,9 +33,9 @@ class OrpheusTTS:
             device: Computing device ('cuda' for GPU, 'cpu' for CPU)
         """
         self.device = device
-        self._load_models(model_path)
+        self.load_models(model_path)
 
-    def _load_models(self, model_path: str):
+    def load_models(self, model_path: str):
         """Load SNAC and language models."""
         # Load SNAC audio codec model for decoding audio tokens
         self.snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").to("cpu")
