@@ -65,6 +65,40 @@ output = model(
 )
 ```
 
+### Llasa Model
+
+```python
+from voicehub.automodel import AutoInferenceModel
+
+model = AutoInferenceModel.from_pretrained(
+    model_type="llasa",  # or "dia" or "vui"
+    model_path="HKUSTAudio/Llasa-1B-Multilingual",
+    device="cuda",
+)
+
+output = model(
+    text="Hey, here is some random stuff, the text the less likely the model can cope!",
+    output_file="output.wav",
+)
+```
+
+### Llasa Voice Clone Model
+
+```python
+from voicehub.automodel import AutoInferenceModel
+
+model = AutoInferenceModel.from_pretrained(
+    model_type="llasa_voice_clone",  # or "dia" or "vui"
+    model_path="HKUSTAudio/Llasa-1B-Multilingual",
+    device="cuda",
+)
+
+output = model(
+    text="Hey, here is some random stuff, the text the less likely the model can cope!",
+    output_file="output.wav",
+)
+```
+
 ## 🤗 Contributing
 
 ```bash
@@ -78,3 +112,5 @@ pre-commit run --all-files
 - [Orpheus-TTS](https://github.com/canopyai/Orpheus-TTS)
 - [Dia](https://github.com/nari-labs/dia)
 - [Vui](https://github.com/fluxions-ai/vui)
+- [Llasa](https://github.com/zhenye234/LLaSA_training)
+- [XCodec2](https://huggingface.co/HKUSTAudio/xcodec2)
