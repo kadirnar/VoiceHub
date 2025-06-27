@@ -9,3 +9,5 @@ inflect
 pandas
 pyannote.audio
 xcodec2
+s3tokenizer
+diffusers
