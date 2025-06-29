@@ -3,7 +3,8 @@ MODEL_TYPE_TO_MODEL_CLASS_NAME = {
     "dia": "DiaTTS",
     "vui": "VuiTTS",
     "llasa": "LlasaTTS",
-    "llasa_voice_clone": "LlasaVoiceClone"
+    "llasa_voice_clone": "LlasaVoiceClone",
+    "chatterbox": "ChatterboxTTS"
 }
 
 
