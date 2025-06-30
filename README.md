@@ -136,4 +136,3 @@ pre-commit run --all-files
 - [Llasa](https://github.com/zhenye234/LLaSA_training)
 - [XCodec2](https://huggingface.co/HKUSTAudio/xcodec2)
 - [Chatterbox](https://github.com/ResembleAI/chatterbox)
-
