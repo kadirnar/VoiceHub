@@ -1,8 +1,9 @@
-from attr import attr
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from attr import attr
+
 
 class CustomSTFT(nn.Module):
     """
@@ -11,18 +12,18 @@ class CustomSTFT(nn.Module):
     - forward STFT => Real-part conv1d + Imag-part conv1d
     - inverse STFT => Real-part conv_transpose1d + Imag-part conv_transpose1d + sum
     - avoids F.unfold, so easier to export to ONNX
-    - uses replicate or constant padding for 'center=True' to approximate 'reflect' 
+    - uses replicate or constant padding for 'center=True' to approximate 'reflect'
       (reflect is not supported for dynamic shapes in ONNX)
     """
 
     def __init__(
-        self,
-        filter_length=800,
-        hop_length=200,
-        win_length=800,
-        window="hann",
-        center=True,
-        pad_mode="replicate",  # or 'constant'
+            self,
+            filter_length=800,
+            hop_length=200,
+            win_length=800,
+            window="hann",
+            center=True,
+            pad_mode="replicate",  # or 'constant'
     ):
         super().__init__()
         self.filter_length = filter_length
@@ -43,7 +44,7 @@ class CustomSTFT(nn.Module):
             extra = self.n_fft - self.win_length
             window_tensor = F.pad(window_tensor, (0, extra))
         elif self.win_length > self.n_fft:
-            window_tensor = window_tensor[: self.n_fft]
+            window_tensor = window_tensor[:self.n_fft]
         self.register_buffer("window", window_tensor)
 
         # Precompute forward DFT (real, imag)
@@ -66,17 +67,13 @@ class CustomSTFT(nn.Module):
 
         # Register as Conv1d weight => (out_channels, in_channels, kernel_size)
         # out_channels = freq_bins, in_channels=1, kernel_size=n_fft
-        self.register_buffer(
-            "weight_forward_real", forward_real_torch.unsqueeze(1)
-        )
-        self.register_buffer(
-            "weight_forward_imag", forward_imag_torch.unsqueeze(1)
-        )
+        self.register_buffer("weight_forward_real", forward_real_torch.unsqueeze(1))
+        self.register_buffer("weight_forward_imag", forward_imag_torch.unsqueeze(1))
 
         # Precompute inverse DFT
         # Real iFFT formula => scale = 1/n_fft, doubling for bins 1..freq_bins-2 if n_fft even, etc.
-        # For simplicity, we won't do the "DC/nyquist not doubled" approach here. 
-        # If you want perfect real iSTFT, you can add that logic. 
+        # For simplicity, we won't do the "DC/nyquist not doubled" approach here.
+        # If you want perfect real iSTFT, you can add that logic.
         # This version just yields good approximate reconstruction with Hann + typical overlap.
         inv_scale = 1.0 / self.n_fft
         n = np.arange(self.n_fft)
@@ -91,20 +88,11 @@ class CustomSTFT(nn.Module):
         backward_imag = idft_sin * inv_window
 
         # We'll implement iSTFT as real+imag conv_transpose with stride=hop.
-        self.register_buffer(
-            "weight_backward_real", torch.from_numpy(backward_real).float().unsqueeze(1)
-        )
-        self.register_buffer(
-            "weight_backward_imag", torch.from_numpy(backward_imag).float().unsqueeze(1)
-        )
-        
-
+        self.register_buffer("weight_backward_real", torch.from_numpy(backward_real).float().unsqueeze(1))
+        self.register_buffer("weight_backward_imag", torch.from_numpy(backward_imag).float().unsqueeze(1))
 
     def transform(self, waveform: torch.Tensor):
-        """
-        Forward STFT => returns magnitude, phase
-        Output shape => (batch, freq_bins, frames)
-        """
+        """Forward STFT => returns magnitude, phase Output shape => (batch, freq_bins, frames)"""
         # waveform shape => (B, T).  conv1d expects (B, 1, T).
         # Optional center pad
         if self.center:
@@ -138,11 +126,8 @@ class CustomSTFT(nn.Module):
         phase[correction_mask] = torch.pi
         return magnitude, phase
 
-
     def inverse(self, magnitude: torch.Tensor, phase: torch.Tensor, length=None):
-        """
-        Inverse STFT => returns waveform shape (B, T).
-        """
+        """Inverse STFT => returns waveform shape (B, T)."""
         # magnitude, phase => (B, freq_bins, frames)
         # Re-create real/imag => shape (B, freq_bins, frames)
         real_part = magnitude * torch.cos(phase)
@@ -191,6 +176,7 @@ class CustomSTFT(nn.Module):
     def forward(self, x: torch.Tensor):
         """
         Full STFT -> iSTFT pass: returns time-domain reconstruction.
+
         Same interface as your original code.
         """
         mag, phase = self.transform(x)

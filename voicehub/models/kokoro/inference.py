@@ -1,6 +1,7 @@
 import soundfile as sf
 from kokoro import KPipeline
 
+
 class KokoroTTS:
     """
     KokoroTTS class for text-to-speech generation using the Kokoro model.
@@ -17,7 +18,7 @@ class KokoroTTS:
         # Generate speech from text
         text = "The sky above the port was the color of television, tuned to a dead channel."
         audios = tts(text=text, voice="af_heart", output_prefix="output")
-        
+
         # To listen in a notebook:
         # from IPython.display import Audio, display
         # display(Audio(audios[0], rate=24000))
@@ -42,7 +43,13 @@ class KokoroTTS:
         """
         self.pipeline = KPipeline(lang_code=lang_code)
 
-    def __call__(self, text: str, voice: str = "af_heart", speed: float = 1.0, output_prefix: str = "output", split_pattern: str = r'\n+'):
+    def __call__(
+            self,
+            text: str,
+            voice: str = "af_heart",
+            speed: float = 1.0,
+            output_prefix: str = "output",
+            split_pattern: str = r'\n+'):
         """
         Generate speech from text and save it to files.
 
@@ -59,12 +66,7 @@ class KokoroTTS:
         Returns:
             list: A list of audio data numpy arrays.
         """
-        generator = self.pipeline(
-            text, 
-            voice=voice,
-            speed=speed, 
-            split_pattern=split_pattern
-        )
+        generator = self.pipeline(text, voice=voice, speed=speed, split_pattern=split_pattern)
 
         generated_audios = []
         print("Generating audio...")
@@ -74,6 +76,6 @@ class KokoroTTS:
             sf.write(output_file, audio, 24000)
             print(f"    Saved to {output_file}")
             generated_audios.append(audio)
-        
+
         print("Audio generation complete.")
         return generated_audios

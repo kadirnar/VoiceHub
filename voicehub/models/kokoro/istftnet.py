@@ -1,10 +1,11 @@
 # ADAPTED from https://github.com/yl4579/StyleTTS2/blob/main/Modules/istftnet.py
-from kokoro.custom_stft import CustomSTFT
-from torch.nn.utils.parametrizations import weight_norm
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from kokoro.custom_stft import CustomSTFT
+from torch.nn.utils.parametrizations import weight_norm
 
 
 # https://github.com/yl4579/StyleTTS2/blob/main/Modules/utils.py
@@ -13,16 +14,18 @@ def init_weights(m, mean=0.0, std=0.01):
     if classname.find("Conv") != -1:
         m.weight.data.normal_(mean, std)
 
+
 def get_padding(kernel_size, dilation=1):
-    return int((kernel_size*dilation - dilation)/2)
+    return int((kernel_size * dilation - dilation) / 2)
 
 
 class AdaIN1d(nn.Module):
+
     def __init__(self, style_dim, num_features):
         super().__init__()
         # affine should be False, however there's a bug in the old torch.onnx.export (not newer dynamo) that causes the channel dimension to be lost if affine=False. When affine is true, there's additional learnably parameters. This shouldn't really matter setting it to True, since we're in inference mode
         self.norm = nn.InstanceNorm1d(num_features, affine=True)
-        self.fc = nn.Linear(style_dim, num_features*2)
+        self.fc = nn.Linear(style_dim, num_features * 2)
 
     def forward(self, x, s):
         h = self.fc(s)
@@ -32,24 +35,46 @@ class AdaIN1d(nn.Module):
 
 
 class AdaINResBlock1(nn.Module):
+
     def __init__(self, channels, kernel_size=3, dilation=(1, 3, 5), style_dim=64):
-        super(AdaINResBlock1, self).__init__()
+        super().__init__()
         self.convs1 = nn.ModuleList([
-            weight_norm(nn.Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
-                                  padding=get_padding(kernel_size, dilation[0]))),
-            weight_norm(nn.Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
-                                  padding=get_padding(kernel_size, dilation[1]))),
-            weight_norm(nn.Conv1d(channels, channels, kernel_size, 1, dilation=dilation[2],
-                                  padding=get_padding(kernel_size, dilation[2])))
+            weight_norm(
+                nn.Conv1d(
+                    channels,
+                    channels,
+                    kernel_size,
+                    1,
+                    dilation=dilation[0],
+                    padding=get_padding(kernel_size, dilation[0]))),
+            weight_norm(
+                nn.Conv1d(
+                    channels,
+                    channels,
+                    kernel_size,
+                    1,
+                    dilation=dilation[1],
+                    padding=get_padding(kernel_size, dilation[1]))),
+            weight_norm(
+                nn.Conv1d(
+                    channels,
+                    channels,
+                    kernel_size,
+                    1,
+                    dilation=dilation[2],
+                    padding=get_padding(kernel_size, dilation[2])))
         ])
         self.convs1.apply(init_weights)
         self.convs2 = nn.ModuleList([
-            weight_norm(nn.Conv1d(channels, channels, kernel_size, 1, dilation=1,
-                                  padding=get_padding(kernel_size, 1))),
-            weight_norm(nn.Conv1d(channels, channels, kernel_size, 1, dilation=1,
-                                  padding=get_padding(kernel_size, 1))),
-            weight_norm(nn.Conv1d(channels, channels, kernel_size, 1, dilation=1,
-                                  padding=get_padding(kernel_size, 1)))
+            weight_norm(
+                nn.Conv1d(
+                    channels, channels, kernel_size, 1, dilation=1, padding=get_padding(kernel_size, 1))),
+            weight_norm(
+                nn.Conv1d(
+                    channels, channels, kernel_size, 1, dilation=1, padding=get_padding(kernel_size, 1))),
+            weight_norm(
+                nn.Conv1d(
+                    channels, channels, kernel_size, 1, dilation=1, padding=get_padding(kernel_size, 1)))
         ])
         self.convs2.apply(init_weights)
         self.adain1 = nn.ModuleList([
@@ -62,22 +87,26 @@ class AdaINResBlock1(nn.Module):
             AdaIN1d(style_dim, channels),
             AdaIN1d(style_dim, channels),
         ])
-        self.alpha1 = nn.ParameterList([nn.Parameter(torch.ones(1, channels, 1)) for i in range(len(self.convs1))])
-        self.alpha2 = nn.ParameterList([nn.Parameter(torch.ones(1, channels, 1)) for i in range(len(self.convs2))])
+        self.alpha1 = nn.ParameterList(
+            [nn.Parameter(torch.ones(1, channels, 1)) for i in range(len(self.convs1))])
+        self.alpha2 = nn.ParameterList(
+            [nn.Parameter(torch.ones(1, channels, 1)) for i in range(len(self.convs2))])
 
     def forward(self, x, s):
-        for c1, c2, n1, n2, a1, a2 in zip(self.convs1, self.convs2, self.adain1, self.adain2, self.alpha1, self.alpha2):
+        for c1, c2, n1, n2, a1, a2 in zip(self.convs1, self.convs2, self.adain1, self.adain2, self.alpha1,
+                                          self.alpha2):
             xt = n1(x, s)
-            xt = xt + (1 / a1) * (torch.sin(a1 * xt) ** 2)  # Snake1D
+            xt = xt + (1 / a1) * (torch.sin(a1 * xt)**2)  # Snake1D
             xt = c1(xt)
             xt = n2(xt, s)
-            xt = xt + (1 / a2) * (torch.sin(a2 * xt) ** 2)  # Snake1D
+            xt = xt + (1 / a2) * (torch.sin(a2 * xt)**2)  # Snake1D
             xt = c2(xt)
             x = xt + x
         return x
 
 
 class TorchSTFT(nn.Module):
+
     def __init__(self, filter_length=800, hop_length=200, win_length=800, window='hann'):
         super().__init__()
         self.filter_length = filter_length
@@ -89,15 +118,22 @@ class TorchSTFT(nn.Module):
     def transform(self, input_data):
         forward_transform = torch.stft(
             input_data,
-            self.filter_length, self.hop_length, self.win_length, window=self.window.to(input_data.device),
+            self.filter_length,
+            self.hop_length,
+            self.win_length,
+            window=self.window.to(input_data.device),
             return_complex=True)
         return torch.abs(forward_transform), torch.angle(forward_transform)
 
     def inverse(self, magnitude, phase):
         inverse_transform = torch.istft(
             magnitude * torch.exp(phase * 1j),
-            self.filter_length, self.hop_length, self.win_length, window=self.window.to(magnitude.device))
-        return inverse_transform.unsqueeze(-2)  # unsqueeze to stay consistent with conv_transpose1d implementation
+            self.filter_length,
+            self.hop_length,
+            self.win_length,
+            window=self.window.to(magnitude.device))
+        return inverse_transform.unsqueeze(
+            -2)  # unsqueeze to stay consistent with conv_transpose1d implementation
 
     def forward(self, input_data):
         self.magnitude, self.phase = self.transform(input_data)
@@ -120,11 +156,17 @@ class SineGen(nn.Module):
     Note: when flag_for_pulse is True, the first time step of a voiced
         segment is always sin(torch.pi) or cos(0)
     """
-    def __init__(self, samp_rate, upsample_scale, harmonic_num=0,
-                 sine_amp=0.1, noise_std=0.003,
-                 voiced_threshold=0,
-                 flag_for_pulse=False):
-        super(SineGen, self).__init__()
+
+    def __init__(
+            self,
+            samp_rate,
+            upsample_scale,
+            harmonic_num=0,
+            sine_amp=0.1,
+            noise_std=0.003,
+            voiced_threshold=0,
+            flag_for_pulse=False):
+        super().__init__()
         self.sine_amp = sine_amp
         self.noise_std = noise_std
         self.harmonic_num = harmonic_num
@@ -152,9 +194,13 @@ class SineGen(nn.Module):
         rad_values[:, 0, :] = rad_values[:, 0, :] + rand_ini
         # instantanouse phase sine[t] = sin(2*pi \sum_i=1 ^{t} rad)
         if not self.flag_for_pulse:
-            rad_values = F.interpolate(rad_values.transpose(1, 2), scale_factor=1/self.upsample_scale, mode="linear").transpose(1, 2)
+            rad_values = F.interpolate(
+                rad_values.transpose(1, 2), scale_factor=1 / self.upsample_scale,
+                mode="linear").transpose(1, 2)
             phase = torch.cumsum(rad_values, dim=1) * 2 * torch.pi
-            phase = F.interpolate(phase.transpose(1, 2) * self.upsample_scale, scale_factor=self.upsample_scale, mode="linear").transpose(1, 2)
+            phase = F.interpolate(
+                phase.transpose(1, 2) * self.upsample_scale, scale_factor=self.upsample_scale,
+                mode="linear").transpose(1, 2)
             sines = torch.sin(phase)
         else:
             # If necessary, make sure that the first time step of every
@@ -226,24 +272,28 @@ class SourceModuleHnNSF(nn.Module):
     noise_source (batchsize, length 1)
     uv (batchsize, length, 1)
     """
-    def __init__(self, sampling_rate, upsample_scale, harmonic_num=0, sine_amp=0.1,
-                 add_noise_std=0.003, voiced_threshod=0):
-        super(SourceModuleHnNSF, self).__init__()
+
+    def __init__(
+            self,
+            sampling_rate,
+            upsample_scale,
+            harmonic_num=0,
+            sine_amp=0.1,
+            add_noise_std=0.003,
+            voiced_threshod=0):
+        super().__init__()
         self.sine_amp = sine_amp
         self.noise_std = add_noise_std
         # to produce sine waveforms
-        self.l_sin_gen = SineGen(sampling_rate, upsample_scale, harmonic_num,
-                                 sine_amp, add_noise_std, voiced_threshod)
+        self.l_sin_gen = SineGen(
+            sampling_rate, upsample_scale, harmonic_num, sine_amp, add_noise_std, voiced_threshod)
         # to merge source harmonics into a single excitation
         self.l_linear = nn.Linear(harmonic_num + 1, 1)
         self.l_tanh = nn.Tanh()
 
     def forward(self, x):
-        """
-        Sine_source, noise_source = SourceModuleHnNSF(F0_sampled)
-        F0_sampled (batchsize, length, 1)
-        Sine_source (batchsize, length, 1)
-        noise_source (batchsize, length 1)
+        """Sine_source, noise_source = SourceModuleHnNSF(F0_sampled) F0_sampled (batchsize, length, 1)
+        Sine_source (batchsize, length, 1) noise_source (batchsize, length 1)
         """
         # source for harmonic branch
         with torch.no_grad():
@@ -255,46 +305,68 @@ class SourceModuleHnNSF(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self, style_dim, resblock_kernel_sizes, upsample_rates, upsample_initial_channel, resblock_dilation_sizes, upsample_kernel_sizes, gen_istft_n_fft, gen_istft_hop_size, disable_complex=False):
-        super(Generator, self).__init__()
+
+    def __init__(
+            self,
+            style_dim,
+            resblock_kernel_sizes,
+            upsample_rates,
+            upsample_initial_channel,
+            resblock_dilation_sizes,
+            upsample_kernel_sizes,
+            gen_istft_n_fft,
+            gen_istft_hop_size,
+            disable_complex=False):
+        super().__init__()
         self.num_kernels = len(resblock_kernel_sizes)
         self.num_upsamples = len(upsample_rates)
         self.m_source = SourceModuleHnNSF(
-                    sampling_rate=24000,
-                    upsample_scale=math.prod(upsample_rates) * gen_istft_hop_size,
-                    harmonic_num=8, voiced_threshod=10)
+            sampling_rate=24000,
+            upsample_scale=math.prod(upsample_rates) * gen_istft_hop_size,
+            harmonic_num=8,
+            voiced_threshod=10)
         self.f0_upsamp = nn.Upsample(scale_factor=math.prod(upsample_rates) * gen_istft_hop_size)
         self.noise_convs = nn.ModuleList()
         self.noise_res = nn.ModuleList()
         self.ups = nn.ModuleList()
         for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
-            self.ups.append(weight_norm(
-                nn.ConvTranspose1d(upsample_initial_channel//(2**i), upsample_initial_channel//(2**(i+1)),
-                                   k, u, padding=(k-u)//2)))
+            self.ups.append(
+                weight_norm(
+                    nn.ConvTranspose1d(
+                        upsample_initial_channel // (2**i),
+                        upsample_initial_channel // (2**(i + 1)),
+                        k,
+                        u,
+                        padding=(k - u) // 2)))
         self.resblocks = nn.ModuleList()
         for i in range(len(self.ups)):
-            ch = upsample_initial_channel//(2**(i+1))
-            for j, (k, d) in enumerate(zip(resblock_kernel_sizes,resblock_dilation_sizes)):
+            ch = upsample_initial_channel // (2**(i + 1))
+            for j, (k, d) in enumerate(zip(resblock_kernel_sizes, resblock_dilation_sizes)):
                 self.resblocks.append(AdaINResBlock1(ch, k, d, style_dim))
-            c_cur = upsample_initial_channel // (2 ** (i + 1))
+            c_cur = upsample_initial_channel // (2**(i + 1))
             if i + 1 < len(upsample_rates):
                 stride_f0 = math.prod(upsample_rates[i + 1:])
-                self.noise_convs.append(nn.Conv1d(
-                    gen_istft_n_fft + 2, c_cur, kernel_size=stride_f0 * 2, stride=stride_f0, padding=(stride_f0+1) // 2))
-                self.noise_res.append(AdaINResBlock1(c_cur, 7, [1,3,5], style_dim))
+                self.noise_convs.append(
+                    nn.Conv1d(
+                        gen_istft_n_fft + 2,
+                        c_cur,
+                        kernel_size=stride_f0 * 2,
+                        stride=stride_f0,
+                        padding=(stride_f0 + 1) // 2))
+                self.noise_res.append(AdaINResBlock1(c_cur, 7, [1, 3, 5], style_dim))
             else:
                 self.noise_convs.append(nn.Conv1d(gen_istft_n_fft + 2, c_cur, kernel_size=1))
-                self.noise_res.append(AdaINResBlock1(c_cur, 11, [1,3,5], style_dim))
+                self.noise_res.append(AdaINResBlock1(c_cur, 11, [1, 3, 5], style_dim))
         self.post_n_fft = gen_istft_n_fft
         self.conv_post = weight_norm(nn.Conv1d(ch, self.post_n_fft + 2, 7, 1, padding=3))
         self.ups.apply(init_weights)
         self.conv_post.apply(init_weights)
         self.reflection_pad = nn.ReflectionPad1d((1, 0))
         self.stft = (
-            CustomSTFT(filter_length=gen_istft_n_fft, hop_length=gen_istft_hop_size, win_length=gen_istft_n_fft)
-            if disable_complex
-            else TorchSTFT(filter_length=gen_istft_n_fft, hop_length=gen_istft_hop_size, win_length=gen_istft_n_fft)
-        )
+            CustomSTFT(
+                filter_length=gen_istft_n_fft, hop_length=gen_istft_hop_size, win_length=gen_istft_n_fft)
+            if disable_complex else TorchSTFT(
+                filter_length=gen_istft_n_fft, hop_length=gen_istft_hop_size, win_length=gen_istft_n_fft))
 
     def forward(self, x, s, f0):
         with torch.no_grad():
@@ -304,7 +376,7 @@ class Generator(nn.Module):
             har_spec, har_phase = self.stft.transform(har_source)
             har = torch.cat([har_spec, har_phase], dim=1)
         for i in range(self.num_upsamples):
-            x = F.leaky_relu(x, negative_slope=0.1) 
+            x = F.leaky_relu(x, negative_slope=0.1)
             x_source = self.noise_convs[i](har)
             x_source = self.noise_res[i](x_source, s)
             x = self.ups[i](x)
@@ -314,18 +386,19 @@ class Generator(nn.Module):
             xs = None
             for j in range(self.num_kernels):
                 if xs is None:
-                    xs = self.resblocks[i*self.num_kernels+j](x, s)
+                    xs = self.resblocks[i * self.num_kernels + j](x, s)
                 else:
-                    xs += self.resblocks[i*self.num_kernels+j](x, s)
+                    xs += self.resblocks[i * self.num_kernels + j](x, s)
             x = xs / self.num_kernels
         x = F.leaky_relu(x)
         x = self.conv_post(x)
-        spec = torch.exp(x[:,:self.post_n_fft // 2 + 1, :])
+        spec = torch.exp(x[:, :self.post_n_fft // 2 + 1, :])
         phase = torch.sin(x[:, self.post_n_fft // 2 + 1:, :])
         return self.stft.inverse(spec, phase)
 
 
 class UpSample1d(nn.Module):
+
     def __init__(self, layer_type):
         super().__init__()
         self.layer_type = layer_type
@@ -338,6 +411,7 @@ class UpSample1d(nn.Module):
 
 
 class AdainResBlk1d(nn.Module):
+
     def __init__(self, dim_in, dim_out, style_dim=64, actv=nn.LeakyReLU(0.2), upsample='none', dropout_p=0.0):
         super().__init__()
         self.actv = actv
@@ -349,7 +423,9 @@ class AdainResBlk1d(nn.Module):
         if upsample == 'none':
             self.pool = nn.Identity()
         else:
-            self.pool = weight_norm(nn.ConvTranspose1d(dim_in, dim_in, kernel_size=3, stride=2, groups=dim_in, padding=1, output_padding=1))
+            self.pool = weight_norm(
+                nn.ConvTranspose1d(
+                    dim_in, dim_in, kernel_size=3, stride=2, groups=dim_in, padding=1, output_padding=1))
 
     def _build_weights(self, dim_in, dim_out, style_dim):
         self.conv1 = weight_norm(nn.Conv1d(dim_in, dim_out, 3, 1, 1))
@@ -382,14 +458,20 @@ class AdainResBlk1d(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, dim_in, style_dim, dim_out, 
-                 resblock_kernel_sizes,
-                 upsample_rates,
-                 upsample_initial_channel,
-                 resblock_dilation_sizes,
-                 upsample_kernel_sizes,
-                 gen_istft_n_fft, gen_istft_hop_size,
-                 disable_complex=False):
+
+    def __init__(
+            self,
+            dim_in,
+            style_dim,
+            dim_out,
+            resblock_kernel_sizes,
+            upsample_rates,
+            upsample_initial_channel,
+            resblock_dilation_sizes,
+            upsample_kernel_sizes,
+            gen_istft_n_fft,
+            gen_istft_hop_size,
+            disable_complex=False):
         super().__init__()
         self.encode = AdainResBlk1d(dim_in + 2, 1024, style_dim)
         self.decode = nn.ModuleList()
@@ -400,9 +482,16 @@ class Decoder(nn.Module):
         self.F0_conv = weight_norm(nn.Conv1d(1, 1, kernel_size=3, stride=2, groups=1, padding=1))
         self.N_conv = weight_norm(nn.Conv1d(1, 1, kernel_size=3, stride=2, groups=1, padding=1))
         self.asr_res = nn.Sequential(weight_norm(nn.Conv1d(512, 64, kernel_size=1)))
-        self.generator = Generator(style_dim, resblock_kernel_sizes, upsample_rates, 
-                                   upsample_initial_channel, resblock_dilation_sizes, 
-                                   upsample_kernel_sizes, gen_istft_n_fft, gen_istft_hop_size, disable_complex=disable_complex)
+        self.generator = Generator(
+            style_dim,
+            resblock_kernel_sizes,
+            upsample_rates,
+            upsample_initial_channel,
+            resblock_dilation_sizes,
+            upsample_kernel_sizes,
+            gen_istft_n_fft,
+            gen_istft_hop_size,
+            disable_complex=disable_complex)
 
     def forward(self, asr, F0_curve, N, s):
         F0 = self.F0_conv(F0_curve.unsqueeze(1))
