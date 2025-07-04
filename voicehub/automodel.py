@@ -4,7 +4,8 @@ MODEL_TYPE_TO_MODEL_CLASS_NAME = {
     "vui": "VuiTTS",
     "llasa": "LlasaTTS",
     "llasa_voice_clone": "LlasaVoiceClone",
-    "chatterbox": "ChatterboxTTS"
+    "chatterbox": "ChatterboxTTS",
+    "kokoro": "KokoroTTS",
 }
 
 
