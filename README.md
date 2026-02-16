@@ -116,9 +116,17 @@ model = AutoInferenceModel.from_pretrained(
     device="cuda",
 )
 
+# Basic text-to-speech
 output = model(
     text="Hey, here is some random stuff, the text the less likely the model can cope!",
     output_file="output.wav",
+)
+
+# Voice cloning with speaker reference audio
+output = model(
+    text="Hey, here is some random stuff, the text the less likely the model can cope!",
+    speaker_audio_path="reference.wav",
+    output_file="output_cloned.wav",
 )
 ```
 
