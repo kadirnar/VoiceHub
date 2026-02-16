@@ -14,6 +14,7 @@ def rotate_half(x):
 
 @autocast("cuda", enabled=False)
 def apply_rotary_emb(freqs: Tensor, t: Tensor, start_index: int = 0, scale: float = 1.0, seq_dim=-2):
+    """Apply rotary positional embeddings to a subset of the feature dimension."""
     dtype = t.dtype
 
     if t.ndim == 3:
@@ -44,6 +45,7 @@ def precompute_freqs_cis(
     theta_rescale_factor: float = 1.0,
     dtype: torch.dtype = torch.float32,
 ):
+    """Pre-compute interleaved sin/cos frequencies for RoPE up to *max_seqlen*."""
     theta *= theta_rescale_factor**(dim / (dim - 2))
     pos = torch.arange(max_seqlen, dtype=dtype)
     inv_freqs = 1.0 / (theta**(torch.arange(0, dim, 2, dtype=dtype) / dim))

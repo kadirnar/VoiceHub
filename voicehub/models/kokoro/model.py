@@ -142,6 +142,7 @@ class KModel(torch.nn.Module):
 
 
 class KModelForONNX(torch.nn.Module):
+    """Thin wrapper around :class:`KModel` that exposes a tensor-only forward for ONNX export."""
 
     def __init__(self, kmodel: KModel):
         super().__init__()

@@ -1,26 +1,14 @@
-# Copyright (c) 2024 Alibaba Inc (authors: Xiang Lyu, Zhihao Du)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 import threading
 
 import torch
 import torch.nn.functional as F
 
-from voicehub.models.s3gen.configs import CFM_PARAMS
-from voicehub.models.s3gen.matcha.flow_matching import BASECFM
+from voicehub.models.chatterbox.models.s3gen.configs import CFM_PARAMS
+from voicehub.models.chatterbox.models.s3gen.matcha.flow_matching import BASECFM
 
 
 class ConditionalCFM(BASECFM):
+    """Conditional Flow Matching with classifier-free guidance for speaker-conditioned mel generation."""
 
     def __init__(self, in_channels, cfm_params, n_spks=1, spk_emb_dim=64, estimator: torch.nn.Module = None):
         super().__init__(
@@ -198,6 +186,7 @@ class ConditionalCFM(BASECFM):
 
 
 class CausalConditionalCFM(ConditionalCFM):
+    """Causal variant of ConditionalCFM using pre-generated random noise for deterministic streaming."""
 
     def __init__(self, in_channels=240, cfm_params=CFM_PARAMS, n_spks=1, spk_emb_dim=80, estimator=None):
         super().__init__(in_channels, cfm_params, n_spks, spk_emb_dim, estimator)

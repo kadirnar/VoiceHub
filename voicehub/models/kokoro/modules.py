@@ -1,4 +1,3 @@
-# https://github.com/yl4579/StyleTTS2/blob/main/models.py
 import numpy as np
 import torch
 import torch.nn as nn
@@ -10,6 +9,7 @@ from .istftnet import AdainResBlk1d
 
 
 class LinearNorm(nn.Module):
+    """Linear layer with Xavier-uniform initialisation."""
 
     def __init__(self, in_dim, out_dim, bias=True, w_init_gain='linear'):
         super().__init__()
@@ -21,6 +21,7 @@ class LinearNorm(nn.Module):
 
 
 class LayerNorm(nn.Module):
+    """Channel-last layer normalisation for ``(B, C, T)`` tensors."""
 
     def __init__(self, channels, eps=1e-5):
         super().__init__()
@@ -36,6 +37,7 @@ class LayerNorm(nn.Module):
 
 
 class TextEncoder(nn.Module):
+    """Convolutional + bi-LSTM encoder that maps phoneme ids to hidden representations."""
 
     def __init__(self, channels, kernel_size, depth, n_symbols, actv=nn.LeakyReLU(0.2)):
         super().__init__()
@@ -75,6 +77,7 @@ class TextEncoder(nn.Module):
 
 
 class AdaLayerNorm(nn.Module):
+    """Adaptive Layer Normalisation conditioned on a style embedding."""
 
     def __init__(self, style_dim, channels, eps=1e-5):
         super().__init__()
@@ -95,6 +98,7 @@ class AdaLayerNorm(nn.Module):
 
 
 class ProsodyPredictor(nn.Module):
+    """Predicts duration, F0, and energy curves from encoded text and a style embedding."""
 
     def __init__(self, style_dim, d_hid, nlayers, max_dur=50, dropout=0.1):
         super().__init__()
@@ -143,6 +147,7 @@ class ProsodyPredictor(nn.Module):
 
 
 class DurationEncoder(nn.Module):
+    """Stacked bi-LSTM with adaptive layer norms for duration-aware text encoding."""
 
     def __init__(self, sty_dim, d_model, nlayers, dropout=0.1):
         super().__init__()
@@ -185,8 +190,8 @@ class DurationEncoder(nn.Module):
         return x.transpose(-1, -2)
 
 
-# https://github.com/yl4579/StyleTTS2/blob/main/Utils/PLBERT/util.py
 class CustomAlbert(AlbertModel):
+    """ALBERT wrapper that returns ``last_hidden_state`` directly instead of the full output object."""
 
     def forward(self, *args, **kwargs):
         outputs = super().forward(*args, **kwargs)

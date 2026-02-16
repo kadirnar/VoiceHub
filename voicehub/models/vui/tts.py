@@ -14,6 +14,7 @@ from voicehub.models.vui.vad import detect_voice_activity as vad
 
 
 def ensure_spaces_around_tags(text: str):
+    """Ensure whitespace exists before ``[`` and after ``]`` markers in the text."""
     # Add space before '[' if not preceded by space, '<', or '['
     text = re.sub(
         r"(?<![<\[\s])(\[)",
@@ -42,6 +43,7 @@ wm = None
 
 
 def asr(chunk, model=None, prefix=None):
+    """Run Whisper ASR on a single audio chunk and return the decoded text."""
     import whisper
 
     global wm
@@ -58,6 +60,7 @@ def asr(chunk, model=None, prefix=None):
 
 
 def replace_numbers_with_words(text):
+    """Replace all digit sequences in *text* with their English word equivalents."""
     global engine
 
     if engine is None:
@@ -97,6 +100,7 @@ def remove_all_invalid_non_speech(txt):
 
 
 def simple_clean(text):
+    """Normalise text for TTS: expand numbers, strip special characters, add trailing pause."""
     text = re.sub(r"(\d+)am", r"\1 AM", text)
     text = re.sub(r"(\d+)pm", r"\1 PM", text)
     text = replace_numbers_with_words(text)
@@ -140,6 +144,20 @@ def generate(
         top_p: float | None = None,
         max_gen_len: int = int(120 * 21.53),
 ):
+    """Autoregressively generate multi-codebook audio codes from cleaned text.
+
+    Args:
+        self: The Vui model instance (bound externally).
+        text: Input text to synthesise.
+        prompt_codes: Optional codec codes for voice prompting.
+        temperature: Sampling temperature.
+        top_k: Top-k filtering threshold.
+        top_p: Nucleus sampling threshold.
+        max_gen_len: Maximum number of codec frames to generate.
+
+    Returns:
+        Tensor of shape ``(1, Q, T)`` containing generated codebook indices.
+    """
     text = simple_clean(text)
     with (
             torch.autocast("cuda", torch.bfloat16, True),

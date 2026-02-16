@@ -1,10 +1,11 @@
-import soundfile as sf
 import torch
 from snac import SNAC
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from voicehub.base_model import BaseTTSModel
 
-class OrpheusTTS:
+
+class OrpheusTTS(BaseTTSModel):
     """
     A neural speech synthesis model that converts text to speech using SNAC audio codec.
 
@@ -32,8 +33,12 @@ class OrpheusTTS:
             model_path: HuggingFace model path for the language model
             device: Computing device ('cuda' for GPU, 'cpu' for CPU)
         """
-        self.device = device
+        super().__init__(model_path, device)
         self.load_models(model_path)
+
+    @property
+    def sample_rate(self) -> int:
+        return 24000
 
     def load_models(self, model_path: str):
         """Load SNAC and language models."""
@@ -180,10 +185,6 @@ class OrpheusTTS:
         # Generate and save audio file
         audio = self._redistribute_codes(codes)
         # Save as 24kHz WAV file
-        sf.write(
-            f"{output_file}",
-            audio.detach().squeeze().cpu().numpy(),
-            24000,
-        )
+        self.save_audio(output_file, audio, self.sample_rate)
 
         return codes

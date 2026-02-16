@@ -1,6 +1,3 @@
-# Copyright (c) 2025 Resemble AI
-# Author: Manmay Nakhashi
-# MIT License
 import math
 
 import torch
@@ -10,6 +7,7 @@ from torch import nn
 
 
 class RelativePositionBias(nn.Module):
+    """Learned relative position bias added to attention scores via bucketed distance encoding."""
 
     def __init__(self, scale, causal=False, num_buckets=32, max_distance=128, heads=8):
         super().__init__()
@@ -54,6 +52,7 @@ class RelativePositionBias(nn.Module):
 
 
 class AttentionQKV(nn.Module):
+    """Multi-head attention module accepting pre-computed Q, K, V with optional flash attention."""
 
     def __init__(self, n_heads, head_dim, dropout_rate=0.1, scale=None, flash=False):
         super().__init__()

@@ -322,6 +322,7 @@ class CrossAttention(nn.Module):
 
 
 class FusedQKV(nn.Module):
+    """Fused Q/K/V linear projection that splits into separate heads after a single matmul."""
 
     def __init__(
         self,
@@ -420,6 +421,7 @@ class SelfAttention(nn.Module):
         self.is_fused_qkv = False
 
     def get_linear_weight(self, dense: DenseGeneral):
+        """Extract a ``DenseGeneral`` kernel as a standard ``nn.Linear``-compatible weight matrix."""
         W_dg = dense.weight.data
 
         out_features = 1
@@ -434,6 +436,7 @@ class SelfAttention(nn.Module):
         return linear_weight
 
     def patch_fused_qkv(self):
+        """Replace separate Q/K/V projections with a single fused linear layer for faster inference."""
         q_proj_weight = self.get_linear_weight(self.q_proj)
         k_proj_weight = self.get_linear_weight(self.k_proj)
         v_proj_weight = self.get_linear_weight(self.v_proj)

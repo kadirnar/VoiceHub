@@ -37,6 +37,7 @@ def load_what_you_can(checkpoint: dict, model):
 
 
 def decompile_state_dict(state_dict):
+    """Strip ``torch.compile`` and DDP prefixes from state-dict keys."""
     state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
     # state_dict = convert_old_weight_norm_to_new(state_dict)
     return {k.replace("module.", ""): v for k, v in state_dict.items()}

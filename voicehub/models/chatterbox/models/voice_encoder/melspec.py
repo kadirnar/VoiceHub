@@ -7,12 +7,14 @@ from scipy import signal
 
 @lru_cache()
 def mel_basis(hp):
+    """Compute and cache the mel filterbank matrix from the given config."""
     assert hp.fmax <= hp.sample_rate // 2
     return librosa.filters.mel(
         sr=hp.sample_rate, n_fft=hp.n_fft, n_mels=hp.num_mels, fmin=hp.fmin, fmax=hp.fmax)  # -> (nmel, nfreq)
 
 
 def preemphasis(wav, hp):
+    """Apply a first-order pre-emphasis filter to boost high frequencies."""
     assert hp.preemphasis != 0
     wav = signal.lfilter([1, -hp.preemphasis], [1], wav)
     wav = np.clip(wav, -1, 1)
@@ -20,6 +22,7 @@ def preemphasis(wav, hp):
 
 
 def melspectrogram(wav, hp, pad=True):
+    """Compute a mel-spectrogram from a waveform with optional pre-emphasis and normalization."""
     # Run through pre-emphasis
     if hp.preemphasis > 0:
         wav = preemphasis(wav, hp)
@@ -48,6 +51,7 @@ def melspectrogram(wav, hp, pad=True):
 
 
 def _stft(y, hp, pad=True):
+    """Compute the short-time Fourier transform with reflect padding."""
     # NOTE: after 0.8, pad mode defaults to constant, setting this to reflect for
     #   historical consistency and streaming-version consistency
     return librosa.stft(
@@ -61,14 +65,17 @@ def _stft(y, hp, pad=True):
 
 
 def _amp_to_db(x, hp):
+    """Convert amplitude spectrogram to decibel scale."""
     return 20 * np.log10(np.maximum(hp.stft_magnitude_min, x))
 
 
 def _db_to_amp(x):
+    """Convert decibel spectrogram back to linear amplitude scale."""
     return np.power(10.0, x * 0.05)
 
 
 def _normalize(s, hp, headroom_db=15):
+    """Normalize a dB-scale spectrogram to the [0, 1] range."""
     min_level_db = 20 * np.log10(hp.stft_magnitude_min)
     s = (s - min_level_db) / (-min_level_db + headroom_db)
     return s

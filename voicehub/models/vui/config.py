@@ -4,6 +4,8 @@ from pydantic import BaseModel
 
 
 class VuiConfig(BaseModel):
+    """Architecture hyper-parameters for the Vui TTS model."""
+
     max_text_tokens: int = 100
     text_size: int = -1
     max_audio_tokens: int = 100
@@ -25,6 +27,8 @@ class VuiConfig(BaseModel):
 
 
 class Config(BaseModel):
+    """Top-level run configuration that wraps a :class:`VuiConfig` and an optional checkpoint."""
+
     name: str = "base"
 
     checkpoint: str | dict | None = None

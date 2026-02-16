@@ -4,8 +4,8 @@ from typing import Optional
 import torch
 from torch import Tensor, nn
 
-from voicehub.models.t3.modules.perceiver import Perceiver
-from voicehub.models.t3.modules.t3_config import T3Config
+from voicehub.models.chatterbox.models.t3.modules.perceiver import Perceiver
+from voicehub.models.chatterbox.models.t3.modules.t3_config import T3Config
 
 
 @dataclass

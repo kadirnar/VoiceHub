@@ -1,4 +1,3 @@
-# ADAPTED from https://github.com/yl4579/StyleTTS2/blob/main/Modules/istftnet.py
 import math
 
 import torch
@@ -8,18 +7,20 @@ from kokoro.custom_stft import CustomSTFT
 from torch.nn.utils.parametrizations import weight_norm
 
 
-# https://github.com/yl4579/StyleTTS2/blob/main/Modules/utils.py
 def init_weights(m, mean=0.0, std=0.01):
+    """Initialise Conv weights with a truncated normal distribution."""
     classname = m.__class__.__name__
     if classname.find("Conv") != -1:
         m.weight.data.normal_(mean, std)
 
 
 def get_padding(kernel_size, dilation=1):
+    """Compute symmetric padding for a dilated 1-D convolution."""
     return int((kernel_size * dilation - dilation) / 2)
 
 
 class AdaIN1d(nn.Module):
+    """Adaptive Instance Normalisation conditioned on a style vector."""
 
     def __init__(self, style_dim, num_features):
         super().__init__()
@@ -35,6 +36,7 @@ class AdaIN1d(nn.Module):
 
 
 class AdaINResBlock1(nn.Module):
+    """Residual block with multi-dilation convolutions and AdaIN style conditioning."""
 
     def __init__(self, channels, kernel_size=3, dilation=(1, 3, 5), style_dim=64):
         super().__init__()
@@ -106,6 +108,7 @@ class AdaINResBlock1(nn.Module):
 
 
 class TorchSTFT(nn.Module):
+    """Thin wrapper around ``torch.stft``/``torch.istft`` with a persistent Hann window."""
 
     def __init__(self, filter_length=800, hop_length=200, win_length=800, window='hann'):
         super().__init__()
@@ -305,6 +308,7 @@ class SourceModuleHnNSF(nn.Module):
 
 
 class Generator(nn.Module):
+    """iSTFT-Net vocoder: up-samples features to magnitude/phase and reconstructs waveform via iSTFT."""
 
     def __init__(
             self,
@@ -398,6 +402,7 @@ class Generator(nn.Module):
 
 
 class UpSample1d(nn.Module):
+    """Conditional 2x nearest-neighbour up-sampler (or identity when *layer_type* is ``'none'``)."""
 
     def __init__(self, layer_type):
         super().__init__()
@@ -411,6 +416,7 @@ class UpSample1d(nn.Module):
 
 
 class AdainResBlk1d(nn.Module):
+    """1-D residual block with AdaIN and optional transposed-conv up-sampling."""
 
     def __init__(self, dim_in, dim_out, style_dim=64, actv=nn.LeakyReLU(0.2), upsample='none', dropout_p=0.0):
         super().__init__()
@@ -458,6 +464,7 @@ class AdainResBlk1d(nn.Module):
 
 
 class Decoder(nn.Module):
+    """Full StyleTTS2-style decoder: AdaIN residual encoding + iSTFT-Net vocoder."""
 
     def __init__(
             self,

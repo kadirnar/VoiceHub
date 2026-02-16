@@ -6,13 +6,19 @@ import torch
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 
-from voicehub.models.s3gen import S3GEN_SR, S3Gen
-from voicehub.models.s3tokenizer import S3_SR
+from voicehub.models.chatterbox.models.s3gen import S3GEN_SR, S3Gen
+from voicehub.models.chatterbox.models.s3tokenizer import S3_SR
 
 REPO_ID = "ResembleAI/chatterbox"
 
 
 class ChatterboxVC:
+    """Voice conversion model that re-synthesises speech with a target speaker's voice.
+
+    Tokenises the source audio with S3Tokenizer, then decodes the tokens through
+    S3Gen conditioned on a reference speaker embedding.
+    """
+
     ENC_COND_LEN = 6 * S3_SR
     DEC_COND_LEN = 10 * S3GEN_SR
 
@@ -33,6 +39,7 @@ class ChatterboxVC:
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxVC':
+        """Load the S3Gen model from a local checkpoint directory."""
         ckpt_dir = Path(ckpt_dir)
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
@@ -54,6 +61,7 @@ class ChatterboxVC:
 
     @classmethod
     def from_pretrained(cls, device) -> 'ChatterboxVC':
+        """Download weights from HuggingFace Hub and initialise the model."""
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -70,6 +78,7 @@ class ChatterboxVC:
         return cls.from_local(Path(local_path).parent, device)
 
     def set_target_voice(self, wav_fpath):
+        """Extract a reference speaker embedding from a target voice audio file."""
         # Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
@@ -81,6 +90,7 @@ class ChatterboxVC:
         audio,
         target_voice_path=None,
     ):
+        """Convert source audio to the target speaker's voice and return a watermarked waveform."""
         if target_voice_path:
             self.set_target_voice(target_voice_path)
         else:

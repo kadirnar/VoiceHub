@@ -3,10 +3,11 @@ from abc import ABC
 import torch
 import torch.nn.functional as F
 
-from voicehub.models.s3gen.matcha.decoder import Decoder
+from voicehub.models.chatterbox.models.s3gen.matcha.decoder import Decoder
 
 
 class BASECFM(torch.nn.Module, ABC):
+    """Abstract base class for Conditional Flow Matching models with Euler ODE solver."""
 
     def __init__(
         self,
@@ -120,6 +121,7 @@ class BASECFM(torch.nn.Module, ABC):
 
 
 class CFM(BASECFM):
+    """Conditional Flow Matching model that uses a U-Net Decoder as the flow estimator."""
 
     def __init__(self, in_channels, out_channel, cfm_params, decoder_params, n_spks=1, spk_emb_dim=64):
         super().__init__(

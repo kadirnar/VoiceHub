@@ -8,10 +8,11 @@ from conformer import ConformerBlock
 from diffusers.models.activations import get_activation
 from einops import pack, rearrange, repeat
 
-from voicehub.models.s3gen.transformer import BasicTransformerBlock
+from voicehub.models.chatterbox.models.s3gen.matcha.transformer import BasicTransformerBlock
 
 
 class SinusoidalPosEmb(torch.nn.Module):
+    """Sinusoidal positional embedding for encoding diffusion timesteps."""
 
     def __init__(self, dim):
         super().__init__()
@@ -31,6 +32,7 @@ class SinusoidalPosEmb(torch.nn.Module):
 
 
 class Block1D(torch.nn.Module):
+    """1D convolutional block with group normalization and Mish activation."""
 
     def __init__(self, dim, dim_out, groups=8):
         super().__init__()
@@ -46,6 +48,7 @@ class Block1D(torch.nn.Module):
 
 
 class ResnetBlock1D(torch.nn.Module):
+    """1D ResNet block with time-step conditioning via a linear projection."""
 
     def __init__(self, dim, dim_out, time_emb_dim, groups=8):
         super().__init__()
@@ -65,6 +68,7 @@ class ResnetBlock1D(torch.nn.Module):
 
 
 class Downsample1D(nn.Module):
+    """1D downsampling layer using strided convolution with factor 2."""
 
     def __init__(self, dim):
         super().__init__()
@@ -75,6 +79,7 @@ class Downsample1D(nn.Module):
 
 
 class TimestepEmbedding(nn.Module):
+    """MLP that projects sinusoidal timestep embeddings to a higher-dimensional space."""
 
     def __init__(
         self,
@@ -165,6 +170,8 @@ class Upsample1D(nn.Module):
 
 
 class ConformerWrapper(ConformerBlock):
+    """Wrapper around ConformerBlock to match the transformer block interface signature."""
+
     def __init__(  # pylint: disable=useless-super-delegation
         self,
         *,
@@ -204,6 +211,7 @@ class ConformerWrapper(ConformerBlock):
 
 
 class Decoder(nn.Module):
+    """U-Net style 1D decoder with configurable transformer/conformer blocks for flow matching."""
 
     def __init__(
         self,

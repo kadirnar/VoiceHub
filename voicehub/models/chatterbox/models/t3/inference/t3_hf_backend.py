@@ -5,7 +5,7 @@ from torch import nn as nn
 from transformers import GenerationMixin, LlamaConfig, LlamaModel, LlamaPreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
-from ..alignment_stream_analyzer import AlignmentStreamAnalyzer
+from .alignment_stream_analyzer import AlignmentStreamAnalyzer
 
 
 class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):

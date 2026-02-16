@@ -1,16 +1,3 @@
-# Copyright (c) 2024 Alibaba Inc (authors: Xiang Lyu, Zhihao Du)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 import logging
 import random
 from typing import Dict, Optional
@@ -19,11 +6,12 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from voicehub.models.s3gen.configs import CFM_PARAMS
-from voicehub.models.s3gen.utils.mask import make_pad_mask
+from voicehub.models.chatterbox.models.s3gen.configs import CFM_PARAMS
+from voicehub.models.chatterbox.models.s3gen.utils.mask import make_pad_mask
 
 
 class MaskedDiffWithXvec(torch.nn.Module):
+    """Masked diffusion module conditioned on speaker x-vectors for non-causal mel generation."""
 
     def __init__(
         self,
@@ -168,6 +156,7 @@ class MaskedDiffWithXvec(torch.nn.Module):
 
 
 class CausalMaskedDiffWithXvec(torch.nn.Module):
+    """Causal variant of MaskedDiffWithXvec for streaming speech token to mel-spectrogram generation."""
 
     def __init__(
         self,

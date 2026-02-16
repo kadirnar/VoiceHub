@@ -1,17 +1,3 @@
-# Modified from CosyVoice https://github.com/FunAudioLLM/CosyVoice
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import logging
 from functools import lru_cache
 from typing import Optional
@@ -20,20 +6,21 @@ import numpy as np
 import torch
 import torchaudio as ta
 
-from voicehub.models.s3gen.configs import CFM_PARAMS
-from voicehub.models.s3gen.const import S3GEN_SR
-from voicehub.models.s3gen.decoder import ConditionalDecoder
-from voicehub.models.s3gen.f0_predictor import ConvRNNF0Predictor
-from voicehub.models.s3gen.flow import CausalMaskedDiffWithXvec
-from voicehub.models.s3gen.flow_matching import CausalConditionalCFM
-from voicehub.models.s3gen.hifigan import HiFTGenerator
-from voicehub.models.s3gen.s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE, S3Tokenizer
-from voicehub.models.s3gen.transformer.upsample_encoder import UpsampleConformerEncoder
-from voicehub.models.s3gen.utils.mel import mel_spectrogram
-from voicehub.models.s3gen.xvector import CAMPPlus
+from voicehub.models.chatterbox.models.s3gen.configs import CFM_PARAMS
+from voicehub.models.chatterbox.models.s3gen.const import S3GEN_SR
+from voicehub.models.chatterbox.models.s3gen.decoder import ConditionalDecoder
+from voicehub.models.chatterbox.models.s3gen.f0_predictor import ConvRNNF0Predictor
+from voicehub.models.chatterbox.models.s3gen.flow import CausalMaskedDiffWithXvec
+from voicehub.models.chatterbox.models.s3gen.flow_matching import CausalConditionalCFM
+from voicehub.models.chatterbox.models.s3gen.hifigan import HiFTGenerator
+from voicehub.models.chatterbox.models.s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE, S3Tokenizer
+from voicehub.models.chatterbox.models.s3gen.transformer.upsample_encoder import UpsampleConformerEncoder
+from voicehub.models.chatterbox.models.s3gen.utils.mel import mel_spectrogram
+from voicehub.models.chatterbox.models.s3gen.xvector import CAMPPlus
 
 
 def drop_invalid_tokens(x):
+    """Filter out speech tokens that exceed the valid vocabulary size."""
     assert len(x.shape) <= 2 and x.shape[0] == 1, "only batch size of one allowed for now"
     return x[x < SPEECH_VOCAB_SIZE]
 
@@ -41,6 +28,7 @@ def drop_invalid_tokens(x):
 # TODO: global resampler cache
 @lru_cache(100)
 def get_resampler(src_sr, dst_sr, device):
+    """Get or create a cached audio resampler for the given sample rate conversion."""
     return ta.transforms.Resample(src_sr, dst_sr).to(device)
 
 

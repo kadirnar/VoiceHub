@@ -19,10 +19,12 @@ from voicehub.models.vui.utils import decompile_state_dict
 
 
 def exists(v):
+    """Return ``True`` if *v* is not ``None``."""
     return v is not None
 
 
 def default(*args):
+    """Return the first non-``None`` argument, or ``None`` if all are ``None``."""
     for arg in args:
         if exists(arg):
             return arg
@@ -30,6 +32,7 @@ def default(*args):
 
 
 def maybe(fn):
+    """Wrap *fn* so that it returns ``None`` unchanged instead of calling through."""
 
     @wraps(fn)
     def inner(x, *args, **kwargs):
@@ -55,6 +58,7 @@ def round_ste(z: Tensor) -> Tensor:
 
 
 class FSQ(Module):
+    """Finite Scalar Quantization: maps continuous features to a fixed grid of levels per dimension."""
 
     def __init__(
         self,
@@ -238,16 +242,18 @@ class FSQ(Module):
 
 
 def WNConv1d(*args, **kwargs):
+    """Weight-normalised ``Conv1d`` factory."""
     return weight_norm(nn.Conv1d(*args, **kwargs))
 
 
 def WNConvTranspose1d(*args, **kwargs):
+    """Weight-normalised ``ConvTranspose1d`` factory."""
     return weight_norm(nn.ConvTranspose1d(*args, **kwargs))
 
 
-# Scripting this brings model speed up 1.4x
 @torch.jit.script
 def snake(x, alpha):
+    """Snake activation: ``x + (1/alpha) * sin^2(alpha * x)``."""
     shape = x.shape
     x = x.reshape(shape[0], shape[1], -1)
     x = x + (alpha + 1e-9).reciprocal() * torch.sin(alpha * x).pow(2)
@@ -256,6 +262,7 @@ def snake(x, alpha):
 
 
 class Snake1d(nn.Module):
+    """Learnable Snake activation for 1-D signals with per-channel frequency."""
 
     def __init__(self, channels):
         super().__init__()
@@ -272,6 +279,7 @@ def init_weights(m):
 
 
 class ResidualUnit(nn.Module):
+    """Dilated residual convolution block with Snake activations."""
 
     def __init__(self, dim: int = 16, dilation: int = 1):
         super().__init__()
@@ -292,6 +300,7 @@ class ResidualUnit(nn.Module):
 
 
 class EncoderBlock(nn.Module):
+    """Encoder down-sampling block: residual units followed by a strided convolution."""
 
     def __init__(self, dim: int = 16, stride: int = 1):
         super().__init__()
@@ -314,6 +323,7 @@ class EncoderBlock(nn.Module):
 
 
 class Encoder(nn.Module):
+    """Multi-stage convolutional encoder that progressively down-samples the waveform."""
 
     def __init__(
         self,
@@ -345,6 +355,7 @@ class Encoder(nn.Module):
 
 
 class DecoderBlock(nn.Module):
+    """Decoder up-sampling block: transposed convolution followed by residual units."""
 
     def __init__(self, input_dim: int = 16, output_dim: int = 8, stride: int = 1):
         super().__init__()
@@ -367,6 +378,7 @@ class DecoderBlock(nn.Module):
 
 
 class Decoder(nn.Module):
+    """Multi-stage convolutional decoder that progressively up-samples to a waveform."""
 
     def __init__(
         self,
@@ -401,6 +413,7 @@ class Decoder(nn.Module):
 
 
 class FiniteScalarQuantize(nn.Module):
+    """Single-codebook FSQ layer with optional strided down-sampling and MLP post-processing."""
 
     def __init__(self, latent_dim: int, levels: list[int], *, stride: int = 1, mlp: bool = False):
         super().__init__()
@@ -457,6 +470,7 @@ class FiniteScalarQuantize(nn.Module):
 
 
 class ResidualFiniteScalarQuantize(nn.Module):
+    """Residual vector quantisation using a cascade of FSQ codebooks."""
 
     def __init__(
         self,
@@ -568,6 +582,8 @@ class ResidualFiniteScalarQuantize(nn.Module):
 
 
 class FluacConfig(BaseModel):
+    """Configuration for the Fluac neural audio codec (encoder + FSQ quantiser + decoder)."""
+
     sample_rate: int = 44100
 
     codebook_size: int | None = None
@@ -595,6 +611,8 @@ class FluacConfig(BaseModel):
 
 
 class Fluac(nn.Module):
+    """Fluac: a lightweight neural audio codec with FSQ-based residual quantisation."""
+
     Q9_22KHZ = "fluac-22hz-22khz.pt"
 
     def __init__(self, config: FluacConfig):

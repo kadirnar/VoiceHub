@@ -1,6 +1,3 @@
-# Copyright (c) 2025 Resemble AI
-# Author: John Meade, Jeremy Hsu
-# MIT License
 import logging
 from dataclasses import dataclass
 from types import MethodType
@@ -27,6 +24,7 @@ class AlignmentAnalysisResult:
 
 
 class AlignmentStreamAnalyzer:
+    """Online alignment analyzer that monitors attention maps for streaming integrity checks."""
 
     def __init__(self, tfmr, queue, text_tokens_slice, alignment_layer_idx=9, eos_idx=0):
         """

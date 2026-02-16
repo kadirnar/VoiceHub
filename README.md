@@ -69,37 +69,22 @@ output = model(
 )
 ```
 
-### Llasa Model
+### KokoroTTS Model
 
 ```python
 from voicehub.automodel import AutoInferenceModel
 
 model = AutoInferenceModel.from_pretrained(
-    model_type="llasa",  # or "dia" or "vui"
-    model_path="HKUSTAudio/Llasa-1B-Multilingual",
+    model_type="kokoro",
+    model_path="",
     device="cuda",
+    lang_code="a",
 )
 
 output = model(
     text="Hey, here is some random stuff, the text the less likely the model can cope!",
-    output_file="output.wav",
-)
-```
-
-### Llasa Voice Clone Model
-
-```python
-from voicehub.automodel import AutoInferenceModel
-
-model = AutoInferenceModel.from_pretrained(
-    model_type="llasa_voice_clone",  # or "dia" or "vui"
-    model_path="HKUSTAudio/Llasa-1B-Multilingual",
-    device="cuda",
-)
-
-output = model(
-    text="Hey, here is some random stuff, the text the less likely the model can cope!",
-    output_file="output.wav",
+    voice="af_heart",
+    output_prefix="output",
 )
 ```
 
@@ -111,6 +96,23 @@ from voicehub.automodel import AutoInferenceModel
 model = AutoInferenceModel.from_pretrained(
     model_type="chatterbox",  # or "dia" or "vui"
     model_path="ResembleAI/chatterbox",
+    device="cuda",
+)
+
+output = model(
+    text="Hey, here is some random stuff, the text the less likely the model can cope!",
+    output_file="output.wav",
+)
+```
+
+### EchoTTS Model
+
+```python
+from voicehub.automodel import AutoInferenceModel
+
+model = AutoInferenceModel.from_pretrained(
+    model_type="echo",
+    model_path="jordand/echo-tts-base",
     device="cuda",
 )
 
@@ -133,6 +135,6 @@ pre-commit run --all-files
 - [Orpheus-TTS](https://github.com/canopyai/Orpheus-TTS)
 - [Dia](https://github.com/nari-labs/dia)
 - [Vui](https://github.com/fluxions-ai/vui)
-- [Llasa](https://github.com/zhenye234/LLaSA_training)
-- [XCodec2](https://huggingface.co/HKUSTAudio/xcodec2)
+- [Kokoro](https://github.com/hexgrad/kokoro)
 - [Chatterbox](https://github.com/ResembleAI/chatterbox)
+- [EchoTTS](https://github.com/JordanDavisUMG/echo-tts)

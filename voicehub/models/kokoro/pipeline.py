@@ -120,7 +120,7 @@ class KPipeline:
                         f"""Failed to initialize model on CUDA: {e}.
                                        Try setting device='cpu' or check CUDA installation.""")
                 raise
-        self.voices = {}
+        self.voices = {}  # lazily populated voice embedding cache
         if lang_code in 'ab':
             try:
                 fallback = espeak.EspeakFallback(british=lang_code == 'b')
@@ -166,14 +166,12 @@ class KPipeline:
         self.voices[voice] = pack
         return pack
 
-    """
-    load_voice is a helper function that lazily downloads and loads a voice:
-    Single voice can be requested (e.g. 'af_bella') or multiple voices (e.g. 'af_bella,af_jessica').
-    If multiple voices are requested, they are averaged.
-    Delimiter is optional and defaults to ','.
-    """
-
     def load_voice(self, voice: Union[str, torch.FloatTensor], delimiter: str = ",") -> torch.FloatTensor:
+        """Lazily download and load a voice embedding.
+
+        Multiple voices can be requested as a delimited string (e.g.
+        ``'af_bella,af_jessica'``); they will be averaged into a single style.
+        """
         if isinstance(voice, torch.FloatTensor):
             return voice
         if voice in self.voices:
@@ -349,19 +347,18 @@ class KPipeline:
         def pred_dur(self) -> Optional[torch.LongTensor]:
             return None if self.output is None else self.output.pred_dur
 
-        ### MARK: BEGIN BACKWARD COMPAT ###
         def __iter__(self):
+            """Allow tuple-style unpacking for backward compatibility."""
             yield self.graphemes
             yield self.phonemes
             yield self.audio
 
         def __getitem__(self, index):
+            """Index-based access for backward compatibility."""
             return [self.graphemes, self.phonemes, self.audio][index]
 
         def __len__(self):
             return 3
-
-        #### MARK: END BACKWARD COMPAT ####
 
     def __call__(
             self,

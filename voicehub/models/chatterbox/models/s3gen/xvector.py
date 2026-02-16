@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-# Copyright FunASR (https://github.com/alibaba-damo-academy/FunASR). All Rights Reserved.
-#  MIT License  (https://opensource.org/licenses/MIT)
-# Modified from 3D-Speaker (https://github.com/alibaba-damo-academy/3D-Speaker)
-
 from collections import OrderedDict
 
 import torch
@@ -12,8 +7,7 @@ import torchaudio.compliance.kaldi as Kaldi
 
 
 def pad_list(xs, pad_value):
-    """
-    Perform padding for the list of tensors.
+    """Pad a list of variable-length tensors to the maximum length in the batch.
 
     Args:
         xs (List): List of Tensors [(T_1, `*`), (T_2, `*`), ..., (T_B, `*`)].
@@ -42,6 +36,7 @@ def pad_list(xs, pad_value):
 
 
 def extract_feature(audio):
+    """Extract normalized Fbank features from a list of audio tensors and pad them into a batch."""
     features = []
     feature_times = []
     feature_lengths = []
@@ -58,6 +53,8 @@ def extract_feature(audio):
 
 
 class BasicResBlock(torch.nn.Module):
+    """Basic residual block with two 2D convolutions and a skip connection."""
+
     expansion = 1
 
     def __init__(self, in_planes, planes, stride=1):
@@ -90,6 +87,7 @@ class BasicResBlock(torch.nn.Module):
 
 
 class FCM(torch.nn.Module):
+    """Feature Computation Module that downsamples input features using residual convolution blocks."""
 
     def __init__(self, block=BasicResBlock, num_blocks=[2, 2], m_channels=32, feat_dim=80):
         super().__init__()
@@ -126,6 +124,7 @@ class FCM(torch.nn.Module):
 
 
 def get_nonlinear(config_str, channels):
+    """Build a sequential nonlinear activation block from a dash-separated config string."""
     nonlinear = torch.nn.Sequential()
     for name in config_str.split("-"):
         if name == "relu":
@@ -142,6 +141,7 @@ def get_nonlinear(config_str, channels):
 
 
 def statistics_pooling(x, dim=-1, keepdim=False, unbiased=True, eps=1e-2):
+    """Compute mean and standard deviation pooling along the given dimension."""
     mean = x.mean(dim=dim)
     std = x.std(dim=dim, unbiased=unbiased)
     stats = torch.cat([mean, std], dim=-1)
@@ -151,12 +151,14 @@ def statistics_pooling(x, dim=-1, keepdim=False, unbiased=True, eps=1e-2):
 
 
 class StatsPool(torch.nn.Module):
+    """Statistics pooling layer that concatenates mean and std along the last dimension."""
 
     def forward(self, x):
         return statistics_pooling(x)
 
 
 class TDNNLayer(torch.nn.Module):
+    """Time-delay neural network layer with 1D convolution and configurable nonlinearity."""
 
     def __init__(
         self,
@@ -192,6 +194,7 @@ class TDNNLayer(torch.nn.Module):
 
 
 class CAMLayer(torch.nn.Module):
+    """Context-Aware Masking layer that modulates local features with global and segment-level context."""
 
     def __init__(self, bn_channels, out_channels, kernel_size, stride, padding, dilation, bias, reduction=2):
         super().__init__()
@@ -230,6 +233,7 @@ class CAMLayer(torch.nn.Module):
 
 
 class CAMDenseTDNNLayer(torch.nn.Module):
+    """Dense TDNN layer with bottleneck structure and context-aware masking."""
 
     def __init__(
         self,
@@ -274,6 +278,7 @@ class CAMDenseTDNNLayer(torch.nn.Module):
 
 
 class CAMDenseTDNNBlock(torch.nn.ModuleList):
+    """Dense block of CAMDenseTDNN layers with channel-wise concatenation for feature reuse."""
 
     def __init__(
         self,
@@ -310,6 +315,7 @@ class CAMDenseTDNNBlock(torch.nn.ModuleList):
 
 
 class TransitLayer(torch.nn.Module):
+    """Transition layer that reduces channel dimensionality between dense blocks."""
 
     def __init__(self, in_channels, out_channels, bias=True, config_str="batchnorm-relu"):
         super().__init__()
@@ -323,6 +329,7 @@ class TransitLayer(torch.nn.Module):
 
 
 class DenseLayer(torch.nn.Module):
+    """Fully connected 1D convolution layer with configurable nonlinear activation."""
 
     def __init__(self, in_channels, out_channels, bias=False, config_str="batchnorm-relu"):
         super().__init__()

@@ -1,7 +1,8 @@
+from voicehub.base_model import BaseTTSModel
 from voicehub.models.dia.model import Dia
 
 
-class DiaTTS:
+class DiaTTS(BaseTTSModel):
     """
     DiaTTS class for text-to-speech generation using the Dia model.
 
@@ -39,11 +40,9 @@ class DiaTTS:
             use_torch_compile (bool): Whether to use torch.compile for potential speedup.
                 Default is False.
         """
-        # Store configuration parameters
-        self.device = device
+        super().__init__(model_path, device)
         self.compute_dtype = compute_dtype
         self.use_torch_compile = use_torch_compile
-        # Load the model with the specified parameters
         self._load_models(model_path)
 
     def _load_models(self, model_path: str):

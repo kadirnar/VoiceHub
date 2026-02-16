@@ -1,36 +1,19 @@
-# Copyright (c) 2021 Mobvoi Inc (Binbin Zhang, Di Wu)
-#               2022 Xingchen Song (sxc19@mails.tsinghua.edu.cn)
-#               2024 Alibaba Inc (Xiang Lyu)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# Modified from ESPnet(https://github.com/espnet/espnet)
-"""Encoder definition."""
 from typing import Tuple
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 
-from voicehub.models.s3gen.transformer.convolution import ConvolutionModule
-from voicehub.models.s3gen.transformer.encoder_layer import ConformerEncoderLayer
-from voicehub.models.s3gen.transformer.positionwise_feed_forward import PositionwiseFeedForward
-from voicehub.models.s3gen.transformer.utils.class_utils import (
+from voicehub.models.chatterbox.models.s3gen.transformer.convolution import ConvolutionModule
+from voicehub.models.chatterbox.models.s3gen.transformer.encoder_layer import ConformerEncoderLayer
+from voicehub.models.chatterbox.models.s3gen.transformer.positionwise_feed_forward import PositionwiseFeedForward
+from voicehub.models.chatterbox.models.s3gen.utils.class_utils import (
     COSYVOICE_ACTIVATION_CLASSES,
     COSYVOICE_ATTENTION_CLASSES,
     COSYVOICE_EMB_CLASSES,
     COSYVOICE_SUBSAMPLE_CLASSES,
 )
-from voicehub.models.s3gen.transformer.utils.mask import add_optional_chunk_mask, make_pad_mask
+from voicehub.models.chatterbox.models.s3gen.utils.mask import add_optional_chunk_mask, make_pad_mask
 
 
 class Upsample1D(nn.Module):
@@ -64,6 +47,7 @@ class Upsample1D(nn.Module):
 
 
 class PreLookaheadLayer(nn.Module):
+    """Convolutional layer that applies limited future context lookahead with residual connection."""
 
     def __init__(self, channels: int, pre_lookahead_len: int = 1):
         super().__init__()
@@ -103,6 +87,7 @@ class PreLookaheadLayer(nn.Module):
 
 
 class UpsampleConformerEncoder(torch.nn.Module):
+    """Conformer encoder with 2x temporal upsampling for token-to-mel frame rate conversion."""
 
     def __init__(
         self,

@@ -1,4 +1,4 @@
-from voicehub.models.s3gen.utils import AttrDict
+from voicehub.models.chatterbox.models.utils import AttrDict
 
 CFM_PARAMS = AttrDict({
     "sigma_min": 1e-06,

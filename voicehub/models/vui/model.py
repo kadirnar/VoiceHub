@@ -16,6 +16,7 @@ from voicehub.models.vui.utils import load_what_you_can
 
 
 class KVCache(nn.Module):
+    """Fixed-size key/value buffer for autoregressive inference with in-place updates."""
 
     def __init__(
         self,
@@ -46,7 +47,7 @@ class KVCache(nn.Module):
 
 
 def repeat_kv(x: torch.Tensor, n_reps: int) -> torch.Tensor:
-    """torch.repeat_interleave(x, dim=2, repeats=n_rep)"""
+    """Repeat KV heads to match the number of query heads (GQA expansion)."""
     bs, n_kv_heads, T, head_dim = x.shape
 
     return (
@@ -55,6 +56,7 @@ def repeat_kv(x: torch.Tensor, n_reps: int) -> torch.Tensor:
 
 
 class MHA(nn.Module):
+    """Multi-Head Attention with optional grouped-query attention and rotary embeddings."""
 
     def __init__(
         self,
@@ -142,6 +144,7 @@ class MHA(nn.Module):
 
 
 class MLP(nn.Module):
+    """Standard two-layer feed-forward with configurable activation and dropout."""
 
     def __init__(self, *, d_model: int, bias: bool, dropout: float, act=nn.GELU, **kwargs):
         super().__init__()
@@ -155,6 +158,7 @@ class MLP(nn.Module):
 
 
 class LlamaMLP(nn.Module):
+    """SwiGLU-style MLP following the LLaMA architecture."""
 
     def __init__(self, *, d_model: int, multiple_of: int = 256, bias: bool = False, **kwargs) -> None:
         super().__init__()
@@ -170,6 +174,7 @@ class LlamaMLP(nn.Module):
 
 
 class RMSNorm(nn.Module):
+    """Root-Mean-Square Layer Normalisation (no bias, no mean subtraction)."""
 
     def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__()
@@ -185,6 +190,7 @@ class RMSNorm(nn.Module):
 
 
 class Block(nn.Module):
+    """Pre-norm transformer block with causal self-attention and a LLaMA-style MLP."""
 
     def __init__(
         self,
@@ -238,6 +244,7 @@ class Block(nn.Module):
 
 
 class Decoder(nn.Module):
+    """Stack of transformer blocks with RoPE and optional KV-cache for inference."""
 
     def __init__(
         self,
@@ -323,6 +330,8 @@ class Decoder(nn.Module):
 
 
 class Vui(nn.Module):
+    """Vui text-to-speech model: byte-level text encoder + multi-codebook audio decoder."""
+
     BASE = "vui-100m-base.pt"
     COHOST = "vui-cohost-100m.pt"
     ABRAHAM = "vui-abraham-100m.pt"

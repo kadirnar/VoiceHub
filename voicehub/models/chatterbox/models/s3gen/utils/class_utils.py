@@ -1,22 +1,8 @@
-# Copyright [2023-11-28] <sxc19@mails.tsinghua.edu.cn, Xingchen Song>
-#            2024 Alibaba Inc (authors: Xiang Lyu)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 import torch
 
-from voicehub.models.s3gen.transformer.activation import Swish
-from voicehub.models.s3gen.transformer.attention import MultiHeadedAttention, RelPositionMultiHeadedAttention
-from voicehub.models.s3gen.transformer.embedding import (
+from voicehub.models.chatterbox.models.s3gen.transformer.activation import Swish
+from voicehub.models.chatterbox.models.s3gen.transformer.attention import MultiHeadedAttention, RelPositionMultiHeadedAttention
+from voicehub.models.chatterbox.models.s3gen.transformer.embedding import (
     EspnetRelPositionalEncoding,
     LearnablePositionalEncoding,
     NoPositionalEncoding,
@@ -24,7 +10,7 @@ from voicehub.models.s3gen.transformer.embedding import (
     RelPositionalEncoding,
     WhisperPositionalEncoding,
 )
-from voicehub.models.s3gen.transformer.subsampling import (
+from voicehub.models.chatterbox.models.s3gen.transformer.subsampling import (
     Conv1dSubsampling2,
     Conv2dSubsampling4,
     Conv2dSubsampling6,

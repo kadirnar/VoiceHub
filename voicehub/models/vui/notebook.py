@@ -3,6 +3,7 @@ import torch
 
 
 def play(audio: torch.Tensor | np.ndarray | str, sr=16000, autoplay=True):
+    """Play an audio tensor/array/file inline in a Jupyter notebook."""
     import torchaudio
     from IPython.display import Audio, display
 
@@ -25,6 +26,7 @@ def play(audio: torch.Tensor | np.ndarray | str, sr=16000, autoplay=True):
 
 
 def plot_mel_spec(mel_spec: torch.Tensor | np.ndarray, title: str = None):
+    """Display a mel spectrogram as a matplotlib heatmap."""
     import matplotlib.pyplot as plt
 
     mel_spec = mel_spec.squeeze()

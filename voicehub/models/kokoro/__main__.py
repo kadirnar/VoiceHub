@@ -1,17 +1,3 @@
-"""Kokoro TTS CLI
-Example usage:
-python3 -m kokoro --text "The sky above the port was the color of television, tuned to a dead channel." -o file.wav --debug
-
-echo "Bom dia mundo, como vão vocês" > text.txt
-python3 -m kokoro -i text.txt -l p --voice pm_alex > audio.wav
-
-Common issues:
-pip not installed: `uv pip install pip`
-(Temporary workaround while https://github.com/explosion/spaCy/issues/13747 is not fixed)
-
-espeak not installed: `apt-get install espeak-ng`
-"""
-
 import argparse
 import wave
 from pathlib import Path
@@ -40,6 +26,7 @@ def generate_audio(text: str,
                    kokoro_language: str,
                    voice: str,
                    speed=1) -> Generator["KPipeline.Result", None, None]:
+    """Yield generated audio segments for the given text, language, and voice."""
     from kokoro import KPipeline
 
     if not voice.startswith(kokoro_language):
@@ -49,6 +36,7 @@ def generate_audio(text: str,
 
 
 def generate_and_save_audio(output_file: Path, text: str, kokoro_language: str, voice: str, speed=1) -> None:
+    """Generate audio from text and write it to a 16-bit 24 kHz mono WAV file."""
     with wave.open(str(output_file.resolve()), "wb") as wav_file:
         wav_file.setnchannels(1)  # Mono audio
         wav_file.setsampwidth(2)  # 2 bytes per sample (16-bit audio)
@@ -63,6 +51,7 @@ def generate_and_save_audio(output_file: Path, text: str, kokoro_language: str, 
 
 
 def main() -> None:
+    """CLI entry-point: parse arguments and synthesise speech."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-m",

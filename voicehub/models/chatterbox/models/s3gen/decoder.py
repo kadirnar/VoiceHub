@@ -1,22 +1,9 @@
-# Copyright (c) 2024 Alibaba Inc (authors: Xiang Lyu, Zhihao Du)
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import pack, rearrange, repeat
 
-from voicehub.models.s3gen.matcha.decoder import (
+from voicehub.models.chatterbox.models.s3gen.matcha.decoder import (
     Block1D,
     Downsample1D,
     ResnetBlock1D,
@@ -24,11 +11,12 @@ from voicehub.models.s3gen.matcha.decoder import (
     TimestepEmbedding,
     Upsample1D,
 )
-from voicehub.models.s3gen.matcha.transformer import BasicTransformerBlock
-from voicehub.models.s3gen.utils.mask import add_optional_chunk_mask
+from voicehub.models.chatterbox.models.s3gen.matcha.transformer import BasicTransformerBlock
+from voicehub.models.chatterbox.models.s3gen.utils.mask import add_optional_chunk_mask
 
 
 def mask_to_bias(mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    """Convert a boolean attention mask to an additive bias tensor for scaled dot-product attention."""
     assert mask.dtype == torch.bool
     assert dtype in [torch.float32, torch.bfloat16, torch.float16]
     mask = mask.to(dtype)
@@ -40,6 +28,7 @@ def mask_to_bias(mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
 
 
 class Transpose(torch.nn.Module):
+    """Utility module that transposes two dimensions of a tensor in the forward pass."""
 
     def __init__(self, dim0: int, dim1: int):
         super().__init__()
@@ -52,6 +41,7 @@ class Transpose(torch.nn.Module):
 
 
 class CausalBlock1D(Block1D):
+    """Causal variant of Block1D using left-padded convolution to prevent future information leakage."""
 
     def __init__(self, dim: int, dim_out: int):
         super().__init__(dim, dim_out)
@@ -69,6 +59,7 @@ class CausalBlock1D(Block1D):
 
 
 class CausalResnetBlock1D(ResnetBlock1D):
+    """Causal variant of ResnetBlock1D with CausalBlock1D sub-blocks for streaming inference."""
 
     def __init__(self, dim: int, dim_out: int, time_emb_dim: int, groups: int = 8):
         super().__init__(dim, dim_out, time_emb_dim, groups)
@@ -77,6 +68,7 @@ class CausalResnetBlock1D(ResnetBlock1D):
 
 
 class CausalConv1d(torch.nn.Conv1d):
+    """1D convolution with left-only padding to ensure causal (non-future-looking) behavior."""
 
     def __init__(
             self,
@@ -112,6 +104,7 @@ class CausalConv1d(torch.nn.Conv1d):
 
 
 class ConditionalDecoder(nn.Module):
+    """U-Net style 1D conditional decoder with transformer blocks for CFM-based mel generation."""
 
     def __init__(
         self,

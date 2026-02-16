@@ -1,5 +1,3 @@
-# Adapted from https://github.com/CorentinJ/Real-Time-Voice-Cloning
-# MIT License
 from typing import List, Optional, Union
 
 import librosa
@@ -57,6 +55,7 @@ def get_num_wins(
     min_coverage: float,
     hp: VoiceEncConfig,
 ):
+    """Calculate the number of overlapping windows and the required target frame count."""
     assert n_frames > 0
     win_size = hp.ve_partial_frames
     n_wins, remainder = divmod(max(n_frames - win_size + step, 0), step)
@@ -71,6 +70,7 @@ def get_frame_step(
     rate: float,
     hp: VoiceEncConfig,
 ):
+    """Compute the frame step between consecutive partial utterance windows."""
     # Compute how many frames separate two partial utterances
     assert 0 <= overlap < 1
     if rate is None:
@@ -117,6 +117,7 @@ def stride_as_partials(
 
 
 class VoiceEncoder(nn.Module):
+    """LSTM-based speaker encoder that produces L2-normalized speaker embeddings from mel spectrograms."""
 
     def __init__(self, hp=VoiceEncConfig()):
         super().__init__()

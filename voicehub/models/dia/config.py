@@ -1,19 +1,3 @@
-"""
-Configuration management module for the Dia model.
-
-This module provides comprehensive configuration management for the Dia model,
-utilizing Pydantic for validation. It defines configurations for data processing,
-model architecture (encoder and decoder), and training settings.
-
-Key components:
-- DataConfig: Parameters for data loading and preprocessing.
-- EncoderConfig: Architecture details for the encoder module.
-- DecoderConfig: Architecture details for the decoder module.
-- ModelConfig: Combined model architecture settings.
-- TrainingConfig: Training hyperparameters and settings.
-- DiaConfig: Master configuration combining all components.
-"""
-
 import os
 from typing import Annotated
 

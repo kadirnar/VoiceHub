@@ -1,8 +1,9 @@
-import soundfile as sf
 from kokoro import KPipeline
 
+from voicehub.base_model import BaseTTSModel
 
-class KokoroTTS:
+
+class KokoroTTS(BaseTTSModel):
     """
     KokoroTTS class for text-to-speech generation using the Kokoro model.
 
@@ -25,23 +26,30 @@ class KokoroTTS:
         ```
     """
 
-    def __init__(self, lang_code: str = "a"):
+    def __init__(self, model_path: str = "", device: str = "cuda", lang_code: str = "a"):
         """
         Initialize the KokoroTTS model.
 
         Args:
+            model_path (str): Unused, kept for interface compatibility.
+            device (str): Unused, kept for interface compatibility.
             lang_code (str): Language code for the model. Default is "a".
-                - 🇺🇸 'a': American English
-                - 🇬🇧 'b': British English
-                - 🇪🇸 'e': Spanish
-                - 🇫🇷 'f': French
-                - 🇮🇳 'h': Hindi
-                - 🇮🇹 'i': Italian
-                - 🇯🇵 'j': Japanese (requires `pip install misaki[ja]`)
-                - 🇧🇷 'p': Brazilian Portuguese
-                - 🇨🇳 'z': Mandarin Chinese (requires `pip install misaki[zh]`)
+                - 'a': American English
+                - 'b': British English
+                - 'e': Spanish
+                - 'f': French
+                - 'h': Hindi
+                - 'i': Italian
+                - 'j': Japanese (requires `pip install misaki[ja]`)
+                - 'p': Brazilian Portuguese
+                - 'z': Mandarin Chinese (requires `pip install misaki[zh]`)
         """
+        super().__init__(model_path, device)
         self.pipeline = KPipeline(lang_code=lang_code)
+
+    @property
+    def sample_rate(self) -> int:
+        return 24000
 
     def __call__(
             self,
@@ -73,7 +81,7 @@ class KokoroTTS:
         for i, (graphemes, phonemes, audio) in enumerate(generator):
             print(f"  - Segment {i}: {repr(graphemes)}")
             output_file = f"{output_prefix}_{i}.wav"
-            sf.write(output_file, audio, 24000)
+            self.save_audio(output_file, audio, self.sample_rate)
             print(f"    Saved to {output_file}")
             generated_audios.append(audio)
 

@@ -1,7 +1,9 @@
-from voicehub.models.t3.llama_configs import LLAMA_CONFIGS
+from voicehub.models.chatterbox.models.t3.llama_configs import LLAMA_CONFIGS
 
 
 class T3Config:
+    """Configuration for the T3 text-to-token model including vocabulary, LLaMA backbone, and conditioning."""
+
     start_text_token = 255
     stop_text_token = 0
     text_tokens_dict_size = 704

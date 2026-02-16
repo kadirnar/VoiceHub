@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import torchaudio
 
-# Assuming these imports are relative to the package structure
 from voicehub.models.dia.audio import apply_audio_delay, build_delay_indices, build_revert_indices, revert_audio_delay
 from voicehub.models.dia.config import DiaConfig
 from voicehub.models.dia.layers import DiaModel
@@ -16,6 +15,7 @@ SAMPLE_RATE_RATIO = 512
 
 
 def _get_default_device():
+    """Return the best available torch device (CUDA > MPS > CPU)."""
     if torch.cuda.is_available():
         return torch.device("cuda")
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -30,6 +30,21 @@ def _sample_next_token(
     top_k: int | None,
     audio_eos_value: int,
 ) -> torch.Tensor:
+    """Sample the next audio token from logits with temperature, top-k and top-p filtering.
+
+    EOS tokens are suppressed unless they are already the argmax, preventing
+    premature sequence termination during sampling.
+
+    Args:
+        logits_BCxV: Raw logits of shape ``(B*C, V)``.
+        temperature: Sampling temperature (0 = greedy argmax).
+        top_p: Nucleus sampling cumulative probability threshold.
+        top_k: Number of top logits to keep (``None`` disables top-k).
+        audio_eos_value: Vocabulary index of the EOS token.
+
+    Returns:
+        Sampled token indices of shape ``(B*C,)``.
+    """
     if temperature == 0.0:
         return torch.argmax(logits_BCxV, dim=-1)
 
@@ -70,6 +85,8 @@ def _sample_next_token(
 
 
 class ComputeDtype(str, Enum):
+    """Enum mapping human-readable dtype names to ``torch.dtype`` objects."""
+
     FLOAT32 = "float32"
     FLOAT16 = "float16"
     BFLOAT16 = "bfloat16"

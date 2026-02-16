@@ -1,34 +1,20 @@
-"""Mel-spectrogram extraction in Matcha-TTS."""
 import numpy as np
 import torch
 from librosa.filters import mel as librosa_mel_fn
 
-# NOTE: they decalred these global vars
 mel_basis = {}
 hann_window = {}
 
 
 def dynamic_range_compression_torch(x, C=1, clip_val=1e-5):
+    """Apply log-based dynamic range compression to a spectrogram tensor."""
     return torch.log(torch.clamp(x, min=clip_val) * C)
 
 
 def spectral_normalize_torch(magnitudes):
+    """Normalize spectrogram magnitudes via dynamic range compression."""
     output = dynamic_range_compression_torch(magnitudes)
     return output
-
-
-"""
-feat_extractor: !name:matcha.utils.audio.mel_spectrogram
-    n_fft: 1920
-    num_mels: 80
-    sampling_rate: 24000
-    hop_size: 480
-    win_size: 1920
-    fmin: 0
-    fmax: 8000
-    center: False
-
-"""
 
 
 def mel_spectrogram(
@@ -41,9 +27,7 @@ def mel_spectrogram(
         fmin=0,
         fmax=8000,
         center=False):
-    """Copied from https://github.com/shivammehta25/Matcha-TTS/blob/main/matcha/utils/audio.py
-    Set default values according to Cosyvoice's config.
-    """
+    """Compute mel-spectrogram from a waveform using STFT and mel filterbank projection."""
 
     if isinstance(y, np.ndarray):
         y = torch.tensor(y).float()

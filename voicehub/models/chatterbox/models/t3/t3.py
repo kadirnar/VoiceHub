@@ -1,5 +1,3 @@
-# Copyright (c) 2025 Resemble AI
-# MIT License
 import logging
 from typing import List, Optional, Union
 
@@ -10,17 +8,18 @@ from tqdm import tqdm
 from transformers import LlamaConfig, LlamaModel
 from transformers.generation.logits_process import MinPLogitsWarper, RepetitionPenaltyLogitsProcessor, TopPLogitsWarper
 
-from voicehub.models.t3.inference.t3_hf_backend import T3HuggingfaceBackend
-from voicehub.models.t3.llama_configs import LLAMA_CONFIGS
-from voicehub.models.t3.modules.cond_enc import T3Cond, T3CondEnc
-from voicehub.models.t3.modules.learned_pos_emb import LearnedPositionEmbeddings
-from voicehub.models.t3.modules.t3_config import T3Config
-from voicehub.models.t3.utils import AttrDict
+from voicehub.models.chatterbox.models.t3.inference.t3_hf_backend import T3HuggingfaceBackend
+from voicehub.models.chatterbox.models.t3.llama_configs import LLAMA_CONFIGS
+from voicehub.models.chatterbox.models.t3.modules.cond_enc import T3Cond, T3CondEnc
+from voicehub.models.chatterbox.models.t3.modules.learned_pos_emb import LearnedPositionEmbeddings
+from voicehub.models.chatterbox.models.t3.modules.t3_config import T3Config
+from voicehub.models.chatterbox.models.utils import AttrDict
 
 logger = logging.getLogger(__name__)
 
 
 def _ensure_BOT_EOT(text_tokens: Tensor, hp):
+    """Validate that every sequence in the batch contains the required start and stop text tokens."""
     B = text_tokens.size(0)
     assert (text_tokens == hp.start_text_token).int().sum() >= B, "missing start_text_token"
     assert (text_tokens == hp.stop_text_token).int().sum() >= B, "missing stop_text_token"
