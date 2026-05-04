@@ -382,7 +382,6 @@ class Decoder(nn.Module):
         Returns:
             _type_: _description_
         """
-
         t = self.time_embeddings(t)
         t = self.time_mlp(t)
 

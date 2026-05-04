@@ -13,10 +13,11 @@ REPO_ID = "ResembleAI/chatterbox"
 
 
 class ChatterboxVC:
-    """Voice conversion model that re-synthesises speech with a target speaker's voice.
+    """
+    Voice conversion model that re-synthesises speech with a target speaker's voice.
 
-    Tokenises the source audio with S3Tokenizer, then decodes the tokens through
-    S3Gen conditioned on a reference speaker embedding.
+    Tokenises the source audio with S3Tokenizer, then decodes the tokens through S3Gen conditioned on a
+    reference speaker embedding.
     """
 
     ENC_COND_LEN = 6 * S3_SR

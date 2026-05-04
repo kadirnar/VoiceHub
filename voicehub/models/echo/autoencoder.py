@@ -23,47 +23,50 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch
+from einops import rearrange
 from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import weight_norm
 from torch.nn.utils.parametrize import remove_parametrizations
 
-from einops import rearrange
-
-
 # --------------------------------------------------------------------
 # Shared helpers
 # --------------------------------------------------------------------
 
+
 def find_multiple(n: int, k: int) -> int:
     return n if n % k == 0 else n + k - (n % k)
 
-def unpad1d(x: Tensor, paddings: Tuple[int, int]) -> Tensor:
-    """Remove padding from x, handling properly zero padding. Only for 1d!"""
+
+def unpad1d(x: Tensor, paddings: tuple[int, int]) -> Tensor:
+    """
+    Remove padding from x, handling properly zero padding.
+
+    Only for 1d!
+    """
     padding_left, padding_right = paddings
     assert padding_left >= 0 and padding_right >= 0, (padding_left, padding_right)
     assert (padding_left + padding_right) <= x.shape[-1]
     end = x.shape[-1] - padding_right
     return x[..., padding_left:end]
 
-def get_extra_padding_for_conv1d(
-    x: Tensor, kernel_size: int, stride: int, padding_total: int = 0
-) -> int:
+
+def get_extra_padding_for_conv1d(x: Tensor, kernel_size: int, stride: int, padding_total: int = 0) -> int:
     """See pad_for_conv1d; enough right pad so striding evenly covers length."""
     length = x.shape[-1]
     n_frames = (length - kernel_size + padding_total) / stride + 1
     ideal_length = (math.ceil(n_frames) - 1) * stride + (kernel_size - padding_total)
     return ideal_length - length
 
+
 def pad1d(
     x: Tensor,
-    paddings: Tuple[int, int],
+    paddings: tuple[int, int],
     mode: str = "zeros",
     value: float = 0.0,
 ) -> Tensor:
-    """
-    Reflect‑safe 1D pad: if reflect would underflow on small inputs, insert
-    temporary right zero-pad before reflecting.
+    """Reflect‑safe 1D pad: if reflect would underflow on small inputs, insert temporary right zero-pad before
+    reflecting.
     """
     length = x.shape[-1]
     padding_left, padding_right = paddings
@@ -87,11 +90,14 @@ def pad1d(
 # SPDX-License-Identifier: MIT
 # --------------------------------------------------------------------
 
+
 def WNConv1d(*args, **kwargs):
     return weight_norm(nn.Conv1d(*args, **kwargs))
 
+
 def WNConvTranspose1d(*args, **kwargs):
     return weight_norm(nn.ConvTranspose1d(*args, **kwargs))
+
 
 @torch.jit.script
 def snake(x: Tensor, alpha: Tensor) -> Tensor:
@@ -101,12 +107,16 @@ def snake(x: Tensor, alpha: Tensor) -> Tensor:
     x = x.reshape(shape)
     return x
 
+
 class Snake1d(nn.Module):
+
     def __init__(self, channels: int):
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(1, channels, 1))
+
     def forward(self, x: Tensor) -> Tensor:
         return snake(x, self.alpha)
+
 
 # --------------------------------------------------------------------
 # DAC Vector Quantize (adapted) — MIT
@@ -114,25 +124,28 @@ class Snake1d(nn.Module):
 # SPDX-License-Identifier: MIT
 # --------------------------------------------------------------------
 
+
 class VectorQuantize(nn.Module):
     """
     VQ with factorized, l2-normalized codes (ViT‑VQGAN style).
+
     I/O in (B, D, T).
     """
+
     def __init__(self, input_dim: int, codebook_size: int, codebook_dim: int):
         super().__init__()
         self.codebook_size = codebook_size
         self.codebook_dim = codebook_dim
-        self.in_proj  = WNConv1d(input_dim,  codebook_dim, kernel_size=1)
-        self.out_proj = WNConv1d(codebook_dim, input_dim,  kernel_size=1)
+        self.in_proj = WNConv1d(input_dim, codebook_dim, kernel_size=1)
+        self.out_proj = WNConv1d(codebook_dim, input_dim, kernel_size=1)
         self.codebook = nn.Embedding(codebook_size, codebook_dim)
 
     def forward(self, z: Tensor):
-        z_e = self.in_proj(z)                 # (B, D, T)
+        z_e = self.in_proj(z)  # (B, D, T)
         z_q, indices = self.decode_latents(z_e)
         commitment_loss = F.mse_loss(z_e, z_q.detach(), reduction="none").mean([1, 2])
-        codebook_loss   = F.mse_loss(z_q, z_e.detach(), reduction="none").mean([1, 2])
-        z_q = z_e + (z_q - z_e).detach()      # straight‑through
+        codebook_loss = F.mse_loss(z_q, z_e.detach(), reduction="none").mean([1, 2])
+        z_q = z_e + (z_q - z_e).detach()  # straight‑through
         z_q = self.out_proj(z_q)
         return z_q, commitment_loss, codebook_loss, indices, z_e
 
@@ -142,16 +155,14 @@ class VectorQuantize(nn.Module):
     def decode_code(self, embed_id: Tensor) -> Tensor:
         return self.embed_code(embed_id).transpose(1, 2)
 
-    def decode_latents(self, latents: Tensor) -> Tuple[Tensor, Tensor]:
+    def decode_latents(self, latents: Tensor) -> tuple[Tensor, Tensor]:
         encodings = rearrange(latents, "b d t -> (b t) d")
-        codebook  = self.codebook.weight
+        codebook = self.codebook.weight
         encodings = F.normalize(encodings)
-        codebook  = F.normalize(codebook)
+        codebook = F.normalize(codebook)
         dist = (
-            encodings.pow(2).sum(1, keepdim=True)
-            - 2 * encodings @ codebook.t()
-            + codebook.pow(2).sum(1, keepdim=True).t()
-        )
+            encodings.pow(2).sum(1, keepdim=True) - 2 * encodings @ codebook.t() +
+            codebook.pow(2).sum(1, keepdim=True).t())
         indices = rearrange((-dist).max(1)[1], "(b t) -> b t", b=latents.size(0))
         z_q = self.decode_code(indices)
         return z_q, indices
@@ -159,33 +170,32 @@ class VectorQuantize(nn.Module):
 
 class ResidualVectorQuantize(nn.Module):
     """SoundStream-style residual VQ stack."""
+
     def __init__(
         self,
         input_dim: int = 512,
         n_codebooks: int = 9,
         codebook_size: int = 1024,
-        codebook_dim: Union[int, List[int]] = 8,
+        codebook_dim: int | list[int] = 8,
         quantizer_dropout: float = 0.0,
     ):
         super().__init__()
         if isinstance(codebook_dim, int):
             codebook_dim = [codebook_dim for _ in range(n_codebooks)]
 
-        self.n_codebooks  = n_codebooks
+        self.n_codebooks = n_codebooks
         self.codebook_dim = codebook_dim
         self.codebook_size = codebook_size
 
-        self.quantizers = nn.ModuleList([
-            VectorQuantize(input_dim, codebook_size, codebook_dim[i])
-            for i in range(n_codebooks)
-        ])
+        self.quantizers = nn.ModuleList(
+            [VectorQuantize(input_dim, codebook_size, codebook_dim[i]) for i in range(n_codebooks)])
         self.quantizer_dropout = quantizer_dropout
 
-    def forward(self, z: Tensor, n_quantizers: Optional[int] = None):
+    def forward(self, z: Tensor, n_quantizers: int | None = None):
         z_q = 0
         residual = z
         commitment_loss = 0
-        codebook_loss   = 0
+        codebook_loss = 0
 
         codebook_indices = []
         latents = []
@@ -193,8 +203,8 @@ class ResidualVectorQuantize(nn.Module):
         if n_quantizers is None:
             n_quantizers = self.n_codebooks
         if self.training:
-            n_quantizers = torch.ones((z.shape[0],)) * self.n_codebooks + 1
-            dropout = torch.randint(1, self.n_codebooks + 1, (z.shape[0],))
+            n_quantizers = torch.ones((z.shape[0], )) * self.n_codebooks + 1
+            dropout = torch.randint(1, self.n_codebooks + 1, (z.shape[0], ))
             n_dropout = int(z.shape[0] * self.quantizer_dropout)
             n_quantizers[:n_dropout] = dropout[:n_dropout]
             n_quantizers = n_quantizers.to(z.device)
@@ -205,22 +215,22 @@ class ResidualVectorQuantize(nn.Module):
 
             z_q_i, commit_i, codebk_i, indices_i, z_e_i = quantizer(residual)
 
-            mask = (torch.full((z.shape[0],), fill_value=i, device=z.device) < n_quantizers)
-            z_q     = z_q + z_q_i * mask[:, None, None]
+            mask = (torch.full((z.shape[0], ), fill_value=i, device=z.device) < n_quantizers)
+            z_q = z_q + z_q_i * mask[:, None, None]
             residual = residual - z_q_i
 
             commitment_loss += (commit_i * mask).mean()
-            codebook_loss   += (codebk_i * mask).mean()
+            codebook_loss += (codebk_i * mask).mean()
 
             codebook_indices.append(indices_i)
             latents.append(z_e_i)
 
-        codes   = torch.stack(codebook_indices, dim=1)
+        codes = torch.stack(codebook_indices, dim=1)
         latents = torch.cat(latents, dim=1)
 
         return z_q, codes, latents, commitment_loss, codebook_loss
 
-    def from_codes(self, codes: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+    def from_codes(self, codes: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         z_q = 0.0
         z_p = []
         n_codebooks = codes.shape[1]
@@ -231,7 +241,7 @@ class ResidualVectorQuantize(nn.Module):
             z_q = z_q + z_q_i
         return z_q, torch.cat(z_p, dim=1), codes
 
-    def from_latents(self, latents: Tensor) -> Tuple[Tensor, Tensor, Tensor]:
+    def from_latents(self, latents: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         z_q = 0
         z_p = []
         codes = []
@@ -251,6 +261,7 @@ class ResidualVectorQuantize(nn.Module):
 # S1 DAC rvq
 # --------------------------------------------------------------------
 
+
 @dataclass
 class VQResult:
     z: Tensor
@@ -258,10 +269,11 @@ class VQResult:
     latents: Tensor
     codebook_loss: Tensor
     commitment_loss: Tensor
-    semantic_distill_z: Optional[Tensor] = None
+    semantic_distill_z: Tensor | None = None
 
 
 class CausalConvNet(nn.Module):
+
     def __init__(
         self,
         in_channels,
@@ -274,8 +286,12 @@ class CausalConvNet(nn.Module):
     ):
         super().__init__()
         self.conv = nn.Conv1d(
-            in_channels, out_channels, kernel_size,
-            stride=stride, dilation=dilation, groups=groups,
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=stride,
+            dilation=dilation,
+            groups=groups,
         )
         self.stride = stride
         self.kernel_size = (kernel_size - 1) * dilation + 1
@@ -298,12 +314,11 @@ class CausalConvNet(nn.Module):
 
 
 class CausalTransConvNet(nn.Module):
+
     def __init__(self, in_channels, out_channels, kernel_size, dilation=1, stride=1, padding=None):
         super().__init__()
         self.conv = nn.ConvTranspose1d(
-            in_channels, out_channels, kernel_size,
-            stride=stride, dilation=dilation
-        )
+            in_channels, out_channels, kernel_size, stride=stride, dilation=dilation)
         self.stride = stride
         self.kernel_size = kernel_size
 
@@ -311,7 +326,7 @@ class CausalTransConvNet(nn.Module):
         x = self.conv(x)
         pad = self.kernel_size - self.stride
         padding_right = math.ceil(pad)
-        padding_left  = pad - padding_right
+        padding_left = pad - padding_right
         x = unpad1d(x, (padding_left, padding_right))
         return x.contiguous()
 
@@ -327,13 +342,18 @@ class CausalTransConvNet(nn.Module):
 def CausalWNConv1d(*args, **kwargs):
     return CausalConvNet(*args, **kwargs).weight_norm()
 
+
 def CausalWNConvTranspose1d(*args, **kwargs):
     return CausalTransConvNet(*args, **kwargs).weight_norm()
 
+
 class ConvNeXtBlock(nn.Module):
-    r"""ConvNeXt Block (1D).
+    r"""
+    ConvNeXt Block (1D).
+
     DwConv -> (N, C, L) → (N, L, C) -> LN -> Linear -> GELU -> Linear -> (N, C, L) with residual
     """
+
     def __init__(
         self,
         dim: int,
@@ -345,35 +365,38 @@ class ConvNeXtBlock(nn.Module):
         super().__init__()
         convnet_type = CausalConvNet
         self.dwconv = convnet_type(
-            dim, dim, kernel_size=kernel_size,
-            groups=dim, dilation=dilation,
+            dim,
+            dim,
+            kernel_size=kernel_size,
+            groups=dim,
+            dilation=dilation,
         )  # depthwise conv
         self.norm = nn.LayerNorm(dim, eps=1e-6)
         self.pwconv1 = nn.Linear(dim, int(mlp_ratio * dim))
         self.act = nn.GELU()
         self.pwconv2 = nn.Linear(int(mlp_ratio * dim), dim)
         self.gamma = (
-            nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=True)
-            if layer_scale_init_value > 0 else None
-        )
+            nn.Parameter(layer_scale_init_value *
+                         torch.ones(dim), requires_grad=True) if layer_scale_init_value > 0 else None)
 
     def forward(self, x: Tensor, apply_residual: bool = True) -> Tensor:
         inp = x
         x = self.dwconv(x)
-        x = x.permute(0, 2, 1)     # (N, C, L) -> (N, L, C)
+        x = x.permute(0, 2, 1)  # (N, C, L) -> (N, L, C)
         x = self.norm(x)
         x = self.pwconv1(x)
         x = self.act(x)
         x = self.pwconv2(x)
         if self.gamma is not None:
             x = self.gamma * x
-        x = x.permute(0, 2, 1)     # (N, L, C) -> (N, C, L)
+        x = x.permute(0, 2, 1)  # (N, L, C) -> (N, C, L)
         if apply_residual:
             x = inp + x
         return x
 
 
 class DownsampleResidualVectorQuantize(nn.Module):
+
     def __init__(
         self,
         input_dim: int = 1024,
@@ -382,18 +405,18 @@ class DownsampleResidualVectorQuantize(nn.Module):
         quantizer_dropout: float = 0.5,
         codebook_size: int = 1024,
         semantic_codebook_size: int = 4096,
-        downsample_factor: Tuple[int, ...] = (2, 2),
-        downsample_dims: Optional[Tuple[int, ...]] = None,
-        pre_module: Optional[nn.Module] = None,
-        post_module: Optional[nn.Module] = None,
-        semantic_predictor_module: Optional[nn.Module] = None,
+        downsample_factor: tuple[int, ...] = (2, 2),
+        downsample_dims: tuple[int, ...] | None = None,
+        pre_module: nn.Module | None = None,
+        post_module: nn.Module | None = None,
+        semantic_predictor_module: nn.Module | None = None,
     ):
         super().__init__()
 
         if downsample_dims is None:
             downsample_dims = tuple(input_dim for _ in range(len(downsample_factor)))
 
-        all_dims = (input_dim,) + tuple(downsample_dims)
+        all_dims = (input_dim, ) + tuple(downsample_dims)
 
         self.semantic_quantizer = ResidualVectorQuantize(
             input_dim=input_dim,
@@ -419,27 +442,22 @@ class DownsampleResidualVectorQuantize(nn.Module):
                 nn.Sequential(
                     convnet_type(all_dims[idx], all_dims[idx + 1], kernel_size=factor, stride=factor),
                     ConvNeXtBlock(dim=all_dims[idx + 1]),
-                )
-                for idx, factor in enumerate(downsample_factor)
-            ]
-        )
+                ) for idx, factor in enumerate(downsample_factor)
+            ])
 
         self.upsample = nn.Sequential(
             *[
                 nn.Sequential(
                     transconvnet_type(all_dims[idx + 1], all_dims[idx], kernel_size=factor, stride=factor),
                     ConvNeXtBlock(dim=all_dims[idx]),
-                )
-                for idx, factor in reversed(list(enumerate(downsample_factor)))
-            ]
-        )
+                ) for idx, factor in reversed(list(enumerate(downsample_factor)))
+            ])
 
         self.apply(self._init_weights)
-        self.pre_module  = pre_module  if pre_module  is not None else nn.Identity()
+        self.pre_module = pre_module if pre_module is not None else nn.Identity()
         self.post_module = post_module if post_module is not None else nn.Identity()
         self.semantic_predictor_module = (
-            semantic_predictor_module if semantic_predictor_module is not None else nn.Identity()
-        )
+            semantic_predictor_module if semantic_predictor_module is not None else nn.Identity())
 
     @staticmethod
     def _init_weights(m):
@@ -448,23 +466,26 @@ class DownsampleResidualVectorQuantize(nn.Module):
             if getattr(m, "bias", None) is not None:
                 nn.init.constant_(m.bias, 0)
 
-    def forward(self, z: Tensor, n_quantizers: Optional[int] = None, semantic_len: Optional[Tensor] = None, **kwargs):
+    def forward(
+            self, z: Tensor, n_quantizers: int | None = None, semantic_len: Tensor | None = None, **kwargs):
         # z: (B, D, T)
         original_shape = z.shape
         if semantic_len is None:
             semantic_len = torch.LongTensor([z.shape[-1]])
 
         z = self.downsample(z)
-        z = self.pre_module(z)  # (B, D, T) or (B, T, D) depending on module; original uses channels-first in/out
+        z = self.pre_module(
+            z)  # (B, D, T) or (B, T, D) depending on module; original uses channels-first in/out
 
         semantic_z, semantic_codes, semantic_latents, semantic_commitment_loss, semantic_codebook_loss = \
             self.semantic_quantizer(z)
         residual_z = z - semantic_z
-        residual_z, codes, latents, commitment_loss, codebook_loss = self.quantizer(residual_z, n_quantizers=n_quantizers)
+        residual_z, codes, latents, commitment_loss, codebook_loss = self.quantizer(
+            residual_z, n_quantizers=n_quantizers)
         z = semantic_z + residual_z
         commitment_loss = commitment_loss + semantic_commitment_loss
-        codebook_loss   = codebook_loss   + semantic_codebook_loss
-        codes   = torch.cat([semantic_codes, codes], dim=1)
+        codebook_loss = codebook_loss + semantic_codebook_loss
+        codes = torch.cat([semantic_codes, codes], dim=1)
         latents = torch.cat([semantic_latents, latents], dim=1)
         z = self.post_module(z)
         z = self.upsample(z)
@@ -472,20 +493,23 @@ class DownsampleResidualVectorQuantize(nn.Module):
         # Pad or crop z to match original shape (time dimension)
         diff = original_shape[-1] - z.shape[-1]
         right = 0
-        left  = abs(diff) - right
+        left = abs(diff) - right
         if diff > 0:
             z = F.pad(z, (left, right))
         elif diff < 0:
             z = z[..., left:]
 
         return VQResult(
-            z=z, codes=codes, latents=latents,
-            commitment_loss=commitment_loss, codebook_loss=codebook_loss,
+            z=z,
+            codes=codes,
+            latents=latents,
+            commitment_loss=commitment_loss,
+            codebook_loss=codebook_loss,
         )
 
     def decode(self, indices: Tensor) -> Tensor:
         new_indices = torch.zeros_like(indices)
-        new_indices[:, 0] = torch.clamp(indices[:, 0],  max=self.semantic_quantizer.codebook_size - 1)
+        new_indices[:, 0] = torch.clamp(indices[:, 0], max=self.semantic_quantizer.codebook_size - 1)
         new_indices[:, 1:] = torch.clamp(indices[:, 1:], max=self.quantizer.codebook_size - 1)
 
         z_q_semantic = self.semantic_quantizer.from_codes(new_indices[:, :1])[0]
@@ -499,6 +523,7 @@ class DownsampleResidualVectorQuantize(nn.Module):
 # --------------------------------------------------------------------
 # Transformer stack
 # --------------------------------------------------------------------
+
 
 @dataclass
 class ModelArgs:
@@ -528,6 +553,7 @@ class ModelArgs:
 
 
 class KVCache(nn.Module):
+
     def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim, dtype=torch.bfloat16):
         super().__init__()
         cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
@@ -542,8 +568,8 @@ class KVCache(nn.Module):
         k_out[:, :, input_pos] = k_val
         v_out[:, :, input_pos] = v_val
         return (
-            k_out[:, :, : input_pos.max() + 1, :],
-            v_out[:, :, : input_pos.max() + 1, :],
+            k_out[:, :, :input_pos.max() + 1, :],
+            v_out[:, :, :input_pos.max() + 1, :],
         )
 
     def clear_cache(self, prompt_len: int):
@@ -552,15 +578,17 @@ class KVCache(nn.Module):
 
 
 class Transformer(nn.Module):
+
     def __init__(self, config: ModelArgs) -> None:
         super().__init__()
         self.config = config
 
         self.layers = nn.ModuleList(TransformerBlock(config) for _ in range(config.n_layer))
-        self.norm   = RMSNorm(config.dim, eps=config.norm_eps)
+        self.norm = RMSNorm(config.dim, eps=config.norm_eps)
 
         if config.pos_embed_type == "rope":
-            freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.head_dim, self.config.rope_base)
+            freqs_cis = precompute_freqs_cis(
+                self.config.block_size, self.config.head_dim, self.config.rope_base)
             self.register_buffer("freqs_cis", freqs_cis)
         else:
             self.register_buffer("freqs_cis", None)
@@ -577,17 +605,16 @@ class Transformer(nn.Module):
         max_seq_length = find_multiple(max_seq_length, 8)
         self.max_seq_length = max_seq_length
         self.max_batch_size = max_batch_size
-        dtype  = self.norm.weight.dtype
+        dtype = self.norm.weight.dtype
         device = self.norm.weight.device
 
         for b in self.layers:
             b.attention.kv_cache = KVCache(
-                max_batch_size, max_seq_length, self.config.n_local_heads, head_dim, dtype
-            ).to(device)
+                max_batch_size, max_seq_length, self.config.n_local_heads, head_dim, dtype).to(device)
 
         self.use_kv_cache = True
 
-    def forward(self, x: Tensor, input_pos: Optional[Tensor] = None, mask: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, input_pos: Tensor | None = None, mask: Tensor | None = None) -> Tensor:
         if self.config.pos_embed_type == "rope":
             assert self.freqs_cis is not None
             freqs_cis = self.freqs_cis[input_pos]
@@ -597,7 +624,7 @@ class Transformer(nn.Module):
         if mask is None:
             if not self.training and self.use_kv_cache:
                 mask = self.causal_mask[None, None, input_pos]
-                mask = mask[..., : input_pos.max() + 1]
+                mask = mask[..., :input_pos.max() + 1]
             else:
                 mask = self.causal_mask[None, None, input_pos]
                 mask = mask[..., input_pos]
@@ -609,6 +636,7 @@ class Transformer(nn.Module):
 
 
 class TransformerBlock(nn.Module):
+
     def __init__(self, config: ModelArgs) -> None:
         super().__init__()
         self.attention = Attention(config)
@@ -619,21 +647,20 @@ class TransformerBlock(nn.Module):
         self.ffn_layer_scale = LayerScale(config.dim, inplace=True)
 
     def forward(self, x: Tensor, input_pos: Tensor, freqs_cis: Tensor, mask: Tensor) -> Tensor:
-        h = x + self.attention_layer_scale(
-            self.attention(self.attention_norm(x), freqs_cis, mask, input_pos)
-        )
+        h = x + self.attention_layer_scale(self.attention(self.attention_norm(x), freqs_cis, mask, input_pos))
         out = h + self.ffn_layer_scale(self.feed_forward(self.ffn_norm(h)))
         return out
 
 
 class Attention(nn.Module):
+
     def __init__(self, config: ModelArgs):
         super().__init__()
         assert config.dim % config.n_head == 0
 
         total_head_dim = (config.n_head + 2 * config.n_local_heads) * config.head_dim
         self.wqkv = nn.Linear(config.dim, total_head_dim, bias=False)
-        self.wo   = nn.Linear(config.head_dim * config.n_head, config.dim, bias=False)
+        self.wo = nn.Linear(config.head_dim * config.n_head, config.dim, bias=False)
         self.kv_cache = None
 
         self.n_head = config.n_head
@@ -652,22 +679,22 @@ class Attention(nn.Module):
     def _compute_conformer_pos_scores(self, q: Tensor, seqlen: int) -> Tensor:
         positions = torch.arange(seqlen, device=q.device)
         relative_positions = positions.unsqueeze(1) - positions.unsqueeze(0)  # [S, S]
-        relative_positions = torch.clamp(relative_positions + self.max_relative_position,
-                                         0, 2 * self.max_relative_position)
+        relative_positions = torch.clamp(
+            relative_positions + self.max_relative_position, 0, 2 * self.max_relative_position)
         rel_embeddings = self.rel_pos_embeddings[relative_positions]  # [S, S, D]
         q = q.transpose(1, 2)  # [B, S, H, D]
         rel_logits = torch.matmul(q, rel_embeddings.transpose(-2, -1))  # [B, S, H, S]
         rel_logits = rel_logits.transpose(1, 2)  # [B, H, S, S]
         return rel_logits
 
-    def forward(self, x: Tensor, freqs_cis: Tensor, mask: Tensor, input_pos: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, freqs_cis: Tensor, mask: Tensor, input_pos: Tensor | None = None) -> Tensor:
         bsz, seqlen, _ = x.shape
 
         kv_size = self.n_local_heads * self.head_dim
         q, k, v = self.wqkv(x).split([kv_size, kv_size, kv_size], dim=-1)
         context_seqlen = seqlen
 
-        q = q.view(bsz, seqlen, self.n_head,        self.head_dim)
+        q = q.view(bsz, seqlen, self.n_head, self.head_dim)
         k = k.view(bsz, context_seqlen, self.n_local_heads, self.head_dim)
         v = v.view(bsz, context_seqlen, self.n_local_heads, self.head_dim)
 
@@ -696,7 +723,9 @@ class Attention(nn.Module):
             y = torch.matmul(attn, v)
         else:
             y = F.scaled_dot_product_attention(
-                q, k, v,
+                q,
+                k,
+                v,
                 dropout_p=self.attn_dropout_rate if self.training else 0.0,
                 attn_mask=mask,
             )
@@ -706,6 +735,7 @@ class Attention(nn.Module):
 
 
 class FeedForward(nn.Module):
+
     def __init__(self, config: ModelArgs) -> None:
         super().__init__()
         self.w1 = nn.Linear(config.dim, config.intermediate_size, bias=False)
@@ -718,6 +748,7 @@ class FeedForward(nn.Module):
 
 
 class RMSNorm(nn.Module):
+
     def __init__(self, dim: int, eps: float = 1e-5):
         super().__init__()
         self.eps = eps
@@ -732,7 +763,8 @@ class RMSNorm(nn.Module):
 
 
 class LayerScale(nn.Module):
-    def __init__(self, dim: int, init_values: Union[float, Tensor] = 1e-2, inplace: bool = False) -> None:
+
+    def __init__(self, dim: int, init_values: float | Tensor = 1e-2, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
         self.gamma = nn.Parameter(init_values * torch.ones(dim))
@@ -743,13 +775,14 @@ class LayerScale(nn.Module):
 
 class WindowLimitedTransformer(Transformer):
     """Transformer with window-limited causal attention."""
+
     def __init__(
         self,
         config: ModelArgs,
         input_dim: int = 512,
-        window_size: Optional[int] = None,
+        window_size: int | None = None,
         causal: bool = True,
-        look_ahead_conv: Optional[nn.Module] = None,
+        look_ahead_conv: nn.Module | None = None,
     ):
         super().__init__(config)
         self.window_size = window_size
@@ -759,7 +792,7 @@ class WindowLimitedTransformer(Transformer):
         self.input_proj = nn.Linear(input_dim, config.dim) if input_dim != config.dim else nn.Identity()
         self.output_proj = nn.Linear(config.dim, input_dim) if input_dim != config.dim else nn.Identity()
 
-    def make_window_limited_mask(self, max_length: int, x_lens: Optional[Tensor] = None) -> Tensor:
+    def make_window_limited_mask(self, max_length: int, x_lens: Tensor | None = None) -> Tensor:
         if self.causal:
             mask = torch.tril(torch.ones(max_length, max_length))
             row_indices = torch.arange(max_length).view(-1, 1)
@@ -772,7 +805,7 @@ class WindowLimitedTransformer(Transformer):
         mask = mask.bool()[None, None]
         return mask
 
-    def make_mask(self, max_length: int, x_lens: Optional[Tensor] = None) -> Tensor:
+    def make_mask(self, max_length: int, x_lens: Tensor | None = None) -> Tensor:
         if self.causal:
             mask = torch.tril(torch.ones(max_length, max_length))
         else:
@@ -783,7 +816,7 @@ class WindowLimitedTransformer(Transformer):
         mask = mask.bool()[None, None]
         return mask
 
-    def forward(self, x: Tensor, x_lens: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, x_lens: Tensor | None = None) -> Tensor:
         if self.channels_first:
             x = x.transpose(1, 2)
         x = self.input_proj(x)
@@ -803,14 +836,14 @@ class WindowLimitedTransformer(Transformer):
 
 
 def precompute_freqs_cis(
-    seq_len: int, n_elem: int, base: int = 10000, dtype: torch.dtype = torch.bfloat16
-) -> Tensor:
-    freqs = 1.0 / (base ** (torch.arange(0, n_elem, 2)[: (n_elem // 2)].float() / n_elem))
+        seq_len: int, n_elem: int, base: int = 10000, dtype: torch.dtype = torch.bfloat16) -> Tensor:
+    freqs = 1.0 / (base**(torch.arange(0, n_elem, 2)[:(n_elem // 2)].float() / n_elem))
     t = torch.arange(seq_len, device=freqs.device)
     freqs = torch.outer(t, freqs)
     freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
     cache = torch.stack([freqs_cis.real, freqs_cis.imag], dim=-1)
     return cache.to(dtype=dtype)
+
 
 def apply_rotary_emb(x: Tensor, freqs_cis: Tensor) -> Tensor:
     xshaped = x.float().reshape(*x.shape[:-1], -1, 2)
@@ -836,7 +869,9 @@ def init_weights(m):
 # Top-level AE
 # --------------------------------------------------------------------
 
+
 class EncoderBlock(nn.Module):
+
     def __init__(
         self,
         dim: int = 16,
@@ -848,9 +883,7 @@ class EncoderBlock(nn.Module):
         super().__init__()
         conv_class = CausalWNConv1d if causal else WNConv1d
         transformer_module = (
-            nn.Identity()
-            if n_t_layer == 0
-            else WindowLimitedTransformer(
+            nn.Identity() if n_t_layer == 0 else WindowLimitedTransformer(
                 causal=causal,
                 input_dim=dim,
                 window_size=512,
@@ -860,8 +893,7 @@ class EncoderBlock(nn.Module):
                     dim=dim,
                     intermediate_size=dim * 3,
                 ),
-            )
-        )
+            ))
         self.block = nn.Sequential(
             # three multi‑receptive‑field residual units
             ResidualUnit(dim // 2, dilation=1, causal=causal),
@@ -877,6 +909,7 @@ class EncoderBlock(nn.Module):
 
 
 class ResidualUnit(nn.Module):
+
     def __init__(self, dim: int = 16, dilation: int = 1, causal: bool = False):
         super().__init__()
         conv_class = CausalWNConv1d if causal else WNConv1d
@@ -896,31 +929,34 @@ class ResidualUnit(nn.Module):
             if self.causal:
                 x = x[..., :-pad]
             else:
-                x = x[..., pad // 2 : -pad // 2]
+                x = x[..., pad // 2:-pad // 2]
         return x + y
 
 
 class Encoder(nn.Module):
+
     def __init__(
         self,
         d_model: int = 64,
-        strides: List[int] = [2, 4, 8, 8],
+        strides: list[int] = [2, 4, 8, 8],
         d_latent: int = 64,
-        n_transformer_layers: List[int] = [0, 0, 4, 4],
-        transformer_general_config: Optional[ModelArgs] = None,
+        n_transformer_layers: list[int] = [0, 0, 4, 4],
+        transformer_general_config: ModelArgs | None = None,
         causal: bool = False,
     ):
         super().__init__()
         conv_class = CausalWNConv1d if causal else WNConv1d
-        layers: List[nn.Module] = [conv_class(1, d_model, kernel_size=7, padding=3)]
+        layers: list[nn.Module] = [conv_class(1, d_model, kernel_size=7, padding=3)]
         for stride, n_t_layer in zip(strides, n_transformer_layers):
             d_model *= 2
             layers.append(
                 EncoderBlock(
-                    d_model, stride=stride, causal=causal,
-                    n_t_layer=n_t_layer, transformer_general_config=transformer_general_config,
-                )
-            )
+                    d_model,
+                    stride=stride,
+                    causal=causal,
+                    n_t_layer=n_t_layer,
+                    transformer_general_config=transformer_general_config,
+                ))
         layers += [Snake1d(d_model), conv_class(d_model, d_latent, kernel_size=3, padding=1)]
         self.block = nn.Sequential(*layers)
         self.enc_dim = d_model
@@ -930,6 +966,7 @@ class Encoder(nn.Module):
 
 
 class DecoderBlock(nn.Module):
+
     def __init__(
         self,
         input_dim: int = 16,
@@ -942,9 +979,7 @@ class DecoderBlock(nn.Module):
         super().__init__()
         conv_trans_class = CausalWNConvTranspose1d if causal else WNConvTranspose1d
         transformer_module = (
-            nn.Identity()
-            if n_t_layer == 0
-            else WindowLimitedTransformer(
+            nn.Identity() if n_t_layer == 0 else WindowLimitedTransformer(
                 causal=causal,
                 input_dim=input_dim,
                 window_size=None,
@@ -954,11 +989,11 @@ class DecoderBlock(nn.Module):
                     dim=input_dim,
                     intermediate_size=input_dim * 3,
                 ),
-            )
-        )
+            ))
         self.block = nn.Sequential(
             Snake1d(input_dim),
-            conv_trans_class(input_dim, output_dim, kernel_size=2 * stride, stride=stride, padding=math.ceil(stride / 2)),
+            conv_trans_class(
+                input_dim, output_dim, kernel_size=2 * stride, stride=stride, padding=math.ceil(stride / 2)),
             ResidualUnit(output_dim, dilation=1, causal=causal),
             ResidualUnit(output_dim, dilation=3, causal=causal),
             ResidualUnit(output_dim, dilation=9, causal=causal),
@@ -969,28 +1004,32 @@ class DecoderBlock(nn.Module):
 
 
 class Decoder(nn.Module):
+
     def __init__(
         self,
         input_channel: int,
         channels: int,
-        rates: List[int],
+        rates: list[int],
         d_out: int = 1,
         causal: bool = False,
-        n_transformer_layers: List[int] = [0, 0, 0, 0],
+        n_transformer_layers: list[int] = [0, 0, 0, 0],
         transformer_general_config=None,
     ):
         super().__init__()
         conv_class = CausalWNConv1d if causal else WNConv1d
-        layers: List[nn.Module] = [conv_class(input_channel, channels, kernel_size=7, padding=3)]
+        layers: list[nn.Module] = [conv_class(input_channel, channels, kernel_size=7, padding=3)]
         for i, (stride, n_t_layer) in enumerate(zip(rates, n_transformer_layers)):
-            input_dim  = channels // 2**i
-            output_dim = channels // 2 ** (i + 1)
+            input_dim = channels // 2**i
+            output_dim = channels // 2**(i + 1)
             layers.append(
                 DecoderBlock(
-                    input_dim, output_dim, stride, causal=causal,
-                    n_t_layer=n_t_layer, transformer_general_config=transformer_general_config,
-                )
-            )
+                    input_dim,
+                    output_dim,
+                    stride,
+                    causal=causal,
+                    n_t_layer=n_t_layer,
+                    transformer_general_config=transformer_general_config,
+                ))
         layers += [Snake1d(output_dim), conv_class(output_dim, d_out, kernel_size=7, padding=3), nn.Tanh()]
         self.model = nn.Sequential(*layers)
 
@@ -999,18 +1038,19 @@ class Decoder(nn.Module):
 
 
 class DAC(nn.Module):
+
     def __init__(
         self,
         encoder_dim: int = 64,
-        encoder_rates: List[int] = [2, 4, 8, 8],
-        latent_dim: Optional[int] = None,
+        encoder_rates: list[int] = [2, 4, 8, 8],
+        latent_dim: int | None = None,
         decoder_dim: int = 1536,
-        decoder_rates: List[int] = [8, 8, 4, 2],
-        quantizer: Optional[nn.Module] = None,
+        decoder_rates: list[int] = [8, 8, 4, 2],
+        quantizer: nn.Module | None = None,
         sample_rate: int = 44100,
         causal: bool = True,
-        encoder_transformer_layers: List[int] = [0, 0, 0, 0],
-        decoder_transformer_layers: List[int] = [0, 0, 0, 0],
+        encoder_transformer_layers: list[int] = [0, 0, 0, 0],
+        decoder_transformer_layers: list[int] = [0, 0, 0, 0],
         transformer_general_config=None,
     ):
         super().__init__()
@@ -1022,18 +1062,24 @@ class DAC(nn.Module):
         self.sample_rate = sample_rate
 
         if latent_dim is None:
-            latent_dim = encoder_dim * (2 ** len(encoder_rates))
+            latent_dim = encoder_dim * (2**len(encoder_rates))
         self.latent_dim = latent_dim
 
         self.hop_length = int(np.prod(encoder_rates))
         self.encoder = Encoder(
-            encoder_dim, encoder_rates, latent_dim, causal=causal,
+            encoder_dim,
+            encoder_rates,
+            latent_dim,
+            causal=causal,
             n_transformer_layers=encoder_transformer_layers,
             transformer_general_config=transformer_general_config,
         )
         self.quantizer = quantizer
         self.decoder = Decoder(
-            latent_dim, decoder_dim, decoder_rates, causal=causal,
+            latent_dim,
+            decoder_dim,
+            decoder_rates,
+            causal=causal,
             n_transformer_layers=decoder_transformer_layers,
             transformer_general_config=transformer_general_config,
         )
@@ -1067,7 +1113,7 @@ class DAC(nn.Module):
         l_in = L
         return (l_in - l_out) // 2
 
-    def preprocess(self, audio_data: Tensor, sample_rate: Optional[int]) -> Tensor:
+    def preprocess(self, audio_data: Tensor, sample_rate: int | None) -> Tensor:
         if sample_rate is None:
             sample_rate = self.sample_rate
         assert sample_rate == self.sample_rate
@@ -1080,8 +1126,8 @@ class DAC(nn.Module):
     def encode(
         self,
         audio_data: Tensor,
-        audio_lengths: Optional[Tensor] = None,
-        n_quantizers: Optional[int] = None,
+        audio_lengths: Tensor | None = None,
+        n_quantizers: int | None = None,
         **kwargs,
     ):
         """Encode audio to quantized code indices."""
@@ -1107,7 +1153,8 @@ class DAC(nn.Module):
         audio_lengths = feature_lengths * self.frame_length
         return self.decoder(z), audio_lengths
 
-    def encode_to_codes(self, audio: Tensor, audio_lengths: Optional[Tensor] = None, n_quantizers: Optional[int] = None, **kw):
+    def encode_to_codes(
+            self, audio: Tensor, audio_lengths: Tensor | None = None, n_quantizers: int | None = None, **kw):
         return self.encode(audio, audio_lengths, n_quantizers, **kw)
 
     def decode_codes(self, indices: Tensor, feature_lengths: Tensor):
@@ -1117,7 +1164,8 @@ class DAC(nn.Module):
     def encode_zq(self, audio_data: Tensor) -> Tensor:
         indices, _ = self.encode(audio_data)
         new_indices = torch.zeros_like(indices)
-        new_indices[:, 0] = torch.clamp(indices[:, 0],  max=self.quantizer.semantic_quantizer.codebook_size - 1)
+        new_indices[:, 0] = torch.clamp(
+            indices[:, 0], max=self.quantizer.semantic_quantizer.codebook_size - 1)
         new_indices[:, 1:] = torch.clamp(indices[:, 1:], max=self.quantizer.quantizer.codebook_size - 1)
 
         z_q_semantic = self.quantizer.semantic_quantizer.from_codes(new_indices[:, :1])[0]
@@ -1132,34 +1180,44 @@ class DAC(nn.Module):
         return self.decoder(z_q)
 
     @property
-    def device(self) -> torch.device: return next(self.parameters()).device
+    def device(self) -> torch.device:
+        return next(self.parameters()).device
 
     @property
-    def dtype(self) -> torch.dtype: return next(self.parameters()).dtype
+    def dtype(self) -> torch.dtype:
+        return next(self.parameters()).dtype
+
 
 # --------------------------------------------------------------------
 # Build helpers
 # --------------------------------------------------------------------
 
+
 def build_ae(**cfg) -> DAC:
-    """
-    Factory used by external loaders
-    """
+    """Factory used by external loaders."""
     # Shared transformer config for the RVQ pre/post modules
     q_config = ModelArgs(
-        block_size=4096, n_layer=8, n_head=16, dim=1024,
-        intermediate_size=3072, head_dim=64, norm_eps=1e-5,
-        dropout_rate=0.1, attn_dropout_rate=0.1, channels_first=True
-    )
+        block_size=4096,
+        n_layer=8,
+        n_head=16,
+        dim=1024,
+        intermediate_size=3072,
+        head_dim=64,
+        norm_eps=1e-5,
+        dropout_rate=0.1,
+        attn_dropout_rate=0.1,
+        channels_first=True)
 
     def make_transformer():
-        return WindowLimitedTransformer(
-            causal=True, window_size=128, input_dim=1024, config=q_config
-        )
+        return WindowLimitedTransformer(causal=True, window_size=128, input_dim=1024, config=q_config)
 
     quantizer = DownsampleResidualVectorQuantize(
-        input_dim=1024, n_codebooks=9, codebook_size=1024, codebook_dim=8,
-        quantizer_dropout=0.5, downsample_factor=(2, 2),
+        input_dim=1024,
+        n_codebooks=9,
+        codebook_size=1024,
+        codebook_dim=8,
+        quantizer_dropout=0.5,
+        downsample_factor=(2, 2),
         semantic_codebook_size=4096,
         pre_module=make_transformer(),
         post_module=make_transformer(),
@@ -1182,14 +1240,20 @@ def build_ae(**cfg) -> DAC:
         )
 
     dac = DAC(
-        encoder_dim=64, encoder_rates=[2, 4, 8, 8], latent_dim=1024,
-        decoder_dim=1536, decoder_rates=[8, 8, 4, 2],
-        quantizer=quantizer, sample_rate=44100, causal=True,
+        encoder_dim=64,
+        encoder_rates=[2, 4, 8, 8],
+        latent_dim=1024,
+        decoder_dim=1536,
+        decoder_rates=[8, 8, 4, 2],
+        quantizer=quantizer,
+        sample_rate=44100,
+        causal=True,
         encoder_transformer_layers=[0, 0, 0, 4],
         decoder_transformer_layers=[4, 0, 0, 0],
         transformer_general_config=transformer_general_config,
     )
     return dac
+
 
 __all__ = [
     "DAC",
@@ -1198,7 +1262,6 @@ __all__ = [
     "ResidualVectorQuantize",
     "DownsampleResidualVectorQuantize",
 ]
-
 
 # ----- BEGIN DAC MIT LICENSE -----
 # MIT License
@@ -1222,4 +1285,3 @@ __all__ = [
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # ----- END DAC MIT LICENSE -----
-

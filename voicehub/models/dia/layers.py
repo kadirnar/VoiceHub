@@ -822,7 +822,6 @@ class Decoder(nn.Module):
             A tuple containing:
             - logits_Bx1xCV: The final output logits for the current step (B, 1, C*V), cast to float32.
         """
-
         x = None
         for i in range(self.num_channels):
             channel_tokens = tgt_ids_Bx1xC[..., i]

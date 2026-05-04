@@ -6,7 +6,8 @@ class ChatterboxInference(BaseTTSModel):
     """A class for running text-to-speech inference with the Chatterbox model."""
 
     def __init__(self, model_path: str = "", device: str = "cuda"):
-        """Initializes the ChatterboxInference class.
+        """
+        Initializes the ChatterboxInference class.
 
         Args:
             model_path: Unused, kept for interface compatibility.

@@ -44,13 +44,13 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
             # This argument was introduced in some recent version of transformers (>=4.29.1)
             cache_position=None):
         """
-        This is a method used by huggingface's generate() method. Overridden here to apply our custom speech
-        token embedding layer.
+        This is a method used by huggingface's generate() method.
+
+        Overridden here to apply our custom speech token embedding layer.
 
         :param input_ids: (B, S) int64 tensors of input tokens.
         :param decoder_cond: (B, T, C) float32 tensor of conditioning (prefixed to <input_embeds>)
         """
-
         # Make use of the kv cache: only the last input ID is new, we trim away all the ones before
         if not use_cache:
             past_key_values = None
@@ -85,8 +85,9 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
         return_dict=True,
     ):
         """
-        This is a method used by huggingface's generate() method. Overridden here to apply our custom layer
-        norm and speech logit projection layers.
+        This is a method used by huggingface's generate() method.
+
+        Overridden here to apply our custom layer norm and speech logit projection layers.
 
         :param inputs_embeds: (B, S, C) float32 tensor of conditioning inputs. If past key values are given, S
             should be 1.

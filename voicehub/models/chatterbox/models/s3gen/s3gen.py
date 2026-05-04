@@ -13,10 +13,10 @@ from voicehub.models.chatterbox.models.s3gen.f0_predictor import ConvRNNF0Predic
 from voicehub.models.chatterbox.models.s3gen.flow import CausalMaskedDiffWithXvec
 from voicehub.models.chatterbox.models.s3gen.flow_matching import CausalConditionalCFM
 from voicehub.models.chatterbox.models.s3gen.hifigan import HiFTGenerator
-from voicehub.models.chatterbox.models.s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE, S3Tokenizer
 from voicehub.models.chatterbox.models.s3gen.transformer.upsample_encoder import UpsampleConformerEncoder
 from voicehub.models.chatterbox.models.s3gen.utils.mel import mel_spectrogram
 from voicehub.models.chatterbox.models.s3gen.xvector import CAMPPlus
+from voicehub.models.chatterbox.models.s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE, S3Tokenizer
 
 
 def drop_invalid_tokens(x):

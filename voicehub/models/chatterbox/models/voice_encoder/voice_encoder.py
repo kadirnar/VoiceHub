@@ -17,8 +17,8 @@ def pack(arrays, seq_len: int = None, pad_value=0):
     (B, T, ...) by padding each individual array on the right.
 
     :param arrays: a list of array-like objects of matching shapes except for the first axis.
-    :param seq_len: the value of T. It must be the maximum of the lengths Ti of the arrays at
-    minimum. Will default to that value if None.
+    :param seq_len: the value of T. It must be the maximum of the lengths Ti of the arrays at minimum. Will
+        default to that value if None.
     :param pad_value: the value to pad the arrays with.
     :return: a (B, T, ...) tensor
     """

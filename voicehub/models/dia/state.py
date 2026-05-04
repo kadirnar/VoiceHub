@@ -68,10 +68,11 @@ class EncoderInferenceState:
 
 
 class KVCache(torch.nn.Module):
-    """Fixed-size key/value cache stored as registered buffers for inference.
+    """
+    Fixed-size key/value cache stored as registered buffers for inference.
 
-    The cache is pre-allocated with shape ``(2*B, H, T, D)`` (factor-of-2 for
-    classifier-free guidance) and updated in-place during autoregressive decoding.
+    The cache is pre-allocated with shape ``(2*B, H, T, D)`` (factor-of-2 for classifier-free guidance) and
+    updated in-place during autoregressive decoding.
     """
 
     k: torch.Tensor
@@ -201,10 +202,11 @@ class DecoderInferenceState:
 
 @dataclass
 class DecoderOutput:
-    """Accumulator for tokens generated during autoregressive decoding.
+    """
+    Accumulator for tokens generated during autoregressive decoding.
 
-    Stores the full ``(B, T, C)`` grid of generated codebook indices and
-    tracks how many prefill steps each batch element consumed.
+    Stores the full ``(B, T, C)`` grid of generated codebook indices and tracks how many prefill steps each
+    batch element consumed.
     """
 
     generated_tokens: torch.Tensor
