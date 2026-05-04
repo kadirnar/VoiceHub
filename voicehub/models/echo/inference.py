@@ -16,8 +16,9 @@ from voicehub.models.echo.sampling import (
 
 
 class EchoTTS(BaseTTSModel):
-    """VoiceHub wrapper for Echo-TTS, a multi-speaker text-to-speech model
-    with speaker reference conditioning via flow matching."""
+    """VoiceHub wrapper for Echo-TTS, a multi-speaker text-to-speech model with speaker reference conditioning
+    via flow matching.
+    """
 
     def __init__(
         self,
@@ -25,7 +26,8 @@ class EchoTTS(BaseTTSModel):
         device: str = "cuda",
         compile: bool = False,
     ):
-        """Initialize the EchoTTS model.
+        """
+        Initialize the EchoTTS model.
 
         Args:
             model_path: HuggingFace repo id for the Echo-TTS checkpoint.

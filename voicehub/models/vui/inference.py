@@ -4,13 +4,15 @@ from voicehub.models.vui.tts import render
 
 
 class VuiTTS(BaseTTSModel):
-    """High-level TTS interface for the Vui model.
+    """
+    High-level TTS interface for the Vui model.
 
     Lazily loads the checkpoint on first call so that instantiation is cheap.
     """
 
     def __init__(self, model_path: str = "", device: str = "cuda"):
-        """Create a VuiTTS wrapper.
+        """
+        Create a VuiTTS wrapper.
 
         Args:
             model_path: HuggingFace repo filename or local checkpoint path.

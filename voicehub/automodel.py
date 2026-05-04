@@ -2,18 +2,19 @@ MODEL_TYPE_TO_MODEL_CLASS_NAME = {
     "orpheustts": "OrpheusTTS",
     "dia": "DiaTTS",
     "vui": "VuiTTS",
-"chatterbox": "ChatterboxInference",
+    "chatterbox": "ChatterboxInference",
     "kokoro": "KokoroTTS",
     "echo": "EchoTTS",
 }
 
 
 class AutoInferenceModel:
-    """Factory class that dynamically loads and instantiates TTS model backends.
+    """
+    Factory class that dynamically loads and instantiates TTS model backends.
 
-    Uses a registry mapping (``MODEL_TYPE_TO_MODEL_CLASS_NAME``) to resolve
-    short model-type strings to their concrete inference classes, importing the
-    appropriate module on demand so that unused backends are never loaded.
+    Uses a registry mapping (``MODEL_TYPE_TO_MODEL_CLASS_NAME``) to resolve short model-type strings to their
+    concrete inference classes, importing the appropriate module on demand so that unused backends are never
+    loaded.
     """
 
     @staticmethod
@@ -22,7 +23,8 @@ class AutoInferenceModel:
             model_path: str = "canopylabs/orpheus-3b-0.1-ft",
             device: str = "cuda",
             **kwargs):
-        """Dynamically load and instantiate the appropriate model class.
+        """
+        Dynamically load and instantiate the appropriate model class.
 
         Args:
             model_type: Key into ``MODEL_TYPE_TO_MODEL_CLASS_NAME``

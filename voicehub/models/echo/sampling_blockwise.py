@@ -2,13 +2,8 @@ from typing import List
 
 import torch
 
-from voicehub.models.echo.sampling import (
-    KVCache,
-    _concat_kv_caches,
-    _multiply_kv_cache,
-    _temporal_score_rescale,
-)
 from voicehub.models.echo.model import EchoDiT
+from voicehub.models.echo.sampling import KVCache, _concat_kv_caches, _multiply_kv_cache, _temporal_score_rescale
 
 
 @torch.inference_mode()
@@ -56,7 +51,7 @@ def sample_blockwise_euler_cfg_independent_guidances(
     full_text_mask = torch.cat([text_mask, text_mask_uncond, text_mask], dim=0)
     full_speaker_mask = torch.cat([speaker_mask, speaker_mask, speaker_mask_uncond], dim=0)
 
-    prefix_latent = torch.zeros((batch_size, sum(block_sizes) , 80), device=device, dtype=torch.float32)
+    prefix_latent = torch.zeros((batch_size, sum(block_sizes), 80), device=device, dtype=torch.float32)
 
     start_pos = 0
     if continuation_latent is not None:
@@ -85,19 +80,21 @@ def sample_blockwise_euler_cfg_independent_guidances(
             if has_cfg:
                 v_cond, v_uncond_text, v_uncond_speaker = model(
                     x=torch.cat([x_t, x_t, x_t], dim=0).to(dtype),
-                    t=(torch.ones((batch_size * 3,), device=device) * t).to(dtype),
+                    t=(torch.ones((batch_size * 3, ), device=device) * t).to(dtype),
                     text_mask=full_text_mask,
                     speaker_mask=full_speaker_mask,
                     start_pos=start_pos,
                     kv_cache_text=kv_text_full,
                     kv_cache_speaker=kv_speaker_full,
                     kv_cache_latent=kv_latent_full,
-                ).float().chunk(3, dim=0)
-                v_pred = v_cond + cfg_scale_text * (v_cond - v_uncond_text) + cfg_scale_speaker * (v_cond - v_uncond_speaker)
+                ).float().chunk(
+                    3, dim=0)
+                v_pred = v_cond + cfg_scale_text * (v_cond - v_uncond_text) + cfg_scale_speaker * (
+                    v_cond - v_uncond_speaker)
             else:
                 v_pred = model(
                     x=x_t.to(dtype),
-                    t=(torch.ones((batch_size,), device=device) * t).to(dtype),
+                    t=(torch.ones((batch_size, ), device=device) * t).to(dtype),
                     text_mask=text_mask,
                     speaker_mask=speaker_mask,
                     start_pos=start_pos,
@@ -125,22 +122,22 @@ def sample_blockwise_euler_cfg_independent_guidances(
 
 if __name__ == "__main__":
     import torchaudio
+
     from voicehub.models.echo.sampling import (
-        load_model_from_hf,
-        load_fish_ae_from_hf,
-        load_pca_state_from_hf,
-        load_audio,
-        get_text_input_ids_and_mask,
-        get_speaker_latent_and_mask,
-        ae_encode,
         ae_decode,
+        ae_encode,
         crop_audio_to_flattening_point,
+        get_speaker_latent_and_mask,
+        get_text_input_ids_and_mask,
+        load_audio,
+        load_fish_ae_from_hf,
+        load_model_from_hf,
+        load_pca_state_from_hf,
     )
 
     model = load_model_from_hf()
     fish_ae = load_fish_ae_from_hf()
     pca_state = load_pca_state_from_hf()
-
 
     # example 1, generate 320 in three blocks
 
@@ -158,7 +155,7 @@ if __name__ == "__main__":
         text_input_ids=text_input_ids,
         text_mask=text_mask,
         rng_seed=0,
-        block_sizes=[128, 128, 64], # (sums to 320, so will be ~15 seconds; supports up to 640)
+        block_sizes=[128, 128, 64],  # (sums to 320, so will be ~15 seconds; supports up to 640)
         num_steps=40,
         cfg_scale_text=3.0,
         cfg_scale_speaker=5.0,
@@ -175,23 +172,22 @@ if __name__ == "__main__":
     audio_out = crop_audio_to_flattening_point(audio_out, latent_out[0])
     torchaudio.save("output_blockwise.wav", audio_out[0].cpu(), 44100)
 
-
-
     # ___________________________________________________________
     # example 2: with continuation latent (use same speaker audio as first example, generate from partial output of first example)
 
-    continuation_audio_path = "output_blockwise.wav" # can be any path
+    continuation_audio_path = "output_blockwise.wav"  # can be any path
     continuation_audio = load_audio(continuation_audio_path).cuda()
-    continuation_latent, continuation_mask = get_speaker_latent_and_mask(fish_ae, pca_state, continuation_audio)
+    continuation_latent, continuation_mask = get_speaker_latent_and_mask(
+        fish_ae, pca_state, continuation_audio)
 
     continuation_latent = continuation_latent[:, :continuation_mask.sum()]
 
-    text = "[S1] Alright, I'm going to demo this new model called Echo TTS, and now, we're going to continue from the audio we already generated and add some more text." 
+    text = "[S1] Alright, I'm going to demo this new model called Echo TTS, and now, we're going to continue from the audio we already generated and add some more text."
     # NOTE this MUST include the text from the continuation prefix. can use https://huggingface.co/jordand/whisper-d-v1a to get in-distribution transcription automatically.
 
     text_input_ids, text_mask = get_text_input_ids_and_mask([text], max_length=None, device="cuda")
 
-    continuation_block_sizes = [256] # (generate up to 12 more seconds)
+    continuation_block_sizes = [256]  # (generate up to 12 more seconds)
     # NOTE: these do not include the continuation latent length, so sum(block_sizes) + continuation_latent.shape[1] should be < 640 (to be in-distribution with training data)
 
     latent_out_continued = sample_blockwise_euler_cfg_independent_guidances(

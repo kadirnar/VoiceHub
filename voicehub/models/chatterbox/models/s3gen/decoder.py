@@ -249,7 +249,6 @@ class ConditionalDecoder(nn.Module):
         Returns:
             _type_: _description_
         """
-
         t = self.time_embeddings(t).to(t.dtype)
         t = self.time_mlp(t)
 

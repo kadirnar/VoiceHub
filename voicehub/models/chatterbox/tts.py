@@ -59,7 +59,8 @@ def punc_norm(text: str) -> str:
 
 @dataclass
 class Conditionals:
-    """Container for T3 and S3Gen conditioning data used during speech synthesis.
+    """
+    Container for T3 and S3Gen conditioning data used during speech synthesis.
 
     Attributes:
         t3: Conditioning data for the T3 text-to-token model (speaker embedding,
@@ -94,11 +95,11 @@ class Conditionals:
 
 
 class ChatterboxTTS:
-    """End-to-end text-to-speech model combining T3 (text-to-token) and S3Gen (token-to-waveform).
+    """
+    End-to-end text-to-speech model combining T3 (text-to-token) and S3Gen (token-to-waveform).
 
-    Synthesises speech by first generating S3 speech tokens from text using T3,
-    then converting those tokens to a waveform via S3Gen.  A voice-encoder
-    embedding is used to condition speaker identity.
+    Synthesises speech by first generating S3 speech tokens from text using T3, then converting those tokens
+    to a waveform via S3Gen.  A voice-encoder embedding is used to condition speaker identity.
     """
 
     ENC_COND_LEN = 6 * S3_SR

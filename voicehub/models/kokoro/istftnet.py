@@ -185,9 +185,7 @@ class SineGen(nn.Module):
         return uv
 
     def _f02sine(self, f0_values):
-        """ f0_values: (batchsize, length, dim)
-            where dim indicates fundamental tone and overtones
-        """
+        """f0_values: (batchsize, length, dim) where dim indicates fundamental tone and overtones."""
         # convert to F0 in rad. The interger part n can be ignored
         # because 2 * torch.pi * n doesn't affect phase
         rad_values = (f0_values / self.sampling_rate) % 1
@@ -308,7 +306,7 @@ class SourceModuleHnNSF(nn.Module):
 
 
 class Generator(nn.Module):
-    """iSTFT-Net vocoder: up-samples features to magnitude/phase and reconstructs waveform via iSTFT."""
+    """ISTFT-Net vocoder: up-samples features to magnitude/phase and reconstructs waveform via iSTFT."""
 
     def __init__(
             self,

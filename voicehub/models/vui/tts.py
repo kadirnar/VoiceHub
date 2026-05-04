@@ -144,7 +144,8 @@ def generate(
         top_p: float | None = None,
         max_gen_len: int = int(120 * 21.53),
 ):
-    """Autoregressively generate multi-codebook audio codes from cleaned text.
+    """
+    Autoregressively generate multi-codebook audio codes from cleaned text.
 
     Args:
         self: The Vui model instance (bound externally).

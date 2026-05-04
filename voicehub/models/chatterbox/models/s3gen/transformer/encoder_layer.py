@@ -173,7 +173,6 @@ class ConformerEncoderLayer(nn.Module):
                 (#batch=1, head, cache_t1 + time, d_k * 2).
             torch.Tensor: cnn_cahce tensor (#batch, size, cache_t2).
         """
-
         # whether to use macaron style
         if self.feed_forward_macaron is not None:
             residual = x

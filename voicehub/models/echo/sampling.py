@@ -1,41 +1,59 @@
 from dataclasses import dataclass
 from typing import Callable, List, Tuple
 
-from huggingface_hub import hf_hub_download
 import safetensors.torch as st
 import torch
 import torchaudio
+from huggingface_hub import hf_hub_download
 
 from voicehub.models.echo.autoencoder import DAC, build_ae
 from voicehub.models.echo.model import EchoDiT
 
-def load_model_from_hf(repo_id: str = "jordand/echo-tts-base", device: str = "cuda", dtype: torch.dtype | None = torch.bfloat16, compile: bool = False, token: str | None = None, delete_blockwise_modules: bool = False) -> EchoDiT:
+
+def load_model_from_hf(
+        repo_id: str = "jordand/echo-tts-base",
+        device: str = "cuda",
+        dtype: torch.dtype | None = torch.bfloat16,
+        compile: bool = False,
+        token: str | None = None,
+        delete_blockwise_modules: bool = False) -> EchoDiT:
     with torch.device("meta"):
         model = EchoDiT(
-            latent_size=80, model_size=2048, num_layers=24, num_heads=16,
-            intermediate_size=5888, norm_eps=1e-5,
-            text_vocab_size=256, text_model_size=1280, text_num_layers=14,
-            text_num_heads=10, text_intermediate_size=3328,
-            speaker_patch_size=4, speaker_model_size=1280, speaker_num_layers=14,
-            speaker_num_heads=10, speaker_intermediate_size=3328,
-            timestep_embed_size=512, adaln_rank=256,
+            latent_size=80,
+            model_size=2048,
+            num_layers=24,
+            num_heads=16,
+            intermediate_size=5888,
+            norm_eps=1e-5,
+            text_vocab_size=256,
+            text_model_size=1280,
+            text_num_layers=14,
+            text_num_heads=10,
+            text_intermediate_size=3328,
+            speaker_patch_size=4,
+            speaker_model_size=1280,
+            speaker_num_layers=14,
+            speaker_num_heads=10,
+            speaker_intermediate_size=3328,
+            timestep_embed_size=512,
+            adaln_rank=256,
         )
     w_path = hf_hub_download(repo_id, "pytorch_model.safetensors", token=token)
     state = st.load_file(w_path, device="cpu")
 
     if delete_blockwise_modules:
-        state = {k: v for k, v in state.items() if not (
-            k.startswith("latent_encoder.") or 
-            k.startswith("latent_norm") or 
-            ".wk_latent" in k or 
-            ".wv_latent" in k
-        )}
+        state = {
+            k: v
+            for k, v in state.items() if not (
+                k.startswith("latent_encoder.") or k.startswith("latent_norm") or ".wk_latent" in k or
+                ".wv_latent" in k)
+        }
 
     if dtype is not None:
         state = {k: v.to(dtype=dtype) for k, v in state.items()}
-    
+
     state = {k: v.to(device=device) for k, v in state.items()}
-    
+
     model.load_state_dict(state, strict=False, assign=True)
     model = model.eval()
 
@@ -44,6 +62,7 @@ def load_model_from_hf(repo_id: str = "jordand/echo-tts-base", device: str = "cu
 
     return model
 
+
 def compile_model(model: EchoDiT) -> EchoDiT:
     model = torch.compile(model)
     model.get_kv_cache_text = torch.compile(model.get_kv_cache_text)
@@ -51,8 +70,14 @@ def compile_model(model: EchoDiT) -> EchoDiT:
     model.get_kv_cache_latent = torch.compile(model.get_kv_cache_latent)
     return model
 
-def load_fish_ae_from_hf(repo_id: str = "jordand/fish-s1-dac-min", device: str = "cuda", dtype: torch.dtype | None = torch.float32, compile: bool = False, token: str | None = None) -> DAC:
-   
+
+def load_fish_ae_from_hf(
+        repo_id: str = "jordand/fish-s1-dac-min",
+        device: str = "cuda",
+        dtype: torch.dtype | None = torch.float32,
+        compile: bool = False,
+        token: str | None = None) -> DAC:
+
     with torch.device("meta"):
         fish_ae = build_ae()
 
@@ -73,6 +98,7 @@ def load_fish_ae_from_hf(repo_id: str = "jordand/fish-s1-dac-min", device: str =
 
     return fish_ae
 
+
 def compile_fish_ae(fish_ae: DAC) -> DAC:
     fish_ae.quantizer.upsample = torch.compile(fish_ae.quantizer.upsample)
     fish_ae.quantizer.downsample = torch.compile(fish_ae.quantizer.downsample)
@@ -87,7 +113,12 @@ class PCAState:
     pca_mean: torch.Tensor
     latent_scale: float
 
-def load_pca_state_from_hf(repo_id: str = "jordand/echo-tts-base", device: str = "cuda", filename: str = "pca_state.safetensors", token: str | None = None) -> PCAState:
+
+def load_pca_state_from_hf(
+        repo_id: str = "jordand/echo-tts-base",
+        device: str = "cuda",
+        filename: str = "pca_state.safetensors",
+        token: str | None = None) -> PCAState:
     p_path = hf_hub_download(repo_id, filename, token=token)
     t = st.load_file(p_path, device=device)
     return PCAState(
@@ -99,6 +130,7 @@ def load_pca_state_from_hf(repo_id: str = "jordand/echo-tts-base", device: str =
 
 # ________
 
+
 def load_audio(path: str, max_duration: int = 300) -> torch.Tensor:
 
     audio, sr = torchaudio.load(path)
@@ -109,10 +141,15 @@ def load_audio(path: str, max_duration: int = 300) -> torch.Tensor:
     audio = audio / torch.maximum(audio.abs().max(), torch.tensor(1.))
     return audio
 
-def tokenizer_encode(text: str, append_bos: bool = True, normalize: bool = True, return_normalized_text: bool = False) -> torch.Tensor | Tuple[torch.Tensor, str]:
+
+def tokenizer_encode(
+        text: str,
+        append_bos: bool = True,
+        normalize: bool = True,
+        return_normalized_text: bool = False) -> torch.Tensor | Tuple[torch.Tensor, str]:
 
     if normalize:
-        text = text.replace("…", "...")        
+        text = text.replace("…", "...")
         text = text.replace('’', "'")
         text = text.replace('”', '"')
         text = text.replace('”', '"')
@@ -132,15 +169,25 @@ def tokenizer_encode(text: str, append_bos: bool = True, normalize: bool = True,
 
     return torch.tensor(b)
 
-def get_text_input_ids_and_mask(text_arr: List[str], max_length: int | None, device: str | None = None, normalize: bool = True, return_normalized_text: bool = False, pad_to_max: bool = True) -> Tuple[torch.Tensor, torch.Tensor] | Tuple[torch.Tensor, torch.Tensor, List[str]]:
-    encoded_texts = [tokenizer_encode(text, normalize=normalize, return_normalized_text=True) for text in text_arr]
-    
+
+def get_text_input_ids_and_mask(
+    text_arr: List[str],
+    max_length: int | None,
+    device: str | None = None,
+    normalize: bool = True,
+    return_normalized_text: bool = False,
+    pad_to_max: bool = True
+) -> Tuple[torch.Tensor, torch.Tensor] | Tuple[torch.Tensor, torch.Tensor, List[str]]:
+    encoded_texts = [
+        tokenizer_encode(text, normalize=normalize, return_normalized_text=True) for text in text_arr
+    ]
+
     if max_length is None:
         max_length = max(len(enc) for enc, _ in encoded_texts)
-    
+
     tokens = torch.zeros((len(text_arr), max_length), dtype=torch.int32)
     mask = torch.zeros((len(text_arr), max_length), dtype=torch.bool)
-    
+
     for i, (encoded, _) in enumerate(encoded_texts):
         length = min(len(encoded), max_length)
         tokens[i, :length] = encoded[:length]
@@ -156,49 +203,56 @@ def get_text_input_ids_and_mask(text_arr: List[str], max_length: int | None, dev
         return tokens, mask, [text for _, text in encoded_texts]
     return tokens, mask
 
+
 # ________
+
 
 @torch.inference_mode()
 def ae_encode(fish_ae: DAC, pca_state: PCAState, audio: torch.Tensor) -> torch.Tensor:
-    assert audio.ndim == 3 and audio.shape[1] == 1 # (b, 1, length)
+    assert audio.ndim == 3 and audio.shape[1] == 1  # (b, 1, length)
     z_q = fish_ae.encode_zq(audio).float()
     z_q = (z_q.transpose(1, 2) - pca_state.pca_mean) @ pca_state.pca_components.T
     z_q = z_q * pca_state.latent_scale
     return z_q
+
 
 @torch.inference_mode()
 def ae_decode(fish_ae: DAC, pca_state: PCAState, z_q: torch.Tensor) -> torch.Tensor:
     z_q = (z_q / pca_state.latent_scale) @ pca_state.pca_components + pca_state.pca_mean
     return fish_ae.decode_zq(z_q.transpose(1, 2).to(fish_ae.dtype)).float()
 
+
 @torch.inference_mode()
 def ae_reconstruct(fish_ae: DAC, pca_state: PCAState, audio: torch.Tensor) -> torch.Tensor:
-    assert audio.ndim == 3 and audio.shape[1] == 1 # (b, 1, length)
+    assert audio.ndim == 3 and audio.shape[1] == 1  # (b, 1, length)
     z_q = ae_encode(fish_ae, pca_state, audio.to(fish_ae.dtype))
     return ae_decode(fish_ae, pca_state, z_q)
 
+
 # ________
+
 
 @torch.inference_mode()
 def get_speaker_latent_and_mask(
     fish_ae: DAC,
     pca_state: PCAState,
-    audio: torch.Tensor, # (1, length)
-    max_speaker_latent_length: int = 6400, # pretrained max length
-    audio_chunk_size: int = 640 * 2048, # (~30 seconds, 1/10 max speaker condition size; max chunk seen in training)
+    audio: torch.Tensor,  # (1, length)
+    max_speaker_latent_length: int = 6400,  # pretrained max length
+    audio_chunk_size: int = 640 *
+    2048,  # (~30 seconds, 1/10 max speaker condition size; max chunk seen in training)
     pad_to_max: bool = False,
     divis_by_patch_size: int | None = 4,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     # gets speaker latent and mask from audio, computes in chunks and concatenates (similar to training setup)
-    
+
     AE_DOWNSAMPLE_FACTOR = 2048
     max_audio_len_length = max_speaker_latent_length * AE_DOWNSAMPLE_FACTOR
-    
+
     assert audio.ndim == 2 and audio.shape[0] == 1  # (1, length)
     audio = audio[:, :max_audio_len_length]
 
     latent_arr = []
-    
+
     for i in range(0, audio.shape[1], audio_chunk_size):
         audio_chunk = audio[:, i:i + audio_chunk_size]
         if audio_chunk.shape[1] < audio_chunk_size:
@@ -206,47 +260,54 @@ def get_speaker_latent_and_mask(
 
         latent_chunk = ae_encode(fish_ae, pca_state, audio_chunk.unsqueeze(0))
         latent_arr.append(latent_chunk)
-    
+
     speaker_latent = torch.cat(latent_arr, dim=1)
-    
+
     actual_latent_length = audio.shape[1] // AE_DOWNSAMPLE_FACTOR
-    speaker_mask = (torch.arange(speaker_latent.shape[1], device=speaker_latent.device) < actual_latent_length).unsqueeze(0)
-    
+    speaker_mask = (
+        torch.arange(speaker_latent.shape[1], device=speaker_latent.device)
+        < actual_latent_length).unsqueeze(0)
+
     if pad_to_max and speaker_latent.shape[1] < max_speaker_latent_length:
-        speaker_latent = torch.nn.functional.pad(speaker_latent, (0, 0, 0, max_speaker_latent_length - speaker_latent.shape[1]))
-        speaker_mask = torch.nn.functional.pad(speaker_mask, (0, max_speaker_latent_length - speaker_mask.shape[1]))
+        speaker_latent = torch.nn.functional.pad(
+            speaker_latent, (0, 0, 0, max_speaker_latent_length - speaker_latent.shape[1]))
+        speaker_mask = torch.nn.functional.pad(
+            speaker_mask, (0, max_speaker_latent_length - speaker_mask.shape[1]))
     elif not pad_to_max:
         speaker_latent = speaker_latent[:, :actual_latent_length]
         speaker_mask = speaker_mask[:, :actual_latent_length]
 
     if divis_by_patch_size is not None:
-        speaker_latent = speaker_latent[:, :speaker_latent.shape[1] // divis_by_patch_size * divis_by_patch_size]
+        speaker_latent = speaker_latent[:, :speaker_latent.shape[1] // divis_by_patch_size *
+                                        divis_by_patch_size]
         speaker_mask = speaker_mask[:, :speaker_mask.shape[1] // divis_by_patch_size * divis_by_patch_size]
-    
+
     return speaker_latent, speaker_mask
 
 
 # ________
 
+
 def find_flattening_point(data, target_value=0.0, window_size=20, std_threshold=0.05):
     # simple heuristic to find end of latent generations; slow and can be improved
     # (data is (length, 80))
-    padded_data = torch.cat([data, torch.zeros(window_size, *data.shape[1:], device=data.device, dtype=data.dtype)])
+    padded_data = torch.cat(
+        [data, torch.zeros(window_size, *data.shape[1:], device=data.device, dtype=data.dtype)])
     for i in range(len(padded_data) - window_size):
         window = padded_data[i:i + window_size]
         if window.std() < std_threshold and abs(window.mean() - target_value) < 0.1:
             return i
     return len(data)
 
+
 def crop_audio_to_flattening_point(audio: torch.Tensor, latent: torch.Tensor) -> torch.Tensor:
     # (audio is (..., length), latent is (length, 80))
     flattening_point = find_flattening_point(latent)
     return audio[..., :flattening_point * 2048]
 
-SampleFn = Callable[
-    [EchoDiT, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int],
-    torch.Tensor
-]
+
+SampleFn = Callable[[EchoDiT, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int], torch.Tensor]
+
 
 @torch.inference_mode()
 def sample_pipeline(
@@ -262,24 +323,33 @@ def sample_pipeline(
     normalize_text: bool = True,
 ) -> Tuple[torch.Tensor, str]:
 
-    MAX_SPEAKER_LATENT_LENGTH = 6400 # max seen during training, though maybe can go higher?
+    MAX_SPEAKER_LATENT_LENGTH = 6400  # max seen during training, though maybe can go higher?
     MAX_TEXT_LENGTH = 768
 
     device, dtype = model.device, model.dtype
 
-    text_input_ids, text_mask, normalized_text = get_text_input_ids_and_mask([text_prompt], max_length=min(pad_to_max_text_length or MAX_TEXT_LENGTH, MAX_TEXT_LENGTH), device=device, normalize=normalize_text, return_normalized_text=True, pad_to_max=(pad_to_max_text_length is not None))
+    text_input_ids, text_mask, normalized_text = get_text_input_ids_and_mask(
+        [text_prompt],
+        max_length=min(pad_to_max_text_length or MAX_TEXT_LENGTH, MAX_TEXT_LENGTH),
+        device=device,
+        normalize=normalize_text,
+        return_normalized_text=True,
+        pad_to_max=(pad_to_max_text_length is not None))
 
     if speaker_audio is None:
-        speaker_latent = torch.zeros((1, pad_to_max_speaker_latent_length or 4, 80), device=device, dtype=dtype)
-        speaker_mask = torch.zeros((1, pad_to_max_speaker_latent_length or 4), device=device, dtype=torch.bool)
+        speaker_latent = torch.zeros((1, pad_to_max_speaker_latent_length or 4, 80),
+                                     device=device,
+                                     dtype=dtype)
+        speaker_mask = torch.zeros((1, pad_to_max_speaker_latent_length or 4),
+                                   device=device,
+                                   dtype=torch.bool)
     else:
         speaker_latent, speaker_mask = get_speaker_latent_and_mask(
-            fish_ae, 
-            pca_state, 
-            speaker_audio.to(fish_ae.dtype).to(device), 
+            fish_ae,
+            pca_state,
+            speaker_audio.to(fish_ae.dtype).to(device),
             max_speaker_latent_length=pad_to_max_speaker_latent_length or MAX_SPEAKER_LATENT_LENGTH,
-            pad_to_max=(pad_to_max_speaker_latent_length is not None)
-        )
+            pad_to_max=(pad_to_max_speaker_latent_length is not None))
 
     latent_out = sample_fn(model, speaker_latent, speaker_mask, text_input_ids, text_mask, rng_seed)
 
@@ -290,14 +360,12 @@ def sample_pipeline(
     return audio_out, normalized_text[0]
 
 
-
-
 # ________
-
 
 KVCache = List[Tuple[torch.Tensor, torch.Tensor]]
 
-def _concat_kv_caches(*caches: KVCache) -> KVCache: 
+
+def _concat_kv_caches(*caches: KVCache) -> KVCache:
     # helper that concatenates multiple KV caches along the batch dimension
     num_layers = len(caches[0])
     result = []
@@ -307,6 +375,7 @@ def _concat_kv_caches(*caches: KVCache) -> KVCache:
         result.append((k, v))
     return result
 
+
 def _multiply_kv_cache(cache: KVCache, scale: float, max_layers: int | None = None) -> None:
     # helper that multiplies KV cache values in-place, for kv speaker scaling
     num_layers = len(cache) if max_layers is None else min(max_layers, len(cache))
@@ -315,13 +384,14 @@ def _multiply_kv_cache(cache: KVCache, scale: float, max_layers: int | None = No
         k.mul_(scale)
         v.mul_(scale)
 
+
 def _temporal_score_rescale(
-    v_pred: torch.Tensor, x_t: torch.Tensor, t: float, rescale_k: float, rescale_sigma: float
-) -> torch.Tensor:
+        v_pred: torch.Tensor, x_t: torch.Tensor, t: float, rescale_k: float,
+        rescale_sigma: float) -> torch.Tensor:
     # for https://arxiv.org/pdf/2510.01184
     if t < 1:
-        snr = (1 - t) ** 2 / (t ** 2)
-        ratio = (snr * rescale_sigma ** 2 + 1) / (snr * rescale_sigma ** 2 / rescale_k + 1)
+        snr = (1 - t)**2 / (t**2)
+        ratio = (snr * rescale_sigma**2 + 1) / (snr * rescale_sigma**2 / rescale_k + 1)
         return 1 / (1 - t) * (ratio * ((1 - t) * v_pred + x_t) - x_t)
     return v_pred
 
@@ -349,9 +419,9 @@ def sample_euler_cfg_independent_guidances(
 ) -> torch.Tensor:
 
     if sequence_length is None:
-        sequence_length = 640 # max sequence length during training
+        sequence_length = 640  # max sequence length during training
 
-    INIT_SCALE = 0.999 # so that we can apply rescale to first step
+    INIT_SCALE = 0.999  # so that we can apply rescale to first step
 
     device, dtype = model.device, model.dtype
     batch_size = text_input_ids.shape[0]
@@ -388,17 +458,19 @@ def sample_euler_cfg_independent_guidances(
         if has_cfg:
             v_cond, v_uncond_text, v_uncond_speaker = model(
                 x=torch.cat([x_t, x_t, x_t], dim=0).to(dtype),
-                t=(torch.ones((batch_size * 3,), device=device) * t).to(dtype),
+                t=(torch.ones((batch_size * 3, ), device=device) * t).to(dtype),
                 text_mask=full_text_mask,
                 speaker_mask=full_speaker_mask,
                 kv_cache_text=kv_text_full,
                 kv_cache_speaker=kv_speaker_full,
-            ).float().chunk(3, dim=0)
-            v_pred = v_cond + cfg_scale_text * (v_cond - v_uncond_text) + cfg_scale_speaker * (v_cond - v_uncond_speaker) # can also use a single, joint unconditional for fewer NFE
+            ).float().chunk(
+                3, dim=0)
+            v_pred = v_cond + cfg_scale_text * (v_cond - v_uncond_text) + cfg_scale_speaker * (
+                v_cond - v_uncond_speaker)  # can also use a single, joint unconditional for fewer NFE
         else:
             v_pred = model(
                 x=x_t.to(dtype),
-                t=(torch.ones((batch_size,), device=device) * t).to(dtype),
+                t=(torch.ones((batch_size, ), device=device) * t).to(dtype),
                 text_mask=text_mask,
                 speaker_mask=speaker_mask,
                 kv_cache_text=kv_text_cond,
@@ -417,7 +489,6 @@ def sample_euler_cfg_independent_guidances(
         x_t = x_t + v_pred * (t_next - t)
 
     return x_t
-
 
 
 # ___________________________________________________________
@@ -453,7 +524,8 @@ if __name__ == "__main__":
         speaker_kv_scale=None,
         speaker_kv_max_layers=None,
         speaker_kv_min_t=None,
-        sequence_length=640, # (max 640. shorter lengths will generate prefixes, not necessarily full generations)
+        sequence_length=
+        640,  # (max 640. shorter lengths will generate prefixes, not necessarily full generations)
     )
     audio_out = ae_decode(fish_ae, pca_state, latent_out)
     audio_out = crop_audio_to_flattening_point(audio_out, latent_out[0])

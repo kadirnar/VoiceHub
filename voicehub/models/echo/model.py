@@ -1,13 +1,13 @@
-from typing import Tuple, List
+from typing import List, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 
-import torch.nn.functional as F
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> torch.Tensor:
-    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)] / dim))
+    freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)] / dim))
     t = torch.arange(end)
     freqs = torch.outer(t, freqs)
     freqs_cis = torch.complex(torch.cos(freqs), torch.sin(freqs))
@@ -31,12 +31,11 @@ def get_timestep_embedding(
     assert embed_size % 2 == 0
 
     half = embed_size // 2
-    
+
     freqs = 1000 * torch.exp(
-        -torch.log(torch.tensor(10000.0)) * 
-        torch.arange(start=0, end=half, dtype=torch.float32) / half
-    ).to(timestep.device)
-        
+        -torch.log(torch.tensor(10000.0)) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(
+            timestep.device)
+
     args = timestep[..., None] * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
 
@@ -44,12 +43,8 @@ def get_timestep_embedding(
 
 
 class LowRankAdaLN(nn.Module):
-    def __init__(
-        self,
-        model_size: int,
-        rank: int,
-        eps: float
-    ):
+
+    def __init__(self, model_size: int, rank: int, eps: float):
         super().__init__()
         self.eps = eps
 
@@ -83,12 +78,9 @@ class LowRankAdaLN(nn.Module):
         return x.to(x_dtype), gate
 
 
-class RMSNorm(nn.Module): # could also just use torch rmsnorm
-    def __init__(
-        self,
-        model_size: int | Tuple[int, int],
-        eps: float
-    ):
+class RMSNorm(nn.Module):  # could also just use torch rmsnorm
+
+    def __init__(self, model_size: int | Tuple[int, int], eps: float):
         super().__init__()
         self.eps = eps
 
@@ -103,14 +95,10 @@ class RMSNorm(nn.Module): # could also just use torch rmsnorm
         x = x * self.weight
         return x.to(x_dtype)
 
+
 class SelfAttention(nn.Module):
-    def __init__(
-        self,
-        model_size: int,
-        num_heads: int,
-        is_causal: bool,
-        norm_eps: float
-    ):
+
+    def __init__(self, model_size: int, num_heads: int, is_causal: bool, norm_eps: float):
         super().__init__()
         self.num_heads = num_heads
         self.is_causal = is_causal
@@ -124,7 +112,7 @@ class SelfAttention(nn.Module):
         assert model_size % num_heads == 0
         self.q_norm = RMSNorm((num_heads, model_size // num_heads), eps=norm_eps)
         self.k_norm = RMSNorm((num_heads, model_size // num_heads), eps=norm_eps)
-        
+
     def forward(self, x: torch.Tensor, mask: torch.Tensor | None, freqs_cis: torch.Tensor) -> torch.Tensor:
 
         batch_size, seq_len = x.shape[:2]
@@ -142,7 +130,7 @@ class SelfAttention(nn.Module):
         xk = apply_rotary_emb(xk, freqs_cis[:seq_len])
 
         if mask is not None:
-            assert mask.ndim == 2 # (b, s)
+            assert mask.ndim == 2  # (b, s)
             mask = mask[:, None, None]
 
         output = F.scaled_dot_product_attention(
@@ -150,8 +138,7 @@ class SelfAttention(nn.Module):
             key=xk.transpose(1, 2),
             value=xv.transpose(1, 2),
             attn_mask=mask,
-            is_causal=self.is_causal
-        ).transpose(1, 2)
+            is_causal=self.is_causal).transpose(1, 2)
 
         output = output.reshape(batch_size, seq_len, -1)
         output = output * torch.sigmoid(gate)
@@ -160,16 +147,12 @@ class SelfAttention(nn.Module):
 
         return output
 
+
 class JointAttention(nn.Module):
+
     def __init__(
-        self,
-        model_size: int,
-        num_heads: int,
-        text_model_size: int,
-        speaker_model_size: int,
-        speaker_patch_size: int,
-        norm_eps: float
-    ):
+            self, model_size: int, num_heads: int, text_model_size: int, speaker_model_size: int,
+            speaker_patch_size: int, norm_eps: float):
         super().__init__()
         self.speaker_patch_size = speaker_patch_size
         self.num_heads = num_heads
@@ -200,18 +183,12 @@ class JointAttention(nn.Module):
         y1, y2 = y.chunk(2, dim=-2)
         y1 = apply_rotary_emb(y1, fc)
         return torch.cat([y1, y2], dim=-2)
-    
+
     def forward(
-        self,
-        x: torch.Tensor,
-        text_mask: torch.Tensor,
-        speaker_mask: torch.Tensor,
-        freqs_cis: torch.Tensor,
-        kv_cache_text: Tuple[torch.Tensor, torch.Tensor],
-        kv_cache_speaker: Tuple[torch.Tensor, torch.Tensor],
-        start_pos: int | None,
-        kv_cache_latent: Tuple[torch.Tensor, torch.Tensor] | None
-    ) -> torch.Tensor:
+            self, x: torch.Tensor, text_mask: torch.Tensor, speaker_mask: torch.Tensor,
+            freqs_cis: torch.Tensor, kv_cache_text: Tuple[torch.Tensor, torch.Tensor],
+            kv_cache_speaker: Tuple[torch.Tensor, torch.Tensor], start_pos: int | None,
+            kv_cache_latent: Tuple[torch.Tensor, torch.Tensor] | None) -> torch.Tensor:
         batch_size, seq_len = x.shape[:2]
 
         xq = self.wq(x).reshape(batch_size, seq_len, self.num_heads, -1)
@@ -226,28 +203,32 @@ class JointAttention(nn.Module):
         if start_pos is None:
             start_pos = 0
 
-        freqs_q = freqs_cis[start_pos : start_pos + seq_len]
-    
+        freqs_q = freqs_cis[start_pos:start_pos + seq_len]
+
         xq = self._apply_rotary_half(xq, freqs_q)
         xk_self = self._apply_rotary_half(xk_self, freqs_q)
 
         xk_text, xv_text = kv_cache_text
         xk_speaker, xv_speaker = kv_cache_speaker
 
-        if kv_cache_latent is None or kv_cache_latent[0].shape [1] == 0:
-            xk_latent = torch.zeros((batch_size, 0, self.num_heads, xq.shape[-1]), device=x.device, dtype=x.dtype)
-            xv_latent = torch.zeros((batch_size, 0, self.num_heads, xq.shape[-1]), device=x.device, dtype=x.dtype)
+        if kv_cache_latent is None or kv_cache_latent[0].shape[1] == 0:
+            xk_latent = torch.zeros((batch_size, 0, self.num_heads, xq.shape[-1]),
+                                    device=x.device,
+                                    dtype=x.dtype)
+            xv_latent = torch.zeros((batch_size, 0, self.num_heads, xq.shape[-1]),
+                                    device=x.device,
+                                    dtype=x.dtype)
             latent_mask = torch.zeros((batch_size, 0), dtype=torch.bool, device=x.device)
         else:
             xk_latent, xv_latent = kv_cache_latent
-            latent_positions = torch.arange(xk_latent.shape[1], device=x.device, dtype=torch.long) * self.speaker_patch_size
+            latent_positions = torch.arange(
+                xk_latent.shape[1], device=x.device, dtype=torch.long) * self.speaker_patch_size
             latent_mask = (latent_positions[None, :] < start_pos).expand(batch_size, xk_latent.shape[1])
 
         xk = torch.cat([xk_self, xk_latent, xk_text, xk_speaker], dim=1)
         xv = torch.cat([xv_self, xv_latent, xv_text, xv_speaker], dim=1)
 
         self_mask = torch.ones((batch_size, seq_len), dtype=torch.bool, device=x.device)
-
 
         mask = torch.cat([self_mask, latent_mask, text_mask, speaker_mask], dim=1)
         mask = mask[:, None, None]
@@ -257,12 +238,11 @@ class JointAttention(nn.Module):
             key=xk.transpose(1, 2),
             value=xv.transpose(1, 2),
             attn_mask=mask,
-            is_causal=False
-        ).transpose(1, 2)
-        
+            is_causal=False).transpose(1, 2)
+
         output = output.reshape(batch_size, seq_len, -1)
         output = output * torch.sigmoid(gate)
-        
+
         output = self.wo(output)
 
         return output
@@ -281,7 +261,8 @@ class JointAttention(nn.Module):
         xk = self.k_norm(xk)
         return xk, xv
 
-    def get_kv_cache_latent(self, latent_state: torch.Tensor, freqs_cis: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_kv_cache_latent(self, latent_state: torch.Tensor,
+                            freqs_cis: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         batch_size = latent_state.shape[0]
         seq_len = latent_state.shape[1]
         xk = self.wk_latent(latent_state).reshape(batch_size, seq_len, self.num_heads, -1)
@@ -294,11 +275,8 @@ class JointAttention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(
-        self,
-        model_size: int, 
-        intermediate_size: int
-    ):
+
+    def __init__(self, model_size: int, intermediate_size: int):
         super().__init__()
         self.w1 = nn.Linear(model_size, intermediate_size, bias=False)
         self.w3 = nn.Linear(model_size, intermediate_size, bias=False)
@@ -309,25 +287,13 @@ class MLP(nn.Module):
 
 
 class EncoderTransformerBlock(nn.Module):
+
     def __init__(
-        self,
-        model_size: int,
-        num_heads: int,
-        intermediate_size: int,
-        is_causal: bool,
-        norm_eps: float
-    ):
+            self, model_size: int, num_heads: int, intermediate_size: int, is_causal: bool, norm_eps: float):
         super().__init__()
         self.attention = SelfAttention(
-            model_size=model_size,
-            num_heads=num_heads,
-            is_causal=is_causal,
-            norm_eps=norm_eps
-        )
-        self.mlp = MLP(
-            model_size=model_size,
-            intermediate_size=intermediate_size
-        )
+            model_size=model_size, num_heads=num_heads, is_causal=is_causal, norm_eps=norm_eps)
+        self.mlp = MLP(model_size=model_size, intermediate_size=intermediate_size)
 
         self.attention_norm = RMSNorm(model_size, norm_eps)
         self.mlp_norm = RMSNorm(model_size, norm_eps)
@@ -338,7 +304,9 @@ class EncoderTransformerBlock(nn.Module):
 
         return x
 
+
 class TransformerBlock(nn.Module):
+
     def __init__(
         self,
         model_size: int,
@@ -357,17 +325,13 @@ class TransformerBlock(nn.Module):
             text_model_size=text_model_size,
             speaker_model_size=speaker_model_size,
             speaker_patch_size=speaker_patch_size,
-            norm_eps=norm_eps
-        )
-        
-        self.mlp = MLP(
-            model_size=model_size,
-            intermediate_size=intermediate_size
-        )
+            norm_eps=norm_eps)
+
+        self.mlp = MLP(model_size=model_size, intermediate_size=intermediate_size)
 
         self.attention_adaln = LowRankAdaLN(model_size=model_size, rank=adaln_rank, eps=norm_eps)
         self.mlp_adaln = LowRankAdaLN(model_size=model_size, rank=adaln_rank, eps=norm_eps)
-    
+
     def forward(
         self,
         x: torch.Tensor,
@@ -382,14 +346,18 @@ class TransformerBlock(nn.Module):
     ) -> torch.Tensor:
 
         x_norm, attention_gate = self.attention_adaln(x, cond_embed)
-        x = x + attention_gate * self.attention(x_norm, text_mask, speaker_mask, freqs_cis, kv_cache_text, kv_cache_speaker, start_pos, kv_cache_latent)
+        x = x + attention_gate * self.attention(
+            x_norm, text_mask, speaker_mask, freqs_cis, kv_cache_text, kv_cache_speaker, start_pos,
+            kv_cache_latent)
 
         x_norm, mlp_gate = self.mlp_adaln(x, cond_embed)
         x = x + mlp_gate * self.mlp(x_norm)
 
         return x
 
+
 class TextEncoder(nn.Module):
+
     def __init__(
         self,
         vocab_size: int,
@@ -409,24 +377,24 @@ class TextEncoder(nn.Module):
                 num_heads=num_heads,
                 intermediate_size=intermediate_size,
                 is_causal=False,
-                norm_eps=norm_eps
-            )
+                norm_eps=norm_eps)
             self.blocks.append(block)
 
         self.head_dim = model_size // num_heads
 
-
     def forward(self, input_ids: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         x = self.text_embedding(input_ids)
 
-        freqs_cis = precompute_freqs_cis(self.head_dim, input_ids.shape[1]).to(x.device) # could cache
+        freqs_cis = precompute_freqs_cis(self.head_dim, input_ids.shape[1]).to(x.device)  # could cache
 
         for block in self.blocks:
             x = block(x, mask, freqs_cis)
 
         return x
 
+
 class SpeakerEncoder(nn.Module):
+
     def __init__(
         self,
         latent_size: int,
@@ -449,19 +417,19 @@ class SpeakerEncoder(nn.Module):
                 num_heads=num_heads,
                 intermediate_size=intermediate_size,
                 is_causal=True,
-                norm_eps=norm_eps
-            )
+                norm_eps=norm_eps)
             self.blocks.append(block)
 
         self.head_dim = model_size // num_heads
 
     def forward(self, latent: torch.Tensor) -> torch.Tensor:
-        x = latent.reshape(*latent.shape[:-2], latent.shape[-2] // self.patch_size, latent.shape[-1] * self.patch_size)
+        x = latent.reshape(
+            *latent.shape[:-2], latent.shape[-2] // self.patch_size, latent.shape[-1] * self.patch_size)
 
         x = self.in_proj(x)
-        x = x / 6. # this helped with initial activation dynamics in early ablations, could also bake into in_proj
+        x = x / 6.  # this helped with initial activation dynamics in early ablations, could also bake into in_proj
 
-        freqs_cis = precompute_freqs_cis(self.head_dim, x.shape[1]).to(x.device) # could cache
+        freqs_cis = precompute_freqs_cis(self.head_dim, x.shape[1]).to(x.device)  # could cache
 
         for block in self.blocks:
             x = block(x, None, freqs_cis)
@@ -470,6 +438,7 @@ class SpeakerEncoder(nn.Module):
 
 
 class EchoDiT(nn.Module):
+
     def __init__(
         self,
         latent_size: int,
@@ -558,8 +527,6 @@ class EchoDiT(nn.Module):
 
         self.head_dim = model_size // num_heads
 
-
-
     def forward(
         self,
         x: torch.Tensor,
@@ -567,16 +534,16 @@ class EchoDiT(nn.Module):
         text_mask: torch.Tensor,
         speaker_mask: torch.Tensor,
         kv_cache_text: List[Tuple[torch.Tensor, torch.Tensor]],
-        kv_cache_speaker: List[Tuple[torch.Tensor, torch.Tensor]],        
+        kv_cache_speaker: List[Tuple[torch.Tensor, torch.Tensor]],
         start_pos: int | None = None,
         kv_cache_latent: List[Tuple[torch.Tensor, torch.Tensor]] | None = None,
     ) -> torch.Tensor:
 
         if start_pos is None:
             start_pos = 0
-    
+
         max_pos = start_pos + x.shape[1]
-        freqs_cis = precompute_freqs_cis(self.head_dim, max_pos).to(x.device) # could cache
+        freqs_cis = precompute_freqs_cis(self.head_dim, max_pos).to(x.device)  # could cache
 
         speaker_mask = speaker_mask[..., ::self.speaker_patch_size]
 
@@ -629,14 +596,16 @@ class EchoDiT(nn.Module):
 
         seq_len = latent_state.shape[1]
         max_pos = seq_len * self.speaker_patch_size
-        freqs_cis = precompute_freqs_cis(self.head_dim, max_pos).to(latent_state.device) # could cache
+        freqs_cis = precompute_freqs_cis(self.head_dim, max_pos).to(latent_state.device)  # could cache
         positions = torch.arange(seq_len, device=latent_state.device) * self.speaker_patch_size
         freqs_latent = freqs_cis[positions]
 
         return [block.attention.get_kv_cache_latent(latent_state, freqs_latent) for block in self.blocks]
 
     @property
-    def device(self) -> torch.device: return next(self.parameters()).device
+    def device(self) -> torch.device:
+        return next(self.parameters()).device
 
     @property
-    def dtype(self) -> torch.dtype: return next(self.parameters()).dtype
+    def dtype(self) -> torch.dtype:
+        return next(self.parameters()).dtype
