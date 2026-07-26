@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from voicehub.errors import OptionalDependencyError
+from voicehub.path_utils import is_explicit_local_path
 
 
 def resolve_pretrained_file(
-    pretrained_model_name_or_path: str,
+    pretrained_model_name_or_path: str | Path,
     filename: str,
     *,
     subfolder: str = "",
@@ -32,6 +33,8 @@ def resolve_pretrained_file(
         if subfolder or source.name != filename:
             raise FileNotFoundError(f"{source} is a file, but {relative_file} was requested.")
         return source
+    if is_explicit_local_path(pretrained_model_name_or_path):
+        raise FileNotFoundError(f"Local pretrained path was not found: {source}.")
 
     try:
         from huggingface_hub import hf_hub_download

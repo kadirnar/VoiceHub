@@ -17,7 +17,6 @@ from voicehub.models.f5tts.source.third_party.BigVGAN.bigvgan import BigVGAN as 
 
 h = None
 device = None
-torch.backends.cudnn.benchmark = False
 
 
 def inference(a, h):

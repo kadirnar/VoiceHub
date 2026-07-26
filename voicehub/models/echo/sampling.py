@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, List, Tuple
 
 import safetensors.torch as st
@@ -10,8 +11,28 @@ from voicehub.models.echo.autoencoder import DAC, build_ae
 from voicehub.models.echo.model import EchoDiT
 
 
+def _resolve_checkpoint_file(
+    name_or_path: str | Path,
+    filename: str,
+    *,
+    token: str | None = None,
+) -> str:
+    raw_source = str(name_or_path)
+    source = Path(name_or_path).expanduser()
+    if source.is_file():
+        return str(source.resolve())
+    if source.is_dir():
+        checkpoint = source / filename
+        if not checkpoint.is_file():
+            raise FileNotFoundError(f"Echo checkpoint file was not found: {checkpoint}.")
+        return str(checkpoint.resolve())
+    if (isinstance(name_or_path, Path) or source.is_absolute() or raw_source.startswith(("./", "../", "~"))):
+        raise FileNotFoundError(f"Echo checkpoint path was not found: {source}.")
+    return hf_hub_download(raw_source, filename, token=token)
+
+
 def load_model_from_hf(
-        repo_id: str = "jordand/echo-tts-base",
+        repo_id: str | Path = "jordand/echo-tts-base",
         device: str = "cuda",
         dtype: torch.dtype | None = torch.bfloat16,
         compile: bool = False,
@@ -38,7 +59,11 @@ def load_model_from_hf(
             timestep_embed_size=512,
             adaln_rank=256,
         )
-    w_path = hf_hub_download(repo_id, "pytorch_model.safetensors", token=token)
+    w_path = _resolve_checkpoint_file(
+        repo_id,
+        "pytorch_model.safetensors",
+        token=token,
+    )
     state = st.load_file(w_path, device="cpu")
 
     if delete_blockwise_modules:
@@ -72,7 +97,7 @@ def compile_model(model: EchoDiT) -> EchoDiT:
 
 
 def load_fish_ae_from_hf(
-        repo_id: str = "jordand/fish-s1-dac-min",
+        repo_id: str | Path = "jordand/fish-s1-dac-min",
         device: str = "cuda",
         dtype: torch.dtype | None = torch.float32,
         compile: bool = False,
@@ -81,7 +106,11 @@ def load_fish_ae_from_hf(
     with torch.device("meta"):
         fish_ae = build_ae()
 
-    w_path = hf_hub_download(repo_id, "pytorch_model.safetensors", token=token)
+    w_path = _resolve_checkpoint_file(
+        repo_id,
+        "pytorch_model.safetensors",
+        token=token,
+    )
     if dtype is not None and dtype != torch.float32:
         state = st.load_file(w_path, device="cpu")
         state = {k: v.to(dtype=dtype) for k, v in state.items()}
@@ -115,11 +144,15 @@ class PCAState:
 
 
 def load_pca_state_from_hf(
-        repo_id: str = "jordand/echo-tts-base",
+        repo_id: str | Path = "jordand/echo-tts-base",
         device: str = "cuda",
         filename: str = "pca_state.safetensors",
         token: str | None = None) -> PCAState:
-    p_path = hf_hub_download(repo_id, filename, token=token)
+    p_path = _resolve_checkpoint_file(
+        repo_id,
+        filename,
+        token=token,
+    )
     t = st.load_file(p_path, device=device)
     return PCAState(
         pca_components=t["pca_components"],

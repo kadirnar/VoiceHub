@@ -9,7 +9,12 @@ AutoConfig
     -> AutoModelForTextToSpeech
     -> PreTrainedTTSModel
        -> lazy source import
-       -> checkpoint loading
+       -> serialized checkpoint loading / runtime transitions
+       -> dependency-free request validation
+       -> InferenceStrategy
+          -> compatibility validation before checkpoint allocation
+          -> compile / quantize / wrap serving runtime
+          -> restore trainable runtime before fine-tuning
        -> forward(...) / generate(...)
        -> TTSOutput(audio, sample_rate, metadata)
 
@@ -42,13 +47,19 @@ For example, F5-TTS exports `F5TTSConfig` and
 `DiaForTextToSpeech`. Historical names remain aliases, but the registry and
 serialized `architectures` field always use canonical names.
 
-Concrete models implement only two private hooks:
+Concrete models implement two required private hooks and can add a lightweight
+request validator:
 
 ```python
 class ExampleForTextToSpeech(PreTrainedTTSModel):
     config_class = ExampleConfig
 
     def _load_pretrained_model(self) -> None:
+        ...
+
+    def _validate_generation_inputs(self, model_inputs) -> None:
+        # Optional: reject invalid modes or missing conditioning before the
+        # checkpoint is allocated.
         ...
 
     def _generate(self, text: str, **kwargs) -> TTSOutput:
@@ -61,6 +72,7 @@ The following public methods are inherited unchanged by all models:
 from_pretrained(...)
 save_pretrained(...)
 load()
+set_inference_strategy(...)
 prepare_inputs_for_generation(...)
 forward(text, **kwargs)
 generate(text, generation_config=None, **kwargs)
@@ -70,6 +82,28 @@ __call__(text, generation_config=None, **kwargs)
 This prevents individual integrations from inventing incompatible public
 signatures. Backend-specific synthesis options exist only in the private
 `_generate` hook and are passed through the common `generate` method.
+`forward()` owns lazy loading, lifecycle locking, and output-contract
+validation. A backend therefore never needs to call `load()` from
+`_generate()`. This keeps first-use concurrency safe for runtimes with mutable
+KV caches and makes generation-to-training transitions explicit. Inference and
+training readiness are tracked independently, so repeated lifecycle calls are
+idempotent and a failed transition can be retried without trusting a partially
+mutated runtime.
+
+Inference integrations follow the same runtime rules across model families:
+
+- Resolve local checkpoints without network access and defer Hub downloads
+  until `load()`.
+- Derive the output sample rate from the loaded codec or synthesizer instead of
+  trusting a wrapper default.
+- Enter serving mode through `_prepare_for_inference()` and undo serving-only
+  compilation, cache, or precision changes in `_prepare_for_training()`.
+- Apply cross-model runtime optimizations through `InferenceStrategy`, outside
+  model-family generation code.
+- Scope stochastic state to one request and restore Python, NumPy, Torch, and
+  selected-accelerator RNG state afterward.
+- Return audio through `finish_audio_output()` so waveform validation, metadata,
+  and optional persistence share one contract.
 
 The important directories are:
 
@@ -79,6 +113,7 @@ voicehub/
   auto.py                    automatic config/model factories
   configuration_utils.py     serializable config base
   generation_configuration.py generation defaults
+  inference_strategy.py       pluggable inference optimization boundary
   modeling_utils.py          pretrained model lifecycle
   modeling_outputs.py        normalized generation output
   processing_utils.py        processor and BatchFeature
@@ -229,6 +264,37 @@ names. One optimizer name can own the whole phase, or names can map
 one-for-one to its component paths.
 
 ## Execution and optimization boundary
+
+`InferenceStrategy` is the serving-runtime boundary. Its default `eager`
+implementation is a no-op; custom strategies can integrate compilation,
+quantization, accelerator-specific graphs, or external serving runtimes
+without adding optimization branches to every model family:
+
+```text
+validate(wrapper)
+    -> load native checkpoint
+    -> wrapper._prepare_for_inference()
+    -> prepare(model, wrapper=wrapper)
+    -> generate
+
+load_for_training()
+    -> restore_for_training(model, wrapper=wrapper)
+    -> wrapper._prepare_for_training()
+```
+
+Validation is side-effect free and runs before checkpoint allocation.
+`prepare()` may replace or wrap the runtime and is called exactly once per
+inference transition. `restore_for_training()` runs before the family-specific
+training hook. Strategies are process-level policies rather than checkpoint
+metadata and are resolved lazily by name:
+
+```python
+register_inference_strategy("custom-runtime", CustomRuntimeStrategy)
+model = AutoModelForTextToSpeech.from_pretrained(
+    checkpoint,
+    inference_strategy="custom-runtime",
+)
+```
 
 The adapter owns model semantics: source resolution, input preparation, phase
 selection, freezing/detaching, native loss extraction, and explicitly enabled

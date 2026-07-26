@@ -4,10 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from voicehub.models.omnivoice.inference import (
-    OmniVoiceConfig,
-    OmniVoiceForTextToSpeech,
-)
+from voicehub.models.omnivoice.inference import OmniVoiceConfig, OmniVoiceForTextToSpeech
 
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 
@@ -16,7 +13,7 @@ TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 class OmniVoiceTrainingRuntimeTests(unittest.TestCase):
 
     @staticmethod
-    def _fake_loader(wrapper):
+    def _fake_runtime_builder(wrapper, *, training):
         import torch
 
         class Runtime(torch.nn.Module):
@@ -30,20 +27,15 @@ class OmniVoiceTrainingRuntimeTests(unittest.TestCase):
 
             def forward(self, input_ids, labels=None):
                 logits = input_ids.float() * self.weight
-                loss = (
-                    (logits - labels).square().mean()
-                    if labels is not None
-                    else None
-                )
+                loss = ((logits - labels).square().mean() if labels is not None else None)
                 return {"loss": loss, "logits": logits}
 
             def generate(self, **kwargs):
                 del kwargs
                 return [self.weight.detach().reshape(1)]
 
-        wrapper.model = Runtime(training=wrapper.is_training_load)
-        wrapper._loaded_for_training = wrapper.is_training_load
-        wrapper.config.sample_rate = 24_000
+        del wrapper
+        return Runtime(training=training), 24_000
 
     def test_runtime_switches_preserve_fine_tuned_weights(self):
         wrapper = OmniVoiceForTextToSpeech(
@@ -51,10 +43,10 @@ class OmniVoiceTrainingRuntimeTests(unittest.TestCase):
             device="cpu",
         )
         with patch.object(
-            OmniVoiceForTextToSpeech,
-            "_load_pretrained_model",
-            autospec=True,
-            side_effect=self._fake_loader,
+                OmniVoiceForTextToSpeech,
+                "_build_runtime",
+                autospec=True,
+                side_effect=self._fake_runtime_builder,
         ):
             wrapper.load_for_training()
             wrapper.model.weight.data.fill_(7.0)
@@ -82,10 +74,10 @@ class OmniVoiceTrainingRuntimeTests(unittest.TestCase):
             source = OmniVoiceForTextToSpeech(config, device="cpu")
 
             with patch.object(
-                OmniVoiceForTextToSpeech,
-                "_load_pretrained_model",
-                autospec=True,
-                side_effect=self._fake_loader,
+                    OmniVoiceForTextToSpeech,
+                    "_build_runtime",
+                    autospec=True,
+                    side_effect=self._fake_runtime_builder,
             ):
                 source.load_for_training()
                 source.model.weight.data.fill_(5.0)

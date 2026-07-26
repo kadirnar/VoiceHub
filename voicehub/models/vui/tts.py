@@ -1,5 +1,5 @@
 import re
-import time
+from contextlib import nullcontext
 
 import inflect
 import torch
@@ -41,6 +41,18 @@ REPLACE = [
 
 engine = None
 wm = None
+
+
+def _inference_precision(model: Vui):
+    """Return the autocast context and matching KV-cache dtype.
+
+    The upstream runtime is tuned for bfloat16 CUDA inference. CPU and
+    MPS execute in the model's native dtype; allocating a hard-coded
+    bfloat16 cache there creates mixed-dtype attention queries and keys.
+    """
+    if model.device.type == "cuda":
+        return torch.autocast("cuda", dtype=torch.bfloat16), torch.bfloat16
+    return nullcontext(), model.dtype
 
 
 def asr(chunk, model=None, prefix=None):
@@ -128,12 +140,55 @@ def simple_clean(text):
     text = re.sub(r"\n+", "\n", text)
     ntxt = re.sub(r" +", " ", text)
 
-    # Ensure that ntxt ends with . or ?
+    # Add sentence-final punctuation only when none is present.
     ntxt = ntxt.strip()
-    if not ntxt.endswith(".") or ntxt.endswith("?"):
+    if not ntxt.endswith((".", "?", "!")):
         ntxt += "."
     ntxt += " [pause]"
     return ntxt
+
+
+def _prepare_prompt_codes(
+    prompt_codes: Tensor | None,
+    *,
+    batch_size: int,
+    n_quantizers: int,
+    max_gen_len: int,
+    device,
+) -> Tensor:
+    """Normalize optional codec prompts to the decoder's code layout."""
+    if prompt_codes is None:
+        return torch.zeros(
+            (batch_size, n_quantizers, 0),
+            dtype=torch.int64,
+            device=device,
+        )
+    if not torch.is_tensor(prompt_codes):
+        raise TypeError("`prompt_codes` must be a torch tensor or None.")
+    if prompt_codes.ndim == 2:
+        prompt_codes = prompt_codes.unsqueeze(0)
+    if prompt_codes.ndim != 3:
+        raise ValueError(
+            "`prompt_codes` must have shape (quantizers, frames) or "
+            "(batch, quantizers, frames).")
+    if prompt_codes.shape[1] < n_quantizers:
+        raise ValueError(
+            f"`prompt_codes` contains {prompt_codes.shape[1]} quantizers, "
+            f"but this Vui checkpoint requires {n_quantizers}.")
+    if prompt_codes.shape[0] not in (1, batch_size):
+        raise ValueError(
+            f"`prompt_codes` batch size must be 1 or {batch_size}, "
+            f"received {prompt_codes.shape[0]}.")
+    if prompt_codes.shape[-1] >= max_gen_len:
+        raise ValueError("`prompt_codes` must leave at least one frame available for "
+                         "generation.")
+    prompt_codes = prompt_codes[:, :n_quantizers].to(
+        device=device,
+        dtype=torch.int64,
+    )
+    if prompt_codes.shape[0] == 1 and batch_size > 1:
+        prompt_codes = prompt_codes.repeat(batch_size, 1, 1)
+    return prompt_codes.contiguous()
 
 
 @torch.inference_mode()
@@ -161,15 +216,11 @@ def generate(
         Tensor of shape ``(1, Q, T)`` containing generated codebook indices.
     """
     text = simple_clean(text)
-    with (
-            torch.autocast("cuda", torch.bfloat16, True),
-            sdpa_kernel([SDPBackend.MATH]),
-    ):
-        t1 = time.perf_counter()
+    autocast_context, cache_dtype = _inference_precision(self)
+    with autocast_context, sdpa_kernel([SDPBackend.MATH]):
         batch_size = 1
         device = self.device
-        self.dtype
-        self.decoder.allocate_inference_cache(batch_size, device, torch.bfloat16)
+        self.decoder.allocate_inference_cache(batch_size, device, cache_dtype)
 
         texts = [text]
 
@@ -185,10 +236,13 @@ def generate(
         B = batch_size
         Q = self.config.model.n_quantizers
 
-        if prompt_codes is None:
-            prompt_codes = torch.zeros((batch_size, Q, 0), dtype=torch.int64, device=device)
-        else:
-            prompt_codes = prompt_codes[:, :Q].repeat(batch_size, 1, 1)
+        prompt_codes = _prepare_prompt_codes(
+            prompt_codes,
+            batch_size=batch_size,
+            n_quantizers=Q,
+            max_gen_len=max_gen_len,
+            device=device,
+        )
 
         start_offset = prompt_codes.size(-1)
 
@@ -199,8 +253,6 @@ def generate(
 
         # we generate codes up to the max_gen_len that will be mapped to the pattern sequence
         codes = torch.full((B, Q, max_gen_len), unknown_token, dtype=torch.int64, device=device)
-        print("codes", codes.shape)
-
         codes[:, :, :start_offset] = prompt_codes
 
         sequence, indexes, mask = pattern.build_pattern_sequence(codes, special_token_id)
@@ -231,9 +283,6 @@ def generate(
                 T += 1
 
             out = self.decoder(embeddings, input_pos)
-
-            if offset == 15:
-                print("TTFB", time.perf_counter() - t1)
 
             logits = torch.stack([self.audio_heads[q](out[:, -1]) for q in range(Q)], dim=1)
 
@@ -308,14 +357,14 @@ def render(
     top_k: int | None = 100,
     top_p: float | None = None,
     max_secs: int = 100,
+    max_chunk_retries: int = 3,
 ):
     """Render audio from text.
 
     Uses generate for text < 1000 characters, otherwise breaks text into
     sections and uses chunking with context.
     """
-    text = remove_all_invalid_non_speech(text)
-    text = simple_clean(text)
+    text = text.strip()
     SR = self.codec.config.sample_rate
     HZ = self.codec.hz
     max_gen_len = int(HZ * max_secs)
@@ -324,7 +373,7 @@ def render(
         codes = generate(self, text, prompt_codes, temperature, top_k, top_p, max_gen_len)
         codes = codes[..., :-10]
         audio = self.codec.from_indices(codes)
-        paudio = torchaudio.functional.resample(audio[0], 22050, 16000)
+        paudio = torchaudio.functional.resample(audio[0], SR, 16000)
         results = vad(paudio)
 
         if len(results):
@@ -343,22 +392,25 @@ def render(
     prev_codes = prompt_codes
     prev_text = ""
 
-    for i, line in enumerate(lines):
-        run = True
-        while run:
+    for chunk_index, line in enumerate(lines):
+        last_error = None
+        for _ in range(max_chunk_retries):
             current_text = prev_text + "\n" + line if prev_text else line
             current_text = current_text.strip()
             current_text = current_text.replace("...", "")
-            current_text = current_text + " [pause]"
 
             # Calculate max length based on text length
-            maxlen = int(HZ * int(60 * len(current_text) / 500))
+            estimated_seconds = max(1.0, 60 * len(current_text) / 500)
+            maxlen = max(
+                1,
+                min(int(HZ * max_secs), round(HZ * estimated_seconds)),
+            )
 
             try:
-                print("rendering", current_text)
+                autocast_context, _ = _inference_precision(self)
                 with (
                         torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.MATH),
-                        torch.autocast("cuda", dtype=torch.bfloat16, enabled=True),
+                        autocast_context,
                 ):
                     codes = generate(
                         self,
@@ -373,27 +425,34 @@ def render(
                 codes = codes[..., :-10]
                 audio = self.codec.from_indices(codes)
                 # Resample for VAD
-                paudio = torchaudio.functional.resample(audio[0], 22050, 16000)
+                paudio = torchaudio.functional.resample(audio[0], SR, 16000)
 
                 results = vad(paudio)
-                run = len(results) == 0
 
                 if len(results):
                     prev_text = line
                     # Cut the audio based on VAD results, add 200ms silence at end
-                    s, e = results[0][0], results[0][1]
+                    s, e = results[0][0], results[-1][1]
                     codes = codes[..., int(s * HZ):int(e * HZ)]
                     prev_codes = codes
                     audio = audio[..., int(s * SR):int((e + 0.2) * SR)].cpu()
                     audios.append(audio)
+                    break
                 else:
                     prev_codes = orig_codes
                     prev_text = ""
             except KeyboardInterrupt:
-                break
+                raise
             except RuntimeError as e:
+                last_error = e
                 prev_codes = orig_codes
                 prev_text = ""
-                print(e)
+        else:
+            message = (
+                f"Vui failed to render chunk {chunk_index + 1} after "
+                f"{max_chunk_retries} attempts.")
+            if last_error is None:
+                raise RuntimeError(message)
+            raise RuntimeError(message) from last_error
 
     return torch.cat(audios, dim=-1)

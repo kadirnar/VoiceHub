@@ -43,13 +43,11 @@ class OuteTTSSFTDataset:
         speaker = record.get("speaker")
         if speaker is not None:
             if not isinstance(speaker, Mapping):
-                raise TypeError(
-                    f"OuteTTS record {index} speaker must be a mapping.")
+                raise TypeError(f"OuteTTS record {index} speaker must be a mapping.")
             return copy.deepcopy(dict(speaker))
         audio_path = record.get("audio")
         if not audio_path:
-            raise ValueError(
-                f"OuteTTS record {index} requires 'speaker' or 'audio'.")
+            raise ValueError(f"OuteTTS record {index} requires 'speaker' or 'audio'.")
         return self.interface.create_speaker(
             str(audio_path),
             transcript=record.get("text"),
@@ -84,16 +82,13 @@ class OuteTTSSFTDataset:
                 add_special_tokens=False,
             )
             if len(audio_start_ids) != 1:
-                raise ValueError(
-                    "OuteTTS audio-start marker must encode to one token.")
+                raise ValueError("OuteTTS audio-start marker must encode to one token.")
             try:
                 completion_start = labels.index(audio_start_ids[0]) + 1
             except ValueError as exc:
-                raise ValueError(
-                    "OuteTTS training prompt is missing its audio-start token.") from exc
+                raise ValueError("OuteTTS training prompt is missing its audio-start token.") from exc
             labels[:completion_start] = [-100] * completion_start
         return {
             "input_ids": input_ids,
             "labels": labels,
         }
-

@@ -33,17 +33,40 @@ class Context:
 
 
 _GLOBAL_CTX: Context | None = None
+_GLOBAL_CTX_OWNER: object | None = None
 
 
-def set_global_ctx(ctx: Context):
-    global _GLOBAL_CTX
-    assert _GLOBAL_CTX is None, "Global context is already set"
+def set_global_ctx(ctx: Context, *, owner: object | None = None) -> object:
+    global _GLOBAL_CTX, _GLOBAL_CTX_OWNER
+    owner = ctx if owner is None else owner
+    if _GLOBAL_CTX is not None:
+        if _GLOBAL_CTX is ctx and _GLOBAL_CTX_OWNER is owner:
+            return owner
+        raise RuntimeError("ZONOS2 global context is already owned by another engine.")
     _GLOBAL_CTX = ctx
+    _GLOBAL_CTX_OWNER = owner
+    return owner
 
 
 def get_global_ctx() -> Context:
     assert _GLOBAL_CTX is not None, "Global context is not set"
     return _GLOBAL_CTX
+
+
+def try_get_global_ctx() -> Context | None:
+    return _GLOBAL_CTX
+
+
+def reset_global_ctx(*, owner: object) -> None:
+    """Release the context only for the engine which installed it."""
+    global _GLOBAL_CTX, _GLOBAL_CTX_OWNER
+    if _GLOBAL_CTX is None:
+        return
+    if _GLOBAL_CTX_OWNER is not owner:
+        raise RuntimeError(
+            "Cannot release a ZONOS2 global context owned by another engine.")
+    _GLOBAL_CTX = None
+    _GLOBAL_CTX_OWNER = None
 
 
 # =============================================================================

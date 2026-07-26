@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
 from functools import wraps
 from pathlib import Path
+from typing import Any
 
 from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
+from voicehub.models._shared import finish_audio_output, seeded_inference, validate_local_file
 
 
 def _install_vendored_yaml_loader(runtime) -> None:
@@ -54,9 +58,12 @@ class CosyVoiceConfig(VoiceHubConfig):
         self.load_vllm = load_vllm
         self.fp16 = fp16
         self.training_component = training_component
+        self.validate()
 
     def validate(self) -> None:
-        component = self.training_component.lower().replace("-", "_")
+        if not isinstance(self.training_component, str):
+            raise TypeError("`training_component` must be a string.")
+        component = self.training_component.strip().lower().replace("-", "_")
         allowed = {
             "llm",
             "language_model",
@@ -68,6 +75,7 @@ class CosyVoiceConfig(VoiceHubConfig):
             raise ValueError(
                 "training_component must select llm, flow, "
                 "hifigan_generator, or hifigan_discriminator.")
+        self.training_component = component
 
 
 class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
@@ -75,6 +83,13 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
 
     config_class = CosyVoiceConfig
     default_model_name_or_path = "FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
+    _SUPPORTED_MODES = {
+        "auto",
+        "sft",
+        "zero_shot",
+        "cross_lingual",
+        "instruct",
+    }
 
     def __init__(
         self,
@@ -90,6 +105,7 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
             model_path=model_path,
             **config_overrides,
         )
+        config.validate()
         self._cosyvoice_training_backend = None
         super().__init__(config, device=device, lazy_load=lazy_load)
 
@@ -111,6 +127,37 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
         self.config.name_or_path = str(backend.artifacts.model_directory)
         self.config.sample_rate = backend.sample_rate
 
+    def _resolve_model_directory(self, runtime) -> Path:
+        source = Path(self.config.name_or_path).expanduser()
+        if source.is_dir():
+            return source.resolve()
+        if source.exists():
+            raise ValueError("CosyVoice expects a checkpoint directory, but received "
+                             f"a file: {source}.")
+        return Path(runtime.snapshot_download(self.config.name_or_path)).resolve()
+
+    def _inference_runtime_spec(self, runtime, model_directory: Path):
+        common = {
+            "model_dir": str(model_directory),
+            "load_trt": self.config.load_trt,
+            "fp16": self.config.fp16,
+            "device": self.device,
+        }
+        if (model_directory / "cosyvoice3.yaml").is_file():
+            common["load_vllm"] = self.config.load_vllm
+            return runtime.CosyVoice3, common
+        if (model_directory / "cosyvoice2.yaml").is_file():
+            common["load_jit"] = self.config.load_jit
+            common["load_vllm"] = self.config.load_vllm
+            return runtime.CosyVoice2, common
+        if (model_directory / "cosyvoice.yaml").is_file():
+            common["load_jit"] = self.config.load_jit
+            return runtime.CosyVoice, common
+        raise ValueError(
+            f"{model_directory} does not contain a supported CosyVoice "
+            "configuration (cosyvoice.yaml, cosyvoice2.yaml, or "
+            "cosyvoice3.yaml).")
+
     def _load_full_inference_model(self) -> None:
         runtime = import_optional(
             "voicehub.models.cosyvoice.source.cosyvoice.cli.cosyvoice",
@@ -118,32 +165,19 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
             install_extra="cosyvoice",
         )
         _install_vendored_yaml_loader(runtime)
-        model_directory = Path(self.config.name_or_path).expanduser()
-        if not model_directory.is_dir():
-            model_directory = Path(runtime.snapshot_download(self.config.name_or_path))
-
-        common = {
-            "model_dir": str(model_directory),
-            "load_trt": self.config.load_trt,
-            "fp16": self.config.fp16,
-        }
-        if (model_directory / "cosyvoice3.yaml").is_file():
-            model_class = runtime.CosyVoice3
-            common["load_vllm"] = self.config.load_vllm
-        elif (model_directory / "cosyvoice2.yaml").is_file():
-            model_class = runtime.CosyVoice2
-            common["load_jit"] = self.config.load_jit
-            common["load_vllm"] = self.config.load_vllm
-        elif (model_directory / "cosyvoice.yaml").is_file():
-            model_class = runtime.CosyVoice
-            common["load_jit"] = self.config.load_jit
-        else:
-            raise ValueError(f"{model_directory} does not contain a CosyVoice model config.")
-
-        self.model = model_class(**common)
+        model_directory = self._resolve_model_directory(runtime)
+        model_class, model_kwargs = self._inference_runtime_spec(
+            runtime,
+            model_directory,
+        )
+        model = model_class(**model_kwargs)
+        sample_rate = int(getattr(model, "sample_rate", 0))
+        if sample_rate <= 0:
+            raise ValueError("The loaded CosyVoice runtime reported an invalid sample rate.")
+        self.model = model
         self._cosyvoice_training_backend = None
         self.config.name_or_path = str(model_directory)
-        self.config.sample_rate = self.model.sample_rate
+        self.config.sample_rate = sample_rate
 
     def _validate_training_runtime(self) -> None:
         if self.config.load_jit or self.config.load_trt or self.config.load_vllm:
@@ -264,9 +298,6 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
         stream: bool,
         speed: float,
     ):
-        if mode == "auto":
-            mode = "zero_shot" if speaker_audio_path else "sft"
-
         common = {"stream": stream, "speed": speed}
         if mode == "sft":
             if speaker is None:
@@ -314,6 +345,78 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
             )
         raise ValueError("mode must be one of: auto, sft, zero_shot, cross_lingual, instruct.")
 
+    @classmethod
+    def _normalize_mode(cls, mode: Any) -> str:
+        if not isinstance(mode, str):
+            raise TypeError("`mode` must be a string.")
+        normalized = mode.strip().lower().replace("-", "_")
+        if normalized not in cls._SUPPORTED_MODES:
+            supported = ", ".join(sorted(cls._SUPPORTED_MODES))
+            raise ValueError(f"`mode` must be one of: {supported}.")
+        return normalized
+
+    @classmethod
+    def _resolve_inference_mode(
+        cls,
+        mode: Any,
+        speaker_audio_path: str | None,
+    ) -> str:
+        normalized = cls._normalize_mode(mode)
+        if normalized == "auto":
+            return "zero_shot" if speaker_audio_path else "sft"
+        return normalized
+
+    def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
+        super()._validate_generation_inputs(model_inputs)
+        mode = self._resolve_inference_mode(
+            model_inputs.get("mode", "auto"),
+            model_inputs.get("speaker_audio_path"),
+        )
+        speaker_audio = model_inputs.get("speaker_audio_path")
+        prompt_text = model_inputs.get("prompt_text", "")
+        if speaker_audio is not None and (not isinstance(speaker_audio,
+                                                         (str, Path)) or not str(speaker_audio).strip()):
+            raise ValueError("`speaker_audio_path` must be a non-empty path or None.")
+        if mode == "zero_shot" and (speaker_audio is None or not isinstance(prompt_text, str) or
+                                    not prompt_text.strip()):
+            raise ValueError("CosyVoice zero_shot mode requires `speaker_audio_path` "
+                             "and `prompt_text`.")
+        if mode == "cross_lingual" and speaker_audio is None:
+            raise ValueError("CosyVoice cross_lingual mode requires `speaker_audio_path`.")
+        instruct_text = model_inputs.get("instruct_text", "")
+        if mode == "instruct" and (not isinstance(instruct_text, str) or not instruct_text.strip()):
+            raise ValueError("CosyVoice instruct mode requires non-empty `instruct_text`.")
+        speaker_path = validate_local_file(
+            speaker_audio,
+            option_name="speaker_audio_path",
+        )
+        if speaker_path is not None:
+            model_inputs["speaker_audio_path"] = str(speaker_path)
+
+        stream = model_inputs.get("stream", False)
+        if not isinstance(stream, bool):
+            raise TypeError("`stream` must be a boolean.")
+        speed = model_inputs.get("speed", 1.0)
+        if isinstance(speed, bool) or not isinstance(speed, (int, float)):
+            raise TypeError("`speed` must be a finite number.")
+        if not math.isfinite(float(speed)) or speed <= 0:
+            raise ValueError("`speed` must be finite and greater than zero.")
+
+    @staticmethod
+    def _collect_audio_chunks(generator) -> list:
+        chunks = []
+        for index, item in enumerate(generator):
+            if not isinstance(item, Mapping) or "tts_speech" not in item:
+                raise TypeError("CosyVoice chunk "
+                                f"{index} must be a mapping containing 'tts_speech'.")
+            speech = item["tts_speech"]
+            if not hasattr(speech, "reshape"):
+                raise TypeError(f"CosyVoice chunk {index} contains a non-tensor waveform.")
+            chunks.append(speech.reshape(-1))
+        if not chunks:
+            raise RuntimeError("CosyVoice returned no audio chunks.")
+        return chunks
+
     def _generate(
         self,
         text: str,
@@ -326,36 +429,47 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
         instruct_text: str = "",
         stream: bool = False,
         speed: float = 1.0,
+        seed: int | None = None,
     ) -> TTSOutput:
-        self.load()
         self._ensure_full_inference_runtime()
-        generator = self._select_inference(
-            mode=mode,
-            text=text,
-            speaker=speaker,
-            prompt_text=prompt_text,
-            speaker_audio_path=speaker_audio_path,
-            instruct_text=instruct_text,
-            stream=stream,
-            speed=speed,
+        if self.model is None:
+            raise RuntimeError("CosyVoice must be loaded before generation.")
+        resolved_mode = self._resolve_inference_mode(
+            mode,
+            speaker_audio_path,
         )
-        chunks = [item["tts_speech"].reshape(-1) for item in generator]
-        if not chunks:
-            raise RuntimeError("CosyVoice returned no audio chunks.")
+        with seeded_inference(
+                seed,
+                device=self.device,
+                model_type="cosyvoice",
+        ) as effective_seed:
+            generator = self._select_inference(
+                mode=resolved_mode,
+                text=text,
+                speaker=speaker,
+                prompt_text=prompt_text,
+                speaker_audio_path=speaker_audio_path,
+                instruct_text=instruct_text,
+                stream=stream,
+                speed=speed,
+            )
+            chunks = self._collect_audio_chunks(generator)
 
         torch = import_optional(
             "torch",
             model_type="cosyvoice",
             install_extra="cosyvoice",
         )
-        output = TTSOutput(
-            audio=torch.cat(chunks),
-            sample_rate=self.sample_rate,
-            metadata={"mode": mode},
+        return finish_audio_output(
+            torch.cat(chunks),
+            self.sample_rate,
+            output_file=output_file,
+            metadata={
+                "mode": resolved_mode,
+                "seed": effective_seed,
+                "requested_seed": seed,
+            },
         )
-        if output_file:
-            output.save(output_file)
-        return output
 
 
 CosyVoiceTTS = CosyVoiceForTextToSpeech

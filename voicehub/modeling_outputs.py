@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from numbers import Integral
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -13,10 +14,21 @@ class TTSOutput:
 
     audio: Any
     sample_rate: int
-    file_path: str | None = None
+    file_path: str | Path | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def save(self, file_path: str) -> str:
+    def __post_init__(self) -> None:
+        if (isinstance(self.sample_rate, bool) or not isinstance(self.sample_rate, Integral) or
+                self.sample_rate <= 0):
+            raise ValueError("`sample_rate` must be a positive integer.")
+        self.sample_rate = int(self.sample_rate)
+        if not isinstance(self.metadata, dict):
+            raise TypeError("`metadata` must be a dictionary.")
+        from voicehub.base_model import BaseTTSModel
+
+        BaseTTSModel.validate_audio(self.audio)
+
+    def save(self, file_path: str | Path) -> str:
         """Write this output through VoiceHub's normalized audio writer."""
         from voicehub.base_model import BaseTTSModel
 

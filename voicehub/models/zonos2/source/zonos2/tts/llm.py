@@ -86,6 +86,7 @@ class TTSLLM(TTSScheduler):
         self,
         model_path: str,
         dtype: torch.dtype = torch.bfloat16,
+        device: str | torch.device | None = None,
         n_codebooks: int | None = None,
         codebook_size: int | None = None,
         text_vocab: int | None = None,
@@ -111,6 +112,7 @@ class TTSLLM(TTSScheduler):
             model_path=model_path,
             tp_info=DistributedInfo(0, 1),
             dtype=dtype,
+            device=device,
             offline_mode=True,
             **kwargs,
         )
@@ -154,6 +156,7 @@ class TTSLLM(TTSScheduler):
             self._vocoder = TTSVocoderManager(
                 n_codebooks=n_codebooks,
                 audio_pad_id=audio_pad_id,
+                device=self.device,
             )
         else:
             self._vocoder = None
@@ -566,7 +569,11 @@ class TTSLLM(TTSScheduler):
             if should_decode and audio_tokens and self._vocoder:
                 # Convert to tensor, align delayed codebooks, then drop EOS and
                 # post-EOS frames before DAC decode.
-                codes = torch.tensor(audio_tokens, dtype=torch.int64, device="cuda")
+                codes = torch.tensor(
+                    audio_tokens,
+                    dtype=torch.int64,
+                    device=self.device,
+                )
                 codes = shear_up(codes, self.audio_pad_id)
                 if status.eos_frame is not None:
                     codes = codes[: max(0, status.eos_frame)]

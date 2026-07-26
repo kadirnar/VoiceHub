@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2026 The Alibaba Qwen team and VoiceHub contributors.
 # SPDX-License-Identifier: Apache-2.0
 """Dataset and collation for the official Qwen3-TTS 12 Hz SFT recipe."""
@@ -15,8 +14,8 @@ class Qwen3TTSSFTDataset:
     """Prepare single-speaker examples for Qwen3-TTS Base fine-tuning.
 
     Records contain ``text``, pre-extracted ``audio_codes`` with shape
-    ``[frames, 16]``, and a 24 kHz ``ref_audio`` path. The same reference is
-    recommended for every record by the upstream recipe.
+    ``[frames, 16]``, and a 24 kHz ``ref_audio`` path. The same
+    reference is recommended for every record by the upstream recipe.
     """
 
     def __init__(self, records: Sequence[Mapping[str, Any]], processor, config):
@@ -52,9 +51,8 @@ class Qwen3TTSSFTDataset:
 
     @staticmethod
     def _assistant_prompt(text: str) -> str:
-        return (
-            f"<|im_start|>assistant\n{text}<|im_end|>\n"
-            "<|im_start|>assistant\n")
+        return (f"<|im_start|>assistant\n{text}<|im_end|>\n"
+                "<|im_start|>assistant\n")
 
     def _extract_reference_mel(self, audio, sample_rate: int):
         if sample_rate != 24_000:
@@ -94,8 +92,7 @@ class Qwen3TTSSFTDataset:
         required = ("audio_codes", "text", "ref_audio")
         missing = [name for name in required if name not in record]
         if missing:
-            raise ValueError(
-                f"Qwen3-TTS record {index} is missing: {', '.join(missing)}.")
+            raise ValueError(f"Qwen3-TTS record {index} is missing: {', '.join(missing)}.")
 
         tokenized = self.processor(
             text=self._assistant_prompt(str(record["text"])),
@@ -106,8 +103,7 @@ class Qwen3TTSSFTDataset:
         if text_ids.ndim == 1:
             text_ids = text_ids.unsqueeze(0)
         if text_ids.shape[1] <= 5:
-            raise ValueError(
-                f"Qwen3-TTS record {index} produced an invalid assistant prompt.")
+            raise ValueError(f"Qwen3-TTS record {index} produced an invalid assistant prompt.")
 
         audio_codes = torch.as_tensor(record["audio_codes"], dtype=torch.long)
         if audio_codes.ndim != 2 or audio_codes.shape[-1] != 16:
@@ -134,10 +130,7 @@ class Qwen3TTSSFTDataset:
             model_type="qwen3tts",
             install_extra="qwen3tts",
         )
-        item_lengths = [
-            item["text_ids"].shape[1] + item["audio_codes"].shape[0]
-            for item in batch
-        ]
+        item_lengths = [item["text_ids"].shape[1] + item["audio_codes"].shape[0] for item in batch]
         max_length = max(item_lengths) + 8
         batch_size = len(batch)
         codebook_count = 16
@@ -214,10 +207,7 @@ class Qwen3TTSSFTDataset:
             attention_mask[row, :codec_end + 1] = 1
 
         reference_mels = [item["ref_mel"] for item in batch]
-        reference_lengths = {
-            int(mel.shape[1])
-            for mel in reference_mels
-        }
+        reference_lengths = {int(mel.shape[1]) for mel in reference_mels}
         if len(reference_lengths) != 1:
             raise ValueError(
                 "Qwen3-TTS reference mels must have equal lengths within a "
@@ -232,4 +222,3 @@ class Qwen3TTSSFTDataset:
             "codec_ids": codec_ids,
             "codec_mask": codec_mask,
         }
-

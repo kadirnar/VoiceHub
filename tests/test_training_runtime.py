@@ -144,10 +144,7 @@ class TrainingRuntimeTests(unittest.TestCase):
 
             def collate_fn(self, records):
                 self.collator_calls += 1
-                values = torch.tensor([
-                    record["value"]
-                    for record in records
-                ]).unsqueeze(-1)
+                values = torch.tensor([record["value"] for record in records]).unsqueeze(-1)
                 return {
                     "input_values": values,
                     "labels": values * 2,
@@ -674,11 +671,7 @@ class TrainingRuntimeTests(unittest.TestCase):
             self.assertTrue((checkpoint / CHECKPOINT_MANIFEST_NAME).is_file())
             self.assertTrue((checkpoint / TRAINING_RUNTIME_STATE_NAME).is_file())
             self.assertFalse((checkpoint / SCALER_STATE_NAME).exists())
-            manifest = json.loads(
-                (checkpoint / CHECKPOINT_MANIFEST_NAME).read_text(
-                    encoding="utf-8",
-                )
-            )
+            manifest = json.loads((checkpoint / CHECKPOINT_MANIFEST_NAME).read_text(encoding="utf-8", ))
             self.assertEqual(
                 manifest["format_version"],
                 CHECKPOINT_FORMAT_VERSION,
@@ -686,6 +679,7 @@ class TrainingRuntimeTests(unittest.TestCase):
             self.assertIn("resume_signature", manifest)
 
     def test_exact_resume_rejects_a_changed_schedule(self):
+
         class StopAfterOne(TrainerCallback):
 
             def on_step_end(self, args, state, control, **kwargs):
@@ -722,8 +716,8 @@ class TrainingRuntimeTests(unittest.TestCase):
                 train_dataset=self._dataset(),
             )
             with self.assertRaisesRegex(
-                ValueError,
-                r"schedule\.max_steps",
+                    ValueError,
+                    r"schedule\.max_steps",
             ):
                 resumed.train(resume_from_checkpoint=True)
 
@@ -781,12 +775,13 @@ class TrainingRuntimeTests(unittest.TestCase):
                 train_dataset=FingerprintedDataset("revision-b"),
             )
             with self.assertRaisesRegex(
-                ValueError,
-                r"dataset\.fingerprint",
+                    ValueError,
+                    r"dataset\.fingerprint",
             ):
                 resumed.train(resume_from_checkpoint=True)
 
     def test_exact_resume_rejects_changed_collator_configuration(self):
+
         class StopAfterOne(TrainerCallback):
 
             def on_step_end(self, args, state, control, **kwargs):
@@ -808,9 +803,7 @@ class TrainingRuntimeTests(unittest.TestCase):
                 model=self._dropout_model(),
                 args=arguments,
                 train_dataset=self._dataset(),
-                data_collator=DataCollatorForTTSTraining(
-                    label_pad_token_id=-100,
-                ),
+                data_collator=DataCollatorForTTSTraining(label_pad_token_id=-100, ),
                 callbacks=[StopAfterOne],
             ).train()
 
@@ -818,20 +811,17 @@ class TrainingRuntimeTests(unittest.TestCase):
                 model=self._dropout_model(),
                 args=arguments,
                 train_dataset=self._dataset(),
-                data_collator=DataCollatorForTTSTraining(
-                    label_pad_token_id=0,
-                ),
+                data_collator=DataCollatorForTTSTraining(label_pad_token_id=0, ),
                 callbacks=[StopAfterOne],
             )
             with self.assertRaisesRegex(
-                ValueError,
-                r"collator\.fingerprint\.label_pad_token_id",
+                    ValueError,
+                    r"collator\.fingerprint\.label_pad_token_id",
             ):
                 resumed.train(resume_from_checkpoint=True)
 
-    def test_exact_resume_rejects_changed_stateful_callback_configuration(
-        self,
-    ):
+    def test_exact_resume_rejects_changed_stateful_callback_configuration(self, ):
+
         class StopAfterOne(TrainerCallback):
 
             def on_step_end(self, args, state, control, **kwargs):
@@ -882,8 +872,8 @@ class TrainingRuntimeTests(unittest.TestCase):
                 ],
             )
             with self.assertRaisesRegex(
-                ValueError,
-                r"stateful_callbacks",
+                    ValueError,
+                    r"stateful_callbacks",
             ):
                 resumed.train(resume_from_checkpoint=True)
 
@@ -953,21 +943,10 @@ class TrainingRuntimeTests(unittest.TestCase):
             )
             trainer.save_model(destination)
 
-            voicehub_config = json.loads(
-                (destination / "config.json").read_text(encoding="utf-8")
-            )
+            voicehub_config = json.loads((destination / "config.json").read_text(encoding="utf-8"))
             native_config = json.loads(
-                (
-                    destination
-                    / NATIVE_EXPORT_DIR
-                    / "config.json"
-                ).read_text(encoding="utf-8")
-            )
-            recipe = json.loads(
-                (destination / TRAINING_RECIPE_NAME).read_text(
-                    encoding="utf-8",
-                )
-            )
+                (destination / NATIVE_EXPORT_DIR / "config.json").read_text(encoding="utf-8"))
+            recipe = json.loads((destination / TRAINING_RECIPE_NAME).read_text(encoding="utf-8", ))
 
         self.assertEqual(voicehub_config["model_type"], "orpheustts")
         self.assertEqual(native_config["model_type"], "upstream-native")
@@ -1139,9 +1118,7 @@ class TrainingRuntimeTests(unittest.TestCase):
                     device="cpu",
                     lazy_load=False,
                 )
-                self.assertIsNotNone(
-                    restored._pending_training_recipe_state
-                )
+                self.assertIsNotNone(restored._pending_training_recipe_state)
                 self.assertEqual(recipe_loads, [])
 
                 resumed = Trainer(model=restored, args=arguments)
@@ -1155,9 +1132,7 @@ class TrainingRuntimeTests(unittest.TestCase):
                     recipe_loads,
                     [resumed.training_adapter],
                 )
-                self.assertIsNone(
-                    restored._pending_training_recipe_state
-                )
+                self.assertIsNone(restored._pending_training_recipe_state)
         finally:
             AutoTrainingAdapter.unregister("orpheustts")
 

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from voicehub.hub import read_json_file, resolve_pretrained_file, write_json_file
+from voicehub.path_utils import normalize_model_source
+from voicehub.serialization_utils import serialize_paths
 
 CONFIG_NAME = "config.json"
 
@@ -23,7 +25,7 @@ class VoiceHubConfig:
         *,
         sample_rate: int = 24000,
         architectures: list[str] | None = None,
-        name_or_path: str = "",
+        name_or_path: str | Path = "",
         return_dict: bool = True,
         output_hidden_states: bool = False,
         output_attentions: bool = False,
@@ -42,7 +44,7 @@ class VoiceHubConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a deep-copied JSON-serializable representation."""
-        output = deepcopy(self.__dict__)
+        output = serialize_paths(deepcopy(self.__dict__))
         output["model_type"] = self.model_type
         return output
 
@@ -57,7 +59,7 @@ class VoiceHubConfig:
     @classmethod
     def from_pretrained(
         cls,
-        pretrained_model_name_or_path: str,
+        pretrained_model_name_or_path: str | Path,
         *,
         subfolder: str = "",
         cache_dir: str | None = None,
@@ -67,8 +69,19 @@ class VoiceHubConfig:
         **kwargs,
     ):
         """Load ``config.json`` from a directory, file, or Hub repository."""
+        pretrained_model_name_or_path = normalize_model_source(pretrained_model_name_or_path)
         source = Path(pretrained_model_name_or_path).expanduser()
         if source.is_file():
+            if source.suffix.lower() != ".json":
+                if cls is VoiceHubConfig:
+                    raise ValueError(
+                        "A raw checkpoint file does not identify its model "
+                        "type. Use AutoConfig.from_pretrained(..., "
+                        "model_type=...) or a concrete config class.")
+                return cls(
+                    name_or_path=str(source),
+                    **kwargs,
+                )
             config_path = source
         else:
             config_path = resolve_pretrained_file(

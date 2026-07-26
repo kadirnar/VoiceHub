@@ -35,35 +35,31 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
     def recipe_resume_configuration(self):
         configuration = dict(super().recipe_resume_configuration())
         configuration.update({
-            "resolved_text_loss_weight": float(
-                getattr(
-                    self.model.config,
-                    "training_text_loss_weight",
-                    0.01,
-                )
-            ),
-            "resolved_mel_loss_weight": float(
-                getattr(
-                    self.model.config,
-                    "training_mel_loss_weight",
-                    1.0,
-                )
-            ),
+            "resolved_text_loss_weight":
+            float(getattr(
+                self.model.config,
+                "training_text_loss_weight",
+                0.01,
+            )),
+            "resolved_mel_loss_weight":
+            float(getattr(
+                self.model.config,
+                "training_mel_loss_weight",
+                1.0,
+            )),
             "resolved_lr_milestones": [
-                int(value)
-                for value in getattr(
+                int(value) for value in getattr(
                     self.model.config,
                     "training_lr_milestones",
                     (900_000, 2_700_000, 5_400_000),
                 )
             ],
-            "resolved_lr_gamma": float(
-                getattr(
-                    self.model.config,
-                    "training_lr_gamma",
-                    0.5,
-                )
-            ),
+            "resolved_lr_gamma":
+            float(getattr(
+                self.model.config,
+                "training_lr_gamma",
+                0.5,
+            )),
         })
         return configuration
 
@@ -77,17 +73,12 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
             install_extra="xtts",
         )
         model_args = SimpleNamespace(
-            debug_loading_failures=bool(
-                kwargs.get("debug_loading_failures", False)),
-            max_conditioning_length=int(
-                kwargs.get("max_conditioning_length", 132_300)),
-            min_conditioning_length=int(
-                kwargs.get("min_conditioning_length", 66_150)),
-            max_wav_length=int(
-                kwargs.get("max_wav_length", 255_995)),
+            debug_loading_failures=bool(kwargs.get("debug_loading_failures", False)),
+            max_conditioning_length=int(kwargs.get("max_conditioning_length", 132_300)),
+            min_conditioning_length=int(kwargs.get("min_conditioning_length", 66_150)),
+            max_wav_length=int(kwargs.get("max_wav_length", 255_995)),
             max_text_length=int(kwargs.get("max_text_length", 200)),
-            gpt_use_masking_gt_prompt_approach=bool(
-                kwargs.get("mask_ground_truth_prompt", True)),
+            gpt_use_masking_gt_prompt_approach=bool(kwargs.get("mask_ground_truth_prompt", True)),
         )
         dataset_config = SimpleNamespace(
             model_args=model_args,
@@ -120,10 +111,7 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
             "cond_lens",
         }
         if required.issubset(batch):
-            return {
-                name: batch[name]
-                for name in required
-            }
+            return {name: batch[name] for name in required}
         raw_required = {
             "padded_text",
             "text_lengths",
@@ -162,11 +150,9 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
         )
         model_directory = self.model._model_directory
         dvae_path = Path(
-            getattr(self.model.config, "training_dvae_checkpoint", None) or
-            model_directory / "dvae.pth")
+            getattr(self.model.config, "training_dvae_checkpoint", None) or model_directory / "dvae.pth")
         mel_norm_path = Path(
-            getattr(self.model.config, "training_mel_norm_file", None) or
-            model_directory / "mel_stats.pth")
+            getattr(self.model.config, "training_mel_norm_file", None) or model_directory / "mel_stats.pth")
         if not dvae_path.is_file() or not mel_norm_path.is_file():
             raise FileNotFoundError(
                 "XTTS raw-batch fine-tuning requires dvae.pth and "
@@ -201,9 +187,7 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
             parameter.requires_grad_(False)
 
         sample_rate = int(self.model._xtts_config.audio.sample_rate)
-        dvae_sample_rate = int(
-            getattr(self.model._xtts_config.audio, "dvae_sample_rate",
-                    22_050))
+        dvae_sample_rate = int(getattr(self.model._xtts_config.audio, "dvae_sample_rate", 22_050))
         common = {
             "mel_norm_file": str(mel_norm_path),
         }
@@ -267,9 +251,7 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
                 cond_mels.size(2),
             )
             source_rate = int(self.model._xtts_config.audio.sample_rate)
-            dvae_rate = int(
-                getattr(self.model._xtts_config.audio, "dvae_sample_rate",
-                        22_050))
+            dvae_rate = int(getattr(self.model._xtts_config.audio, "dvae_sample_rate", 22_050))
             waveform = batch["wav"]
             if source_rate != dvae_rate:
                 waveform = torchaudio.functional.resample(
@@ -281,8 +263,7 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
                     resampling_method="kaiser_window",
                     beta=14.769656459379492,
                 )
-            audio_codes = self._dvae.get_codebook_indices(
-                self._dvae_mel(waveform))
+            audio_codes = self._dvae.get_codebook_indices(self._dvae_mel(waveform))
         return {
             "text_inputs": batch["padded_text"],
             "text_lengths": batch["text_lengths"],
@@ -300,21 +281,13 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
         self.setup()
         prepared = self.prepare_batch(context.inputs, context)
         loss_text, loss_mel, logits = self.primary_model(**prepared)
-        text_weight = float(
-            getattr(self.model.config, "training_text_loss_weight", 0.01))
-        mel_weight = float(
-            getattr(self.model.config, "training_mel_loss_weight", 1.0))
-        if (
-            not math.isfinite(text_weight)
-            or not math.isfinite(mel_weight)
-            or text_weight < 0
-            or mel_weight < 0
-            or text_weight + mel_weight <= 0
-        ):
+        text_weight = float(getattr(self.model.config, "training_text_loss_weight", 0.01))
+        mel_weight = float(getattr(self.model.config, "training_mel_loss_weight", 1.0))
+        if (not math.isfinite(text_weight) or not math.isfinite(mel_weight) or text_weight < 0 or
+                mel_weight < 0 or text_weight + mel_weight <= 0):
             raise ValueError(
                 "XTTS training loss weights must be finite, non-negative, "
-                "and include at least one positive value."
-            )
+                "and include at least one positive value.")
         text_loss = text_weight * loss_text
         mel_loss = mel_weight * loss_mel
         loss = text_loss + mel_loss
@@ -377,8 +350,8 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
         for parameter_name, parameter in parameters:
             normalized = parameter_name.lower()
             target = (
-                no_decay if parameter_name.endswith(".bias") or
-                "norm" in normalized or "embedding" in normalized else decay)
+                no_decay if parameter_name.endswith(".bias") or "norm" in normalized or
+                "embedding" in normalized else decay)
             target.append(parameter)
         groups = []
         if decay:
@@ -412,8 +385,7 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
             install_extra="xtts",
         )
         milestones = tuple(
-            int(value)
-            for value in getattr(
+            int(value) for value in getattr(
                 self.model.config,
                 "training_lr_milestones",
                 (900_000, 2_700_000, 5_400_000),
@@ -421,8 +393,7 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
         return torch.optim.lr_scheduler.MultiStepLR(
             optimizer,
             milestones=milestones,
-            gamma=float(
-                getattr(self.model.config, "training_lr_gamma", 0.5)),
+            gamma=float(getattr(self.model.config, "training_lr_gamma", 0.5)),
         )
 
     def save_pretrained(self, save_directory) -> None:

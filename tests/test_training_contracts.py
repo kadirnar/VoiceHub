@@ -63,9 +63,7 @@ class TrainingContractValidationTests(unittest.TestCase):
         self.assertEqual(get_training_spec("f5-tts").model_type, "f5tts")
         self.assertIn(TrainingFamily.VITS, {spec.family for spec in list_training_specs()})
         self.assertEqual(
-            get_training_spec(
-                "qwen3tts"
-            ).training_default_model_name_or_path,
+            get_training_spec("qwen3tts").training_default_model_name_or_path,
             "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
         )
 
@@ -649,17 +647,23 @@ class SupportAndObjectiveBoundaryTests(unittest.TestCase):
     def test_serving_and_quantized_artifacts_are_rejected_before_loading(self):
         cases = (
             (
-                {"name_or_path": "publisher/model-q4.gguf"},
+                {
+                    "name_or_path": "publisher/model-q4.gguf"
+                },
                 "serving-only format",
             ),
             (
-                {"name_or_path": "publisher/model-AWQ"},
+                {
+                    "name_or_path": "publisher/model-AWQ"
+                },
                 "quantization-aware",
             ),
             (
                 {
                     "name_or_path": "publisher/model",
-                    "quantization_config": {"load_in_4bit": True},
+                    "quantization_config": {
+                        "load_in_4bit": True
+                    },
                 },
                 "full-precision",
             ),

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
 from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
-from voicehub.models._shared import finish_audio_output, resolve_model_directory
+from voicehub.models._shared import finish_audio_output, resolve_model_directory, seeded_inference
 
 
 class XTTSConfig(VoiceHubConfig):
@@ -66,6 +70,20 @@ class XTTSForTextToSpeech(PreTrainedTTSModel):
         self._loaded_for_training = False
         super().__init__(config, device=device, lazy_load=lazy_load)
 
+    @staticmethod
+    def _checkpoint_sample_rate(xtts_config: Any) -> int:
+        output_sample_rate = getattr(
+            getattr(xtts_config, "audio", None),
+            "output_sample_rate",
+            None,
+        )
+        if (not isinstance(output_sample_rate, int) or isinstance(output_sample_rate, bool) or
+                output_sample_rate <= 0):
+            raise ValueError(
+                "XTTS checkpoint configuration must define a positive "
+                "`audio.output_sample_rate`.")
+        return output_sample_rate
+
     def _load_pretrained_model(self) -> None:
         model_directory = resolve_model_directory(
             self.config.name_or_path,
@@ -90,6 +108,7 @@ class XTTSForTextToSpeech(PreTrainedTTSModel):
             eval=not self.is_training_load,
         )
         model.to(self.device)
+        self.config.sample_rate = self._checkpoint_sample_rate(xtts_config)
         self._xtts_config = xtts_config
         self._model_directory = model_directory
         self._loaded_for_training = self.is_training_load
@@ -105,6 +124,51 @@ class XTTSForTextToSpeech(PreTrainedTTSModel):
         finally:
             self._loading_for_training = False
 
+    def _prepare_for_inference(self) -> None:
+        if self.model is not None and hasattr(self.model, "eval"):
+            self.model.eval()
+
+    def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
+        speaker_audio_path = model_inputs.get("speaker_audio_path")
+        if not isinstance(speaker_audio_path, (str, Path)) or not str(speaker_audio_path).strip():
+            raise ValueError("`speaker_audio_path` must point to a local XTTS reference-audio file.")
+        reference_path = Path(speaker_audio_path).expanduser()
+        if not reference_path.is_file():
+            raise FileNotFoundError(f"XTTS reference audio was not found: {reference_path}.")
+
+        language = model_inputs.get("language") or self.config.language
+        if not isinstance(language, str) or not language.strip():
+            raise ValueError("`language` must be a non-empty XTTS language code.")
+
+    def _resolve_language(self, language: str | None) -> str:
+        normalized = (language or self.config.language).strip().lower()
+        supported = tuple(getattr(self._xtts_config, "languages", ()))
+        candidate = "zh-cn" if normalized == "zh" else normalized
+        if supported and candidate not in supported:
+            available = ", ".join(supported)
+            raise ValueError(f"Unsupported XTTS language {language!r}. Supported: {available}.")
+        return candidate
+
+    @staticmethod
+    def _extract_audio(result: Any):
+        if isinstance(result, Mapping):
+            if "wav" not in result:
+                raise RuntimeError("XTTS result does not contain the expected `wav` field.")
+            audio = result["wav"]
+        else:
+            audio = result
+        if audio is None:
+            raise RuntimeError("XTTS returned no audio waveform.")
+        if hasattr(audio, "numel"):
+            sample_count = audio.numel()
+        elif hasattr(audio, "size"):
+            sample_count = audio.size
+        else:
+            sample_count = len(audio)
+        if sample_count == 0:
+            raise RuntimeError("XTTS returned an empty audio waveform.")
+        return audio
+
     def _generate(
         self,
         text: str,
@@ -112,25 +176,31 @@ class XTTSForTextToSpeech(PreTrainedTTSModel):
         output_file: str | None = None,
         speaker_audio_path: str | None = None,
         language: str | None = None,
+        seed: int | None = None,
         **generation_options,
     ) -> TTSOutput:
-        self.load()
-        if not speaker_audio_path:
-            raise ValueError("XTTS requires speaker_audio_path for voice cloning.")
-        language = language or self.config.language
-        result = self.model.synthesize(
-            text,
-            self._xtts_config,
-            speaker_wav=speaker_audio_path,
-            language=language,
-            **generation_options,
-        )
-        audio = result["wav"] if isinstance(result, dict) else result
+        language = self._resolve_language(language)
+        with seeded_inference(
+                seed,
+                device=self.device,
+                model_type="xtts",
+        ) as effective_seed:
+            result = self.model.synthesize(
+                text,
+                self._xtts_config,
+                speaker_wav=str(Path(speaker_audio_path).expanduser()),
+                language=language,
+                **generation_options,
+            )
         return finish_audio_output(
-            audio,
+            self._extract_audio(result),
             self.sample_rate,
             output_file=output_file,
-            metadata={"language": language},
+            metadata={
+                "language": language,
+                "seed": effective_seed,
+                "requested_seed": seed,
+            },
         )
 
 

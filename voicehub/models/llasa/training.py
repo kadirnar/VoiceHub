@@ -34,9 +34,7 @@ class LlasaSFTDataset:
         pad_token_id = tokenizer.pad_token_id
         if pad_token_id is None:
             pad_token_id = tokenizer.eos_token_id
-        self.collate_fn = CausalTokenCollator(
-            pad_token_id=pad_token_id,
-        )
+        self.collate_fn = CausalTokenCollator(pad_token_id=pad_token_id, )
         if not self.records:
             raise ValueError("LlasaSFTDataset requires at least one record.")
 
@@ -48,8 +46,7 @@ class LlasaSFTDataset:
         if codes is None:
             audio_path = record.get("audio")
             if not audio_path:
-                raise ValueError(
-                    "LLaSA records require 'audio' or precomputed 'audio_codes'.")
+                raise ValueError("LLaSA records require 'audio' or precomputed 'audio_codes'.")
             waveform = load_audio_tensor(
                 str(audio_path),
                 sample_rate=self.sample_rate,
@@ -75,12 +72,10 @@ class LlasaSFTDataset:
         record = self.records[index]
         if "text" not in record:
             raise ValueError(f"LLaSA record {index} is missing 'text'.")
-        text = (
-            self.TEXT_START + str(record["text"]) + self.TEXT_END)
+        text = (self.TEXT_START + str(record["text"]) + self.TEXT_END)
         speech = (
-            self.SPEECH_START +
-            "".join(f"<|s_{value}|>" for value in self._speech_ids(record)) +
-            self.SPEECH_END)
+            self.SPEECH_START + "".join(f"<|s_{value}|>"
+                                        for value in self._speech_ids(record)) + self.SPEECH_END)
         messages = [
             {
                 "role": "user",
@@ -113,4 +108,3 @@ class LlasaSFTDataset:
             "input_ids": input_ids,
             "labels": labels,
         }
-

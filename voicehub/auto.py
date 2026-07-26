@@ -7,6 +7,7 @@ from pathlib import Path
 
 from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.hub import read_json_file, resolve_pretrained_file
+from voicehub.inference_strategy import InferenceStrategy
 from voicehub.processing_utils import VoiceHubProcessor
 from voicehub.registry import get_model_spec
 
@@ -35,13 +36,18 @@ class AutoConfig:
     @classmethod
     def from_pretrained(
         cls,
-        pretrained_model_name_or_path: str,
+        pretrained_model_name_or_path: str | Path,
         *,
         model_type: str | None = None,
         **kwargs,
     ) -> VoiceHubConfig:
+        source = Path(pretrained_model_name_or_path).expanduser()
+        is_direct_checkpoint = (source.is_file() and source.suffix.lower() != ".json")
         if model_type is None:
-            source = Path(pretrained_model_name_or_path).expanduser()
+            if is_direct_checkpoint:
+                raise ValueError(
+                    "A raw checkpoint file does not identify its model type. "
+                    "Pass `model_type` explicitly.")
             if source.is_file():
                 config_path = source
             else:
@@ -75,18 +81,33 @@ class AutoModelForTextToSpeech:
         raise OSError("AutoModelForTextToSpeech must be created with from_config/from_pretrained.")
 
     @classmethod
-    def from_config(cls, config: VoiceHubConfig, **kwargs):
+    def from_config(
+        cls,
+        config: VoiceHubConfig,
+        *,
+        inference_strategy: str | InferenceStrategy | None = None,
+        **kwargs,
+    ):
         spec = get_model_spec(config.model_type)
         model_class = _load_class(spec.module, spec.class_name)
-        return model_class(config, **kwargs)
+        eager_load = kwargs.get("lazy_load", True) is False
+        if inference_strategy is not None and eager_load:
+            kwargs["lazy_load"] = True
+        model = model_class(config, **kwargs)
+        if inference_strategy is not None:
+            model.set_inference_strategy(inference_strategy)
+            if eager_load:
+                model.load()
+        return model
 
     @classmethod
     def from_pretrained(
         cls,
-        pretrained_model_name_or_path: str = "",
+        pretrained_model_name_or_path: str | Path = "",
         *,
         model_type: str | None = None,
         config: VoiceHubConfig | None = None,
+        inference_strategy: str | InferenceStrategy | None = None,
         **kwargs,
     ):
         if config is None:
@@ -102,6 +123,7 @@ class AutoModelForTextToSpeech:
         return model_class.from_pretrained(
             pretrained_model_name_or_path,
             config=config,
+            inference_strategy=inference_strategy,
             **kwargs,
         )
 
@@ -126,7 +148,7 @@ class AutoProcessor:
     @classmethod
     def from_pretrained(
         cls,
-        pretrained_model_name_or_path: str = "",
+        pretrained_model_name_or_path: str | Path = "",
         *,
         model_type: str | None = None,
         config: VoiceHubConfig | None = None,

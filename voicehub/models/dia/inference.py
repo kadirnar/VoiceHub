@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from os import PathLike
 from pathlib import Path
@@ -12,6 +13,7 @@ from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
+from voicehub.models._shared import finish_audio_output, seeded_inference, validate_local_file
 
 
 class DiaConfig(VoiceHubConfig):
@@ -41,6 +43,15 @@ class DiaConfig(VoiceHubConfig):
         self.backend = normalized_backend
         self.compute_dtype = compute_dtype
         self.use_torch_compile = use_torch_compile
+        self.validate()
+
+    def validate(self) -> None:
+        if self.backend not in {"auto", "legacy", "transformers"}:
+            raise ValueError("Dia backend must be 'auto', 'legacy', or 'transformers'.")
+        if not isinstance(self.compute_dtype, str) or not self.compute_dtype.strip():
+            raise ValueError("`compute_dtype` must be a non-empty string.")
+        if not isinstance(self.use_torch_compile, bool):
+            raise TypeError("`use_torch_compile` must be a boolean.")
 
 
 class DiaForTextToSpeech(PreTrainedTTSModel):
@@ -64,6 +75,7 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
             model_path=model_path,
             **config_overrides,
         )
+        config.validate()
         self._dia_backend = None
         self._loaded_backend: str | None = None
         super().__init__(config, device=device, lazy_load=lazy_load)
@@ -119,27 +131,37 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
                 compute_dtype=self.config.compute_dtype,
                 for_training=self.is_training_load,
             )
+            if backend.model is None or backend.processor is None:
+                raise RuntimeError("The Transformers Dia loader returned an incomplete backend.")
+            sample_rate = int(backend.sample_rate)
+            if sample_rate <= 0:
+                raise ValueError("The Transformers Dia backend reported an invalid sample rate.")
             self.model = backend.model
             self._dia_backend = backend
             self._loaded_backend = "transformers"
-            self.config.sample_rate = backend.sample_rate
+            self.config.sample_rate = sample_rate
             return
 
         from voicehub.models.dia.model import Dia
 
-        self.model = Dia.from_pretrained(
+        model = Dia.from_pretrained(
             self.config.name_or_path,
             compute_dtype=self.config.compute_dtype,
             device=self.device,
         )
+        if not callable(getattr(model, "generate", None)):
+            raise TypeError("The legacy Dia runtime does not implement generate().")
+        self.model = model
         self._dia_backend = None
         self._loaded_backend = "legacy"
+        self.config.sample_rate = 44_100
 
     @property
     def training_backend(self):
         """Return the official backend after a training load."""
+        model_config = getattr(self.model, "config", None)
         if (self._loaded_backend == "transformers" and self._dia_backend is not None and
-                not getattr(self.model.config, "use_cache", True)):
+                not getattr(model_config, "use_cache", True)):
             return self._dia_backend
         return None
 
@@ -149,14 +171,40 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
             self._dia_backend.prepare_for_training()
             return
 
+        previous_state = (
+            self.model,
+            self._dia_backend,
+            self._loaded_backend,
+        )
         self.model = None
         self._dia_backend = None
         self._loaded_backend = None
+        previous_loading_mode = self._loading_for_training
         self._loading_for_training = True
         try:
             self.load()
+        except BaseException:
+            self.model, self._dia_backend, self._loaded_backend = previous_state
+            raise
         finally:
-            self._loading_for_training = False
+            self._loading_for_training = previous_loading_mode
+
+    def _prepare_for_inference(self) -> None:
+        """Restore eval and cache state for either Dia backend."""
+        if self._loaded_backend == "transformers":
+            if self.model is not None and hasattr(self.model, "eval"):
+                self.model.eval()
+            model_config = getattr(self.model, "config", None)
+            if model_config is not None and hasattr(model_config, "use_cache"):
+                model_config.use_cache = True
+            return
+
+        source_model = getattr(self.model, "model", None)
+        if source_model is not None and hasattr(source_model, "eval"):
+            source_model.eval()
+        codec = getattr(self.model, "dac_model", None)
+        if codec is not None and hasattr(codec, "eval"):
+            codec.eval()
 
     def prepare_training_inputs(
         self,
@@ -172,6 +220,56 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
             raise RuntimeError("Dia training inputs require load_for_training() before "
                                "preparation.")
         return backend.prepare_inputs(inputs)
+
+    def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
+        super()._validate_generation_inputs(model_inputs)
+        for aliases in (
+            ("max_tokens", "max_new_tokens"),
+            ("cfg_scale", "guidance_scale"),
+            ("cfg_filter_top_k", "top_k"),
+        ):
+            if all(model_inputs.get(name) is not None for name in aliases):
+                raise ValueError(f"Pass either {aliases[0]!r} or {aliases[1]!r}, not both.")
+
+        prompt_names = ("audio", "audio_prompt", "audio_prompt_path")
+        supplied_prompts = [name for name in prompt_names if model_inputs.get(name) is not None]
+        if len(supplied_prompts) > 1:
+            raise ValueError("Pass only one of 'audio', 'audio_prompt', or "
+                             "'audio_prompt_path'.")
+        if supplied_prompts:
+            prompt = model_inputs[supplied_prompts[0]]
+            if isinstance(prompt, Mapping) and "path" in prompt:
+                prompt = prompt["path"]
+            if isinstance(prompt, (str, PathLike)):
+                prompt_path = validate_local_file(
+                    prompt,
+                    option_name=supplied_prompts[0],
+                )
+                prompt_value = model_inputs[supplied_prompts[0]]
+                if isinstance(prompt_value, Mapping):
+                    prompt_value = dict(prompt_value)
+                    prompt_value["path"] = str(prompt_path)
+                    model_inputs[supplied_prompts[0]] = prompt_value
+                else:
+                    model_inputs[supplied_prompts[0]] = str(prompt_path)
+
+        for name in ("max_tokens", "max_new_tokens", "cfg_filter_top_k", "top_k"):
+            value = model_inputs.get(name)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"`{name}` must be a positive integer.")
+        for name in ("cfg_scale", "guidance_scale"):
+            value = model_inputs.get(name)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(f"`{name}` must be a finite number.")
+            if not math.isfinite(float(value)) or value < 0:
+                raise ValueError(f"`{name}` must be finite and non-negative.")
+        seed = model_inputs.get("seed")
+        if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
+            raise TypeError("`seed` must be an integer or None.")
 
     @staticmethod
     def _audio_prompt(audio: Any, sample_rate: int) -> Any:
@@ -208,25 +306,48 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
         return audio
 
     @staticmethod
-    def _seed_generation(options: dict[str, Any]) -> None:
-        seed = options.pop("seed", None)
-        if seed is None:
-            return
-        torch = import_optional(
-            "torch",
-            model_type="dia",
-            install_extra="dia",
-        )
-        torch.manual_seed(int(seed))
+    def _rename_generation_options(
+        options: dict[str, Any],
+        aliases: tuple[tuple[str, str], ...],
+    ) -> None:
+        for source, target in aliases:
+            if source not in options:
+                continue
+            if target in options:
+                raise ValueError(f"Pass either {source!r} or {target!r}, not both.")
+            options[target] = options.pop(source)
+
+    @staticmethod
+    def _pop_audio_prompt(options: dict[str, Any]) -> Any:
+        prompt = None
+        for name in ("audio", "audio_prompt", "audio_prompt_path"):
+            if name not in options:
+                continue
+            value = options.pop(name)
+            if value is None:
+                continue
+            if prompt is not None:
+                raise ValueError("Pass only one of 'audio', 'audio_prompt', or "
+                                 "'audio_prompt_path'.")
+            prompt = value
+        return prompt
 
     def _generate_legacy(
         self,
         text: str,
         generation_options: dict[str, Any],
     ) -> Any:
-        if ("max_new_tokens" in generation_options and "max_tokens" not in generation_options):
-            generation_options["max_tokens"] = generation_options.pop("max_new_tokens")
-        self._seed_generation(generation_options)
+        self._rename_generation_options(
+            generation_options,
+            (
+                ("max_new_tokens", "max_tokens"),
+                ("guidance_scale", "cfg_scale"),
+                ("top_k", "cfg_filter_top_k"),
+            ),
+        )
+        audio_prompt = self._pop_audio_prompt(generation_options)
+        if audio_prompt is not None:
+            generation_options["audio_prompt"] = audio_prompt
         return self.model.generate(
             text,
             use_torch_compile=self.config.use_torch_compile,
@@ -238,31 +359,22 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
         text: str,
         generation_options: dict[str, Any],
     ) -> Any:
-        processor = self._dia_backend.processor
-        self._seed_generation(generation_options)
-        aliases = (
-            ("max_tokens", "max_new_tokens"),
-            ("cfg_scale", "guidance_scale"),
-            ("cfg_filter_top_k", "top_k"),
+        backend = self._dia_backend
+        if backend is None or backend.processor is None:
+            raise RuntimeError("Dia Transformers generation requires a loaded processor.")
+        processor = backend.processor
+        self._rename_generation_options(
+            generation_options,
+            (
+                ("max_tokens", "max_new_tokens"),
+                ("cfg_scale", "guidance_scale"),
+                ("cfg_filter_top_k", "top_k"),
+            ),
         )
-        for source, target in aliases:
-            if source not in generation_options:
-                continue
-            if target in generation_options:
-                raise ValueError(f"Pass either {source!r} or {target!r}, not both.")
-            generation_options[target] = generation_options.pop(source)
         generation_options.pop("use_cfg_filter", None)
         generation_options.pop("verbose", None)
 
-        audio = generation_options.pop("audio", None)
-        for alias in ("audio_prompt", "audio_prompt_path"):
-            value = generation_options.pop(alias, None)
-            if value is None:
-                continue
-            if audio is not None:
-                raise ValueError("Pass only one of 'audio', 'audio_prompt', or "
-                                 "'audio_prompt_path'.")
-            audio = value
+        audio = self._pop_audio_prompt(generation_options)
         if audio is not None:
             audio = self._audio_prompt(audio, self.sample_rate)
 
@@ -272,18 +384,22 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
             padding=True,
             return_tensors="pt",
         )
-        prompt_length = (
-            processor.get_audio_prompt_len(inputs["decoder_attention_mask"], ) if audio is not None else None)
+        prompt_length = None
+        if audio is not None:
+            prompt_length = processor.get_audio_prompt_len(inputs["decoder_attention_mask"], )
         inputs = inputs.to(self.device)
         generated = self.model.generate(
             **inputs,
             **generation_options,
         )
         sequences = getattr(generated, "sequences", generated)
-        return processor.batch_decode(
+        decoded = processor.batch_decode(
             sequences,
             audio_prompt_len=prompt_length,
-        )[0]
+        )
+        if not decoded:
+            raise RuntimeError("Dia Transformers decoding returned no audio.")
+        return decoded[0]
 
     def _generate(
         self,
@@ -292,22 +408,29 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
         output_file: str | None = None,
         **generation_options,
     ) -> TTSOutput:
-        self.load()
         options = dict(generation_options)
-        if self._loaded_backend == "legacy":
-            audio = self._generate_legacy(text, options)
-        else:
-            audio = self._generate_transformers(text, options)
-        output = TTSOutput(
-            audio=audio,
-            sample_rate=self.sample_rate,
+        requested_seed = options.pop("seed", None)
+        with seeded_inference(
+                requested_seed,
+                device=self.device,
+                model_type="dia",
+        ) as effective_seed:
+            if self._loaded_backend == "legacy":
+                audio = self._generate_legacy(text, options)
+            elif self._loaded_backend == "transformers":
+                audio = self._generate_transformers(text, options)
+            else:
+                raise RuntimeError("Dia must select and load a backend before generation.")
+        return finish_audio_output(
+            audio,
+            self.sample_rate,
+            output_file=output_file,
             metadata={
                 "backend": self._loaded_backend,
+                "seed": effective_seed,
+                "requested_seed": requested_seed,
             },
         )
-        if output_file:
-            output.save(output_file)
-        return output
 
     def _save_pretrained(self, save_directory: Path) -> None:
         if self._loaded_backend == "transformers" and self._dia_backend:

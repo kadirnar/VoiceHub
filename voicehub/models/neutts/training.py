@@ -42,8 +42,7 @@ class NeuTTSSFTDataset:
         if codes is None:
             audio_path = record.get("audio")
             if not audio_path:
-                raise ValueError(
-                    "NeuTTS records require 'audio' or precomputed 'audio_codes'.")
+                raise ValueError("NeuTTS records require 'audio' or precomputed 'audio_codes'.")
             codes = self.runtime.encode_reference(str(audio_path))
         if hasattr(codes, "detach"):
             codes = codes.detach().cpu().reshape(-1).tolist()
@@ -60,9 +59,7 @@ class NeuTTSSFTDataset:
             "user: Convert the text to speech:"
             f"<|TEXT_PROMPT_START|>{text}<|TEXT_PROMPT_END|>\n"
             f"assistant:{self.SPEECH_START}")
-        completion = (
-            "".join(f"<|speech_{value}|>" for value in self._speech_ids(record)) +
-            self.SPEECH_END)
+        completion = ("".join(f"<|speech_{value}|>" for value in self._speech_ids(record)) + self.SPEECH_END)
         prompt_ids = self.tokenizer.encode(
             prompt,
             add_special_tokens=True,
@@ -75,10 +72,8 @@ class NeuTTSSFTDataset:
         prompt_length = min(len(prompt_ids), len(input_ids))
         labels = [-100] * prompt_length + input_ids[prompt_length:]
         if not any(label != -100 for label in labels):
-            raise ValueError(
-                f"NeuTTS record {index} has no completion tokens after truncation.")
+            raise ValueError(f"NeuTTS record {index} has no completion tokens after truncation.")
         return {
             "input_ids": input_ids,
             "labels": labels,
         }
-

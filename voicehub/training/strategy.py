@@ -188,8 +188,7 @@ class TrainingStrategy:
             return adapter.execute_prediction_phase(context)
         raise TypeError(
             "A strategy that wraps a training adapter must override "
-            "execute_prediction_phase() for label-free prediction."
-        )
+            "execute_prediction_phase() for label-free prediction.")
 
     def state_dict(self) -> dict[str, Any]:
         """Return runtime-specific checkpoint state."""
@@ -198,8 +197,9 @@ class TrainingStrategy:
     def resume_signature(self) -> dict[str, Any]:
         """Return stable topology required for exact checkpoint resume.
 
-        Distributed strategies should override this with their world size,
-        sharding layout, accumulation semantics, and other topology controls.
+        Distributed strategies should override this with their world
+        size, sharding layout, accumulation semantics, and other
+        topology controls.
         """
         return {
             "name": self.name,

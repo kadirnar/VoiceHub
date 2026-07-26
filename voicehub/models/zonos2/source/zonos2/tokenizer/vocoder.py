@@ -8,22 +8,22 @@ import numpy as np
 import torch
 from voicehub.models.zonos2.source.zonos2.message import TTSDetokenizeMsg
 
-# Global DAC model cache
-_dac_model = None
+# DAC models are cached per device so an explicitly selected GPU is respected.
+_dac_models: dict[str, object] = {}
 
 
-def _get_dac():
+def _get_dac(device: str | torch.device):
     """Lazy load and cache the DAC 44kHz model."""
-    global _dac_model
-    if _dac_model is None:
+    normalized_device = str(torch.device(device))
+    if normalized_device not in _dac_models:
         import voicehub.components.audio.codecs.dac as dac_module
 
-        _dac_model = (
+        _dac_models[normalized_device] = (
             dac_module.DAC.load(dac_module.utils.download(model_type="44khz"))
             .eval()
-            .to("cuda")
+            .to(normalized_device)
         )
-    return _dac_model
+    return _dac_models[normalized_device]
 
 
 def shear_up(x: torch.Tensor, pad_id: int) -> torch.Tensor:
@@ -56,7 +56,7 @@ def decode_dac(codes: torch.Tensor) -> torch.Tensor:
     Returns:
         Audio tensor of shape (batch, num_samples) at 44.1kHz
     """
-    dac = _get_dac()
+    dac = _get_dac(codes.device)
     # Clamp codes to valid range
     codes = torch.clamp(codes, max=1023)
     # DAC expects (batch, codebooks, seq)
@@ -90,6 +90,7 @@ class TTSVocoderManager:
         sample_rate: int = 44100,
         overlap_frames: int = 4,
         hop_length: int = 512,
+        device: str | torch.device = "cuda",
     ):
         """Initialize the vocoder manager.
 
@@ -111,6 +112,7 @@ class TTSVocoderManager:
         self.sample_rate = sample_rate
         self.overlap_frames = overlap_frames
         self.hop_length = hop_length
+        self.device = torch.device(device)
 
         # Per-request state
         self._frame_buffers: Dict[int, List[List[int]]] = {}
@@ -294,7 +296,7 @@ class TTSVocoderManager:
         if apply_shear_up:
             codes = shear_up(codes, self.audio_pad_id)
 
-        codes = codes.to("cuda")
+        codes = codes.to(self.device)
         return decode_dac(codes)
 
     def reset(self, uid: int | None = None):

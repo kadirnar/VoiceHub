@@ -133,7 +133,7 @@ class Generator:
         text: str,
         speaker: int = 0,
         max_audio_length_ms: float = 30_000,
-        context: List[Segment] = [],
+        context: List[Segment] | None = None,
         temperature: float = 0.9,
         topk: int = 30,
     ) -> torch.Tensor:
@@ -143,8 +143,7 @@ class Generator:
 
         max_audio_frames = int(max_audio_length_ms / 40) # the frame number of max prediction
         tokens, tokens_mask = [], []
-        tokens, tokens_mask = [], []
-        for segment in context:
+        for segment in context or ():
             segment_tokens, segment_tokens_mask = self._tokenize_segment(segment)
             tokens.append(segment_tokens)
             tokens_mask.append(segment_tokens_mask)
@@ -179,6 +178,10 @@ class Generator:
                 [torch.ones_like(sample).bool(), torch.zeros(1, 1).bool().to(self.device)], dim=1
             ).unsqueeze(1)
             curr_pos = curr_pos[:, -1:] + 1
+        if not samples:
+            raise RuntimeError(
+                "ConversationTTS generation ended before producing an audio "
+                "frame. Try a longer duration or different sampling options.")
         audio = self._audio_tokenizer.detokenize(torch.stack(samples).permute(1, 2, 0).squeeze(0))
         return audio
 

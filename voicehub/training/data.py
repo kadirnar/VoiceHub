@@ -78,15 +78,13 @@ class CausalTokenCollator:
             install_extra="training",
         )
         sequences = [
-            torch.as_tensor(feature["input_ids"], dtype=torch.long).reshape(-1)
-            for feature in features
+            torch.as_tensor(feature["input_ids"], dtype=torch.long).reshape(-1) for feature in features
         ]
         labels = [
             torch.as_tensor(
                 feature.get("labels", feature["input_ids"]),
                 dtype=torch.long,
-            ).reshape(-1)
-            for feature in features
+            ).reshape(-1) for feature in features
         ]
         if any(ids.shape != target.shape for ids, target in zip(sequences, labels)):
             raise ValueError("Every causal token example must align input_ids and labels.")
@@ -108,8 +106,7 @@ class CausalTokenCollator:
         for row, (sequence, target) in enumerate(zip(sequences, labels)):
             length = int(sequence.numel())
             target_slice = (
-                slice(max_length - length, max_length)
-                if self.padding_side == "left" else slice(0, length))
+                slice(max_length - length, max_length) if self.padding_side == "left" else slice(0, length))
             input_ids[row, target_slice] = sequence
             attention_mask[row, target_slice] = 1
             padded_labels[row, target_slice] = target

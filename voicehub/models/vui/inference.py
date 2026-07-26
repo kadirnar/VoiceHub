@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import math
+from typing import Any
+
 from voicehub.configuration_utils import VoiceHubConfig
+from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
+from voicehub.models._shared import finish_audio_output, seeded_inference
 
 
 class VuiConfig(VoiceHubConfig):
@@ -20,6 +25,15 @@ class VuiForTextToSpeech(PreTrainedTTSModel):
     """Vui synthesis with locally maintained source."""
 
     config_class = VuiConfig
+    default_model_name_or_path = "vui-abraham-100m.pt"
+    passthrough_generation_options = frozenset({
+        "max_chunk_retries",
+        "max_secs",
+        "prompt_codes",
+        "temperature",
+        "top_k",
+        "top_p",
+    })
 
     def __init__(
         self,
@@ -42,30 +56,66 @@ class VuiForTextToSpeech(PreTrainedTTSModel):
 
         self.model = Vui.from_pretrained(checkpoint_path=self.config.name_or_path).to(self.device)
         self.model.eval()
-        self.config.sample_rate = self.model.codec.config.sample_rate
+        self.config.sample_rate = int(self.model.codec.config.sample_rate)
+
+    def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
+        temperature = model_inputs.get("temperature", 0.5)
+        if (not isinstance(temperature, (int, float)) or isinstance(temperature, bool) or
+                not math.isfinite(temperature) or temperature <= 0):
+            raise ValueError("`temperature` must be a finite positive number.")
+        top_k = model_inputs.get("top_k", 100)
+        if top_k is not None and (not isinstance(top_k, int) or isinstance(top_k, bool) or top_k <= 0):
+            raise ValueError("`top_k` must be a positive integer or None.")
+        top_p = model_inputs.get("top_p")
+        if top_p is not None and (not isinstance(top_p, (int, float)) or isinstance(top_p, bool) or
+                                  not math.isfinite(top_p) or not 0 < top_p <= 1):
+            raise ValueError("`top_p` must be finite and in the interval (0, 1] or None.")
+        max_secs = model_inputs.get("max_secs", 100)
+        if (not isinstance(max_secs, int) or isinstance(max_secs, bool) or max_secs <= 0):
+            raise ValueError("`max_secs` must be a positive integer.")
+        max_chunk_retries = model_inputs.get("max_chunk_retries", 3)
+        if (not isinstance(max_chunk_retries, int) or isinstance(max_chunk_retries, bool) or
+                max_chunk_retries <= 0):
+            raise ValueError("`max_chunk_retries` must be a positive integer.")
 
     def _generate(
         self,
         text: str,
         *,
         output_file: str | None = None,
+        seed: int | None = None,
         **generation_options,
     ) -> TTSOutput:
-        self.load()
         from voicehub.models.vui.tts import render
 
-        waveform = render(
-            self.model,
-            text,
-            **generation_options,
+        torch = import_optional(
+            "torch",
+            model_type="vui",
+            install_extra="vui",
         )
-        output = TTSOutput(
-            audio=waveform[0],
-            sample_rate=self.sample_rate,
+        with seeded_inference(
+                seed,
+                device=self.device,
+                model_type="vui",
+        ) as effective_seed:
+            with torch.inference_mode():
+                waveform = render(
+                    self.model,
+                    text,
+                    **generation_options,
+                )
+        if waveform is None or waveform.numel() == 0:
+            raise RuntimeError("Vui returned an empty audio waveform.")
+        audio = waveform[0] if waveform.ndim > 1 else waveform
+        return finish_audio_output(
+            audio,
+            self.sample_rate,
+            output_file=output_file,
+            metadata={
+                "seed": effective_seed,
+                "requested_seed": seed,
+            },
         )
-        if output_file:
-            output.save(output_file)
-        return output
 
 
 VuiTTS = VuiForTextToSpeech

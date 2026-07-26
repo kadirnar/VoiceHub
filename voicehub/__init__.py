@@ -6,6 +6,14 @@ from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.data_collator import DefaultDataCollator, default_data_collator
 from voicehub.errors import OptionalDependencyError, SourceLicenseError, UnknownModelError, VoiceHubError
 from voicehub.generation_configuration import TTSGenerationConfig
+from voicehub.inference_strategy import (
+    EagerInferenceStrategy,
+    InferenceStrategy,
+    get_inference_strategy,
+    list_inference_strategies,
+    register_inference_strategy,
+    unregister_inference_strategy,
+)
 from voicehub.modeling_outputs import TTSOutput, TTSTrainingOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
 from voicehub.policies import ModelLicenseSpec
@@ -71,9 +79,11 @@ __all__ = [
     "DataCollatorForTTSTraining",
     "DefaultDataCollator",
     "EarlyStoppingCallback",
+    "EagerInferenceStrategy",
     "EvalPrediction",
     "FlowMatchingTrainingAdapter",
     "IntervalStrategy",
+    "InferenceStrategy",
     "ModelLicenseSpec",
     "ModelSpec",
     "ModelTrainingSpec",
@@ -111,14 +121,18 @@ __all__ = [
     "__version__",
     "default_data_collator",
     "get_last_checkpoint",
+    "get_inference_strategy",
     "get_training_strategy",
     "get_training_spec",
-    "list_training_strategies",
+    "list_inference_strategies",
     "list_training_specs",
+    "list_training_strategies",
+    "register_inference_strategy",
     "register_training_alias",
     "register_training_spec",
     "register_training_strategy",
     "set_seed",
+    "unregister_inference_strategy",
     "unregister_training_alias",
     "unregister_training_spec",
     "unregister_training_strategy",

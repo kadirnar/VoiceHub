@@ -9,6 +9,7 @@ from huggingface_hub import snapshot_download
 from .model.voxcpm import VoxCPMModel, LoRAConfig
 from .model.voxcpm2 import VoxCPM2Model
 from .model.utils import next_and_close
+from voicehub.models._shared import seeded_inference
 
 
 class VoxCPM:
@@ -294,29 +295,34 @@ class VoxCPM:
                     self.text_normalizer = TextNormalizer()
                 text = self.text_normalizer.normalize(text)
 
-            generate_result = self.tts_model._generate_with_prompt_cache(
-                target_text=text,
-                prompt_cache=fixed_prompt_cache,
-                min_len=min_len,
-                max_len=max_len,
-                inference_timesteps=inference_timesteps,
-                cfg_value=cfg_value,
-                retry_badcase=retry_badcase,
-                retry_badcase_max_times=retry_badcase_max_times,
-                retry_badcase_ratio_threshold=retry_badcase_ratio_threshold,
-                streaming=streaming,
-                seed=seed,
-            )
+            with seeded_inference(
+                seed,
+                device=str(self.tts_model.device),
+                model_type="voxcpm",
+            ) as effective_seed:
+                generate_result = self.tts_model._generate_with_prompt_cache(
+                    target_text=text,
+                    prompt_cache=fixed_prompt_cache,
+                    min_len=min_len,
+                    max_len=max_len,
+                    inference_timesteps=inference_timesteps,
+                    cfg_value=cfg_value,
+                    retry_badcase=retry_badcase,
+                    retry_badcase_max_times=retry_badcase_max_times,
+                    retry_badcase_ratio_threshold=retry_badcase_ratio_threshold,
+                    streaming=streaming,
+                    seed=effective_seed,
+                )
 
-            if streaming:
-                try:
-                    for wav, _, _ in generate_result:
-                        yield wav.squeeze(0).cpu().numpy()
-                finally:
-                    generate_result.close()
-            else:
-                wav, _, _ = next_and_close(generate_result)
-                yield wav.squeeze(0).cpu().numpy()
+                if streaming:
+                    try:
+                        for wav, _, _ in generate_result:
+                            yield wav.squeeze(0).cpu().numpy()
+                    finally:
+                        generate_result.close()
+                else:
+                    wav, _, _ = next_and_close(generate_result)
+                    yield wav.squeeze(0).cpu().numpy()
 
         finally:
             for tmp_path in temp_files:

@@ -79,8 +79,8 @@ class OrpheusSFTDataset:
             previous_first = frame[0]
         offsets = (0, 4096, 8192, 12288, 16384, 20480, 24576)
         return [
-            value + OrpheusSFTDataset.AUDIO_OFFSET + offsets[channel]
-            for frame in deduplicated for channel, value in enumerate(frame)
+            value + OrpheusSFTDataset.AUDIO_OFFSET + offsets[channel] for frame in deduplicated
+            for channel, value in enumerate(frame)
         ]
 
     def _audio_tokens(self, record: Mapping[str, Any]) -> list[int]:
@@ -88,8 +88,7 @@ class OrpheusSFTDataset:
         if codes is None:
             audio_path = record.get("audio")
             if not audio_path:
-                raise ValueError(
-                    "Orpheus records require 'audio' or precomputed 'audio_codes'.")
+                raise ValueError("Orpheus records require 'audio' or precomputed 'audio_codes'.")
             waveform = load_audio_tensor(
                 str(audio_path),
                 sample_rate=24_000,
@@ -103,17 +102,15 @@ class OrpheusSFTDataset:
             )
             device = next(self.codec.parameters()).device
             with torch.inference_mode():
-                codes = self.codec.encode(
-                    waveform.to(device).unsqueeze(0).unsqueeze(0))
+                codes = self.codec.encode(waveform.to(device).unsqueeze(0).unsqueeze(0))
         if isinstance(codes, Mapping):
             codes = (
                 codes["layer_1"],
                 codes["layer_2"],
                 codes["layer_3"],
             )
-        if len(codes) == 3 and any(
-                hasattr(item, "shape") or isinstance(item, (tuple, list))
-                for item in codes):
+        if len(codes) == 3 and any(hasattr(item, "shape") or isinstance(item, (tuple, list))
+                                   for item in codes):
             return self._flatten_snac_codes(codes)
         flattened = [int(value) for value in codes]
         if flattened and max(flattened) < self.AUDIO_OFFSET:
@@ -135,10 +132,9 @@ class OrpheusSFTDataset:
             add_special_tokens=True,
         )
         audio_tokens = self._audio_tokens(record)
-        sequence = (
-            [self.START_HUMAN] + list(text_ids) +
-            [self.END_TEXT, self.END_HUMAN, self.START_AI, self.START_SPEECH] +
-            audio_tokens + [self.END_SPEECH, self.END_AI])
+        sequence = ([self.START_HUMAN] + list(text_ids) +
+                    [self.END_TEXT, self.END_HUMAN, self.START_AI, self.START_SPEECH] + audio_tokens +
+                    [self.END_SPEECH, self.END_AI])
         labels = list(sequence)
         if self.completion_only:
             speech_index = sequence.index(self.START_SPEECH)
@@ -147,4 +143,3 @@ class OrpheusSFTDataset:
             "input_ids": sequence,
             "labels": labels,
         }
-

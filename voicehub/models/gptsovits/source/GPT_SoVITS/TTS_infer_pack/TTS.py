@@ -191,24 +191,36 @@ v4:
 """
 
 
-def set_seed(seed: int):
+def set_seed(seed: int, device: str | torch.device = "cpu"):
     seed = int(seed)
     seed = seed if seed != -1 else random.randint(0, 2**32 - 1)
     print(f"Set seed to {seed}")
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
-    torch.manual_seed(seed)
+    torch.random.default_generator.manual_seed(seed)
     try:
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(seed)
-            torch.cuda.manual_seed_all(seed)
+        resolved_device = torch.device(device)
+        if resolved_device.type == "cuda" and torch.cuda.is_available():
+            device_index = (
+                torch.cuda.current_device()
+                if resolved_device.index is None
+                else resolved_device.index
+            )
+            with torch.cuda.device(device_index):
+                torch.cuda.manual_seed(seed)
             # torch.backends.cudnn.deterministic = True
             # torch.backends.cudnn.benchmark = False
             # torch.backends.cudnn.enabled = True
             # 开启后会影响精度
             torch.backends.cuda.matmul.allow_tf32 = False
             torch.backends.cudnn.allow_tf32 = False
+        elif (
+            resolved_device.type == "mps"
+            and hasattr(torch, "mps")
+            and hasattr(torch.mps, "manual_seed")
+        ):
+            torch.mps.manual_seed(seed)
     except:
         pass
     return seed
@@ -1050,7 +1062,7 @@ class TTS:
         fragment_interval = inputs.get("fragment_interval", 0.3)
         seed = inputs.get("seed", -1)
         seed = -1 if seed in ["", None] else seed
-        actual_seed = set_seed(seed)
+        actual_seed = set_seed(seed, self.configs.device)
         parallel_infer = inputs.get("parallel_infer", True)
         repetition_penalty = inputs.get("repetition_penalty", 1.35)
         sample_steps = inputs.get("sample_steps", 32)
