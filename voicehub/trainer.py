@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from voicehub.data_collator import default_data_collator
 from voicehub.dependencies import import_optional
+from voicehub.errors import UnknownModelError
 from voicehub.modeling_utils import PreTrainedTTSModel
 from voicehub.trainer_callback import (
     CallbackHandler,
@@ -38,6 +39,9 @@ from voicehub.trainer_utils import (
     get_scheduler_lambda,
     set_seed,
 )
+from voicehub.training.adapters import BaseTrainingAdapter
+from voicehub.training.auto import AutoTrainingAdapter
+from voicehub.training.optimization import OptimizerBundle, SchedulerBundle
 from voicehub.training_args import TrainingArguments
 
 
@@ -65,6 +69,7 @@ class Trainer:
         optimizers: tuple[Any | None, Any | None] = (None, None),
         optimizer_cls_and_kwargs: tuple[type, dict[str, Any]] | None = None,
         preprocess_logits_for_metrics: Callable[[Any, Any], Any] | None = None,
+        training_adapter: BaseTrainingAdapter | None = None,
     ):
         if model is None and model_init is None:
             raise ValueError("Pass either `model` or `model_init` to Trainer.")
@@ -77,7 +82,14 @@ class Trainer:
         self.model_init = model_init
         self.model = model if model is not None else model_init()
         self.model_wrapped = self.model
-        self.data_collator = data_collator or default_data_collator
+        self.training_adapter = self._create_training_adapter(
+            self.model,
+            training_adapter,
+        )
+        self._uses_default_data_collator = data_collator is None
+        self.data_collator = data_collator or (
+            self.training_adapter.data_collator
+            if self.training_adapter is not None else default_data_collator)
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
         self.processing_class = processing_class
@@ -133,11 +145,31 @@ class Trainer:
             )
         return self._torch
 
+    @staticmethod
+    def _create_training_adapter(model, training_adapter):
+        if training_adapter is not None:
+            if not isinstance(training_adapter, BaseTrainingAdapter):
+                raise TypeError("`training_adapter` must inherit `BaseTrainingAdapter`.")
+            if training_adapter.model is not model:
+                raise ValueError("The training adapter must wrap the model passed to Trainer.")
+            return training_adapter
+        if isinstance(model, PreTrainedTTSModel):
+            try:
+                return AutoTrainingAdapter.from_model(model)
+            except (KeyError, UnknownModelError):
+                return None
+        return None
+
     def _ensure_model_loaded(self) -> None:
         if (isinstance(self.model, PreTrainedTTSModel) and not self.model.is_loaded):
             self.model.load()
+        if self.training_adapter is not None:
+            self.training_adapter.setup()
+            self.model_wrapped = self.training_adapter
 
     def _runtime_model(self):
+        if self.training_adapter is not None:
+            return self.training_adapter
         if hasattr(self.model, "parameters"):
             return self.model
         runtime = getattr(self.model, "model", None)
@@ -215,41 +247,56 @@ class Trainer:
         if not trainable:
             raise ValueError("The model has no trainable parameters.")
 
-        if self.optimizer_cls_and_kwargs is not None:
-            optimizer_cls, optimizer_kwargs = self.optimizer_cls_and_kwargs
-            self.optimizer = optimizer_cls(
-                [parameter for _, parameter in trainable],
-                **optimizer_kwargs,
-            )
+        if (self.training_adapter is not None and self.training_adapter.spec.separate_optimizers):
+            named_groups = self.training_adapter.named_parameter_groups()
+            if len(named_groups) > 1:
+                self.optimizer = OptimizerBundle({
+                    name: self._create_single_optimizer(parameters, torch)
+                    for name, parameters in named_groups
+                })
+            else:
+                self.optimizer = self._create_single_optimizer(
+                    trainable,
+                    torch,
+                )
         else:
-            decay_parameters = []
-            non_decay_parameters = []
-            for name, parameter in trainable:
-                normalized_name = name.lower()
-                if name.endswith(".bias") or "norm" in normalized_name:
-                    non_decay_parameters.append(parameter)
-                else:
-                    decay_parameters.append(parameter)
-            groups = [
-                {
-                    "params": decay_parameters,
-                    "weight_decay": self.args.weight_decay
-                },
-                {
-                    "params": non_decay_parameters,
-                    "weight_decay": 0.0
-                },
-            ]
-            groups = [group for group in groups if group["params"]]
-            self.optimizer = torch.optim.AdamW(
-                groups,
-                lr=self.args.learning_rate,
-                betas=(self.args.adam_beta1, self.args.adam_beta2),
-                eps=self.args.adam_epsilon,
-            )
+            self.optimizer = self._create_single_optimizer(trainable, torch)
 
         self.callback_handler.optimizer = self.optimizer
         return self.optimizer
+
+    def _create_single_optimizer(self, trainable, torch):
+        if self.optimizer_cls_and_kwargs is not None:
+            optimizer_cls, optimizer_kwargs = self.optimizer_cls_and_kwargs
+            return optimizer_cls(
+                [parameter for _, parameter in trainable],
+                **optimizer_kwargs,
+            )
+        decay_parameters = []
+        non_decay_parameters = []
+        for name, parameter in trainable:
+            normalized_name = name.lower()
+            if name.endswith(".bias") or "norm" in normalized_name:
+                non_decay_parameters.append(parameter)
+            else:
+                decay_parameters.append(parameter)
+        groups = [
+            {
+                "params": decay_parameters,
+                "weight_decay": self.args.weight_decay
+            },
+            {
+                "params": non_decay_parameters,
+                "weight_decay": 0.0
+            },
+        ]
+        groups = [group for group in groups if group["params"]]
+        return torch.optim.AdamW(
+            groups,
+            lr=self.args.learning_rate,
+            betas=(self.args.adam_beta1, self.args.adam_beta2),
+            eps=self.args.adam_epsilon,
+        )
 
     def create_scheduler(self, num_training_steps: int, optimizer=None):
         """Create a linear, cosine, or constant learning-rate scheduler."""
@@ -264,10 +311,20 @@ class Trainer:
             num_warmup_steps=self.args.get_warmup_steps(num_training_steps),
             num_training_steps=num_training_steps,
         )
-        self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
-            optimizer,
-            schedule,
-        )
+        if isinstance(optimizer, OptimizerBundle):
+            self.lr_scheduler = SchedulerBundle({
+                name:
+                torch.optim.lr_scheduler.LambdaLR(
+                    named_optimizer,
+                    schedule,
+                )
+                for name, named_optimizer in optimizer.optimizers.items()
+            })
+        else:
+            self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
+                optimizer,
+                schedule,
+            )
         self.callback_handler.lr_scheduler = self.lr_scheduler
         return self.lr_scheduler
 
@@ -294,6 +351,8 @@ class Trainer:
         return self._prepare_input(inputs)
 
     def _model_forward(self, model, inputs):
+        if isinstance(model, BaseTrainingAdapter):
+            return model(**inputs)
         if isinstance(model, PreTrainedTTSModel):
             return model.forward(**inputs)
         return model(**inputs)
@@ -404,14 +463,22 @@ class Trainer:
         torch = self._import_torch()
         runtime = self._runtime_model()
         if self._scaler is not None:
-            self._scaler.unscale_(self.optimizer)
+            if isinstance(self.optimizer, OptimizerBundle):
+                for optimizer in self.optimizer.optimizers.values():
+                    self._scaler.unscale_(optimizer)
+            else:
+                self._scaler.unscale_(self.optimizer)
         if self.args.max_grad_norm and self.args.max_grad_norm > 0:
             torch.nn.utils.clip_grad_norm_(
                 runtime.parameters(),
                 self.args.max_grad_norm,
             )
         if self._scaler is not None:
-            self._scaler.step(self.optimizer)
+            if isinstance(self.optimizer, OptimizerBundle):
+                for optimizer in self.optimizer.optimizers.values():
+                    self._scaler.step(optimizer)
+            else:
+                self._scaler.step(self.optimizer)
             self._scaler.update()
         else:
             self.optimizer.step()
@@ -442,6 +509,12 @@ class Trainer:
         if self.model_init is not None:
             self.model = self.model_init()
             self.model_wrapped = self.model
+            self.training_adapter = self._create_training_adapter(
+                self.model,
+                None,
+            )
+            if (self._uses_default_data_collator and self.training_adapter is not None):
+                self.data_collator = self.training_adapter.data_collator
             self.optimizer = None
             self.lr_scheduler = None
             self.callback_handler.model = self.model
@@ -717,11 +790,10 @@ class Trainer:
         """Run one no-gradient prediction/evaluation batch."""
         torch = self._import_torch()
         prepared = self._prepare_inputs(inputs)
-        has_labels = (bool(self.args.label_names) and all(name in prepared for name in self.args.label_names))
-        labels = None
-        if has_labels:
-            label_values = [prepared[name] for name in self.args.label_names]
-            labels = label_values[0] if len(label_values) == 1 else tuple(label_values)
+        label_values = self._get_label_values(prepared)
+        has_labels = bool(label_values)
+        labels = (
+            label_values[0] if len(label_values) == 1 else tuple(label_values) if label_values else None)
 
         self._set_model_mode(training=False)
         with torch.no_grad(), self._autocast_context():
@@ -751,6 +823,16 @@ class Trainer:
             self._nested_detach(logits),
             self._nested_detach(labels),
         )
+
+    def _get_label_values(self, inputs):
+        if self.training_adapter is not None:
+            for name in self.training_adapter.spec.label_names:
+                if name in inputs:
+                    return [inputs[name]]
+            return []
+        if (self.args.label_names and all(name in inputs for name in self.args.label_names)):
+            return [inputs[name] for name in self.args.label_names]
+        return []
 
     @staticmethod
     def _extract_predictions(outputs, *, ignore_loss: bool):

@@ -9,7 +9,9 @@ Trainer
 TrainerState / TrainerControl / TrainerCallback
 EvalPrediction / TrainOutput / PredictionOutput
 DefaultDataCollator
+DataCollatorForTTSTraining
 TTSTrainingOutput
+AutoTrainingAdapter / ModelTrainingSpec
 ```
 
 PyTorch remains optional. Install the training extra only for training:
@@ -22,10 +24,17 @@ python -m pip install "voicehub[training]"
 
 A trainable model returns `TTSTrainingOutput` with `loss` as its first field.
 It may be a source-integrated VoiceHub architecture or any `torch.nn.Module`
-that follows the same contract.
+that follows the same contract. Source-integrated models automatically receive
+their registered training adapter.
 
 ```python
-from voicehub import Trainer, TrainingArguments
+from voicehub import AutoModelForTextToSpeech, Trainer, TrainingArguments
+
+model = AutoModelForTextToSpeech.from_pretrained(
+    "OpenMOSS-Team/MOSS-TTS-v1.5",
+    model_type="mosstts",
+    device="cuda",
+)
 
 arguments = TrainingArguments(
     output_dir="runs/my-tts-model",
@@ -52,10 +61,42 @@ trainer.train(resume_from_checkpoint=True)
 ```
 
 Dataset samples are mappings. Their keys are passed to `model.forward`;
-`labels` is the default target key. `DefaultDataCollator` stacks fixed-size
-tensors and numeric values while preserving text and other metadata as lists.
-Variable-length audio and token sequences should use an
-architecture-specific padding collator passed as `data_collator`.
+`labels` is the portable target key. A model profile can also recognize
+upstream names such as `targets`, `mel_labels`, and `audio_labels`.
+`DataCollatorForTTSTraining` pads variable token, acoustic, and waveform
+sequences; integer labels use `-100`, while continuous features use zero.
+
+## All-model adapter layer
+
+Every registered model resolves one of five adapters:
+
+| Family                | Default fallback objective              |
+| --------------------- | --------------------------------------- |
+| Causal LM             | Shifted codec-token cross entropy       |
+| Sequence-to-sequence  | Teacher-forced token cross entropy      |
+| Flow matching         | Native flow loss, otherwise MSE         |
+| Acoustic regression   | Mel/codec/waveform L1 or MSE             |
+| Composite             | Weighted native component losses        |
+
+The adapter searches known model-specific paths first and then performs a
+bounded search for the largest trainable source module. This handles runtime
+wrappers without binding Trainer to private class names:
+
+```python
+adapter = model.get_training_adapter()
+print(adapter.spec.family, adapter.spec.source_entrypoints)
+
+trainer = Trainer(model=model, args=arguments, train_dataset=train_dataset)
+```
+
+Composite profiles can resolve several modules. Trainer creates separate named
+optimizer and scheduler states while deduplicating shared parameters. The
+entire bundle is included in checkpoints.
+
+The model matrix in
+[`training_models.md`](https://github.com/kadirnar/VoiceHub/blob/main/docs/training_models.md)
+distinguishes included native upstream recipes from models trained through the
+generic family objective.
 
 ## Loss contract
 
@@ -84,9 +125,10 @@ trainer = Trainer(
 ```
 
 Inference adapters remain lazy and keep their existing `generate()` contract.
-An architecture needs a differentiable source `forward` path to be fine-tuned;
-inference-only upstream implementations cannot become trainable merely by
-wrapping waveform generation in a loss function.
+Training calls the resolved source module instead of waveform generation.
+When a published snapshot only exposes an inference graph, pass a specialized
+`BaseTrainingAdapter` backed by the corresponding differentiable source model;
+VoiceHub raises a precise error instead of treating ONNX output as a gradient.
 
 ## Extension points
 

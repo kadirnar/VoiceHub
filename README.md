@@ -158,10 +158,18 @@ and [architecture guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/arc
 ## Training
 
 `Trainer` and `TrainingArguments` follow the Transformers training vocabulary
-without adding Transformers or PyTorch to the base installation:
+without adding Transformers or PyTorch to the base installation. Every
+registered backend has a `ModelTrainingSpec`; `Trainer` automatically selects
+its model-family adapter:
 
 ```python
-from voicehub import Trainer, TrainingArguments
+from voicehub import AutoModelForTextToSpeech, Trainer, TrainingArguments
+
+model = AutoModelForTextToSpeech.from_pretrained(
+    "F5TTS_v1_Base",
+    model_type="f5tts",
+    device="cuda",
+)
 
 trainer = Trainer(
     model=model,
@@ -185,15 +193,21 @@ trainer.train(resume_from_checkpoint=True)
 
 Trainable models return `TTSTrainingOutput(loss=..., logits=...)`, a mapping
 with `loss`, or a tuple with loss first. Architecture-specific objectives can
-be connected through `compute_loss_func`; variable-length speech batches can
-provide a custom `data_collator`. The common loop includes gradient
-accumulation and clipping, AdamW schedules, mixed precision, callbacks,
-evaluation/prediction, best-model selection, checkpoint rotation, and
-resumable optimizer/scheduler/RNG state.
+be connected through `compute_loss_func`. The automatic adapters cover causal
+codec LMs, sequence-to-sequence models, flow/diffusion models, acoustic
+regression models, and composite/GAN systems. Composite source modules receive
+separate named optimizer and scheduler states. Variable-length token, mel, and
+waveform batches use `DataCollatorForTTSTraining`.
+
+The common loop includes gradient accumulation and clipping, AdamW schedules,
+mixed precision, callbacks, evaluation/prediction, best-model selection,
+checkpoint rotation, and resumable model/optimizer/scheduler/RNG state.
 
 See the
 [trainer guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/trainer.md)
-for the loss contract and extension points.
+and
+[training model matrix](https://github.com/kadirnar/VoiceHub/blob/main/docs/training_models.md)
+for objective families, native upstream recipes, and extension points.
 
 ## Source policy
 

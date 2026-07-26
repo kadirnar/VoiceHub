@@ -71,6 +71,7 @@ class TTSTrainingOutput:
     audio_values: Any | None = None
     hidden_states: Any | None = None
     attentions: Any | None = None
+    losses: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_tuple(self) -> tuple[Any, ...]:
@@ -97,6 +98,8 @@ class TTSTrainingOutput:
             "attentions",
         )
         populated = [name for name in names if getattr(self, name) is not None]
+        if self.losses:
+            populated.append("losses")
         if self.metadata:
             populated.append("metadata")
         return tuple(populated)

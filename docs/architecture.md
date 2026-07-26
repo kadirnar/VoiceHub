@@ -15,10 +15,14 @@ AutoConfig
 
 TrainingArguments
     -> Trainer
-       -> data collator / DataLoader
-       -> differentiable forward(...)
+       -> AutoTrainingAdapter
+          -> mandatory ModelTrainingSpec
+          -> causal-LM / seq2seq / flow / acoustic / composite adapter
+          -> trainable source-module discovery
+       -> TTS padding collator / DataLoader
+       -> differentiable source forward(...)
        -> TTSTrainingOutput(loss, logits, audio_values)
-       -> optimizer / scheduler
+       -> named optimizer / scheduler bundle
        -> callbacks / evaluation
        -> checkpoint save / resume
 ```
@@ -83,6 +87,12 @@ voicehub/
   trainer.py                 train/evaluate/predict loop
   trainer_callback.py        callback, state, and control API
   trainer_utils.py           strategies, outputs, checkpoint utilities
+  training/
+    specs.py                  profile for every registered model
+    auto.py                   lazy model-to-adapter resolution
+    adapters.py               five objective-family implementations
+    collators.py              variable token/audio padding
+    optimization.py           composite optimizer/scheduler bundles
   policies/
     licensing.py             model/checkpoint usage restrictions
   components/
@@ -147,6 +157,19 @@ checkpoint-<global_step>/
 Models used with the default training path return a loss-bearing mapping,
 tuple, or `TTSTrainingOutput`. A custom `compute_loss_func` connects upstream
 objectives without coupling VoiceHub to an external trainer package.
+
+Every `ModelSpec.training` property resolves one `ModelTrainingSpec`.
+`AutoTrainingAdapter` first follows that profile's known source component
+paths, then performs bounded recursive discovery when an inference runtime adds
+an intermediate wrapper. It never scans installed TTS packages. Parameters
+shared by two components are yielded once.
+
+Composite architectures use one named optimizer and scheduler per resolved
+source component. Their states are serialized as a bundle, so LLM, codec,
+generator, and discriminator state can resume together. Native named losses
+are combined through the profile's explicit weights; the five family adapters
+only calculate a fallback cross-entropy, flow MSE, or acoustic reconstruction
+loss when upstream `forward()` does not already return one.
 
 General compute and utility dependencies remain external: PyTorch,
 Transformers, NumPy, audio I/O, phonemizers, and platform runtimes such as

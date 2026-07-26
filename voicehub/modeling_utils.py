@@ -230,5 +230,11 @@ class PreTrainedTTSModel(BaseTTSModel, ABC):
         self._save_pretrained(output_directory)
         return output_directory
 
+    def get_training_adapter(self):
+        """Return the unloaded model-family adapter paired with this model."""
+        from voicehub.training.auto import AutoTrainingAdapter
+
+        return AutoTrainingAdapter.from_model(self)
+
     def _save_pretrained(self, save_directory: Path) -> None:
         """Optional backend hook for serializing weights."""
