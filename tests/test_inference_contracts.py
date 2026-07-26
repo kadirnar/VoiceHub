@@ -8,12 +8,7 @@ from threading import Event
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from voicehub import (
-    AutoConfig,
-    PreTrainedTTSModel,
-    TTSGenerationConfig,
-    TTSOutput,
-)
+from voicehub import AutoConfig, PreTrainedTTSModel, TTSGenerationConfig, TTSOutput
 from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.inference_strategy import InferenceStrategy
 from voicehub.models._shared import resolve_model_directory, resolve_torch_dtype, seeded_inference
