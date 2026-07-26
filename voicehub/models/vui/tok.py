@@ -3,11 +3,11 @@ from transformers import ByT5Tokenizer
 
 
 class CustomByT5Tokenizer(ByT5Tokenizer):
-    """ByT5 tokenizer that returns a ``torch.Tensor`` instead of a plain list."""
+    """ByT5 tokenizer that returns a ``torch.Tensor`` instead of a plain
+    list."""
 
     def encode(self, text, add_special_tokens=False, **kwargs):
-        """
-        Override the encode method.
+        """Override the encode method.
 
         Args:
             text (str): Input text

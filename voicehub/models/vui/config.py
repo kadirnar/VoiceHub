@@ -27,7 +27,8 @@ class VuiConfig(BaseModel):
 
 
 class Config(BaseModel):
-    """Top-level run configuration that wraps a :class:`VuiConfig` and an optional checkpoint."""
+    """Top-level run configuration that wraps a :class:`VuiConfig` and an
+    optional checkpoint."""
 
     name: str = "base"
 

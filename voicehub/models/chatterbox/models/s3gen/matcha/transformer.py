@@ -58,10 +58,10 @@ class SnakeBeta(nn.Module):
         self.no_div_by_zero = 0.000000001
 
     def forward(self, x):
-        """
-        Forward pass of the function.
+        """Forward pass of the function.
 
-        Applies the function to the input elementwise. SnakeBeta ∶= x + 1/b * sin^2 (xa)
+        Applies the function to the input elementwise. SnakeBeta ∶= x +
+        1/b * sin^2 (xa)
         """
         x = self.proj(x)
         if self.alpha_logscale:
@@ -77,8 +77,7 @@ class SnakeBeta(nn.Module):
 
 
 class FeedForward(nn.Module):
-    r"""
-    A feed-forward layer.
+    r"""A feed-forward layer.
 
     Parameters:
         dim (`int`): The number of channels in the input.
@@ -132,8 +131,7 @@ class FeedForward(nn.Module):
 
 @maybe_allow_in_graph
 class BasicTransformerBlock(nn.Module):
-    r"""
-    A basic Transformer block.
+    r"""A basic Transformer block.
 
     Parameters:
         dim (`int`): The number of channels in the input and output.

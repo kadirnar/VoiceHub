@@ -19,7 +19,8 @@ REPO_ID = "ResembleAI/chatterbox"
 
 
 def punc_norm(text: str) -> str:
-    """Quick cleanup func for punctuation from LLMs or containing chars not seen often in the dataset."""
+    """Quick cleanup func for punctuation from LLMs or containing chars not
+    seen often in the dataset."""
     if len(text) == 0:
         return "You need to add some text for me to talk."
 
@@ -59,8 +60,8 @@ def punc_norm(text: str) -> str:
 
 @dataclass
 class Conditionals:
-    """
-    Container for T3 and S3Gen conditioning data used during speech synthesis.
+    """Container for T3 and S3Gen conditioning data used during speech
+    synthesis.
 
     Attributes:
         t3: Conditioning data for the T3 text-to-token model (speaker embedding,
@@ -95,11 +96,12 @@ class Conditionals:
 
 
 class ChatterboxTTS:
-    """
-    End-to-end text-to-speech model combining T3 (text-to-token) and S3Gen (token-to-waveform).
+    """End-to-end text-to-speech model combining T3 (text-to-token) and S3Gen
+    (token-to-waveform).
 
-    Synthesises speech by first generating S3 speech tokens from text using T3, then converting those tokens
-    to a waveform via S3Gen.  A voice-encoder embedding is used to condition speaker identity.
+    Synthesises speech by first generating S3 speech tokens from text
+    using T3, then converting those tokens to a waveform via S3Gen.  A
+    voice-encoder embedding is used to condition speaker identity.
     """
 
     ENC_COND_LEN = 6 * S3_SR
@@ -163,7 +165,8 @@ class ChatterboxTTS:
         device,
         repo_id: str = REPO_ID,
     ) -> 'ChatterboxTTS':
-        """Download model weights from HuggingFace Hub and initialise the model."""
+        """Download model weights from HuggingFace Hub and initialise the
+        model."""
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
             if not torch.backends.mps.is_built():
@@ -181,7 +184,8 @@ class ChatterboxTTS:
         return cls.from_local(Path(local_path).parent, device)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
-        """Extract speaker and prosody conditioning from a reference audio file."""
+        """Extract speaker and prosody conditioning from a reference audio
+        file."""
         # Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
@@ -218,7 +222,8 @@ class ChatterboxTTS:
         cfg_weight=0.5,
         temperature=0.8,
     ):
-        """Synthesise speech from text and return a watermarked waveform tensor."""
+        """Synthesise speech from text and return a watermarked waveform
+        tensor."""
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         else:

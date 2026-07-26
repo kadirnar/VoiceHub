@@ -73,8 +73,7 @@ class KPipeline:
             trf: bool = False,
             en_callable: Optional[Callable[[str], str]] = None,
             device: Optional[str] = None):
-        """
-        Initialize a KPipeline.
+        """Initialize a KPipeline.
 
         Args:
             lang_code: Language code for G2P processing
@@ -167,11 +166,11 @@ class KPipeline:
         return pack
 
     def load_voice(self, voice: Union[str, torch.FloatTensor], delimiter: str = ",") -> torch.FloatTensor:
-        """
-        Lazily download and load a voice embedding.
+        """Lazily download and load a voice embedding.
 
-        Multiple voices can be requested as a delimited string (e.g. ``'af_bella,af_jessica'``); they will be
-        averaged into a single style.
+        Multiple voices can be requested as a delimited string (e.g.
+        ``'af_bella,af_jessica'``); they will be averaged into a single
+        style.
         """
         if isinstance(voice, torch.FloatTensor):
             return voice
@@ -250,8 +249,7 @@ class KPipeline:
             voice: str,
             speed: float = 1,
             model: Optional[KModel] = None) -> Generator['KPipeline.Result', None, None]:
-        """
-        Generate audio from either raw phonemes or pre-processed tokens.
+        """Generate audio from either raw phonemes or pre-processed tokens.
 
         Args:
             tokens: Either a phoneme string or list of pre-processed MTokens

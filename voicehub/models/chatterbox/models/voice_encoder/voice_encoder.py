@@ -12,13 +12,15 @@ from .melspec import melspectrogram
 
 
 def pack(arrays, seq_len: int = None, pad_value=0):
-    """
-    Given a list of length B of array-like objects of shapes (Ti, ...), packs them in a single tensor of shape
-    (B, T, ...) by padding each individual array on the right.
+    """Given a list of length B of array-like objects of shapes (Ti, ...),
+    packs them in a single tensor of shape (B, T, ...) by padding each
+    individual array on the right.
 
-    :param arrays: a list of array-like objects of matching shapes except for the first axis.
-    :param seq_len: the value of T. It must be the maximum of the lengths Ti of the arrays at minimum. Will
-        default to that value if None.
+    :param arrays: a list of array-like objects of matching shapes
+        except for the first axis.
+    :param seq_len: the value of T. It must be the maximum of the
+        lengths Ti of the arrays at minimum. Will default to that value
+        if None.
     :param pad_value: the value to pad the arrays with.
     :return: a (B, T, ...) tensor
     """
@@ -55,7 +57,8 @@ def get_num_wins(
     min_coverage: float,
     hp: VoiceEncConfig,
 ):
-    """Calculate the number of overlapping windows and the required target frame count."""
+    """Calculate the number of overlapping windows and the required target
+    frame count."""
     assert n_frames > 0
     win_size = hp.ve_partial_frames
     n_wins, remainder = divmod(max(n_frames - win_size + step, 0), step)
@@ -117,7 +120,8 @@ def stride_as_partials(
 
 
 class VoiceEncoder(nn.Module):
-    """LSTM-based speaker encoder that produces L2-normalized speaker embeddings from mel spectrograms."""
+    """LSTM-based speaker encoder that produces L2-normalized speaker
+    embeddings from mel spectrograms."""
 
     def __init__(self, hp=VoiceEncConfig()):
         super().__init__()
@@ -139,13 +143,14 @@ class VoiceEncoder(nn.Module):
         return next(self.parameters()).device
 
     def forward(self, mels: torch.FloatTensor):
-        """
-        Computes the embeddings of a batch of partial utterances.
+        """Computes the embeddings of a batch of partial utterances.
 
-        :param mels: a batch of unscaled mel spectrograms of same duration as a float32 tensor of shape (B, T,
-            M) where T is hp.ve_partial_frames
-        :return: the embeddings as a float32 tensor of shape (B, E) where E is hp.speaker_embed_size.
-            Embeddings are L2-normed and thus lay in the range [-1, 1].
+        :param mels: a batch of unscaled mel spectrograms of same
+            duration as a float32 tensor of shape (B, T, M) where T is
+            hp.ve_partial_frames
+        :return: the embeddings as a float32 tensor of shape (B, E)
+            where E is hp.speaker_embed_size. Embeddings are L2-normed
+            and thus lay in the range [-1, 1].
         """
         if self.hp.normalized_mels and (mels.min() < 0 or mels.max() > 1):
             raise Exception(f"Mels outside [0, 1]. Min={mels.min()}, Max={mels.max()}")
@@ -169,8 +174,8 @@ class VoiceEncoder(nn.Module):
             rate: float = None,
             min_coverage=0.8,
             batch_size=None):
-        """
-        Computes the embeddings of a batch of full utterances with gradients.
+        """Computes the embeddings of a batch of full utterances with
+        gradients.
 
         :param mels: (B, T, M) unscaled mels
         :return: (B, E) embeddings on CPU
@@ -212,16 +217,16 @@ class VoiceEncoder(nn.Module):
 
     @staticmethod
     def utt_to_spk_embed(utt_embeds: np.ndarray):
-        """Takes an array of L2-normalized utterance embeddings, computes the mean embedding and L2-normalize
-        it to get a speaker embedding.
-        """
+        """Takes an array of L2-normalized utterance embeddings, computes the
+        mean embedding and L2-normalize it to get a speaker embedding."""
         assert utt_embeds.ndim == 2
         utt_embeds = np.mean(utt_embeds, axis=0)
         return utt_embeds / np.linalg.norm(utt_embeds, 2)
 
     @staticmethod
     def voice_similarity(embeds_x: np.ndarray, embeds_y: np.ndarray):
-        """Cosine similarity for L2-normalized utterance embeddings or speaker embeddings."""
+        """Cosine similarity for L2-normalized utterance embeddings or speaker
+        embeddings."""
         embeds_x = embeds_x if embeds_x.ndim == 1 else VoiceEncoder.utt_to_spk_embed(embeds_x)
         embeds_y = embeds_y if embeds_y.ndim == 1 else VoiceEncoder.utt_to_spk_embed(embeds_y)
         return embeds_x @ embeds_y
@@ -233,15 +238,18 @@ class VoiceEncoder(nn.Module):
             as_spk=False,
             batch_size=32,
             **kwargs):
-        """
-        Convenience function for deriving utterance or speaker embeddings from mel spectrograms.
+        """Convenience function for deriving utterance or speaker embeddings
+        from mel spectrograms.
 
-        :param mels: unscaled mels strictly within [0, 1] as either a (B, T, M) tensor or a list of (Ti, M)
-            arrays.
-        :param mel_lens: if passing mels as a tensor, individual mel lengths
-        :param as_spk: whether to return utterance embeddings or a single speaker embedding
+        :param mels: unscaled mels strictly within [0, 1] as either a
+            (B, T, M) tensor or a list of (Ti, M) arrays.
+        :param mel_lens: if passing mels as a tensor, individual mel
+            lengths
+        :param as_spk: whether to return utterance embeddings or a
+            single speaker embedding
         :param kwargs: args for inference()
-        :returns: embeds as a (B, E) float32 numpy array if <as_spk> is False, else as a (E,) array
+        :returns: embeds as a (B, E) float32 numpy array if <as_spk> is
+            False, else as a (E,) array
         """
         # Load mels in memory and pack them
         if isinstance(mels, List):
@@ -265,11 +273,10 @@ class VoiceEncoder(nn.Module):
             batch_size=32,
             trim_top_db: Optional[float] = 20,
             **kwargs):
-        """
-        Wrapper around embeds_from_mels.
+        """Wrapper around embeds_from_mels.
 
-        :param trim_top_db: this argument was only added for the sake of compatibility with metavoice's
-            implementation
+        :param trim_top_db: this argument was only added for the sake of
+            compatibility with metavoice's implementation
         """
         if sample_rate != self.hp.sample_rate:
             wavs = [

@@ -13,11 +13,11 @@ REPO_ID = "ResembleAI/chatterbox"
 
 
 class ChatterboxVC:
-    """
-    Voice conversion model that re-synthesises speech with a target speaker's voice.
+    """Voice conversion model that re-synthesises speech with a target
+    speaker's voice.
 
-    Tokenises the source audio with S3Tokenizer, then decodes the tokens through S3Gen conditioned on a
-    reference speaker embedding.
+    Tokenises the source audio with S3Tokenizer, then decodes the tokens
+    through S3Gen conditioned on a reference speaker embedding.
     """
 
     ENC_COND_LEN = 6 * S3_SR
@@ -79,7 +79,8 @@ class ChatterboxVC:
         return cls.from_local(Path(local_path).parent, device)
 
     def set_target_voice(self, wav_fpath):
-        """Extract a reference speaker embedding from a target voice audio file."""
+        """Extract a reference speaker embedding from a target voice audio
+        file."""
         # Load reference wav
         s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
 
@@ -91,7 +92,8 @@ class ChatterboxVC:
         audio,
         target_voice_path=None,
     ):
-        """Convert source audio to the target speaker's voice and return a watermarked waveform."""
+        """Convert source audio to the target speaker's voice and return a
+        watermarked waveform."""
         if target_voice_path:
             self.set_target_voice(target_voice_path)
         else:

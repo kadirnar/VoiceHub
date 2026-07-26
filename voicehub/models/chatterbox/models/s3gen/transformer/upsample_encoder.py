@@ -17,8 +17,7 @@ from voicehub.models.chatterbox.models.s3gen.utils.mask import add_optional_chun
 
 
 class Upsample1D(nn.Module):
-    """
-    A 1D upsampling layer with an optional convolution.
+    """A 1D upsampling layer with an optional convolution.
 
     Parameters:
         channels (`int`):
@@ -47,7 +46,8 @@ class Upsample1D(nn.Module):
 
 
 class PreLookaheadLayer(nn.Module):
-    """Convolutional layer that applies limited future context lookahead with residual connection."""
+    """Convolutional layer that applies limited future context lookahead with
+    residual connection."""
 
     def __init__(self, channels: int, pre_lookahead_len: int = 1):
         super().__init__()
@@ -85,7 +85,8 @@ class PreLookaheadLayer(nn.Module):
 
 
 class UpsampleConformerEncoder(torch.nn.Module):
-    """Conformer encoder with 2x temporal upsampling for token-to-mel frame rate conversion."""
+    """Conformer encoder with 2x temporal upsampling for token-to-mel frame
+    rate conversion."""
 
     def __init__(
         self,
@@ -221,8 +222,7 @@ class UpsampleConformerEncoder(torch.nn.Module):
         decoding_chunk_size: int = 0,
         num_decoding_left_chunks: int = -1,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Embed positions in tensor.
+        """Embed positions in tensor.
 
         Args:
             xs: padded input tensor (B, T, D)

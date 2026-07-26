@@ -14,8 +14,8 @@ def _normalize_axes(axes: tuple[int, ...], ndim: int) -> tuple[int, ...]:
 
 
 class DenseGeneral(nn.Module):
-    """
-    PyTorch equivalent of flax.linen.DenseGeneral with shapes defined at init.
+    """PyTorch equivalent of flax.linen.DenseGeneral with shapes defined at
+    init.
 
     Stores weights (`kernel`) in the same layout as Jax and uses torch.tensordot
     for the generalized matrix multiplication. Weight/bias shapes are calculated
@@ -322,7 +322,8 @@ class CrossAttention(nn.Module):
 
 
 class FusedQKV(nn.Module):
-    """Fused Q/K/V linear projection that splits into separate heads after a single matmul."""
+    """Fused Q/K/V linear projection that splits into separate heads after a
+    single matmul."""
 
     def __init__(
         self,
@@ -421,7 +422,8 @@ class SelfAttention(nn.Module):
         self.is_fused_qkv = False
 
     def get_linear_weight(self, dense: DenseGeneral):
-        """Extract a ``DenseGeneral`` kernel as a standard ``nn.Linear``-compatible weight matrix."""
+        """Extract a ``DenseGeneral`` kernel as a standard
+        ``nn.Linear``-compatible weight matrix."""
         W_dg = dense.weight.data
 
         out_features = 1
@@ -436,7 +438,8 @@ class SelfAttention(nn.Module):
         return linear_weight
 
     def patch_fused_qkv(self):
-        """Replace separate Q/K/V projections with a single fused linear layer for faster inference."""
+        """Replace separate Q/K/V projections with a single fused linear layer
+        for faster inference."""
         q_proj_weight = self.get_linear_weight(self.q_proj)
         k_proj_weight = self.get_linear_weight(self.k_proj)
         v_proj_weight = self.get_linear_weight(self.v_proj)
@@ -791,7 +794,8 @@ class Decoder(nn.Module):
         enc_positions: torch.Tensor,  # (B, S)
         k_padding_mask: torch.Tensor | None = None,
     ) -> list[KVCache]:
-        """Computes the Key and Value tensors for cross-attention for each layer from the encoder output."""
+        """Computes the Key and Value tensors for cross-attention for each
+        layer from the encoder output."""
         per_layer_kv_cache: list[KVCache] = []
 
         for layer in self.layers:
@@ -815,8 +819,7 @@ class Decoder(nn.Module):
         state: DecoderInferenceState,
         current_idx: int,
     ) -> torch.Tensor:
-        """
-        Performs a single decoding step, managing KV caches layer by layer.
+        """Performs a single decoding step, managing KV caches layer by layer.
 
         Returns:
             A tuple containing:
@@ -845,8 +848,7 @@ class Decoder(nn.Module):
         return logits_Bx1xCxV.to(torch.float32)
 
     def forward(self, tgt_ids_BxTxC: torch.Tensor, state: DecoderInferenceState) -> torch.Tensor:
-        """
-        Forward pass for the Decoder stack, managing KV caches.
+        """Forward pass for the Decoder stack, managing KV caches.
 
         Args:
             tgt_ids_BxTxC: Target token IDs (B, T, C).

@@ -36,8 +36,7 @@ class PositionalEncoding(torch.nn.Module):
                 x: torch.Tensor,
                 offset: Union[int, torch.Tensor] = 0)\
             -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Add positional encoding.
+        """Add positional encoding.
 
         Args:
             x (torch.Tensor): Input. Its shape is (batch, time, ...)
@@ -54,8 +53,7 @@ class PositionalEncoding(torch.nn.Module):
 
     def position_encoding(
             self, offset: Union[int, torch.Tensor], size: int, apply_dropout: bool = True) -> torch.Tensor:
-        """
-        For getting encoding in a streaming fashion.
+        """For getting encoding in a streaming fashion.
 
         Attention!!!!!
         we apply dropout only once at the whole utterance level in a none
@@ -93,8 +91,7 @@ class PositionalEncoding(torch.nn.Module):
 
 
 class RelPositionalEncoding(PositionalEncoding):
-    """
-    Relative positional encoding module.
+    """Relative positional encoding module.
 
     See : Appendix B in https://arxiv.org/abs/1901.02860
     Args:
@@ -111,8 +108,7 @@ class RelPositionalEncoding(PositionalEncoding):
                 x: torch.Tensor,
                 offset: Union[int, torch.Tensor] = 0)\
             -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Compute positional encoding.
+        """Compute positional encoding.
 
         Args:
             x (torch.Tensor): Input tensor (batch, time, `*`).
@@ -172,8 +168,7 @@ class NoPositionalEncoding(torch.nn.Module):
 
 
 class EspnetRelPositionalEncoding(torch.nn.Module):
-    """
-    Relative positional encoding module (new implementation).
+    """Relative positional encoding module (new implementation).
 
     Details can be found in https://github.com/espnet/espnet/pull/2816.
 
@@ -226,8 +221,7 @@ class EspnetRelPositionalEncoding(torch.nn.Module):
 
     def forward(self, x: torch.Tensor, offset: Union[int, torch.Tensor] = 0)\
             -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Add positional encoding.
+        """Add positional encoding.
 
         Args:
             x (torch.Tensor): Input tensor (batch, time, `*`).
@@ -241,8 +235,7 @@ class EspnetRelPositionalEncoding(torch.nn.Module):
         return self.dropout(x), self.dropout(pos_emb)
 
     def position_encoding(self, offset: Union[int, torch.Tensor], size: int) -> torch.Tensor:
-        """
-        For getting encoding in a streaming fashion.
+        """For getting encoding in a streaming fashion.
 
         Attention!!!!!
         we apply dropout only once at the whole utterance level in a none

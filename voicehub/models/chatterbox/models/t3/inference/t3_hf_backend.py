@@ -9,9 +9,8 @@ from .alignment_stream_analyzer import AlignmentStreamAnalyzer
 
 
 class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
-    """
-    Override some HuggingFace interface methods so we can use the standard `generate` method with our custom
-    embedding / logit layers.
+    """Override some HuggingFace interface methods so we can use the standard
+    `generate` method with our custom embedding / logit layers.
 
     NOTE: need to extend "*PreTrainedModel" to avoid re-initializing weights!
     """
@@ -43,13 +42,14 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
             past_key_values=None,
             # This argument was introduced in some recent version of transformers (>=4.29.1)
             cache_position=None):
-        """
-        This is a method used by huggingface's generate() method.
+        """This is a method used by huggingface's generate() method.
 
-        Overridden here to apply our custom speech token embedding layer.
+        Overridden here to apply our custom speech token embedding
+        layer.
 
         :param input_ids: (B, S) int64 tensors of input tokens.
-        :param decoder_cond: (B, T, C) float32 tensor of conditioning (prefixed to <input_embeds>)
+        :param decoder_cond: (B, T, C) float32 tensor of conditioning
+            (prefixed to <input_embeds>)
         """
         # Make use of the kv cache: only the last input ID is new, we trim away all the ones before
         if not use_cache:
@@ -84,13 +84,13 @@ class T3HuggingfaceBackend(LlamaPreTrainedModel, GenerationMixin):
         output_hidden_states=True,
         return_dict=True,
     ):
-        """
-        This is a method used by huggingface's generate() method.
+        """This is a method used by huggingface's generate() method.
 
-        Overridden here to apply our custom layer norm and speech logit projection layers.
+        Overridden here to apply our custom layer norm and speech logit
+        projection layers.
 
-        :param inputs_embeds: (B, S, C) float32 tensor of conditioning inputs. If past key values are given, S
-            should be 1.
+        :param inputs_embeds: (B, S, C) float32 tensor of conditioning
+            inputs. If past key values are given, S should be 1.
         """
         is_large_input = inputs_embeds.size(1) != 1
         has_cache = past_key_values is not None and len(past_key_values) > 0

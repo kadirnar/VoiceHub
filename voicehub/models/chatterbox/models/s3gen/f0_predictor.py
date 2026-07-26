@@ -4,7 +4,8 @@ from torch.nn.utils.parametrizations import weight_norm
 
 
 class ConvRNNF0Predictor(nn.Module):
-    """Convolutional F0 predictor that estimates fundamental frequency from mel-spectrograms."""
+    """Convolutional F0 predictor that estimates fundamental frequency from
+    mel-spectrograms."""
 
     def __init__(self, num_class: int = 1, in_channels: int = 80, cond_channels: int = 512):
         super().__init__()

@@ -8,7 +8,8 @@ from voicehub.models.chatterbox.models.s3gen.matcha.flow_matching import BASECFM
 
 
 class ConditionalCFM(BASECFM):
-    """Conditional Flow Matching with classifier-free guidance for speaker-conditioned mel generation."""
+    """Conditional Flow Matching with classifier-free guidance for speaker-
+    conditioned mel generation."""
 
     def __init__(self, in_channels, cfm_params, n_spks=1, spk_emb_dim=64, estimator: torch.nn.Module = None):
         super().__init__(
@@ -36,8 +37,7 @@ class ConditionalCFM(BASECFM):
         cond=None,
         prompt_len=0,
         flow_cache=torch.zeros(1, 80, 0, 2)):  # noqa: E125
-        """
-        Forward diffusion.
+        """Forward diffusion.
 
         Args:
             mu (torch.Tensor): output of encoder
@@ -70,8 +70,7 @@ class ConditionalCFM(BASECFM):
         return self.solve_euler(z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond), flow_cache
 
     def solve_euler(self, x, t_span, mu, mask, spks, cond):
-        """
-        Fixed euler solver for ODEs.
+        """Fixed euler solver for ODEs.
 
         Args:
             x (torch.Tensor): random noise
@@ -142,8 +141,7 @@ class ConditionalCFM(BASECFM):
             return x
 
     def compute_loss(self, x1, mask, mu, spks=None, cond=None):
-        """
-        Computes diffusion loss.
+        """Computes diffusion loss.
 
         Args:
             x1 (torch.Tensor): Target
@@ -185,7 +183,8 @@ class ConditionalCFM(BASECFM):
 
 
 class CausalConditionalCFM(ConditionalCFM):
-    """Causal variant of ConditionalCFM using pre-generated random noise for deterministic streaming."""
+    """Causal variant of ConditionalCFM using pre-generated random noise for
+    deterministic streaming."""
 
     def __init__(self, in_channels=240, cfm_params=CFM_PARAMS, n_spks=1, spk_emb_dim=80, estimator=None):
         super().__init__(in_channels, cfm_params, n_spks, spk_emb_dim, estimator)
@@ -193,8 +192,7 @@ class CausalConditionalCFM(ConditionalCFM):
 
     @torch.inference_mode()
     def forward(self, mu, mask, n_timesteps, temperature=1.0, spks=None, cond=None):
-        """
-        Forward diffusion.
+        """Forward diffusion.
 
         Args:
             mu (torch.Tensor): output of encoder

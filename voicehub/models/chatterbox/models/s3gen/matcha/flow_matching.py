@@ -7,7 +7,8 @@ from voicehub.models.chatterbox.models.s3gen.matcha.decoder import Decoder
 
 
 class BASECFM(torch.nn.Module, ABC):
-    """Abstract base class for Conditional Flow Matching models with Euler ODE solver."""
+    """Abstract base class for Conditional Flow Matching models with Euler ODE
+    solver."""
 
     def __init__(
         self,
@@ -30,8 +31,7 @@ class BASECFM(torch.nn.Module, ABC):
 
     @torch.inference_mode()
     def forward(self, mu, mask, n_timesteps, temperature=1.0, spks=None, cond=None):
-        """
-        Forward diffusion.
+        """Forward diffusion.
 
         Args:
             mu (torch.Tensor): output of encoder
@@ -53,8 +53,7 @@ class BASECFM(torch.nn.Module, ABC):
         return self.solve_euler(z, t_span=t_span, mu=mu, mask=mask, spks=spks, cond=cond)
 
     def solve_euler(self, x, t_span, mu, mask, spks, cond):
-        """
-        Fixed euler solver for ODEs.
+        """Fixed euler solver for ODEs.
 
         Args:
             x (torch.Tensor): random noise
@@ -86,8 +85,7 @@ class BASECFM(torch.nn.Module, ABC):
         return sol[-1]
 
     def compute_loss(self, x1, mask, mu, spks=None, cond=None):
-        """
-        Computes diffusion loss.
+        """Computes diffusion loss.
 
         Args:
             x1 (torch.Tensor): Target
@@ -121,7 +119,8 @@ class BASECFM(torch.nn.Module, ABC):
 
 
 class CFM(BASECFM):
-    """Conditional Flow Matching model that uses a U-Net Decoder as the flow estimator."""
+    """Conditional Flow Matching model that uses a U-Net Decoder as the flow
+    estimator."""
 
     def __init__(self, in_channels, out_channel, cfm_params, decoder_params, n_spks=1, spk_emb_dim=64):
         super().__init__(

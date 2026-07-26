@@ -6,8 +6,7 @@ from torch import nn
 
 
 class MultiHeadedAttention(nn.Module):
-    """
-    Multi-Head Attention layer.
+    """Multi-Head Attention layer.
 
     Args:
         n_head (int): The number of heads.
@@ -30,8 +29,7 @@ class MultiHeadedAttention(nn.Module):
 
     def forward_qkv(self, query: torch.Tensor, key: torch.Tensor,
                     value: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Transform query, key and value.
+        """Transform query, key and value.
 
         Args:
             query (torch.Tensor): Query tensor (#batch, time1, size).
@@ -62,8 +60,7 @@ class MultiHeadedAttention(nn.Module):
         scores: torch.Tensor,
         mask: torch.Tensor = torch.ones((0, 0, 0), dtype=torch.bool)
     ) -> torch.Tensor:  # noqa: E125
-        """
-        Compute attention context vector.
+        """Compute attention context vector.
 
         Args:
             value (torch.Tensor): Transformed value, size
@@ -109,8 +106,7 @@ class MultiHeadedAttention(nn.Module):
         pos_emb: torch.Tensor = torch.empty(0),
         cache: torch.Tensor = torch.zeros((0, 0, 0, 0))
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Compute scaled dot product attention.
+        """Compute scaled dot product attention.
 
         Args:
             query (torch.Tensor): Query tensor (#batch, time1, size).
@@ -170,8 +166,7 @@ class MultiHeadedAttention(nn.Module):
 
 
 class RelPositionMultiHeadedAttention(MultiHeadedAttention):
-    """
-    Multi-Head Attention layer with relative position encoding.
+    """Multi-Head Attention layer with relative position encoding.
 
     Paper: https://arxiv.org/abs/1901.02860
     Args:
@@ -193,8 +188,7 @@ class RelPositionMultiHeadedAttention(MultiHeadedAttention):
         torch.nn.init.xavier_uniform_(self.pos_bias_v)
 
     def rel_shift(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Compute relative positional encoding.
+        """Compute relative positional encoding.
 
         Args:
             x (torch.Tensor): Input tensor (batch, head, time1, 2*time1-1).
@@ -220,8 +214,7 @@ class RelPositionMultiHeadedAttention(MultiHeadedAttention):
         pos_emb: torch.Tensor = torch.empty(0),
         cache: torch.Tensor = torch.zeros((0, 0, 0, 0))
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Compute 'Scaled Dot Product Attention' with rel.
+        """Compute 'Scaled Dot Product Attention' with rel.
 
         positional encoding. Args:
             query (torch.Tensor): Query tensor (#batch, time1, size).

@@ -26,7 +26,8 @@ def generate_audio(text: str,
                    kokoro_language: str,
                    voice: str,
                    speed=1) -> Generator["KPipeline.Result", None, None]:
-    """Yield generated audio segments for the given text, language, and voice."""
+    """Yield generated audio segments for the given text, language, and
+    voice."""
     from voicehub.models.kokoro.pipeline import KPipeline
 
     if not voice.startswith(kokoro_language):
@@ -36,7 +37,8 @@ def generate_audio(text: str,
 
 
 def generate_and_save_audio(output_file: Path, text: str, kokoro_language: str, voice: str, speed=1) -> None:
-    """Generate audio from text and write it to a 16-bit 24 kHz mono WAV file."""
+    """Generate audio from text and write it to a 16-bit 24 kHz mono WAV
+    file."""
     with wave.open(str(output_file.resolve()), "wb") as wav_file:
         wav_file.setnchannels(1)  # Mono audio
         wav_file.setsampwidth(2)  # 2 bytes per sample (16-bit audio)

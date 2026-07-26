@@ -6,7 +6,8 @@ from einops import rearrange
 
 
 def sequence_mask(length, max_length=None):
-    """Create a boolean mask from sequence lengths where True indicates valid positions."""
+    """Create a boolean mask from sequence lengths where True indicates valid
+    positions."""
     if max_length is None:
         max_length = length.max()
     x = torch.arange(max_length, dtype=length.dtype, device=length.device)
@@ -37,7 +38,8 @@ class LayerNorm(nn.Module):
 
 
 class ConvReluNorm(nn.Module):
-    """Multi-layer 1D convolution stack with ReLU, layer normalization, and residual projection."""
+    """Multi-layer 1D convolution stack with ReLU, layer normalization, and
+    residual projection."""
 
     def __init__(self, in_channels, hidden_channels, out_channels, kernel_size, n_layers, p_dropout):
         super().__init__()
@@ -73,7 +75,8 @@ class ConvReluNorm(nn.Module):
 
 
 class DurationPredictor(nn.Module):
-    """Two-layer convolutional duration predictor that estimates phoneme durations."""
+    """Two-layer convolutional duration predictor that estimates phoneme
+    durations."""
 
     def __init__(self, in_channels, filter_channels, kernel_size, p_dropout):
         super().__init__()
@@ -102,12 +105,13 @@ class DurationPredictor(nn.Module):
 
 
 class RotaryPositionalEmbeddings(nn.Module):
-    """
-    ## RoPE module
+    """## RoPE module
 
-    Rotary encoding transforms pairs of features by rotating in the 2D plane. That is, it organizes the $d$
-    features as $\frac{d}{2}$ pairs. Each pair can be considered a coordinate in a 2D plane, and the encoding
-    will rotate it by an angle depending on the position of the token.
+    Rotary encoding transforms pairs of features by rotating in the 2D
+    plane. That is, it organizes the $d$ features as $\frac{d}{2}$
+    pairs. Each pair can be considered a coordinate in a 2D plane, and
+    the encoding will rotate it by an angle depending on the position of
+    the token.
     """
 
     def __init__(self, d: int, base: int = 10_000):
@@ -177,7 +181,8 @@ class RotaryPositionalEmbeddings(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    """Multi-head attention with rotary positional embeddings and optional proximal bias."""
+    """Multi-head attention with rotary positional embeddings and optional
+    proximal bias."""
 
     def __init__(
         self,
@@ -259,7 +264,8 @@ class MultiHeadAttention(nn.Module):
 
 
 class FFN(nn.Module):
-    """Two-layer 1D convolutional feed-forward network with ReLU activation and dropout."""
+    """Two-layer 1D convolutional feed-forward network with ReLU activation and
+    dropout."""
 
     def __init__(self, in_channels, out_channels, filter_channels, kernel_size, p_dropout=0.0):
         super().__init__()
@@ -282,7 +288,8 @@ class FFN(nn.Module):
 
 
 class Encoder(nn.Module):
-    """Transformer encoder with multi-head attention and feed-forward layers for text encoding."""
+    """Transformer encoder with multi-head attention and feed-forward layers
+    for text encoding."""
 
     def __init__(
         self,
@@ -336,7 +343,8 @@ class Encoder(nn.Module):
 
 
 class TextEncoder(nn.Module):
-    """Text encoder that combines embedding, pre-net, transformer encoder, and duration predictor."""
+    """Text encoder that combines embedding, pre-net, transformer encoder, and
+    duration predictor."""
 
     def __init__(
         self,
@@ -388,8 +396,8 @@ class TextEncoder(nn.Module):
         )
 
     def forward(self, x, x_lengths, spks=None):
-        """
-        Run forward pass to the transformer based encoder and duration predictor.
+        """Run forward pass to the transformer based encoder and duration
+        predictor.
 
         Args:
             x (torch.Tensor): text input

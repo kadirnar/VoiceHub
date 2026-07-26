@@ -2,8 +2,7 @@ import torch
 
 
 class PositionwiseFeedForward(torch.nn.Module):
-    """
-    Positionwise feed forward layer.
+    """Positionwise feed forward layer.
 
     FeedForward are appied on each position of the sequence.
     The output dim is same with the input dim.
@@ -30,8 +29,7 @@ class PositionwiseFeedForward(torch.nn.Module):
         self.w_2 = torch.nn.Linear(hidden_units, idim)
 
     def forward(self, xs: torch.Tensor) -> torch.Tensor:
-        """
-        Forward function.
+        """Forward function.
 
         Args:
             xs: input tensor (B, L, D)
@@ -74,8 +72,7 @@ class MoEFFNLayer(torch.nn.Module):
         self.n_expert_per_token = n_expert_per_token
 
     def forward(self, xs: torch.Tensor) -> torch.Tensor:
-        """
-        Foward function.
+        """Foward function.
 
         Args:
             xs: input tensor (B, L, D)

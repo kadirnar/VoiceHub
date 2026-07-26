@@ -10,8 +10,7 @@ from voicehub.models.chatterbox.models.t3.modules.t3_config import T3Config
 
 @dataclass
 class T3Cond:
-    """
-    Dataclass container for most / all conditioning info.
+    """Dataclass container for most / all conditioning info.
 
     TODO: serialization methods aren't used, keeping them around for convenience
     """
@@ -40,7 +39,8 @@ class T3Cond:
 
 
 class T3CondEnc(nn.Module):
-    """Handle all non-text conditioning, like speaker embeddings / prompts, CLAP, emotion, etc."""
+    """Handle all non-text conditioning, like speaker embeddings / prompts,
+    CLAP, emotion, etc."""
 
     def __init__(self, hp: T3Config):
         super().__init__()

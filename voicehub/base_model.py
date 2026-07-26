@@ -21,11 +21,10 @@ class BaseTTSModel(ABC):
 
     @staticmethod
     def save_audio(file_path: str, audio_data: Any, sample_rate: int) -> str:
-        """
-        Write a mono waveform while keeping NumPy and SoundFile lazy.
+        """Write a mono waveform while keeping NumPy and SoundFile lazy.
 
-        Importing VoiceHub should be cheap. Audio dependencies are therefore imported only when a backend
-        actually writes a file.
+        Importing VoiceHub should be cheap. Audio dependencies are
+        therefore imported only when a backend actually writes a file.
         """
         np = import_module("numpy")
         sf = import_module("soundfile")

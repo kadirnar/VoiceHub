@@ -12,7 +12,8 @@ def create_attn_mask(
     device: torch.device,
     is_causal: bool = False,
 ) -> torch.Tensor:
-    """Creates the attention mask (self or cross) mimicking JAX segment ID logic."""
+    """Creates the attention mask (self or cross) mimicking JAX segment ID
+    logic."""
     # B1, Tq = q_padding_mask_1d.shape
     # B2, Tk = k_padding_mask_1d.shape
 
@@ -50,7 +51,8 @@ class EncoderInferenceState:
 
     @classmethod
     def new(cls, config: DiaConfig, cond_src: torch.Tensor) -> "EncoderInferenceState":
-        """Create an ``EncoderInferenceState`` from a config and conditional source tensor."""
+        """Create an ``EncoderInferenceState`` from a config and conditional
+        source tensor."""
         device = cond_src.device
 
         positions = torch.arange(config.data.text_length, dtype=torch.float32, device=device).unsqueeze(0)
@@ -68,11 +70,11 @@ class EncoderInferenceState:
 
 
 class KVCache(torch.nn.Module):
-    """
-    Fixed-size key/value cache stored as registered buffers for inference.
+    """Fixed-size key/value cache stored as registered buffers for inference.
 
-    The cache is pre-allocated with shape ``(2*B, H, T, D)`` (factor-of-2 for classifier-free guidance) and
-    updated in-place during autoregressive decoding.
+    The cache is pre-allocated with shape ``(2*B, H, T, D)`` (factor-
+    of-2 for classifier-free guidance) and updated in-place during
+    autoregressive decoding.
     """
 
     k: torch.Tensor
@@ -122,7 +124,8 @@ class KVCache(torch.nn.Module):
 
     def update(self, k: torch.Tensor, v: torch.Tensor,
                current_idx: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Write *k* and *v* into the cache at *current_idx* and return full cache tensors."""
+        """Write *k* and *v* into the cache at *current_idx* and return full
+        cache tensors."""
         k_out, v_out = self.k, self.v
         k_out[:, :, current_idx, :] = k
         v_out[:, :, current_idx, :] = v
@@ -193,7 +196,8 @@ class DecoderInferenceState:
         )
 
     def prepare_step(self, step_from: int, step_to: int | None = None) -> None:
-        """Set ``dec_positions`` to the range ``[step_from, step_to)`` for the next forward pass."""
+        """Set ``dec_positions`` to the range ``[step_from, step_to)`` for the
+        next forward pass."""
         if step_to is None:
             step_to = step_from + 1
         self.dec_positions = torch.arange(
@@ -202,11 +206,10 @@ class DecoderInferenceState:
 
 @dataclass
 class DecoderOutput:
-    """
-    Accumulator for tokens generated during autoregressive decoding.
+    """Accumulator for tokens generated during autoregressive decoding.
 
-    Stores the full ``(B, T, C)`` grid of generated codebook indices and tracks how many prefill steps each
-    batch element consumed.
+    Stores the full ``(B, T, C)`` grid of generated codebook indices and
+    tracks how many prefill steps each batch element consumed.
     """
 
     generated_tokens: torch.Tensor
@@ -214,7 +217,8 @@ class DecoderOutput:
 
     @classmethod
     def new(cls, batch_size: int, config: DiaConfig, device: torch.device) -> "DecoderOutput":
-        """Allocate a blank output buffer filled with ``-1`` (uninitialised marker)."""
+        """Allocate a blank output buffer filled with ``-1`` (uninitialised
+        marker)."""
         max_audio_len = config.data.audio_length
         return cls(
             generated_tokens=torch.full(
@@ -227,13 +231,15 @@ class DecoderOutput:
         )
 
     def get_tokens_at(self, step_from: int, step_to: int | None = None) -> torch.Tensor:
-        """Return generated tokens in the half-open range ``[step_from, step_to)``."""
+        """Return generated tokens in the half-open range ``[step_from,
+        step_to)``."""
         if step_to is None:
             step_to = step_from + 1
         return self.generated_tokens[:, step_from:step_to, :]
 
     def update_one(self, dec_out: torch.Tensor, step: int, apply_mask: bool = False):
-        """Write a single step's predictions, optionally preserving already-filled positions."""
+        """Write a single step's predictions, optionally preserving already-
+        filled positions."""
         dec_out = dec_out.to(self.generated_tokens.dtype)
         if apply_mask:
             mask = self.generated_tokens[:, step, :] == -1
@@ -242,7 +248,8 @@ class DecoderOutput:
             self.generated_tokens[:, step, :] = dec_out
 
     def prefill(self, dec_out: torch.Tensor, prefill_steps: list[int]):
-        """Bulk-write the audio-prompt tokens and record per-item prefill lengths."""
+        """Bulk-write the audio-prompt tokens and record per-item prefill
+        lengths."""
         length = dec_out.shape[1]
         self.generated_tokens[:, :length, :] = dec_out
         self.prefill_steps = prefill_steps

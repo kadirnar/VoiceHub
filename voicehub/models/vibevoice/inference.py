@@ -32,7 +32,8 @@ class VibeVoiceConfig(VoiceHubConfig):
 
 
 class VibeVoiceForTextToSpeech(PreTrainedTTSModel):
-    """Single-speaker realtime VibeVoice generation with cached voice prompts."""
+    """Single-speaker realtime VibeVoice generation with cached voice
+    prompts."""
 
     config_class = VibeVoiceConfig
     default_model_name_or_path = "microsoft/VibeVoice-Realtime-0.5B"

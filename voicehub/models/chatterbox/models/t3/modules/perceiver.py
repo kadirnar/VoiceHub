@@ -7,7 +7,8 @@ from torch import nn
 
 
 class RelativePositionBias(nn.Module):
-    """Learned relative position bias added to attention scores via bucketed distance encoding."""
+    """Learned relative position bias added to attention scores via bucketed
+    distance encoding."""
 
     def __init__(self, scale, causal=False, num_buckets=32, max_distance=128, heads=8):
         super().__init__()
@@ -52,7 +53,8 @@ class RelativePositionBias(nn.Module):
 
 
 class AttentionQKV(nn.Module):
-    """Multi-head attention module accepting pre-computed Q, K, V with optional flash attention."""
+    """Multi-head attention module accepting pre-computed Q, K, V with optional
+    flash attention."""
 
     def __init__(self, n_heads, head_dim, dropout_rate=0.1, scale=None, flash=False):
         super().__init__()
@@ -105,9 +107,9 @@ class AttentionQKV(nn.Module):
 
 
 class AttentionBlock2(nn.Module):
-    """An attention block that allows spatial positions to attend to each other, using AttentionQKV and
-    separate linear transformations for Q, K, and V.
-    """
+    """An attention block that allows spatial positions to attend to each
+    other, using AttentionQKV and separate linear transformations for Q, K, and
+    V."""
 
     def __init__(
             self,
@@ -181,10 +183,10 @@ class Perceiver(nn.Module):
             pre_attention_query_size=1024,
             embedding_dim=1024,
             num_attn_heads=4):
-        """
-        Initialize the perceiver module.
+        """Initialize the perceiver module.
 
-        :param pre_attention_query_token: Number of query tokens for pre-attention
+        :param pre_attention_query_token: Number of query tokens for
+            pre-attention
         :param pre_attention_query_size: Size of each query token
         :param embedding_dim: Dimension of the embedding space
         :param num_attn_heads: Number of attention heads
@@ -206,8 +208,7 @@ class Perceiver(nn.Module):
         self.attn = AttentionBlock2(embedding_dim, num_attn_heads)
 
     def forward(self, h):
-        """
-        Forward pass of the perceiver module.
+        """Forward pass of the perceiver module.
 
         :param h: Input tensor
         :return: Output after applying attention mechanisms

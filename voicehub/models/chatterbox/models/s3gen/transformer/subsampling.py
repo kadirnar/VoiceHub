@@ -45,8 +45,7 @@ class EmbedinigNoSubsampling(BaseSubsampling):
 
 
 class LinearNoSubsampling(BaseSubsampling):
-    """
-    Linear transform the input without subsampling.
+    """Linear transform the input without subsampling.
 
     Args:
         idim (int): Input dimension.
@@ -143,8 +142,7 @@ class Conv1dSubsampling2(BaseSubsampling):
 
 
 class Conv2dSubsampling4(BaseSubsampling):
-    """
-    Convolutional 2D subsampling (to 1/4 length).
+    """Convolutional 2D subsampling (to 1/4 length).
 
     Args:
         idim (int): Input dimension.
@@ -196,8 +194,7 @@ class Conv2dSubsampling4(BaseSubsampling):
 
 
 class Conv2dSubsampling6(BaseSubsampling):
-    """
-    Convolutional 2D subsampling (to 1/6 length).
+    """Convolutional 2D subsampling (to 1/6 length).
 
     Args:
         idim (int): Input dimension.
@@ -246,8 +243,7 @@ class Conv2dSubsampling6(BaseSubsampling):
 
 
 class Conv2dSubsampling8(BaseSubsampling):
-    """
-    Convolutional 2D subsampling (to 1/8 length).
+    """Convolutional 2D subsampling (to 1/8 length).
 
     Args:
         idim (int): Input dimension.
@@ -299,8 +295,7 @@ class Conv2dSubsampling8(BaseSubsampling):
 
 
 class LegacyLinearNoSubsampling(BaseSubsampling):
-    """
-    Linear transform the input without subsampling.
+    """Linear transform the input without subsampling.
 
     Args:
         idim (int): Input dimension.

@@ -24,14 +24,15 @@ class AlignmentAnalysisResult:
 
 
 class AlignmentStreamAnalyzer:
-    """Online alignment analyzer that monitors attention maps for streaming integrity checks."""
+    """Online alignment analyzer that monitors attention maps for streaming
+    integrity checks."""
 
     def __init__(self, tfmr, queue, text_tokens_slice, alignment_layer_idx=9, eos_idx=0):
-        """
-        Some transformer TTS models implicitly solve text-speech alignment in one or more of their self-
-        attention activation maps. This module exploits this to perform online integrity checks which
-        streaming. A hook is injected into the specified attention layer, and heuristics are used to determine
-        alignment position, repetition, etc.
+        """Some transformer TTS models implicitly solve text-speech alignment
+        in one or more of their self- attention activation maps. This module
+        exploits this to perform online integrity checks which streaming. A
+        hook is injected into the specified attention layer, and heuristics are
+        used to determine alignment position, repetition, etc.
 
         NOTE: currently requires no queues.
         """
@@ -56,17 +57,17 @@ class AlignmentStreamAnalyzer:
         self._add_attention_spy(tfmr, alignment_layer_idx)
 
     def _add_attention_spy(self, tfmr, alignment_layer_idx):
-        """
-        Adds a forward hook to a specific attention layer to collect outputs.
+        """Adds a forward hook to a specific attention layer to collect
+        outputs.
 
-        Using `output_attentions=True` is incompatible with optimized attention kernels, so using it for all
-        layers slows things down too much. (credit: jrm)
+        Using `output_attentions=True` is incompatible with optimized
+        attention kernels, so using it for all layers slows things down
+        too much. (credit: jrm)
         """
 
         def attention_forward_hook(module, input, output):
-            """
-            See `LlamaAttention.forward`; the output is a 3-tuple: `attn_output, attn_weights,
-            past_key_value`.
+            """See `LlamaAttention.forward`; the output is a 3-tuple:
+            `attn_output, attn_weights, past_key_value`.
 
             NOTE:
             - When `output_attentions=True`, `LlamaSdpaAttention.forward` calls `LlamaAttention.forward`.
@@ -89,9 +90,8 @@ class AlignmentStreamAnalyzer:
         target_layer.forward = MethodType(patched_forward, target_layer)
 
     def step(self, logits):
-        """Emits an AlignmentAnalysisResult into the output queue, and potentially modifies the logits to
-        force an EOS.
-        """
+        """Emits an AlignmentAnalysisResult into the output queue, and
+        potentially modifies the logits to force an EOS."""
         # extract approximate alignment matrix chunk (1 frame at a time after the first chunk)
         aligned_attn = self.last_aligned_attn  # (N, N)
         i, j = self.text_tokens_slice

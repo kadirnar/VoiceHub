@@ -28,13 +28,13 @@ def drop_invalid_tokens(x):
 # TODO: global resampler cache
 @lru_cache(100)
 def get_resampler(src_sr, dst_sr, device):
-    """Get or create a cached audio resampler for the given sample rate conversion."""
+    """Get or create a cached audio resampler for the given sample rate
+    conversion."""
     return ta.transforms.Resample(src_sr, dst_sr).to(device)
 
 
 class S3Token2Mel(torch.nn.Module):
-    """
-    CosyVoice2's CFM decoder maps S3 speech tokens to mel-spectrograms.
+    """CosyVoice2's CFM decoder maps S3 speech tokens to mel-spectrograms.
 
     TODO: make these modules configurable?
     """
@@ -150,9 +150,8 @@ class S3Token2Mel(torch.nn.Module):
         ref_dict: Optional[dict] = None,
         finalize: bool = False,
     ):
-        """
-        Generate waveforms from S3 speech tokens and a reference waveform, which the speaker timbre is
-        inferred from.
+        """Generate waveforms from S3 speech tokens and a reference waveform,
+        which the speaker timbre is inferred from.
 
         NOTE:
         - The speaker encoder accepts 16 kHz waveform.
@@ -197,8 +196,8 @@ class S3Token2Mel(torch.nn.Module):
 
 
 class S3Token2Wav(S3Token2Mel):
-    """
-    The decoder of CosyVoice2 is a concat of token-to-mel (CFM) and a mel-to-waveform (HiFiGAN) modules.
+    """The decoder of CosyVoice2 is a concat of token-to-mel (CFM) and a mel-
+    to-waveform (HiFiGAN) modules.
 
     TODO: make these modules configurable?
     """

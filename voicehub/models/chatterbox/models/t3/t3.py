@@ -19,15 +19,16 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_BOT_EOT(text_tokens: Tensor, hp):
-    """Validate that every sequence in the batch contains the required start and stop text tokens."""
+    """Validate that every sequence in the batch contains the required start
+    and stop text tokens."""
     B = text_tokens.size(0)
     assert (text_tokens == hp.start_text_token).int().sum() >= B, "missing start_text_token"
     assert (text_tokens == hp.stop_text_token).int().sum() >= B, "missing stop_text_token"
 
 
 class T3(nn.Module):
-    """
-    Token-To-Token (T3) TTS model using huggingface transformer models as backbones,
+    """Token-To-Token (T3) TTS model using huggingface transformer models as
+    backbones,
 
     * tokenization, including start / stop tokens are always added externally to this class
     * conditioning data like CLAP, emotion, etc are all in a separate file for more modularity
@@ -67,7 +68,8 @@ class T3(nn.Module):
         return self.speech_head.weight.device
 
     def prepare_conditioning(self, t3_cond: T3Cond):
-        """Token cond data needs to be embedded, so that needs to be here instead of in `T3CondEnc`."""
+        """Token cond data needs to be embedded, so that needs to be here
+        instead of in `T3CondEnc`."""
         if t3_cond.cond_prompt_speech_tokens is not None and t3_cond.cond_prompt_speech_emb is None:
             t3_cond.cond_prompt_speech_emb = self.speech_emb(t3_cond.cond_prompt_speech_tokens) +\
                 self.speech_pos_emb(t3_cond.cond_prompt_speech_tokens)

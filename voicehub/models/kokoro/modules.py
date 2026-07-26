@@ -37,7 +37,8 @@ class LayerNorm(nn.Module):
 
 
 class TextEncoder(nn.Module):
-    """Convolutional + bi-LSTM encoder that maps phoneme ids to hidden representations."""
+    """Convolutional + bi-LSTM encoder that maps phoneme ids to hidden
+    representations."""
 
     def __init__(self, channels, kernel_size, depth, n_symbols, actv=nn.LeakyReLU(0.2)):
         super().__init__()
@@ -98,7 +99,8 @@ class AdaLayerNorm(nn.Module):
 
 
 class ProsodyPredictor(nn.Module):
-    """Predicts duration, F0, and energy curves from encoded text and a style embedding."""
+    """Predicts duration, F0, and energy curves from encoded text and a style
+    embedding."""
 
     def __init__(self, style_dim, d_hid, nlayers, max_dur=50, dropout=0.1):
         super().__init__()
@@ -147,7 +149,8 @@ class ProsodyPredictor(nn.Module):
 
 
 class DurationEncoder(nn.Module):
-    """Stacked bi-LSTM with adaptive layer norms for duration-aware text encoding."""
+    """Stacked bi-LSTM with adaptive layer norms for duration-aware text
+    encoding."""
 
     def __init__(self, sty_dim, d_model, nlayers, dropout=0.1):
         super().__init__()
@@ -191,7 +194,8 @@ class DurationEncoder(nn.Module):
 
 
 class CustomAlbert(AlbertModel):
-    """ALBERT wrapper that returns ``last_hidden_state`` directly instead of the full output object."""
+    """ALBERT wrapper that returns ``last_hidden_state`` directly instead of
+    the full output object."""
 
     def forward(self, *args, **kwargs):
         outputs = super().forward(*args, **kwargs)
