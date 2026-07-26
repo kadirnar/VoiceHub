@@ -1,7 +1,10 @@
 import torch
 
 from voicehub.models.chatterbox.models.s3gen.transformer.activation import Swish
-from voicehub.models.chatterbox.models.s3gen.transformer.attention import MultiHeadedAttention, RelPositionMultiHeadedAttention
+from voicehub.models.chatterbox.models.s3gen.transformer.attention import (
+    MultiHeadedAttention,
+    RelPositionMultiHeadedAttention,
+)
 from voicehub.models.chatterbox.models.s3gen.transformer.embedding import (
     EspnetRelPositionalEncoding,
     LearnablePositionalEncoding,

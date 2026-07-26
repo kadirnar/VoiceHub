@@ -30,7 +30,8 @@ def _sample_next_token(
     top_k: int | None,
     audio_eos_value: int,
 ) -> torch.Tensor:
-    """Sample the next audio token from logits with temperature, top-k and top-p filtering.
+    """
+    Sample the next audio token from logits with temperature, top-k and top-p filtering.
 
     EOS tokens are suppressed unless they are already the argmax, preventing
     premature sequence termination during sampling.
@@ -242,7 +243,7 @@ class Dia:
         Raises:
             RuntimeError: If downloading or loading the DAC model fails.
         """
-        import dac
+        from voicehub.third_party import dac
 
         try:
             dac_model_path = dac.utils.download()

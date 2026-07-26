@@ -1,0 +1,135 @@
+"""Parler-TTS integration backed by vendored model source."""
+
+from __future__ import annotations
+
+from voicehub.configuration_utils import VoiceHubConfig
+from voicehub.dependencies import import_optional
+from voicehub.modeling_outputs import TTSOutput
+from voicehub.modeling_utils import PreTrainedTTSModel
+
+DEFAULT_DESCRIPTION = (
+    "A clear, expressive speaker delivers high-quality speech at a moderate "
+    "speed and pitch in a close, noise-free recording."
+)
+
+
+class ParlerTTSConfig(VoiceHubConfig):
+    """VoiceHub loading configuration for Parler-TTS."""
+
+    model_type = "parlertts"
+
+    def __init__(
+        self,
+        *,
+        attention_implementation: str | None = "sdpa",
+        compile_model: bool = False,
+        torch_dtype: str | None = None,
+        sample_rate: int = 44100,
+        **kwargs,
+    ):
+        super().__init__(sample_rate=sample_rate, **kwargs)
+        self.attention_implementation = attention_implementation
+        self.compile_model = compile_model
+        self.torch_dtype = torch_dtype
+
+
+class ParlerTTSForTextToSpeech(PreTrainedTTSModel):
+    """Prompt-controlled TTS without the external ``parler-tts`` package."""
+
+    config_class = ParlerTTSConfig
+    default_model_name_or_path = "parler-tts/parler-tts-mini-v1"
+
+    def __init__(
+        self,
+        config: ParlerTTSConfig | str | None = None,
+        *,
+        model_path: str | None = None,
+        device: str = "auto",
+        lazy_load: bool = True,
+        **config_overrides,
+    ):
+        config = self._coerce_config(
+            config,
+            model_path=model_path,
+            **config_overrides,
+        )
+        self.tokenizer = None
+        self._torch = None
+        super().__init__(config, device=device, lazy_load=lazy_load)
+
+    def _load_pretrained_model(self) -> None:
+        torch = import_optional(
+            "torch",
+            model_type="parlertts",
+            install_extra="parlertts",
+        )
+        source = import_optional(
+            "voicehub.models.parlertts.source.parler_tts",
+            model_type="parlertts",
+            install_extra="parlertts",
+        )
+        transformers = import_optional(
+            "transformers",
+            model_type="parlertts",
+            install_extra="parlertts",
+        )
+        model_options = {}
+        if self.config.attention_implementation:
+            model_options["attn_implementation"] = (
+                self.config.attention_implementation
+            )
+        if self.config.torch_dtype:
+            model_options["torch_dtype"] = getattr(
+                torch,
+                self.config.torch_dtype,
+            )
+
+        model = (
+            source.ParlerTTSForConditionalGeneration.from_pretrained(
+                self.config.name_or_path,
+                **model_options,
+            ).to(self.device)
+        )
+        self.model = torch.compile(model) if self.config.compile_model else model
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained(
+            self.config.name_or_path
+        )
+        self._torch = torch
+        self.config.sample_rate = self.model.config.sampling_rate
+
+    def _generate(
+        self,
+        text: str,
+        *,
+        description: str = DEFAULT_DESCRIPTION,
+        output_file: str | None = None,
+        **generation_options,
+    ) -> TTSOutput:
+        self.load()
+        input_ids = self.tokenizer(
+            description,
+            return_tensors="pt",
+        ).input_ids.to(self.device)
+        prompt_input_ids = self.tokenizer(
+            text,
+            return_tensors="pt",
+        ).input_ids.to(self.device)
+
+        with self._torch.inference_mode():
+            generation = self.model.generate(
+                input_ids=input_ids,
+                prompt_input_ids=prompt_input_ids,
+                **generation_options,
+            )
+        output = TTSOutput(
+            audio=generation.detach().cpu().numpy().squeeze(),
+            sample_rate=self.sample_rate,
+            metadata={"description": description},
+        )
+        if output_file:
+            output.save(output_file)
+        return output
+
+
+ParlerVoiceHubConfig = ParlerTTSConfig
+ParlerTTS = ParlerTTSForTextToSpeech

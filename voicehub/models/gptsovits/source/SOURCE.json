@@ -1,0 +1,8 @@
+{
+  "license": "MIT",
+  "model_type": "gptsovits",
+  "nested_revisions": {},
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and are not part of this source snapshot.",
+  "revision": "d523079fc05d9a8028d6085bffe4a2757c32abb6",
+  "upstream": "https://github.com/RVC-Boss/GPT-SoVITS"
+}

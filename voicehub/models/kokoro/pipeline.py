@@ -167,10 +167,11 @@ class KPipeline:
         return pack
 
     def load_voice(self, voice: Union[str, torch.FloatTensor], delimiter: str = ",") -> torch.FloatTensor:
-        """Lazily download and load a voice embedding.
+        """
+        Lazily download and load a voice embedding.
 
-        Multiple voices can be requested as a delimited string (e.g.
-        ``'af_bella,af_jessica'``); they will be averaged into a single style.
+        Multiple voices can be requested as a delimited string (e.g. ``'af_bella,af_jessica'``); they will be
+        averaged into a single style.
         """
         if isinstance(voice, torch.FloatTensor):
             return voice
@@ -213,7 +214,7 @@ class KPipeline:
         pcount = 0
         for t in tokens:
             # American English: ɾ => T
-            t.phonemes = '' if t.phonemes is None else t.phonemes  #.replace('ɾ', 'T')
+            t.phonemes = '' if t.phonemes is None else t.phonemes
             next_ps = t.phonemes + (' ' if t.whitespace else '')
             next_pcount = pcount + len(next_ps.rstrip())
             if next_pcount > 510:

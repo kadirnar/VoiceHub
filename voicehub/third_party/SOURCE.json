@@ -1,0 +1,29 @@
+{
+  "components": [
+    {
+      "license": "MIT",
+      "name": "dac",
+      "revision": "c7cfc5d2647e26471dc394f95846a0830e7bec34",
+      "upstream": "https://github.com/descriptinc/descript-audio-codec"
+    },
+    {
+      "license": "MIT",
+      "name": "vocos",
+      "revision": "c859e3b7b534f3776a357983029d34170ddd6fc3",
+      "upstream": "https://github.com/gemelo-ai/vocos"
+    },
+    {
+      "license": "MIT",
+      "name": "conformer",
+      "revision": "fc70d518d3770788d17a5d9799e08d23ad19c525",
+      "upstream": "https://github.com/lucidrains/conformer"
+    },
+    {
+      "license": "MIT",
+      "name": "wavmark",
+      "revision": "6ab3bf7ce0679e5b5cfeff3a62e8df9cd2024b37",
+      "upstream": "https://github.com/wavmark/wavmark"
+    }
+  ],
+  "policy": "Reusable architecture source is vendored; checkpoints remain external."
+}

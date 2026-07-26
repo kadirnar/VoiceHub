@@ -1,0 +1,10 @@
+{
+  "license": "MIT",
+  "model_type": "f5tts",
+  "nested_revisions": {
+    "BigVGAN": "7d2b454564a6c7d014227f635b7423881f14bdac"
+  },
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and are not part of this source snapshot.",
+  "revision": "9c614e9657089213efc6a7421b30630be138a3f5",
+  "upstream": "https://github.com/SWivid/F5-TTS"
+}

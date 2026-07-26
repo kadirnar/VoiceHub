@@ -19,7 +19,7 @@ languages = [
 ]
 
 if TYPE_CHECKING:
-    from kokoro import KPipeline
+    from voicehub.models.kokoro.pipeline import KPipeline
 
 
 def generate_audio(text: str,
@@ -27,7 +27,7 @@ def generate_audio(text: str,
                    voice: str,
                    speed=1) -> Generator["KPipeline.Result", None, None]:
     """Yield generated audio segments for the given text, language, and voice."""
-    from kokoro import KPipeline
+    from voicehub.models.kokoro.pipeline import KPipeline
 
     if not voice.startswith(kokoro_language):
         logger.warning(f"Voice {voice} is not made for language {kokoro_language}")

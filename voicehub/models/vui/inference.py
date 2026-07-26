@@ -1,36 +1,71 @@
-from voicehub.base_model import BaseTTSModel
-from voicehub.models.vui.model import Vui
-from voicehub.models.vui.tts import render
+"""Vui integration using the architecture source included in VoiceHub."""
+
+from __future__ import annotations
+
+from voicehub.configuration_utils import VoiceHubConfig
+from voicehub.modeling_outputs import TTSOutput
+from voicehub.modeling_utils import PreTrainedTTSModel
 
 
-class VuiTTS(BaseTTSModel):
-    """High-level TTS interface for the Vui model.
+class VuiConfig(VoiceHubConfig):
+    """Configuration for Vui checkpoint loading."""
 
-    Lazily loads the checkpoint on first call so that instantiation is cheap.
-    """
+    model_type = "vui"
 
-    def __init__(self, model_path: str = "", device: str = "cuda"):
-        """Create a VuiTTS wrapper.
+    def __init__(self, *, sample_rate: int = 22050, **kwargs):
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
-        Args:
-            model_path: HuggingFace repo filename or local checkpoint path.
-            device: Torch device string (``"cuda"`` or ``"cpu"``).
-        """
-        super().__init__(model_path, device)
-        self.model = None
 
-    @property
-    def sample_rate(self) -> int:
-        return 22050
+class VuiForTextToSpeech(PreTrainedTTSModel):
+    """Vui synthesis with locally maintained source."""
 
-    def load_model(self):
-        """Load the Vui checkpoint and move the model to the configured device."""
-        model = Vui.from_pretrained(checkpoint_path=self.model_path).to(self.device)
-        self.model = model
+    config_class = VuiConfig
 
-    def __call__(self, text: str, output_file: str = "output.wav"):
-        """Synthesise speech from *text* and write it to *output_file* (22 050 Hz WAV)."""
-        if self.model is None:
-            self.load_model()
-        waveform = render(self.model, text)
-        self.save_audio(output_file, waveform[0], self.sample_rate)
+    def __init__(
+        self,
+        config: VuiConfig | str | None = None,
+        *,
+        model_path: str | None = None,
+        device: str = "auto",
+        lazy_load: bool = True,
+        **config_overrides,
+    ):
+        config = self._coerce_config(
+            config,
+            model_path=model_path,
+            **config_overrides,
+        )
+        super().__init__(config, device=device, lazy_load=lazy_load)
+
+    def _load_pretrained_model(self) -> None:
+        from voicehub.models.vui.model import Vui
+
+        self.model = Vui.from_pretrained(checkpoint_path=self.config.name_or_path).to(self.device)
+        self.model.eval()
+        self.config.sample_rate = self.model.codec.config.sample_rate
+
+    def _generate(
+        self,
+        text: str,
+        *,
+        output_file: str | None = None,
+        **generation_options,
+    ) -> TTSOutput:
+        self.load()
+        from voicehub.models.vui.tts import render
+
+        waveform = render(
+            self.model,
+            text,
+            **generation_options,
+        )
+        output = TTSOutput(
+            audio=waveform[0],
+            sample_rate=self.sample_rate,
+        )
+        if output_file:
+            output.save(output_file)
+        return output
+
+
+VuiTTS = VuiForTextToSpeech

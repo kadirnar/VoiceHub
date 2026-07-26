@@ -1,39 +1,75 @@
-from voicehub.base_model import BaseTTSModel
-from voicehub.models.chatterbox.tts import ChatterboxTTS
+"""Chatterbox integration using source included in VoiceHub."""
+
+from __future__ import annotations
+
+from voicehub.configuration_utils import VoiceHubConfig
+from voicehub.modeling_outputs import TTSOutput
+from voicehub.modeling_utils import PreTrainedTTSModel
 
 
-class ChatterboxInference(BaseTTSModel):
-    """A class for running text-to-speech inference with the Chatterbox model."""
+class ChatterboxConfig(VoiceHubConfig):
+    """Configuration for the original Chatterbox architecture."""
 
-    def __init__(self, model_path: str = "", device: str = "cuda"):
-        """Initializes the ChatterboxInference class.
+    model_type = "chatterbox"
 
-        Args:
-            model_path: Unused, kept for interface compatibility.
-            device: The device to run the model on, e.g., "cuda" or "cpu".
-        """
-        super().__init__(model_path, device)
-        print(f"Loading ChatterboxTTS model on {self.device}...")
-        self.model = ChatterboxTTS.from_pretrained(device=self.device)
-        print("Model loaded successfully.")
+    def __init__(self, *, sample_rate: int = 24000, **kwargs):
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
-    @property
-    def sample_rate(self) -> int:
-        return self.model.sr
 
-    def __call__(self, text, output_file="output.wav", audio_prompt_path=None):
-        """
-        Synthesizes speech from text and saves it to a file.
+class ChatterboxForTextToSpeech(PreTrainedTTSModel):
+    """Zero-shot voice cloning without the ``chatterbox-tts`` package."""
 
-        Args:
-            text (str): The text to synthesize.
-            output_file (str): The path to save the generated audio file.
-            audio_prompt_path (str, optional): Path to an audio file for voice prompt. Defaults to None.
-        """
-        print(f"Synthesizing text: '{text}'")
-        if audio_prompt_path:
-            print(f"Using audio prompt: {audio_prompt_path}")
+    config_class = ChatterboxConfig
+    default_model_name_or_path = "ResembleAI/chatterbox"
 
-        wav = self.model.generate(text, audio_prompt_path=audio_prompt_path)
-        self.save_audio(output_file, wav, self.sample_rate)
-        print(f"Audio saved to {output_file}")
+    def __init__(
+        self,
+        config: ChatterboxConfig | str | None = None,
+        *,
+        model_path: str | None = None,
+        device: str = "auto",
+        lazy_load: bool = True,
+        **config_overrides,
+    ):
+        config = self._coerce_config(
+            config,
+            model_path=model_path,
+            **config_overrides,
+        )
+        super().__init__(config, device=device, lazy_load=lazy_load)
+
+    def _load_pretrained_model(self) -> None:
+        from voicehub.models.chatterbox.tts import ChatterboxTTS
+
+        self.model = ChatterboxTTS.from_pretrained(
+            device=self.device,
+            repo_id=self.config.name_or_path,
+        )
+        self.config.sample_rate = self.model.sr
+
+    def _generate(
+        self,
+        text: str,
+        *,
+        output_file: str | None = None,
+        speaker_audio_path: str | None = None,
+        audio_prompt_path: str | None = None,
+        **generation_options,
+    ) -> TTSOutput:
+        self.load()
+        prompt_path = speaker_audio_path or audio_prompt_path
+        waveform = self.model.generate(
+            text,
+            audio_prompt_path=prompt_path,
+            **generation_options,
+        )
+        output = TTSOutput(
+            audio=waveform,
+            sample_rate=self.sample_rate,
+        )
+        if output_file:
+            output.save(output_file)
+        return output
+
+
+ChatterboxInference = ChatterboxForTextToSpeech

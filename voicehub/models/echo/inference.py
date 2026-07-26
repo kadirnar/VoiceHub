@@ -1,55 +1,75 @@
+"""Echo-TTS integration using source included in VoiceHub."""
+
+from __future__ import annotations
+
 from functools import partial
 
-import torch
-
-from voicehub.base_model import BaseTTSModel
-from voicehub.models.echo.sampling import (
-    ae_decode,
-    crop_audio_to_flattening_point,
-    load_audio,
-    load_fish_ae_from_hf,
-    load_model_from_hf,
-    load_pca_state_from_hf,
-    sample_euler_cfg_independent_guidances,
-    sample_pipeline,
-)
+from voicehub.configuration_utils import VoiceHubConfig
+from voicehub.modeling_outputs import TTSOutput
+from voicehub.modeling_utils import PreTrainedTTSModel
 
 
-class EchoTTS(BaseTTSModel):
-    """VoiceHub wrapper for Echo-TTS, a multi-speaker text-to-speech model
-    with speaker reference conditioning via flow matching."""
+class EchoTTSConfig(VoiceHubConfig):
+    """Configuration for Echo-TTS flow matching inference."""
+
+    model_type = "echo"
 
     def __init__(
         self,
-        model_path: str = "jordand/echo-tts-base",
-        device: str = "cuda",
-        compile: bool = False,
+        *,
+        compile_model: bool = False,
+        compile: bool | None = None,
+        sample_rate: int = 44100,
+        **kwargs,
     ):
-        """Initialize the EchoTTS model.
+        super().__init__(sample_rate=sample_rate, **kwargs)
+        self.compile_model = (compile_model if compile is None else compile)
 
-        Args:
-            model_path: HuggingFace repo id for the Echo-TTS checkpoint.
-            device: Torch device string.
-            compile: Whether to torch.compile the model for faster inference.
-        """
-        super().__init__(model_path, device)
+
+class EchoTTSForTextToSpeech(PreTrainedTTSModel):
+    """Speaker-conditioned Echo-TTS with local architecture source."""
+
+    config_class = EchoTTSConfig
+    default_model_name_or_path = "jordand/echo-tts-base"
+
+    def __init__(
+        self,
+        config: EchoTTSConfig | str | None = None,
+        *,
+        model_path: str | None = None,
+        device: str = "auto",
+        lazy_load: bool = True,
+        **config_overrides,
+    ):
+        config = self._coerce_config(
+            config,
+            model_path=model_path,
+            **config_overrides,
+        )
+        self.fish_ae = None
+        self.pca_state = None
+        super().__init__(config, device=device, lazy_load=lazy_load)
+
+    def _load_pretrained_model(self) -> None:
+        from voicehub.models.echo.sampling import load_fish_ae_from_hf, load_model_from_hf, load_pca_state_from_hf
+
         self.model = load_model_from_hf(
-            repo_id=model_path,
-            device=device,
-            compile=compile,
+            repo_id=self.config.name_or_path,
+            device=self.device,
+            compile=self.config.compile_model,
             delete_blockwise_modules=True,
         )
-        self.fish_ae = load_fish_ae_from_hf(device=device)
-        self.pca_state = load_pca_state_from_hf(repo_id=model_path, device=device)
+        self.fish_ae = load_fish_ae_from_hf(device=self.device)
+        self.pca_state = load_pca_state_from_hf(
+            repo_id=self.config.name_or_path,
+            device=self.device,
+        )
 
-    @property
-    def sample_rate(self) -> int:
-        return 44100
-
-    def __call__(
+    def _generate(
         self,
         text: str,
-        output_file: str = "output.wav",
+        *,
+        output_file: str | None = None,
         speaker_audio_path: str | None = None,
         num_steps: int = 40,
         cfg_scale_text: float = 3.0,
@@ -57,29 +77,15 @@ class EchoTTS(BaseTTSModel):
         cfg_min_t: float = 0.5,
         cfg_max_t: float = 1.0,
         sequence_length: int = 640,
-        rng_seed: int = 0,
+        seed: int = 0,
+        rng_seed: int | None = None,
         truncation_factor: float | None = None,
-    ):
-        """Generate speech from text and save to a file.
+    ) -> TTSOutput:
+        self.load()
+        from voicehub.models.echo.sampling import load_audio, sample_euler_cfg_independent_guidances, sample_pipeline
 
-        Args:
-            text: Text to synthesize. Will be prefixed with ``[S1]`` if needed.
-            output_file: Path to save the generated audio (44.1 kHz WAV).
-            speaker_audio_path: Optional path to a speaker reference audio file.
-            num_steps: Number of Euler sampling steps.
-            cfg_scale_text: Classifier-free guidance scale for text.
-            cfg_scale_speaker: Classifier-free guidance scale for speaker.
-            cfg_min_t: Minimum timestep for applying CFG.
-            cfg_max_t: Maximum timestep for applying CFG.
-            sequence_length: Max latent sequence length (640 = ~30 s).
-            rng_seed: Random seed for reproducibility.
-            truncation_factor: Optional noise truncation factor.
-        """
-        speaker_audio = None
-        if speaker_audio_path is not None:
-            speaker_audio = load_audio(speaker_audio_path).to(self.device)
-
-        sample_fn = partial(
+        speaker_audio = (load_audio(speaker_audio_path).to(self.device) if speaker_audio_path else None)
+        sample_function = partial(
             sample_euler_cfg_independent_guidances,
             num_steps=num_steps,
             cfg_scale_text=cfg_scale_text,
@@ -94,16 +100,24 @@ class EchoTTS(BaseTTSModel):
             speaker_kv_min_t=None,
             sequence_length=sequence_length,
         )
-
-        audio_out, _ = sample_pipeline(
+        effective_seed = seed if rng_seed is None else rng_seed
+        audio, _ = sample_pipeline(
             model=self.model,
             fish_ae=self.fish_ae,
             pca_state=self.pca_state,
-            sample_fn=sample_fn,
+            sample_fn=sample_function,
             text_prompt=text,
             speaker_audio=speaker_audio,
-            rng_seed=rng_seed,
+            rng_seed=effective_seed,
         )
+        output = TTSOutput(
+            audio=audio[0],
+            sample_rate=self.sample_rate,
+            metadata={"seed": effective_seed},
+        )
+        if output_file:
+            output.save(output_file)
+        return output
 
-        self.save_audio(output_file, audio_out[0], self.sample_rate)
-        return audio_out
+
+EchoTTS = EchoTTSForTextToSpeech
