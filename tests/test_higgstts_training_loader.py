@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 import weakref
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -376,6 +377,9 @@ class HiggsWrapperRuntimeTests(unittest.TestCase):
             ), patch(
                     "voicehub.models.higgstts.inference.import_optional",
                     return_value=data_types,
+            ), patch(
+                    "voicehub.models.higgstts.inference.seeded_inference",
+                    return_value=nullcontext(23),
             ):
                 generated = restored.generate("restored artifact")
 

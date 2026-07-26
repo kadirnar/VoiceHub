@@ -1,7 +1,7 @@
 import sys
 import tempfile
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -651,12 +651,21 @@ class OmniVoiceInferenceContractTests(unittest.TestCase):
         model = OmniVoiceForTextToSpeech(device="cpu")
         model.model = runtime
 
-        output = model.generate(
-            "Test request.",
-            temperature=0.4,
-            num_step=8,
-        )
+        with patch(
+                "voicehub.models.omnivoice.inference.seeded_inference",
+                return_value=nullcontext(17),
+        ) as seeded:
+            output = model.generate(
+                "Test request.",
+                temperature=0.4,
+                num_step=8,
+            )
 
+        seeded.assert_called_once_with(
+            None,
+            device="cpu",
+            model_type="omnivoice",
+        )
         self.assertEqual(output.audio, [0.1, -0.1])
         self.assertEqual(
             runtime.generate.call_args.kwargs["class_temperature"],

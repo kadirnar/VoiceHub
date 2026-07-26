@@ -657,7 +657,11 @@ class WrapperHelperTests(unittest.TestCase):
         )
         model.model = backend
 
-        output = model.generate("hello", mode="auto", instruct="calm")
+        with patch(
+                "voicehub.models.qwen3tts.inference.seeded_inference",
+                return_value=nullcontext(19),
+        ):
+            output = model.generate("hello", mode="auto", instruct="calm")
 
         backend.generate_voice_design.assert_called_once()
         backend.generate_custom_voice.assert_not_called()
@@ -707,12 +711,16 @@ class WrapperHelperTests(unittest.TestCase):
         model = Qwen3TTSForTextToSpeech(device="cpu")
         model.model = backend
 
-        output = model.generate(
-            "hello",
-            mode="voice_design",
-            instruct="",
-            seed=7,
-        )
+        with patch(
+                "voicehub.models.qwen3tts.inference.seeded_inference",
+                return_value=nullcontext(7),
+        ):
+            output = model.generate(
+                "hello",
+                mode="voice_design",
+                instruct="",
+                seed=7,
+            )
 
         backend.generate_voice_design.assert_called_once()
         self.assertEqual(
@@ -747,7 +755,11 @@ class WrapperHelperTests(unittest.TestCase):
             Message=Message,
         )
 
-        model.generate("hello")
+        with patch(
+                "voicehub.models.higgstts.inference.seeded_inference",
+                return_value=nullcontext(29),
+        ):
+            model.generate("hello")
 
         self.assertTrue(backend.generate.call_args.kwargs["force_audio_gen"])
 

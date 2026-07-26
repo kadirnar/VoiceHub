@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -225,12 +226,21 @@ class DiaWrapperTests(unittest.TestCase):
         model._dia_backend = backend
         model._loaded_backend = "transformers"
 
-        output = model._generate(
-            "[S1] Generate.",
-            max_tokens=16,
-            cfg_scale=2.5,
-        )
+        with patch(
+                "voicehub.models.dia.inference.seeded_inference",
+                return_value=nullcontext(13),
+        ) as seeded:
+            output = model._generate(
+                "[S1] Generate.",
+                max_tokens=16,
+                cfg_scale=2.5,
+            )
 
+        seeded.assert_called_once_with(
+            None,
+            device="cpu",
+            model_type="dia",
+        )
         self.assertEqual(output.audio, [0.25, -0.25])
         self.assertEqual(output.metadata["backend"], "transformers")
         self.assertEqual(

@@ -1,4 +1,5 @@
 import importlib
+import importlib.util
 import os
 import sys
 import tempfile
@@ -26,6 +27,8 @@ from voicehub.models.vui.inference import VuiForTextToSpeech
 from voicehub.models.xtts.inference import XTTSForTextToSpeech
 from voicehub.models.zonos2.inference import Zonos2Config, Zonos2ForTextToSpeech
 from voicehub.models.zonos.inference import ZonosForTextToSpeech
+
+TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 
 
 @contextmanager
@@ -439,6 +442,7 @@ class InferenceHelperTests(unittest.TestCase):
         self.assertEqual(runtime_device, "cpu")
         self.assertEqual(model.sample_rate, 24_000)
 
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional Kokoro extra")
     def test_kokoro_resolves_model_assets_from_local_snapshot(self):
         fake_loguru = ModuleType("loguru")
         fake_loguru.logger = SimpleNamespace(debug=Mock())
@@ -680,6 +684,7 @@ class InferenceHelperTests(unittest.TestCase):
 
         self.assertEqual(model.config.name_or_path, "vui-abraham-100m.pt")
 
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional Vui extra")
     def test_vui_cpu_precision_uses_the_model_dtype(self):
         import torch
 
@@ -733,6 +738,7 @@ class InferenceHelperTests(unittest.TestCase):
                 device=torch.device("cpu"),
             )
 
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional Vui extra")
     def test_vui_render_cleans_once_and_uses_codec_rate_and_final_vad_endpoint(self):
         import torch
 
@@ -940,6 +946,7 @@ class InferenceHelperTests(unittest.TestCase):
         ):
             model._load_pretrained_model()
 
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional Zonos2 extra")
     def test_zonos2_parallel_context_is_idempotent(self):
         from voicehub.models.zonos2.source.zonos2.distributed import info
 
@@ -949,6 +956,7 @@ class InferenceHelperTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "already configured"):
                 info.set_tp_info(1, 2)
 
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional Zonos2 extra")
     def test_zonos2_global_state_can_be_reused_by_a_sequential_engine(self):
         from voicehub.models.zonos2.source.zonos2 import core
         from voicehub.models.zonos2.source.zonos2.distributed import info
@@ -1004,8 +1012,6 @@ class InferenceHelperTests(unittest.TestCase):
         )
 
     def test_acoustic_wrappers_scope_generation_seeds(self):
-        import torch
-
         inflect = InflectTTSForTextToSpeech(device="cpu")
         inflect.device = "cpu"
         inflect.model = SimpleNamespace(

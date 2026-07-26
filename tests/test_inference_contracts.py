@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import random
 import tempfile
@@ -13,6 +14,8 @@ from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.inference_strategy import InferenceStrategy
 from voicehub.models._shared import resolve_model_directory, resolve_torch_dtype, seeded_inference
 from voicehub.models.melotts.inference import MeloTTSConfig, MeloTTSForTextToSpeech
+
+TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 
 
 class InferenceConfig(VoiceHubConfig):
@@ -334,6 +337,7 @@ class InferenceLifecycleTests(unittest.TestCase):
         self.assertEqual(model.load_count, 1)
         self.assertEqual(model.inference_prepare_count, 1)
 
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional inference extra")
     def test_model_loading_restores_process_random_state(self):
         import numpy
         import torch
@@ -532,6 +536,7 @@ class SharedInferenceHelperTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "supported range"):
                     TTSGenerationConfig(seed=seed)
 
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional inference extra")
     def test_seeded_inference_restores_all_cpu_random_states(self):
         import numpy
         import torch
