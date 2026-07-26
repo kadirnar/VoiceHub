@@ -25,27 +25,63 @@ ISSUE_MODEL_TYPES = {
     "parlertts",
     "styletts2",
 }
+CURRENT_MODEL_TYPES = {
+    "csm",
+    "fishtts",
+    "higgstts",
+    "inflecttts",
+    "irodoritts",
+    "mosstts",
+    "neutts",
+    "omnivoice",
+    "qwen3tts",
+    "supertonic",
+    "vibevoice",
+    "voxcpm",
+    "xtts",
+    "zonos",
+    "zonos2",
+}
 FORBIDDEN_TTS_PACKAGES = {
     "TTS",
+    "boson_multimodal",
     "chatterbox",
     "conformer",
     "dac",
     "f5_tts",
+    "fish_speech",
+    "irodori_tts",
     "kokoro",
     "xcodec2",
     "melo",
     "melotts",
+    "moshi",
+    "moss_audio_tokenizer",
+    "moss_tts_delay",
+    "moss_tts_local",
+    "moss_tts_realtime",
+    "mossttsrealtime",
+    "neucodec",
+    "neutts",
+    "omnivoice",
     "outetts",
     "parler_tts",
     "perth",
+    "qwen_tts",
     "s3tokenizer",
     "snac",
     "styletts2",
+    "supertonic",
+    "silentcipher",
+    "vibevoice",
+    "voxcpm",
     "vocos",
     "vq",
     "wavmark",
+    "zonos",
+    "zonos2",
 }
-SOURCE_INTEGRATED_MODELS = ISSUE_MODEL_TYPES - {"conversationtts"}
+SOURCE_INTEGRATED_MODELS = (ISSUE_MODEL_TYPES | CURRENT_MODEL_TYPES) - {"conversationtts"}
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -53,17 +89,24 @@ class RegistryTests(unittest.TestCase):
 
     def test_all_issue_models_are_registered(self):
         registered = {spec.model_type for spec in AutoInferenceModel.available_models()}
-        self.assertTrue(ISSUE_MODEL_TYPES.issubset(registered))
+        self.assertTrue((ISSUE_MODEL_TYPES | CURRENT_MODEL_TYPES).issubset(registered))
 
     def test_aliases_resolve_to_canonical_model(self):
         aliases = {
             "conversation-tts": "conversationtts",
             "F5-TTS": "f5tts",
             "GPT-SoVITS": "gptsovits",
+            "Higgs-TTS": "higgstts",
+            "Irodori-TTS": "irodoritts",
             "LLaSA-TTS": "llasa",
             "Melo-TTS": "melotts",
+            "MOSS-TTS": "mosstts",
             "Parler-TTS": "parlertts",
+            "Qwen3-TTS": "qwen3tts",
             "Style-TTS2": "styletts2",
+            "Vibe-Voice": "vibevoice",
+            "Vox-CPM": "voxcpm",
+            "Zonos-2": "zonos2",
         }
         for alias, canonical in aliases.items():
             with self.subTest(alias=alias):

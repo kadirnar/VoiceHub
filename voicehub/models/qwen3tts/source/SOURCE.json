@@ -1,0 +1,7 @@
+{
+  "license": "Apache-2.0",
+  "model_type": "qwen3tts",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "022e286b98fbec7e1e916cb940cdf532cd9f488e",
+  "upstream": "https://github.com/QwenLM/Qwen3-TTS"
+}

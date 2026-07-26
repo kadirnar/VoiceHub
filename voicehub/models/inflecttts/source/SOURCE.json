@@ -1,0 +1,7 @@
+{
+  "license": "Apache-2.0",
+  "model_type": "inflecttts",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "132edf8700da8e0d3fa81cdc0fd8844926fc6582",
+  "upstream": "https://huggingface.co/owensong/Inflect-Micro-v2"
+}

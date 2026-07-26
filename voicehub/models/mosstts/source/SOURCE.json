@@ -1,0 +1,15 @@
+{
+  "components": [
+    {
+      "license": "Apache-2.0",
+      "name": "moss_audio_tokenizer",
+      "revision": "8c50ac4c5d7287d2ed6ea20a08c90ca439887d23",
+      "upstream": "https://github.com/OpenMOSS/MOSS-Audio-Tokenizer"
+    }
+  ],
+  "license": "Apache-2.0",
+  "model_type": "mosstts",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "ad99ec5f26debf1d6c1a4dc8461b2bcb787ec9af",
+  "upstream": "https://github.com/OpenMOSS/MOSS-TTS"
+}

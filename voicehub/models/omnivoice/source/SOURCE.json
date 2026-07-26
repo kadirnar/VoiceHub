@@ -1,0 +1,7 @@
+{
+  "license": "Apache-2.0",
+  "model_type": "omnivoice",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "468e927ba3716cd8dd86421148dfb3046e9f9d7b",
+  "upstream": "https://github.com/k2-fsa/OmniVoice"
+}

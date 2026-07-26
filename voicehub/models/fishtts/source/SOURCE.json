@@ -1,0 +1,7 @@
+{
+  "license": "Fish Audio Research License",
+  "model_type": "fishtts",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "e5e292632cb11e7a27b2b7487f58f612bc101e13",
+  "upstream": "https://github.com/fishaudio/fish-speech"
+}

@@ -1,0 +1,7 @@
+{
+  "license": "Apache-2.0",
+  "model_type": "voxcpm",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "616d3d3e630a9c96c2853250eef91b0f39dcd5fa",
+  "upstream": "https://github.com/OpenBMB/VoxCPM"
+}

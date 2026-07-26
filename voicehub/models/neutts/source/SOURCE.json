@@ -1,0 +1,21 @@
+{
+  "components": [
+    {
+      "license": "Apache-2.0",
+      "name": "neucodec",
+      "revision": "ed3e6cd1bdc374ce14a21355e5eee66a777149ce",
+      "upstream": "https://github.com/neuphonic/neucodec"
+    },
+    {
+      "license": "MIT",
+      "name": "perth",
+      "revision": "ce86c49d029f42272c1902eccb675556b9ed2330",
+      "upstream": "https://github.com/resemble-ai/Perth"
+    }
+  ],
+  "license": "NeuTTS Open License v1.0",
+  "model_type": "neutts",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "ac69851f28fc63a487917e7c2e27f0d75c759cba",
+  "upstream": "https://github.com/neuphonic/neutts"
+}

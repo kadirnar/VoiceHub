@@ -1,0 +1,7 @@
+{
+  "license": "Apache-2.0",
+  "model_type": "zonos",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "bc40d98e1e1ab54fc65c483be127a90e3c7c0645",
+  "upstream": "https://github.com/Zyphra/Zonos"
+}

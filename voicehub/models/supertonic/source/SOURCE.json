@@ -1,0 +1,7 @@
+{
+  "license": "MIT",
+  "model_type": "supertonic",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "7e2804f96016a7028cb1ed627353c61c1e9dd281",
+  "upstream": "https://github.com/supertone-inc/supertonic"
+}

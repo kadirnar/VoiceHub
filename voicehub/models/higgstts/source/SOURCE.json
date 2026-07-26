@@ -1,0 +1,7 @@
+{
+  "license": "Apache-2.0",
+  "model_type": "higgstts",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "05a145bb490501b534563bf51bf2f7aa2326b271",
+  "upstream": "https://github.com/boson-ai/higgs-audio"
+}

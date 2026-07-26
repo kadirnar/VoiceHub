@@ -1,0 +1,7 @@
+{
+  "license": "MPL-2.0",
+  "model_type": "xtts",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "dbf1a08a0d4e47fdad6172e433eeb34bc6b13b4e",
+  "upstream": "https://github.com/coqui-ai/TTS"
+}
