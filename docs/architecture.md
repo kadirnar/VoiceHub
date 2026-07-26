@@ -12,6 +12,19 @@ AutoConfig
        -> checkpoint loading
        -> forward(...) / generate(...)
        -> TTSOutput(audio, sample_rate, metadata)
+
+TrainingArguments
+    -> Trainer
+       -> AutoTrainingAdapter
+          -> mandatory ModelTrainingSpec
+          -> causal-LM / seq2seq / flow / acoustic / composite adapter
+          -> trainable source-module discovery
+       -> TTS padding collator / DataLoader
+       -> differentiable source forward(...)
+       -> TTSTrainingOutput(loss, logits, audio_values)
+       -> named optimizer / scheduler bundle
+       -> callbacks / evaluation
+       -> checkpoint save / resume
 ```
 
 ## Public API contract
@@ -69,6 +82,17 @@ voicehub/
   modeling_outputs.py        normalized generation output
   processing_utils.py        processor and BatchFeature
   registry.py                lazy architecture registry
+  data_collator.py           default PyTorch batch collation
+  training_args.py           serializable training configuration
+  trainer.py                 train/evaluate/predict loop
+  trainer_callback.py        callback, state, and control API
+  trainer_utils.py           strategies, outputs, checkpoint utilities
+  training/
+    specs.py                  profile for every registered model
+    auto.py                   lazy model-to-adapter resolution
+    adapters.py               five objective-family implementations
+    collators.py              variable token/audio padding
+    optimization.py           composite optimizer/scheduler bundles
   policies/
     licensing.py             model/checkpoint usage restrictions
   components/
@@ -93,6 +117,9 @@ Model source imports are rewritten into the `voicehub.models...source`
 namespace. This prevents collisions with similarly named site-packages and
 makes an accidentally installed TTS package irrelevant to model resolution.
 Heavy ML imports and checkpoint downloads happen only in `load()`.
+Trainer modules follow the same import boundary: importing `voicehub.Trainer`
+does not import PyTorch. The framework is resolved only when a dataloader,
+optimizer, training step, or checkpoint tensor is needed.
 
 Shared components are not anonymous dependencies. `ComponentSpec` stores
 their category, import path, upstream repository, and license.
@@ -114,6 +141,35 @@ config.json
 generation_config.json
 processor_config.json
 ```
+
+Trainer checkpoints add the state required for continuation:
+
+```text
+checkpoint-<global_step>/
+  model_state.pt
+  optimizer.pt
+  scheduler.pt
+  rng_state.pth
+  trainer_state.json
+  training_args.json
+```
+
+Models used with the default training path return a loss-bearing mapping,
+tuple, or `TTSTrainingOutput`. A custom `compute_loss_func` connects upstream
+objectives without coupling VoiceHub to an external trainer package.
+
+Every `ModelSpec.training` property resolves one `ModelTrainingSpec`.
+`AutoTrainingAdapter` first follows that profile's known source component
+paths, then performs bounded recursive discovery when an inference runtime adds
+an intermediate wrapper. It never scans installed TTS packages. Parameters
+shared by two components are yielded once.
+
+Composite architectures use one named optimizer and scheduler per resolved
+source component. Their states are serialized as a bundle, so LLM, codec,
+generator, and discriminator state can resume together. Native named losses
+are combined through the profile's explicit weights; the five family adapters
+only calculate a fallback cross-entropy, flow MSE, or acoustic reconstruction
+loss when upstream `forward()` does not already return one.
 
 General compute and utility dependencies remain external: PyTorch,
 Transformers, NumPy, audio I/O, phonemizers, and platform runtimes such as

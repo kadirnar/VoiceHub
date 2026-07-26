@@ -34,6 +34,13 @@ class ModelSpec:
 
         return get_model_license(self.model_type)
 
+    @property
+    def training(self):
+        """Return the mandatory training profile for this backend."""
+        from voicehub.training.specs import get_training_spec
+
+        return get_training_spec(self.model_type)
+
 
 _MODEL_SPECS = (
     ModelSpec(

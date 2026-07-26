@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "voicehub"
 dynamic = ["version"]
-description = "A unified, source-integrated inference interface for text-to-speech models"
+description = "A unified, source-integrated inference and training interface for text-to-speech models"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
@@ -36,6 +36,9 @@ Issues = "https://github.com/kadirnar/VoiceHub/issues"
 Documentation = "https://github.com/kadirnar/VoiceHub/tree/main/docs"
 
 [project.optional-dependencies]
+training = [
+  "torch>=2.1",
+]
 orpheustts = [
   "torch",
   "transformers",
