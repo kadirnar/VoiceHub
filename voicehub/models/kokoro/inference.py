@@ -1,89 +1,104 @@
-from kokoro import KPipeline
+"""Kokoro integration backed by the source included in VoiceHub."""
 
-from voicehub.base_model import BaseTTSModel
+from __future__ import annotations
+
+from voicehub.configuration_utils import VoiceHubConfig
+from voicehub.dependencies import import_optional
+from voicehub.modeling_outputs import TTSOutput
+from voicehub.modeling_utils import PreTrainedTTSModel
 
 
-class KokoroTTS(BaseTTSModel):
-    """
-    KokoroTTS class for text-to-speech generation using the Kokoro model.
+class KokoroConfig(VoiceHubConfig):
+    """Configuration for Kokoro model and G2P pipeline."""
 
-    This class provides a simple interface for loading and using the Kokoro model
-    to generate speech from text prompts.
+    model_type = "kokoro"
 
-    Example:
-        ```python
-        # Initialize the KokoroTTS model
-        # 🇺🇸 'a' => American English, 🇬🇧 'b' => British English, 🇪🇸 'e' => Spanish, etc.
-        tts = KokoroTTS(lang_code="a")
+    def __init__(
+        self,
+        *,
+        language_code: str = "a",
+        lang_code: str | None = None,
+        sample_rate: int = 24000,
+        **kwargs,
+    ):
+        super().__init__(sample_rate=sample_rate, **kwargs)
+        self.language_code = (language_code if lang_code is None else lang_code)
 
-        # Generate speech from text
-        text = "The sky above the port was the color of television, tuned to a dead channel."
-        audios = tts(text=text, voice="af_heart", output_prefix="output")
 
-        # To listen in a notebook:
-        # from IPython.display import Audio, display
-        # display(Audio(audios[0], rate=24000))
-        ```
-    """
+class KokoroForTextToSpeech(PreTrainedTTSModel):
+    """Multilingual Kokoro synthesis without the ``kokoro`` package."""
 
-    def __init__(self, model_path: str = "", device: str = "cuda", lang_code: str = "a"):
-        """
-        Initialize the KokoroTTS model.
+    config_class = KokoroConfig
+    default_model_name_or_path = "hexgrad/Kokoro-82M"
 
-        Args:
-            model_path (str): Unused, kept for interface compatibility.
-            device (str): Unused, kept for interface compatibility.
-            lang_code (str): Language code for the model. Default is "a".
-                - 'a': American English
-                - 'b': British English
-                - 'e': Spanish
-                - 'f': French
-                - 'h': Hindi
-                - 'i': Italian
-                - 'j': Japanese (requires `pip install misaki[ja]`)
-                - 'p': Brazilian Portuguese
-                - 'z': Mandarin Chinese (requires `pip install misaki[zh]`)
-        """
-        super().__init__(model_path, device)
-        self.pipeline = KPipeline(lang_code=lang_code)
+    def __init__(
+        self,
+        config: KokoroConfig | str | None = None,
+        *,
+        model_path: str | None = None,
+        device: str = "auto",
+        lazy_load: bool = True,
+        **config_overrides,
+    ):
+        config = self._coerce_config(
+            config,
+            model_path=model_path,
+            **config_overrides,
+        )
+        super().__init__(config, device=device, lazy_load=lazy_load)
 
-    @property
-    def sample_rate(self) -> int:
-        return 24000
+    def _load_pretrained_model(self) -> None:
+        pipeline_module = import_optional(
+            "voicehub.models.kokoro.pipeline",
+            model_type="kokoro",
+            install_extra="kokoro",
+        )
+        self.model = pipeline_module.KPipeline(
+            lang_code=self.config.language_code,
+            repo_id=self.config.name_or_path,
+            device=self.device,
+        )
 
-    def __call__(
-            self,
-            text: str,
-            voice: str = "af_heart",
-            speed: float = 1.0,
-            output_prefix: str = "output",
-            split_pattern: str = r'\n+'):
-        """
-        Generate speech from text and save it to files.
+    def _generate(
+        self,
+        text: str,
+        *,
+        voice: str = "af_heart",
+        speed: float = 1.0,
+        split_pattern: str = r"\n+",
+        output_file: str | None = None,
+    ) -> TTSOutput:
+        self.load()
+        chunks = []
+        segments = []
+        for result in self.model(
+                text,
+                voice=voice,
+                speed=speed,
+                split_pattern=split_pattern,
+        ):
+            if result.audio is not None:
+                chunks.append(result.audio.reshape(-1))
+                segments.append(result.graphemes)
+        if not chunks:
+            raise RuntimeError("Kokoro returned no audio.")
 
-        Args:
-            text (str): Text to convert to speech.
-            voice (str): The voice to use for generation. Default is "af_heart".
-                         Can also be a path to a voice tensor.
-            speed (float): Speaking speed. Default is 1.0.
-            output_prefix (str): Prefix for the output audio files.
-                                 Files will be saved as {output_prefix}_0.wav, etc.
-            split_pattern (str): Regex pattern to split the input text into segments.
-                                 Default is r'\n+'.
+        torch = import_optional(
+            "torch",
+            model_type="kokoro",
+            install_extra="kokoro",
+        )
+        output = TTSOutput(
+            audio=torch.cat(chunks),
+            sample_rate=self.sample_rate,
+            metadata={
+                "segments": segments,
+                "voice": voice
+            },
+        )
+        if output_file:
+            output.save(output_file)
+        return output
 
-        Returns:
-            list: A list of audio data numpy arrays.
-        """
-        generator = self.pipeline(text, voice=voice, speed=speed, split_pattern=split_pattern)
 
-        generated_audios = []
-        print("Generating audio...")
-        for i, (graphemes, phonemes, audio) in enumerate(generator):
-            print(f"  - Segment {i}: {repr(graphemes)}")
-            output_file = f"{output_prefix}_{i}.wav"
-            self.save_audio(output_file, audio, self.sample_rate)
-            print(f"    Saved to {output_file}")
-            generated_audios.append(audio)
-
-        print("Audio generation complete.")
-        return generated_audios
+KokoroTTS = KokoroForTextToSpeech

@@ -1,0 +1,12 @@
+{
+  "components": [
+    {
+      "license": "MIT",
+      "name": "snac",
+      "revision": "8f79a718f1ad71f94f79999f0071348227aff22e",
+      "upstream": "https://github.com/hubertsiuzdak/snac"
+    }
+  ],
+  "model_type": "orpheustts",
+  "policy": "Runtime component source is vendored; pretrained weights remain external."
+}

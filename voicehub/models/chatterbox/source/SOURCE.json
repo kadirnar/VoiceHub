@@ -1,0 +1,18 @@
+{
+  "components": [
+    {
+      "license": "Apache-2.0",
+      "name": "s3tokenizer",
+      "revision": "9bf5d845b5e043ffaf4657f4942939091c7697a2",
+      "upstream": "https://github.com/xingchensong/S3Tokenizer"
+    },
+    {
+      "license": "MIT",
+      "name": "perth",
+      "revision": "ce86c49d029f42272c1902eccb675556b9ed2330",
+      "upstream": "https://github.com/resemble-ai/Perth"
+    }
+  ],
+  "model_type": "chatterbox",
+  "policy": "Runtime component source is vendored; pretrained weights remain external."
+}

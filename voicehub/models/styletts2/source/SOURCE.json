@@ -1,0 +1,10 @@
+{
+  "license": "MIT",
+  "model_type": "styletts2",
+  "nested_revisions": {
+    "monotonic_align": "c6e5e6cb19882164027eb6e35118e841eed9298e"
+  },
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and are not part of this source snapshot.",
+  "revision": "5cedc71c333f8d8b8551ca59378bdcc7af4c9529",
+  "upstream": "https://github.com/yl4579/StyleTTS2"
+}

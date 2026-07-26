@@ -7,7 +7,8 @@ import torchaudio.compliance.kaldi as Kaldi
 
 
 def pad_list(xs, pad_value):
-    """Pad a list of variable-length tensors to the maximum length in the batch.
+    """
+    Pad a list of variable-length tensors to the maximum length in the batch.
 
     Args:
         xs (List): List of Tensors [(T_1, `*`), (T_2, `*`), ..., (T_B, `*`)].

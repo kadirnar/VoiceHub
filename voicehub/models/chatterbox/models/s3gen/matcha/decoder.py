@@ -4,11 +4,11 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from conformer import ConformerBlock
 from diffusers.models.activations import get_activation
 from einops import pack, rearrange, repeat
 
 from voicehub.models.chatterbox.models.s3gen.matcha.transformer import BasicTransformerBlock
+from voicehub.third_party.conformer import ConformerBlock
 
 
 class SinusoidalPosEmb(torch.nn.Module):

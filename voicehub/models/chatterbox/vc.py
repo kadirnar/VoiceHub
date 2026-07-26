@@ -1,22 +1,23 @@
 from pathlib import Path
 
 import librosa
-import perth
 import torch
 from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 
 from voicehub.models.chatterbox.models.s3gen import S3GEN_SR, S3Gen
 from voicehub.models.chatterbox.models.s3tokenizer import S3_SR
+from voicehub.models.chatterbox.source import perth
 
 REPO_ID = "ResembleAI/chatterbox"
 
 
 class ChatterboxVC:
-    """Voice conversion model that re-synthesises speech with a target speaker's voice.
+    """
+    Voice conversion model that re-synthesises speech with a target speaker's voice.
 
-    Tokenises the source audio with S3Tokenizer, then decodes the tokens through
-    S3Gen conditioned on a reference speaker embedding.
+    Tokenises the source audio with S3Tokenizer, then decodes the tokens through S3Gen conditioned on a
+    reference speaker embedding.
     """
 
     ENC_COND_LEN = 6 * S3_SR

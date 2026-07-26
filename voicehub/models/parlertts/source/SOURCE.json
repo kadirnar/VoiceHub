@@ -1,0 +1,8 @@
+{
+  "license": "Apache-2.0",
+  "model_type": "parlertts",
+  "nested_revisions": {},
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and are not part of this source snapshot.",
+  "revision": "d108732cd57788ec86bc857d99a6cabd66663d68",
+  "upstream": "https://github.com/huggingface/parler-tts"
+}

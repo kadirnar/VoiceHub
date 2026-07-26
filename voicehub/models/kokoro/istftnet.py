@@ -3,8 +3,9 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from kokoro.custom_stft import CustomSTFT
 from torch.nn.utils.parametrizations import weight_norm
+
+from voicehub.models.kokoro.custom_stft import CustomSTFT
 
 
 def init_weights(m, mean=0.0, std=0.01):
@@ -238,7 +239,6 @@ class SineGen(nn.Module):
         output sine_tensor: tensor(batchsize=1, length, dim)
         output uv: tensor(batchsize=1, length, 1)
         """
-        f0_buf = torch.zeros(f0.shape[0], f0.shape[1], self.dim, device=f0.device)
         # fundamental component
         fn = torch.multiply(f0, torch.FloatTensor([[range(1, self.harmonic_num + 2)]]).to(f0.device))
         # generate sine waveforms
