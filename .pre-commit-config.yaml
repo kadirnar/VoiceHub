@@ -5,6 +5,8 @@ ci:
   autoupdate_schedule: monthly
   # submodules: true
 
+exclude: ^(?:voicehub/models/.*/source/|voicehub/third_party/)
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

@@ -62,8 +62,8 @@ class T3CondEnc(nn.Module):
 
     def forward(self, cond: T3Cond):
         # Validate
-        assert (cond.cond_prompt_speech_tokens is None) == (cond.cond_prompt_speech_emb is None), \
-            "no embeddings for cond_prompt_speech_tokens"
+        assert (cond.cond_prompt_speech_tokens is None) == (
+            cond.cond_prompt_speech_emb is None), "no embeddings for cond_prompt_speech_tokens"
 
         # Speaker embedding projection
         cond_spkr = self.spkr_enc(cond.speaker_emb.view(-1, self.hp.speaker_embed_size))[:,

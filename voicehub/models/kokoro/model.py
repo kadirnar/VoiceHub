@@ -78,7 +78,7 @@ class KModel(torch.nn.Module):
             assert hasattr(self, key), key
             try:
                 getattr(self, key).load_state_dict(state_dict)
-            except:
+            except RuntimeError:
                 logger.debug(f"Did not load {key} from state_dict")
                 state_dict = {k[7:]: v for k, v in state_dict.items()}
                 getattr(self, key).load_state_dict(state_dict, strict=False)

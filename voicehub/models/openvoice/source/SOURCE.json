@@ -1,0 +1,8 @@
+{
+  "license": "MIT",
+  "model_type": "openvoice",
+  "nested_revisions": {},
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and are not part of this source snapshot.",
+  "revision": "74a1d147b17a8c3092dd5430504bd83ef6c7eb23",
+  "upstream": "https://github.com/myshell-ai/OpenVoice"
+}

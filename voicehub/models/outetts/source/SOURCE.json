@@ -1,0 +1,8 @@
+{
+  "license": "Apache-2.0",
+  "model_type": "outetts",
+  "nested_revisions": {},
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and are not part of this source snapshot.",
+  "revision": "f5eac6e70d792844c6a6959d900a47af2c061a5b",
+  "upstream": "https://github.com/edwko/OuteTTS"
+}

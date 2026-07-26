@@ -34,7 +34,7 @@ class PositionalEncoding(torch.nn.Module):
 
     def forward(self,
                 x: torch.Tensor,
-                offset: Union[int, torch.Tensor] = 0) \
+                offset: Union[int, torch.Tensor] = 0)\
             -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Add positional encoding.
@@ -80,7 +80,7 @@ class PositionalEncoding(torch.nn.Module):
             pos_emb = self.pe[:, offset:offset + size]
         else:  # for batched streaming decoding on GPU
             assert torch.max(offset) + size <= self.max_len
-            index = offset.unsqueeze(1) + \
+            index = offset.unsqueeze(1) +\
                 torch.arange(0, size).to(offset.device)  # B X T
             flag = index > 0
             # remove negative offset
@@ -109,7 +109,7 @@ class RelPositionalEncoding(PositionalEncoding):
 
     def forward(self,
                 x: torch.Tensor,
-                offset: Union[int, torch.Tensor] = 0) \
+                offset: Union[int, torch.Tensor] = 0)\
             -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute positional encoding.
@@ -134,7 +134,7 @@ class WhisperPositionalEncoding(PositionalEncoding):
         self.xscale = 1.0
         log_timescale_increment = np.log(10000) / (d_model // 2 - 1)
         inv_timescales = torch.exp(-log_timescale_increment * torch.arange(d_model // 2))
-        scaled_time = torch.arange(max_len)[:, np.newaxis] * \
+        scaled_time = torch.arange(max_len)[:, np.newaxis] *\
             inv_timescales[np.newaxis, :]
         pe = torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], dim=1)
         delattr(self, "pe")
@@ -161,7 +161,7 @@ class NoPositionalEncoding(torch.nn.Module):
 
     def forward(self,
                 x: torch.Tensor,
-                offset: Union[int, torch.Tensor] = 0) \
+                offset: Union[int, torch.Tensor] = 0)\
             -> Tuple[torch.Tensor, torch.Tensor]:
         """Just return zero vector for interface compatibility."""
         pos_emb = torch.zeros(1, x.size(1), self.d_model).to(x.device)
@@ -224,7 +224,7 @@ class EspnetRelPositionalEncoding(torch.nn.Module):
         pe = torch.cat([pe_positive, pe_negative], dim=1)
         self.pe = pe.to(device=x.device, dtype=x.dtype)
 
-    def forward(self, x: torch.Tensor, offset: Union[int, torch.Tensor] = 0) \
+    def forward(self, x: torch.Tensor, offset: Union[int, torch.Tensor] = 0)\
             -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Add positional encoding.

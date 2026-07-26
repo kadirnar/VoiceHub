@@ -5,8 +5,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from accelerate import Accelerator
-from s3tokenizer.model_v2 import ModelConfig, S3TokenizerV2
-from s3tokenizer.utils import padding
+
+from voicehub.models.chatterbox.source.s3tokenizer.model_v2 import ModelConfig, S3TokenizerV2
+from voicehub.models.chatterbox.source.s3tokenizer.utils import padding
 
 # Sampling rate of the inputs to S3TokenizerV2
 S3_SR = 16_000

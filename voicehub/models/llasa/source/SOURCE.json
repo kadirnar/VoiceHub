@@ -1,0 +1,7 @@
+{
+  "license": "CC-BY-NC-4.0",
+  "model_type": "llasa",
+  "policy": "XCodec2 architecture source is vendored. LLaSA and codec weights remain external Hub artifacts.",
+  "revision": "e412427ed30f0cf9d5e3c95562113deb10a32d03",
+  "upstream": "https://huggingface.co/HKUSTAudio/xcodec2"
+}

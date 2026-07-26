@@ -524,8 +524,8 @@ if __name__ == "__main__":
         speaker_kv_scale=None,
         speaker_kv_max_layers=None,
         speaker_kv_min_t=None,
-        sequence_length=
-        640,  # (max 640. shorter lengths will generate prefixes, not necessarily full generations)
+        # Shorter lengths generate prefixes, not necessarily full generations.
+        sequence_length=640,
     )
     audio_out = ae_decode(fish_ae, pca_state, latent_out)
     audio_out = crop_audio_to_flattening_point(audio_out, latent_out[0])

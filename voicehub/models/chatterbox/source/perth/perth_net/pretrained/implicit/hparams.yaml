@@ -1,0 +1,14 @@
+batch_size: 16
+hidden_size: 256
+hop_size: 320
+loss_type: psychoacoustic
+max_lr: 0.0001
+max_wmark_freq: 2000
+min_lr: 1.0e-05
+n_fft: 2048
+sample_rate: 32000
+stft_magnitude_min: 1.0e-09
+use_lr_scheduler: false
+use_wandb: true
+window_fn: hann
+window_size: 2048

@@ -1,148 +1,157 @@
 <div align="center">
-<h2>
-    VoiceHub: A Unified Inference Interface for TTS Models
-</h2>
-<img width="450" alt="teaser" src="assets/logo.png">
+  <img width="420" alt="VoiceHub" src="assets/logo.png">
+  <h1>VoiceHub</h1>
+  <p>One lazy, discoverable Python interface for open text-to-speech models.</p>
 </div>
 
-## 🛠️ Installation
+## Why VoiceHub
+
+- **One lifecycle:** every architecture uses config, lazy loading, generation, and a normalized output.
+- **Fast imports:** ML frameworks and model weights are loaded only when the selected backend needs them.
+- **Source included:** VoiceHub never delegates synthesis to a separately installed TTS package.
+- **Small base install:** model extras contain only general runtime dependencies.
+- **Actionable errors:** missing backends point to the exact installation extra.
+- **16 backends:** classic TTS, voice cloning, multilingual, dialogue, and prompted-style models.
+
+## Install
+
+VoiceHub requires Python 3.10 or newer.
 
 ```bash
-uv venv --python 3.12
-source .venv/bin/activate
-uv pip install voicehub
+python -m pip install voicehub
 ```
 
-## 📚 Usage
+Install only the backend you plan to use:
 
-VoiceHub provides a simple, unified interface for working with various Text-to-Speech (TTS) models. Below are examples showing how to use different supported TTS models with the same consistent approach.
+```bash
+python -m pip install "voicehub[parlertts]"
+python -m pip install "voicehub[f5tts]"
+python -m pip install "voicehub[melotts]"
+```
 
-### OrpheusTTS Model
+TTS implementations and their third-party licenses are included in the
+VoiceHub package. Checkpoints remain separate and are downloaded lazily or
+passed as local paths. See the
+[model guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/models.md).
+
+## Quick start
 
 ```python
-from voicehub.automodel import AutoInferenceModel
+from voicehub import AutoModelForTextToSpeech
 
-model = AutoInferenceModel.from_pretrained(
-    model_type="orpheustts",  # or "dia" or "vui"
-    model_path="canopylabs/orpheus-3b-0.1-ft",
+model = AutoModelForTextToSpeech.from_pretrained(
+    "parler-tts/parler-tts-mini-v1",
+    model_type="parlertts",
     device="cuda",
 )
 
 output = model(
-    text="Hey, here is some random stuff, the text the less likely the model can cope!",
-    voice="tara",
+    text="VoiceHub keeps the interface small and the model choice open.",
+    description="A warm, clear speaker talks at a relaxed pace.",
     output_file="output.wav",
 )
+print(output.sample_rate, output.file_path)
 ```
 
-### DiaTTS Model
+Construction is intentionally cheap. The checkpoint is downloaded and loaded
+on the first synthesis call. Use `model.load()` when you want to warm a model
+up before serving traffic.
+
+## Supported models
+
+| Model type        | Backend         | Notable capabilities                |
+| ----------------- | --------------- | ----------------------------------- |
+| `orpheustts`      | Orpheus-TTS     | Expressive speech                   |
+| `dia`             | Dia             | Dialogue                            |
+| `vui`             | Vui             | Text to speech                      |
+| `chatterbox`      | Chatterbox      | Voice cloning                       |
+| `kokoro`          | Kokoro          | Multilingual                        |
+| `echo`            | Echo-TTS        | Voice cloning                       |
+| `conversationtts` | ConversationTTS | Blocked: upstream source unlicensed |
+| `llasa`           | LLaSA           | Multilingual synthesis and cloning  |
+| `cosyvoice`       | CosyVoice 1/2/3 | Cloning, multilingual, streaming    |
+| `f5tts`           | F5-TTS          | Voice cloning                       |
+| `gptsovits`       | GPT-SoVITS      | Few-shot multilingual cloning       |
+| `melotts`         | MeloTTS         | Fast multilingual synthesis         |
+| `openvoice`       | OpenVoice V2    | Cross-lingual voice cloning         |
+| `outetts`         | OuteTTS         | Speaker profiles, multiple runtimes |
+| `parlertts`       | Parler-TTS      | Natural-language style control      |
+| `styletts2`       | StyleTTS 2      | Style diffusion and voice cloning   |
+
+Aliases such as `f5-tts`, `gpt-sovits`, `melo-tts`, `parler-tts`, and
+`style-tts2` are accepted.
+
+Discover models without importing their ML stacks:
 
 ```python
-from voicehub.automodel import AutoInferenceModel
+from voicehub import AutoInferenceModel
 
-model = AutoInferenceModel.from_pretrained(
-    model_type="dia",  # or "dia" or "vui"
-    model_path="dia/dia-100m-base.pt",
-    device="cuda",
-)
-
-output = model(
-    text="Hey, here is some random stuff, the text the less likely the model can cope!",
-    output_file="output.wav",
-)
+for spec in AutoInferenceModel.available_models():
+    print(spec.model_type, spec.capabilities)
 ```
 
-### VuiTTS Model
+## Common API
+
+The Transformers-style API loads architecture-specific configuration:
 
 ```python
-from voicehub.automodel import AutoInferenceModel
+from voicehub import (
+    AutoConfig,
+    AutoModelForTextToSpeech,
+    AutoProcessor,
+    TTSGenerationConfig,
+)
 
-model = AutoInferenceModel.from_pretrained(
-    model_type="vui",  # or "dia" or "vui"
-    model_path="fluxions/vui",
+config = AutoConfig.for_model("f5tts", ode_method="euler")
+processor = AutoProcessor.from_config(config)
+model = AutoModelForTextToSpeech.from_pretrained(
+    "F5TTS_v1_Base",
+    config=config,
     device="cuda",
 )
-
-output = model(
-    text="Hey, here is some random stuff, the text the less likely the model can cope!",
-    output_file="output.wav",
-)
-```
-
-### KokoroTTS Model
-
-```python
-from voicehub.automodel import AutoInferenceModel
-
-model = AutoInferenceModel.from_pretrained(
-    model_type="kokoro",
-    model_path="",
-    device="cuda",
-    lang_code="a",
-)
-
-output = model(
-    text="Hey, here is some random stuff, the text the less likely the model can cope!",
-    voice="af_heart",
-    output_prefix="output",
-)
-```
-
-### Chatterbox Model
-
-```python
-from voicehub.automodel import AutoInferenceModel
-
-model = AutoInferenceModel.from_pretrained(
-    model_type="chatterbox",  # or "dia" or "vui"
-    model_path="ResembleAI/chatterbox",
-    device="cuda",
-)
-
-output = model(
-    text="Hey, here is some random stuff, the text the less likely the model can cope!",
-    output_file="output.wav",
-)
-```
-
-### EchoTTS Model
-
-```python
-from voicehub.automodel import AutoInferenceModel
-
-model = AutoInferenceModel.from_pretrained(
-    model_type="echo",
-    model_path="jordand/echo-tts-base",
-    device="cuda",
-)
-
-# Basic text-to-speech
-output = model(
-    text="Hey, here is some random stuff, the text the less likely the model can cope!",
-    output_file="output.wav",
-)
-
-# Voice cloning with speaker reference audio
-output = model(
-    text="Hey, here is some random stuff, the text the less likely the model can cope!",
+inputs = processor(
+    "VoiceHub has one public API contract.",
     speaker_audio_path="reference.wav",
-    output_file="output_cloned.wav",
+    reference_text="Reference transcript.",
+)
+output = model.generate(
+    **inputs,
+    generation_config=TTSGenerationConfig(speed=1.0, seed=42),
 )
 ```
 
-## 🤗 Contributing
+Every synthesis call returns `TTSOutput`, containing `audio`, `sample_rate`,
+`file_path`, and backend metadata. Every registry class is named
+`<Architecture>ForTextToSpeech`, every config is named
+`<Architecture>Config`, and all models inherit the same `forward` and
+`generate` signatures.
+
+See the
+[model guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/models.md)
+and [architecture guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/architecture.md).
+
+## Source policy
+
+Upstream implementation snapshots live under `voicehub/models/*/source`;
+shared neural components live under `voicehub/third_party`. Every vendored
+snapshot records its exact revision and license. A static test rejects imports
+of external TTS packages.
+
+ConversationTTS is the sole exception: its public repository has no source
+license, so redistribution is blocked until upstream grants one.
+LLaSA's vendored XCodec2 component is separately licensed under
+CC BY-NC 4.0 and is restricted to non-commercial use.
+
+## Development
 
 ```bash
-uv pip install pre-commit
-pre-commit install
-pre-commit run --all-files
+python -m pip install -e ".[test]"
+python -m pytest
+pre-commit run --from-ref origin/main --to-ref HEAD
 ```
 
-## 📝 Acknowledgments
+## License
 
-- [Orpheus-TTS](https://github.com/canopyai/Orpheus-TTS)
-- [Dia](https://github.com/nari-labs/dia)
-- [Vui](https://github.com/fluxions-ai/vui)
-- [Kokoro](https://github.com/hexgrad/kokoro)
-- [Chatterbox](https://github.com/ResembleAI/chatterbox)
-- [EchoTTS](https://github.com/JordanDavisUMG/echo-tts)
+VoiceHub is released under Apache-2.0. Model code, checkpoints, voices, and
+generated audio can have additional licenses or usage conditions; review the
+selected backend before distribution.

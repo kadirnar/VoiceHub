@@ -1,0 +1,11 @@
+{
+    "model_type": "xcodec2",
+    "semantic_hidden_size": 1024,
+    "codec_encoder_hidden_size": 1024,
+    "codec_decoder_hidden_size": 1024,
+    "use_vocos": true,
+    "architectures": [
+      "XCodec2Model"
+    ]
+  }
+  

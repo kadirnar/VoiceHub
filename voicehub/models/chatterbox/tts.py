@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import librosa
-import perth
 import torch
 import torch.nn.functional as F
 from huggingface_hub import hf_hub_download
@@ -14,6 +13,7 @@ from voicehub.models.chatterbox.models.t3 import T3
 from voicehub.models.chatterbox.models.t3.modules.cond_enc import T3Cond
 from voicehub.models.chatterbox.models.tokenizers import EnTokenizer
 from voicehub.models.chatterbox.models.voice_encoder import VoiceEncoder
+from voicehub.models.chatterbox.source import perth
 
 REPO_ID = "ResembleAI/chatterbox"
 
@@ -158,7 +158,11 @@ class ChatterboxTTS:
         return cls(t3, s3gen, ve, tokenizer, device, conds=conds)
 
     @classmethod
-    def from_pretrained(cls, device) -> 'ChatterboxTTS':
+    def from_pretrained(
+        cls,
+        device,
+        repo_id: str = REPO_ID,
+    ) -> 'ChatterboxTTS':
         """Download model weights from HuggingFace Hub and initialise the model."""
         # Check if MPS is available on macOS
         if device == "mps" and not torch.backends.mps.is_available():
@@ -172,7 +176,7 @@ class ChatterboxTTS:
 
         for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json",
                       "conds.pt"]:
-            local_path = hf_hub_download(repo_id=REPO_ID, filename=fpath)
+            local_path = hf_hub_download(repo_id=repo_id, filename=fpath)
 
         return cls.from_local(Path(local_path).parent, device)
 

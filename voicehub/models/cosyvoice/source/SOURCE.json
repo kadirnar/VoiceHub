@@ -1,0 +1,10 @@
+{
+  "license": "Apache-2.0",
+  "model_type": "cosyvoice",
+  "nested_revisions": {
+    "Matcha-TTS": "dd9105b34bf2be2230f4aa1e4769fb586a3c824e"
+  },
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and are not part of this source snapshot.",
+  "revision": "074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc",
+  "upstream": "https://github.com/QwenAudio/CosyVoice"
+}
