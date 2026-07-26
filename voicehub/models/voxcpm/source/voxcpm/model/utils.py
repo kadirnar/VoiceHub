@@ -12,6 +12,8 @@ _VALID_DTYPE_OVERRIDES = {
     "float32",
     "fp32",
 }
+_TORCH_SEED_MIN = -(2**63)
+_TORCH_SEED_MAX = 2**64 - 1
 
 
 # Ref: https://github.com/OpenBMB/VoxCPM/issues/256#issuecomment-4235252732
@@ -26,15 +28,46 @@ def next_and_close(gen):
 
 def materialize_generation_seed(seed: Optional[int]) -> int:
     """Return a concrete seed for a generation request."""
-    if seed is not None:
-        return int(seed)
-    return int(torch.seed() & 0xFFFFFFFF)
+    resolved_seed = (
+        int(seed)
+        if seed is not None
+        else int(torch.seed() & 0xFFFFFFFF)
+    )
+    if not _TORCH_SEED_MIN <= resolved_seed <= _TORCH_SEED_MAX:
+        raise ValueError(
+            "Generation seed must be in Torch's supported range "
+            f"[{_TORCH_SEED_MIN}, {_TORCH_SEED_MAX}]."
+        )
+    return resolved_seed
 
 
-def apply_generation_seed(seed: int) -> None:
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+def advance_generation_seed(seed: int) -> int:
+    """Advance a retry seed without overflowing Torch's accepted range."""
+    return 0 if seed == _TORCH_SEED_MAX else seed + 1
+
+
+def apply_generation_seed(seed: int, device: str | torch.device) -> None:
+    """Seed only the CPU generator and the accelerator used by this model."""
+    torch.random.default_generator.manual_seed(seed)
+    resolved_device = torch.device(device)
+    if resolved_device.type == "cuda":
+        device_index = (
+            resolved_device.index
+            if resolved_device.index is not None
+            else torch.cuda.current_device()
+        )
+        with torch.cuda.device(device_index):
+            torch.cuda.manual_seed(seed)
+    elif resolved_device.type == "mps":
+        torch.mps.manual_seed(seed)
+    elif resolved_device.type == "xpu":
+        device_index = (
+            resolved_device.index
+            if resolved_device.index is not None
+            else torch.xpu.current_device()
+        )
+        with torch.xpu.device(device_index):
+            torch.xpu.manual_seed(seed)
 
 
 def mask_multichar_chinese_tokens(tokenizer: PreTrainedTokenizer):

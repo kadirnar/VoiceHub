@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import copy
+import math
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 
 from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
-from voicehub.models._shared import finish_audio_output, resolve_model_directory, resolve_torch_dtype
+from voicehub.models._shared import finish_audio_output, resolve_model_directory, resolve_torch_dtype, seeded_inference
 
 
 class VibeVoiceConfig(VoiceHubConfig):
@@ -104,12 +108,100 @@ class VibeVoiceForTextToSpeech(PreTrainedTTSModel):
         model.to(self.device).eval()
         model.set_ddpm_inference_steps(num_steps=self.config.diffusion_steps)
         self._processor = (processor_module.VibeVoiceStreamingProcessor.from_pretrained(str(model_directory)))
+        self.config.sample_rate = self._checkpoint_sample_rate(self._processor)
         self._safe_globals = (
             modeling_outputs.BaseModelOutputWithPast,
             cache_utils.DynamicCache,
         )
         self._torch = torch
         self.model = model
+
+    @staticmethod
+    def _checkpoint_sample_rate(processor: Any) -> int:
+        audio_processor = getattr(processor, "audio_processor", None)
+        sample_rate = getattr(audio_processor, "sampling_rate", None)
+        if isinstance(sample_rate, bool) or not isinstance(sample_rate, int):
+            raise RuntimeError(
+                "The VibeVoice checkpoint processor does not define an "
+                "integer audio sampling rate.")
+        if sample_rate <= 0:
+            raise RuntimeError(
+                "The VibeVoice checkpoint processor defines an invalid "
+                f"audio sampling rate: {sample_rate}.")
+        return sample_rate
+
+    def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
+        diffusion_steps = self.config.diffusion_steps
+        if (not isinstance(diffusion_steps, int) or isinstance(diffusion_steps, bool) or
+                diffusion_steps <= 0):
+            raise ValueError("`diffusion_steps` must be a positive integer.")
+        voice_prompt_path = model_inputs.get("voice_prompt_path")
+        if not isinstance(voice_prompt_path, (str, Path)) or not str(voice_prompt_path).strip():
+            raise ValueError("`voice_prompt_path` must point to a cached VibeVoice `.pt` prompt.")
+        prompt_path = Path(voice_prompt_path).expanduser()
+        if not prompt_path.is_file():
+            raise FileNotFoundError(f"VibeVoice cached voice prompt was not found: {prompt_path}.")
+
+        cfg_scale = model_inputs.get("cfg_scale", 1.5)
+        if (not isinstance(cfg_scale, (int, float)) or isinstance(cfg_scale, bool) or
+                not math.isfinite(cfg_scale) or cfg_scale <= 0):
+            raise ValueError("`cfg_scale` must be a finite positive number.")
+        max_new_tokens = model_inputs.get("max_new_tokens")
+        if max_new_tokens is not None and (not isinstance(max_new_tokens, int) or
+                                           isinstance(max_new_tokens, bool) or max_new_tokens <= 0):
+            raise ValueError("`max_new_tokens` must be a positive integer or None.")
+
+    def _load_cached_prompt(self, voice_prompt_path: str) -> Mapping[str, Any]:
+        with self._torch.serialization.safe_globals(list(self._safe_globals)):
+            cached_prompt = self._torch.load(
+                str(Path(voice_prompt_path).expanduser()),
+                map_location=self.device,
+                weights_only=True,
+            )
+        if not isinstance(cached_prompt, Mapping):
+            raise TypeError("VibeVoice cached prompt must contain a mapping.")
+        required_sections = ("lm", "tts_lm", "neg_lm", "neg_tts_lm")
+        missing = [name for name in required_sections if name not in cached_prompt]
+        if missing:
+            raise ValueError(
+                "VibeVoice cached prompt is missing required section(s): " + ", ".join(missing) + ".")
+        return cached_prompt
+
+    def _move_inputs_to_device(self, inputs: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            key: value.to(self.device) if self._torch.is_tensor(value) else value
+            for key, value in inputs.items()
+        }
+
+    @staticmethod
+    def _generation_kwargs(
+        generation_options: Mapping[str, Any],
+        *,
+        max_new_tokens: int | None,
+        cfg_scale: float,
+        tokenizer: Any,
+        cached_prompt: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        reserved = {
+            "all_prefilled_outputs",
+            "cfg_scale",
+            "max_new_tokens",
+            "tokenizer",
+        }
+        conflicts = sorted(reserved & set(generation_options))
+        if conflicts:
+            raise ValueError(
+                "VibeVoice generation option(s) are managed by the wrapper: " + ", ".join(conflicts) + ".")
+        options = dict(generation_options)
+        options.setdefault("generation_config", {"do_sample": False})
+        options.update({
+            "cfg_scale": cfg_scale,
+            "tokenizer": tokenizer,
+            "all_prefilled_outputs": copy.deepcopy(cached_prompt),
+        })
+        if max_new_tokens is not None:
+            options["max_new_tokens"] = max_new_tokens
+        return options
 
     def _generate(
         self,
@@ -119,19 +211,10 @@ class VibeVoiceForTextToSpeech(PreTrainedTTSModel):
         voice_prompt_path: str | None = None,
         cfg_scale: float = 1.5,
         max_new_tokens: int | None = None,
+        seed: int | None = None,
         **generation_options,
     ) -> TTSOutput:
-        self.load()
-        if not voice_prompt_path:
-            raise ValueError(
-                "VibeVoice requires voice_prompt_path pointing to a cached "
-                "realtime .pt voice prompt.")
-        with self._torch.serialization.safe_globals(list(self._safe_globals)):
-            cached_prompt = self._torch.load(
-                voice_prompt_path,
-                map_location=self.device,
-                weights_only=True,
-            )
+        cached_prompt = self._load_cached_prompt(voice_prompt_path)
         inputs = self._processor.process_input_with_cached_prompt(
             text=text,
             cached_prompt=cached_prompt,
@@ -139,26 +222,40 @@ class VibeVoiceForTextToSpeech(PreTrainedTTSModel):
             return_tensors="pt",
             return_attention_mask=True,
         )
-        inputs = {
-            key: value.to(self.device) if self._torch.is_tensor(value) else value
-            for key, value in inputs.items()
-        }
-        outputs = self.model.generate(
-            **inputs,
+        inputs = self._move_inputs_to_device(inputs)
+        options = self._generation_kwargs(
+            generation_options,
             max_new_tokens=max_new_tokens,
             cfg_scale=cfg_scale,
             tokenizer=self._processor.tokenizer,
-            generation_config={"do_sample": False},
-            all_prefilled_outputs=copy.deepcopy(cached_prompt),
-            **generation_options,
+            cached_prompt=cached_prompt,
         )
-        if not outputs.speech_outputs or outputs.speech_outputs[0] is None:
+        with seeded_inference(
+                seed,
+                device=self.device,
+                model_type="vibevoice",
+        ) as effective_seed:
+            outputs = self.model.generate(
+                **inputs,
+                **options,
+            )
+        speech_outputs = getattr(outputs, "speech_outputs", None)
+        if not speech_outputs or speech_outputs[0] is None:
             raise RuntimeError("VibeVoice did not return an audio waveform.")
+        waveform = speech_outputs[0]
+        if not hasattr(waveform, "detach"):
+            raise RuntimeError("VibeVoice returned a non-tensor audio waveform.")
+        if hasattr(waveform, "numel") and waveform.numel() == 0:
+            raise RuntimeError("VibeVoice returned an empty audio waveform.")
         return finish_audio_output(
-            outputs.speech_outputs[0].detach().float().cpu(),
+            waveform.detach().float().cpu(),
             self.sample_rate,
             output_file=output_file,
-            metadata={"cfg_scale": cfg_scale},
+            metadata={
+                "cfg_scale": cfg_scale,
+                "seed": effective_seed,
+                "requested_seed": seed,
+            },
         )
 
 

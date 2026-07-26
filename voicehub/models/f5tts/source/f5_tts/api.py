@@ -1,6 +1,6 @@
-import random
-import sys
 from importlib.resources import files
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import soundfile as sf
 import tqdm
@@ -17,7 +17,7 @@ from voicehub.models.f5tts.source.f5_tts.infer.utils_infer import (
     save_spectrogram,
     transcribe,
 )
-from voicehub.models.f5tts.source.f5_tts.model.utils import seed_everything
+from voicehub.models._shared import seeded_inference
 
 
 class F5TTS:
@@ -95,6 +95,18 @@ class F5TTS:
     def export_spectrogram(self, spec, file_spec):
         save_spectrogram(spec, file_spec)
 
+    def _remove_silence(self, wav):
+        """Trim a waveform with the upstream file-based pydub routine."""
+        with TemporaryDirectory(prefix="f5tts-silence-") as directory:
+            temporary_wav = Path(directory) / "generated.wav"
+            self.export_wav(wav, temporary_wav, remove_silence=True)
+            trimmed, _ = sf.read(
+                temporary_wav,
+                dtype="float32",
+                always_2d=False,
+            )
+        return trimmed
+
     def infer(
         self,
         ref_file,
@@ -114,34 +126,41 @@ class F5TTS:
         file_spec=None,
         seed=None,
     ):
-        if seed is None:
-            seed = random.randint(0, sys.maxsize)
-        seed_everything(seed)
-        self.seed = seed
+        with seeded_inference(
+            seed,
+            device=str(self.device),
+            model_type="f5tts",
+        ) as effective_seed:
+            self.seed = effective_seed
+            ref_file, ref_text = preprocess_ref_audio_text(
+                ref_file,
+                ref_text,
+                show_info=show_info,
+            )
+            wav, sr, spec = infer_process(
+                ref_file,
+                ref_text,
+                gen_text,
+                self.ema_model,
+                self.vocoder,
+                self.mel_spec_type,
+                show_info=show_info,
+                progress=progress,
+                target_rms=target_rms,
+                cross_fade_duration=cross_fade_duration,
+                nfe_step=nfe_step,
+                cfg_strength=cfg_strength,
+                sway_sampling_coef=sway_sampling_coef,
+                speed=speed,
+                fix_duration=fix_duration,
+                device=self.device,
+            )
 
-        ref_file, ref_text = preprocess_ref_audio_text(ref_file, ref_text, show_info=show_info)
-
-        wav, sr, spec = infer_process(
-            ref_file,
-            ref_text,
-            gen_text,
-            self.ema_model,
-            self.vocoder,
-            self.mel_spec_type,
-            show_info=show_info,
-            progress=progress,
-            target_rms=target_rms,
-            cross_fade_duration=cross_fade_duration,
-            nfe_step=nfe_step,
-            cfg_strength=cfg_strength,
-            sway_sampling_coef=sway_sampling_coef,
-            speed=speed,
-            fix_duration=fix_duration,
-            device=self.device,
-        )
+        if remove_silence:
+            wav = self._remove_silence(wav)
 
         if file_wave is not None:
-            self.export_wav(wav, file_wave, remove_silence)
+            self.export_wav(wav, file_wave)
 
         if file_spec is not None:
             self.export_spectrogram(spec, file_spec)

@@ -42,7 +42,7 @@ class VoiceHubProcessor:
     @classmethod
     def from_pretrained(
         cls,
-        pretrained_model_name_or_path: str,
+        pretrained_model_name_or_path: str | Path,
         *,
         subfolder: str = "",
         **kwargs,

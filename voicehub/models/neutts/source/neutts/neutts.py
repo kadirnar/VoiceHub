@@ -55,6 +55,24 @@ def _torch_device(device, param):
     return torch.device(device)
 
 
+def _seed_torch_device(seed: int, device: torch.device) -> None:
+    """Seed CPU and only the accelerator used by the backbone."""
+    torch.random.default_generator.manual_seed(seed)
+    if device.type == "cuda":
+        device_index = (
+            torch.cuda.current_device()
+            if device.index is None else device.index
+        )
+        with torch.cuda.device(device_index):
+            torch.cuda.manual_seed(seed)
+    elif (
+        device.type == "mps"
+        and hasattr(torch, "mps")
+        and hasattr(torch.mps, "manual_seed")
+    ):
+        torch.mps.manual_seed(seed)
+
+
 def _n_perf_cores() -> int:
     # On Apple silicon, keep generation threads off the efficiency cores.
     if sys.platform == "darwin":
@@ -154,6 +172,7 @@ class NeuTTS:
         self.tokenizer = None
 
         self._seed = seed
+        self.last_seed = None
 
         self._load_backbone(backbone_repo, backbone_device)
 
@@ -307,6 +326,7 @@ class NeuTTS:
         emotion: str | None = None,
         temperature: float = 1.0,
         top_k: int = 50,
+        seed: int | None = None,
     ) -> np.ndarray:
         """
         Perform inference to generate speech from text using the TTS model and reference audio.
@@ -318,6 +338,7 @@ class NeuTTS:
             emotion (str | None): Emotion tag, e.g. "happy". BPE models only.
             temperature (float): Sampling temperature.
             top_k (int): Top-K sampling cutoff.
+            seed (int | None): Optional per-request sampling seed.
         Returns:
             np.ndarray: Generated speech waveform.
         """
@@ -325,9 +346,26 @@ class NeuTTS:
 
         # Generate tokens
         if self._is_quantized_model:
-            output_str = self._infer_ggml(ref_codes, ref_text, text, emotion, temperature, top_k)
+            output_str = self._infer_ggml(
+                ref_codes,
+                ref_text,
+                text,
+                emotion,
+                temperature,
+                top_k,
+                seed,
+            )
         else:
-            torch.manual_seed(self._call_seed())
+            backbone_device = getattr(self.backbone, "device", None)
+            if backbone_device is None:
+                try:
+                    backbone_device = next(self.backbone.parameters()).device
+                except (AttributeError, StopIteration):
+                    backbone_device = torch.device("cpu")
+            _seed_torch_device(
+                self._call_seed(seed),
+                torch.device(backbone_device),
+            )
             prompt_ids = self._apply_chat_template(ref_codes, ref_text, text, emotion)
             output_str = self._infer_torch(prompt_ids, temperature, top_k)
 
@@ -349,6 +387,7 @@ class NeuTTS:
         emotion: str | None = None,
         temperature: float = 1.0,
         top_k: int = 50,
+        seed: int | None = None,
     ) -> Generator[np.ndarray, None, None]:
         """
         Perform streaming inference to generate speech from
@@ -361,21 +400,36 @@ class NeuTTS:
             emotion (str | None): Emotion tag, e.g. "happy". BPE models only.
             temperature (float): Sampling temperature.
             top_k (int): Top-K sampling cutoff.
+            seed (int | None): Optional per-request sampling seed.
         Yields:
             np.ndarray: Generated speech waveform.
         """
         emotion = self._check_emotion(emotion)
 
         if self._is_quantized_model:
-            return self._infer_stream_ggml(ref_codes, ref_text, text, emotion, temperature, top_k)
+            return self._infer_stream_ggml(
+                ref_codes,
+                ref_text,
+                text,
+                emotion,
+                temperature,
+                top_k,
+                seed,
+            )
 
         else:
             raise NotImplementedError("Streaming is not implemented for the torch backend!")
 
-    def _call_seed(self) -> int:
-        # A fixed seed pins every call; otherwise each call draws a fresh seed.
-        # The print makes any unseeded take recoverable by passing its seed.
-        seed = self._seed if self._seed is not None else random.randint(0, 2**32)
+    def _call_seed(self, request_seed: int | None = None) -> int:
+        # A request seed wins over the configured seed. Otherwise each call
+        # draws a fresh value so the generated take remains reproducible.
+        configured_seed = self._seed if request_seed is None else request_seed
+        seed = (
+            configured_seed
+            if configured_seed is not None
+            else random.randint(0, 2**32)
+        )
+        self.last_seed = seed
         print(f"Using seed {seed}")
         return seed
 
@@ -537,6 +591,7 @@ class NeuTTS:
         emotion: str | None = None,
         temperature: float = 1.0,
         top_k: int = 50,
+        seed: int | None = None,
     ) -> str:
         prompt = self._ggml_prompt(ref_codes, ref_text, input_text, emotion)
         # a full re-prefill keeps repeated calls bit-identical
@@ -547,7 +602,7 @@ class NeuTTS:
             temperature=temperature,
             top_k=top_k,
             stop=["<|SPEECH_GENERATION_END|>"],
-            seed=self._call_seed(),
+            seed=self._call_seed(seed),
         )
         output_str = output["choices"][0]["text"]
         return output_str
@@ -560,6 +615,7 @@ class NeuTTS:
         emotion: str | None = None,
         temperature: float = 1.0,
         top_k: int = 50,
+        seed: int | None = None,
     ) -> Generator[np.ndarray, None, None]:
         prompt = self._ggml_prompt(ref_codes, ref_text, input_text, emotion)
         # a full re-prefill keeps repeated calls bit-identical
@@ -577,7 +633,7 @@ class NeuTTS:
             top_k=top_k,
             stop=["<|SPEECH_GENERATION_END|>"],
             stream=True,
-            seed=self._call_seed(),
+            seed=self._call_seed(seed),
         ):
             output_str = item["choices"][0]["text"]
             token_cache.append(output_str)

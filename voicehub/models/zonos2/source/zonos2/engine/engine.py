@@ -11,11 +11,21 @@ from voicehub.models.zonos2.source.zonos2.core import (
     TTSBatch,
     TTSReq,
     TTSSamplingParams,
+    reset_global_ctx,
     set_global_ctx,
+    try_get_global_ctx,
 )
-from voicehub.models.zonos2.source.zonos2.distributed import destroy_distributed, enable_pynccl_distributed, set_tp_info
+from voicehub.models.zonos2.source.zonos2.distributed import (
+    destroy_distributed,
+    enable_pynccl_distributed,
+    reset_tp_info,
+    set_tp_info,
+)
 from voicehub.models.zonos2.source.zonos2.kvcache import create_kvcache
-from voicehub.models.zonos2.source.zonos2.layers import set_rope_device
+from voicehub.models.zonos2.source.zonos2.layers import (
+    reset_rope_state,
+    set_rope_device,
+)
 from voicehub.models.zonos2.source.zonos2.models import create_model, load_checkpoint_weight
 from voicehub.models.zonos2.source.zonos2.utils import divide_even, init_logger, torch_dtype
 
@@ -47,9 +57,38 @@ def _get_frame_width(model_config) -> int:
 class Engine:
     def __init__(self, config: EngineConfig):
         self.model_config = config.model_config
-        set_tp_info(rank=config.tp_info.rank, size=config.tp_info.size)
+        self._shutdown = False
+        self._owns_default_process_group = False
+        self._owned_cpu_group = None
+        self._distributed_plugin = None
+        self._tp_info = config.tp_info
+        self._owns_tp_info = False
+        self._rope_state_installed = False
+        self._global_context_owner = object()
+        self._global_context_installed = False
+        if try_get_global_ctx() is not None:
+            raise RuntimeError(
+                "A ZONOS2 engine is already active in this process. Shut it "
+                "down before constructing another engine.")
 
-        self.device = torch.device(f"cuda:{config.tp_info.rank}")
+        requested_device = torch.device(
+            config.device or f"cuda:{config.tp_info.rank}"
+        )
+        if requested_device.type != "cuda":
+            raise ValueError(
+                "The ZONOS2 fused engine requires a CUDA device; received "
+                f"{requested_device}."
+            )
+        device_index = (
+            config.tp_info.rank
+            if requested_device.index is None
+            else requested_device.index
+        )
+        self.device = torch.device("cuda", device_index)
+        self._owns_tp_info = set_tp_info(
+            rank=config.tp_info.rank,
+            size=config.tp_info.size,
+        )
         # Importing the model eagerly pulls in sgl_kernel, which creates a CUDA
         # context on the current device. The scheduler entry point binds this
         # process to its rank's GPU before that import, so an existing context is
@@ -74,6 +113,7 @@ class Engine:
 
         # load model and determine number of pages
         set_rope_device(self.device)
+        self._rope_state_installed = True
         with torch.device("meta"), torch_dtype(config.dtype):
             self.model = create_model(config)
 
@@ -158,7 +198,8 @@ class Engine:
             self.page_table,
         )
         self.ctx = Context(page_size=1, attn_backend=self.attn_backend)
-        set_global_ctx(self.ctx)
+        set_global_ctx(self.ctx, owner=self._global_context_owner)
+        self._global_context_installed = True
 
         post_free_memory = self._sync_get_memory()[0]
         logger.info_rank0(f"Free memory after initialization: {mem_GB(post_free_memory)}")
@@ -191,30 +232,50 @@ class Engine:
         )
 
     def _init_communication(self, config: EngineConfig) -> torch.distributed.ProcessGroup:
-        if config.tp_info.size == 1 or config.use_pynccl:
-            torch.distributed.init_process_group(
-                backend="gloo",
+        distributed = torch.distributed
+        process_backend = (
+            "gloo"
+            if config.tp_info.size == 1 or config.use_pynccl
+            else "nccl"
+        )
+        if not distributed.is_initialized():
+            distributed.init_process_group(
+                backend=process_backend,
                 rank=config.tp_info.rank,
                 world_size=config.tp_info.size,
                 timeout=timedelta(seconds=config.distributed_timeout),
                 init_method=config.distributed_addr,
             )
-            tp_cpu_group = torch.distributed.group.WORLD
+            self._owns_default_process_group = True
+        else:
+            rank = distributed.get_rank()
+            size = distributed.get_world_size()
+            backend = str(distributed.get_backend()).lower()
+            if (rank, size) != (config.tp_info.rank, config.tp_info.size):
+                raise RuntimeError(
+                    "Existing distributed process group is configured as "
+                    f"rank={rank}, size={size}; ZONOS2 requested "
+                    f"rank={config.tp_info.rank}, size={config.tp_info.size}.")
+            if process_backend not in backend:
+                raise RuntimeError(
+                    "Existing distributed process group uses backend "
+                    f"{backend!r}; ZONOS2 requires {process_backend!r}.")
+
+        if config.tp_info.size == 1 or config.use_pynccl:
+            tp_cpu_group = distributed.group.WORLD
             assert tp_cpu_group is not None
             max_bytes = (
                 config.max_forward_len * config.model_config.hidden_size * self.dtype.itemsize
             )
-            enable_pynccl_distributed(config.tp_info, tp_cpu_group, max_bytes)
-        else:
-            torch.distributed.init_process_group(
-                backend="nccl",
-                rank=config.tp_info.rank,
-                world_size=config.tp_info.size,
-                timeout=timedelta(seconds=config.distributed_timeout),
-                init_method=config.distributed_addr,
+            self._distributed_plugin = enable_pynccl_distributed(
+                config.tp_info,
+                tp_cpu_group,
+                max_bytes,
             )
-            tp_cpu_group = torch.distributed.new_group(backend="gloo")
+        else:
+            tp_cpu_group = distributed.new_group(backend="gloo")
             assert tp_cpu_group is not None
+            self._owned_cpu_group = tp_cpu_group
         return tp_cpu_group
 
     def _load_weight_state_dict(self, config: EngineConfig) -> Dict[str, torch.Tensor]:
@@ -330,6 +391,52 @@ class Engine:
             return logits[last_indices]
 
     def shutdown(self) -> None:
-        self.graph_runner.destroy_cuda_graphs()
-        torch.distributed.destroy_process_group()
-        destroy_distributed()
+        if self._shutdown:
+            return
+        errors: list[BaseException] = []
+
+        def cleanup(action) -> None:
+            try:
+                action()
+            except BaseException as exc:
+                errors.append(exc)
+
+        graph_runner = getattr(self, "graph_runner", None)
+        if graph_runner is not None:
+            cleanup(graph_runner.destroy_cuda_graphs)
+        if self._global_context_installed:
+            cleanup(lambda: reset_global_ctx(owner=self._global_context_owner))
+            self._global_context_installed = False
+        if self._rope_state_installed:
+            cleanup(lambda: reset_rope_state(self.device))
+            self._rope_state_installed = False
+        if self._distributed_plugin is not None:
+            cleanup(lambda: destroy_distributed(self._distributed_plugin))
+            self._distributed_plugin = None
+
+        distributed = torch.distributed
+        if distributed.is_initialized():
+            if self._owned_cpu_group is not None:
+                cleanup(
+                    lambda: distributed.destroy_process_group(
+                        self._owned_cpu_group))
+                self._owned_cpu_group = None
+            if self._owns_default_process_group:
+                cleanup(distributed.destroy_process_group)
+                self._owns_default_process_group = False
+        if self._owns_tp_info:
+            cleanup(lambda: reset_tp_info(self._tp_info))
+            self._owns_tp_info = False
+        self._shutdown = True
+        if errors:
+            raise RuntimeError(
+                "ZONOS2 engine shutdown failed to release all owned state."
+            ) from errors[0]
+
+    def __del__(self):
+        # Failed construction can otherwise leave the process group or
+        # singleton context claimed, preventing a retry in the same process.
+        try:
+            self.shutdown()
+        except BaseException:
+            pass

@@ -50,8 +50,13 @@ class ConversationTTSCheckpointTests(unittest.TestCase):
         with patch(
                 "voicehub.models.conversationtts.runtime.import_optional",
                 return_value=torch,
-        ):
-            resume_for_inference("/checkpoint.pt", None, model, "cpu")
+        ), self.assertWarnsRegex(RuntimeWarning, "restricted checkpoint"):
+            resume_for_inference(
+                "/checkpoint.pt",
+                None,
+                model,
+                "cpu",
+            )
 
         self.assertEqual(
             torch.load.call_args_list,
@@ -85,6 +90,45 @@ class ConversationTTSCheckpointTests(unittest.TestCase):
                 "cpu",
             )
         self.assertEqual(torch.load.call_count, 1)
+
+    def test_checkpoint_does_not_retry_unrelated_type_errors(self):
+        torch = SimpleNamespace(load=Mock(side_effect=TypeError("invalid map_location")), )
+        with (
+                patch(
+                    "voicehub.models.conversationtts.runtime.import_optional",
+                    return_value=torch,
+                ),
+                self.assertRaisesRegex(TypeError, "invalid map_location"),
+        ):
+            resume_for_inference(
+                "/checkpoint.pt",
+                None,
+                Mock(),
+                "cpu",
+            )
+        self.assertEqual(torch.load.call_count, 1)
+
+    def test_checkpoint_rejects_prefix_collisions(self):
+        torch = SimpleNamespace(
+            load=Mock(return_value={
+                "model": {
+                    "weight": 1,
+                    "module.weight": 2,
+                },
+            }), )
+        with (
+                patch(
+                    "voicehub.models.conversationtts.runtime.import_optional",
+                    return_value=torch,
+                ),
+                self.assertRaisesRegex(ValueError, "colliding state keys"),
+        ):
+            resume_for_inference(
+                "/checkpoint.pt",
+                None,
+                Mock(),
+                "cpu",
+            )
 
 
 @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")
@@ -193,6 +237,7 @@ class ConversationTTSTrainingRuntimeTests(unittest.TestCase):
                 model.setup_caches(1)
                 self._text_tokenizer = object()
                 self._audio_tokenizer = object()
+                self.sample_rate = 24_000
 
             def generate_v1(self, **_kwargs):
                 return self._model.weight.detach().reshape(1)

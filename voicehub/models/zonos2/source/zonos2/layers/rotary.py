@@ -73,6 +73,16 @@ def set_rope_device(device: torch.device):
     _ROPE_DEVICE = device
 
 
+def reset_rope_state(expected_device: torch.device) -> None:
+    """Drop device-specific cached embeddings after an engine shuts down."""
+    global _ROPE_DEVICE
+    if _ROPE_DEVICE is not None and _ROPE_DEVICE != expected_device:
+        raise RuntimeError(
+            "Cannot reset ZONOS2 rotary state owned by another device.")
+    get_rope.cache_clear()
+    _ROPE_DEVICE = None
+
+
 @lru_cache()
 def get_rope(
     head_dim: int,
@@ -94,4 +104,9 @@ def get_rope(
     return _get_rope(head_dim, rotary_dim, max_position, base, rope_map)
 
 
-__all__ = ["get_rope", "RotaryEmbedding", "set_rope_device"]
+__all__ = [
+    "get_rope",
+    "RotaryEmbedding",
+    "set_rope_device",
+    "reset_rope_state",
+]

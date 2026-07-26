@@ -156,6 +156,11 @@ class Generator:
             ).unsqueeze(1)
             curr_pos = curr_pos[:, -1:] + 1
 
+        if not samples:
+            raise RuntimeError(
+                "CSM generation ended before producing an audio frame. "
+                "Try a longer duration or different sampling options."
+            )
         audio = self._audio_tokenizer.decode(torch.stack(samples).permute(1, 2, 0)).squeeze(0).squeeze(0)
 
         # This applies an imperceptible watermark to identify audio as AI-generated.

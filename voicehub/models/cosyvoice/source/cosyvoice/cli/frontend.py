@@ -35,17 +35,30 @@ class CosyVoiceFrontEnd:
                  campplus_model: str,
                  speech_tokenizer_model: str,
                  spk2info: str = '',
-                 allowed_special: str = 'all'):
+                 allowed_special: str = 'all',
+                 device: str | torch.device | None = None):
         self.tokenizer = get_tokenizer()
         self.feat_extractor = feat_extractor
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = torch.device(
+            device
+            if device is not None
+            else ('cuda' if torch.cuda.is_available() else 'cpu'))
         option = onnxruntime.SessionOptions()
         option.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
         option.intra_op_num_threads = 1
         self.campplus_session = onnxruntime.InferenceSession(campplus_model, sess_options=option, providers=["CPUExecutionProvider"])
+        if self.device.type == "cuda":
+            speech_tokenizer_providers = [
+                (
+                    "CUDAExecutionProvider",
+                    {"device_id": self.device.index or 0},
+                ),
+                "CPUExecutionProvider",
+            ]
+        else:
+            speech_tokenizer_providers = ["CPUExecutionProvider"]
         self.speech_tokenizer_session = onnxruntime.InferenceSession(speech_tokenizer_model, sess_options=option,
-                                                                     providers=["CUDAExecutionProvider" if torch.cuda.is_available() else
-                                                                                "CPUExecutionProvider"])
+                                                                     providers=speech_tokenizer_providers)
         if os.path.exists(spk2info):
             self.spk2info = torch.load(spk2info, map_location=self.device, weights_only=True)
         else:

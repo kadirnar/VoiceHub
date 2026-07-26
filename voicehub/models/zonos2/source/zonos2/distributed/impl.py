@@ -72,12 +72,12 @@ class DistributedCommunicator:
 
 def enable_pynccl_distributed(
     tp_info: DistributedInfo, tp_cpu_group: torch.distributed.ProcessGroup, max_bytes: int
-) -> None:
+) -> DistributedImpl | None:
     """
     Enable PyNCCL-based distributed communication for tensor parallelism.
     """
     if tp_info.size == 1:
-        return
+        return None
     from voicehub.models.zonos2.source.zonos2.kernel import init_pynccl
 
     comm = init_pynccl(
@@ -87,11 +87,22 @@ def enable_pynccl_distributed(
         max_size_bytes=max_bytes,
     )
 
-    DistributedCommunicator.plugins.append(PyNCCLDistributedImpl(comm))
+    plugin = PyNCCLDistributedImpl(comm)
+    DistributedCommunicator.plugins.append(plugin)
+    return plugin
 
 
-def destroy_distributed() -> None:
+def destroy_distributed(plugin: DistributedImpl | None = None) -> None:
     """
     Destroy all the distributed communication plugins.
     """
-    DistributedCommunicator.plugins = []
+    if plugin is None:
+        DistributedCommunicator.plugins = [TorchDistributedImpl()]
+        return
+    DistributedCommunicator.plugins = [
+        candidate
+        for candidate in DistributedCommunicator.plugins
+        if candidate is not plugin
+    ]
+    if not DistributedCommunicator.plugins:
+        DistributedCommunicator.plugins = [TorchDistributedImpl()]

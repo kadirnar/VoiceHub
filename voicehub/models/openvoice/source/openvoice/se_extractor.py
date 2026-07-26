@@ -14,12 +14,35 @@ import librosa
 from whisper_timestamped.transcribe import get_audio_tensor, get_vad_segments
 
 model_size = "medium"
-# Run on GPU with FP16
-model = None
-def split_audio_whisper(audio_path, audio_name, target_dir='processed'):
-    global model
-    if model is None:
-        model = WhisperModel(model_size, device="cuda", compute_type="float16")
+_whisper_models = {}
+
+
+def _whisper_runtime(device):
+    requested = str(device or "cpu").lower()
+    device_type, _, device_index = requested.partition(":")
+    if device_type != "cuda" or not torch.cuda.is_available():
+        device_type = "cpu"
+        device_index = ""
+    compute_type = "float16" if device_type == "cuda" else "int8"
+    cache_key = (device_type, device_index, compute_type)
+    if cache_key not in _whisper_models:
+        options = {
+            "device": device_type,
+            "compute_type": compute_type,
+        }
+        if device_type == "cuda" and device_index:
+            options["device_index"] = int(device_index)
+        _whisper_models[cache_key] = WhisperModel(model_size, **options)
+    return _whisper_models[cache_key]
+
+
+def split_audio_whisper(
+    audio_path,
+    audio_name,
+    target_dir='processed',
+    device='cpu',
+):
+    model = _whisper_runtime(device)
     audio = AudioSegment.from_file(audio_path)
     max_len = len(audio)
 
@@ -143,11 +166,15 @@ def get_se(audio_path, vc_model, target_dir='processed', vad=True):
     if vad:
         wavs_folder = split_audio_vad(audio_path, target_dir=target_dir, audio_name=audio_name)
     else:
-        wavs_folder = split_audio_whisper(audio_path, target_dir=target_dir, audio_name=audio_name)
+        wavs_folder = split_audio_whisper(
+            audio_path,
+            target_dir=target_dir,
+            audio_name=audio_name,
+            device=device,
+        )
     
     audio_segs = glob(f'{wavs_folder}/*.wav')
     if len(audio_segs) == 0:
         raise NotImplementedError('No audio segments found!')
     
     return vc_model.extract_se(audio_segs, se_save_path=se_path), audio_name
-

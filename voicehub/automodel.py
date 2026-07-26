@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from importlib import import_module
+from pathlib import Path
 
 from voicehub.dependencies import import_optional
+from voicehub.inference_strategy import InferenceStrategy
 from voicehub.modeling_utils import PreTrainedTTSModel
 from voicehub.registry import MODEL_REGISTRY, ModelSpec, get_model_spec, list_model_specs
 
@@ -30,8 +32,9 @@ class AutoInferenceModel:
     def from_pretrained(
         cls,
         model_type: str = "orpheustts",
-        model_path: str | None = None,
+        model_path: str | Path | None = None,
         device: str = "cuda",
+        inference_strategy: str | InferenceStrategy | None = None,
         **kwargs,
     ):
         """Dynamically load and instantiate the appropriate model class.
@@ -41,6 +44,8 @@ class AutoInferenceModel:
             model_path: Hugging Face id or local path. Each backend has a
                 sensible default when this is omitted.
             device: Target device (``"cuda"`` or ``"cpu"``).
+            inference_strategy: Registered strategy name or configured
+                strategy instance applied before the first inference load.
             **kwargs: Additional keyword arguments passed to the model class
                 (e.g. ``lang_code`` for Kokoro).
 
@@ -72,11 +77,20 @@ class AutoInferenceModel:
                 name_or_path=resolved_path,
                 **kwargs,
             )
-            return inference_model(
+            model = inference_model(
                 config,
                 device=device,
-                lazy_load=lazy_load,
+                lazy_load=(True if inference_strategy is not None else lazy_load),
             )
+            if inference_strategy is not None:
+                model.set_inference_strategy(inference_strategy)
+                if not lazy_load:
+                    model.load()
+            return model
+        if inference_strategy is not None:
+            raise TypeError(
+                f"{inference_model.__name__} does not support "
+                "`inference_strategy`; it must inherit PreTrainedTTSModel.")
         return inference_model(
             model_path=resolved_path,
             device=device,

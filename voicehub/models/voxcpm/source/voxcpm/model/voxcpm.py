@@ -45,6 +45,7 @@ from ..modules.locdit import CfmConfig, UnifiedCFM, VoxCPMLocDiT
 from ..modules.locenc import VoxCPMLocEnc
 from ..modules.minicpm4 import MiniCPM4Config, MiniCPMModel
 from .utils import (
+    advance_generation_seed,
     apply_generation_seed,
     get_dtype,
     materialize_generation_seed,
@@ -227,26 +228,63 @@ class VoxCPMModel(nn.Module):
                     setattr(self, attr_name, LoRALinear(base=module, **lora_kwargs))
 
     def optimize(self, disable: bool = False):
-        if disable:
+        if disable or hasattr(self, "_inference_optimization_state"):
             return self
         try:
-            if self.device != "cuda":
+            if torch.device(self.device).type != "cuda":
                 raise ValueError("VoxCPMModel can only be optimized on CUDA device")
             try:
                 import triton  # noqa: F401
             except ImportError:
                 raise ValueError("triton is not installed")
-            self.base_lm.forward_step = torch.compile(self.base_lm.forward_step, mode="reduce-overhead", fullgraph=True)
-            self.residual_lm.forward_step = torch.compile(
-                self.residual_lm.forward_step, mode="reduce-overhead", fullgraph=True
+            state = {
+                "base_lm_forward_step": self.base_lm.forward_step,
+                "residual_lm_forward_step": self.residual_lm.forward_step,
+                "feat_encoder": self.feat_encoder,
+                "estimator": self.feat_decoder.estimator,
+            }
+            base_lm_forward_step = torch.compile(
+                state["base_lm_forward_step"],
+                mode="reduce-overhead",
+                fullgraph=True,
             )
-            self._feat_encoder_raw = self.feat_encoder
-            self.feat_encoder = torch.compile(self.feat_encoder, mode="reduce-overhead", fullgraph=True)
-            self.feat_decoder.estimator = torch.compile(
-                self.feat_decoder.estimator, mode="reduce-overhead", fullgraph=True
+            residual_lm_forward_step = torch.compile(
+                state["residual_lm_forward_step"],
+                mode="reduce-overhead",
+                fullgraph=True,
             )
+            feat_encoder = torch.compile(
+                state["feat_encoder"],
+                mode="reduce-overhead",
+                fullgraph=True,
+            )
+            estimator = torch.compile(
+                state["estimator"],
+                mode="reduce-overhead",
+                fullgraph=True,
+            )
+            self._inference_optimization_state = state
+            self._feat_encoder_raw = state["feat_encoder"]
+            self.base_lm.forward_step = base_lm_forward_step
+            self.residual_lm.forward_step = residual_lm_forward_step
+            self.feat_encoder = feat_encoder
+            self.feat_decoder.estimator = estimator
         except Exception as e:
             print(f"Warning: torch.compile disabled - {e}", file=sys.stderr)
+        return self
+
+    def deoptimize(self):
+        """Restore trainable modules after reversible inference compilation."""
+        state = getattr(self, "_inference_optimization_state", None)
+        if state is None:
+            return self
+        self.base_lm.forward_step = state["base_lm_forward_step"]
+        self.residual_lm.forward_step = state["residual_lm_forward_step"]
+        self.feat_encoder = state["feat_encoder"]
+        self.feat_decoder.estimator = state["estimator"]
+        del self._inference_optimization_state
+        if hasattr(self, "_feat_encoder_raw"):
+            del self._feat_encoder_raw
         return self
 
     def forward(
@@ -460,7 +498,7 @@ class VoxCPMModel(nn.Module):
         last_attempt_seed = current_seed
         while retry_badcase_times < retry_badcase_max_times:
             last_attempt_seed = current_seed
-            apply_generation_seed(last_attempt_seed)
+            apply_generation_seed(last_attempt_seed, self.device)
 
             inference_result = self._inference(
                 text_token,
@@ -492,7 +530,7 @@ class VoxCPMModel(nn.Module):
                             file=sys.stderr,
                         )
                         retry_badcase_times += 1
-                        current_seed += 1
+                        current_seed = advance_generation_seed(current_seed)
                         continue
                     else:
                         break
@@ -695,7 +733,7 @@ class VoxCPMModel(nn.Module):
         last_attempt_seed = current_seed
         while retry_badcase_times < retry_badcase_max_times:
             last_attempt_seed = current_seed
-            apply_generation_seed(last_attempt_seed)
+            apply_generation_seed(last_attempt_seed, self.device)
 
             inference_result = self._inference(
                 text_token,
@@ -728,7 +766,7 @@ class VoxCPMModel(nn.Module):
                             file=sys.stderr,
                         )
                         retry_badcase_times += 1
-                        current_seed += 1
+                        current_seed = advance_generation_seed(current_seed)
                         continue
                     else:
                         break

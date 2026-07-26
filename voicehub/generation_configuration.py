@@ -3,21 +3,35 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from math import isfinite
+from numbers import Integral, Real
 from pathlib import Path
 from typing import Any
 
 from voicehub.hub import read_json_file, resolve_pretrained_file, write_json_file
+from voicehub.serialization_utils import serialize_paths
 
 GENERATION_CONFIG_NAME = "generation_config.json"
+TORCH_SEED_MIN = -(2**63)
+TORCH_SEED_MAX = 2**64 - 1
 
 
 class TTSGenerationConfig:
     """Serializable, extensible generation options for every TTS model."""
 
+    _COMMON_FIELDS = frozenset({
+        "output_file",
+        "seed",
+        "speed",
+        "temperature",
+        "top_p",
+        "max_new_tokens",
+    })
+
     def __init__(
         self,
         *,
-        output_file: str | None = None,
+        output_file: str | Path | None = None,
         seed: int | None = None,
         speed: float | None = None,
         temperature: float | None = None,
@@ -41,18 +55,52 @@ class TTSGenerationConfig:
 
     def validate(self) -> None:
         """Validate common values without rejecting backend extensions."""
-        if hasattr(self, "speed") and self.speed <= 0:
-            raise ValueError("`speed` must be greater than zero.")
-        if hasattr(self, "temperature") and self.temperature <= 0:
-            raise ValueError("`temperature` must be greater than zero.")
-        if hasattr(self, "top_p") and not 0 < self.top_p <= 1:
-            raise ValueError("`top_p` must be in the interval (0, 1].")
-        if hasattr(self, "max_new_tokens") and self.max_new_tokens <= 0:
-            raise ValueError("`max_new_tokens` must be greater than zero.")
+        output_file = getattr(self, "output_file", None)
+        if output_file is not None and (not isinstance(output_file,
+                                                       (str, Path)) or not str(output_file).strip()):
+            raise ValueError("`output_file` must be a non-empty path.")
+        if (output_file is not None and Path(output_file).expanduser().is_dir()):
+            raise IsADirectoryError(f"`output_file` is a directory: {Path(output_file).expanduser()}.")
+
+        seed = getattr(self, "seed", None)
+        if seed is not None and (isinstance(seed, bool) or not isinstance(seed, Integral)):
+            raise TypeError("`seed` must be an integer.")
+        if seed is not None and not TORCH_SEED_MIN <= seed <= TORCH_SEED_MAX:
+            raise ValueError(
+                "`seed` must be in Torch's supported range "
+                f"[{TORCH_SEED_MIN}, {TORCH_SEED_MAX}].")
+
+        speed = getattr(self, "speed", None)
+        if speed is not None:
+            if isinstance(speed, bool) or not isinstance(speed, Real):
+                raise TypeError("`speed` must be a real number.")
+            if not isfinite(speed) or speed <= 0:
+                raise ValueError("`speed` must be finite and greater than zero.")
+
+        temperature = getattr(self, "temperature", None)
+        if temperature is not None:
+            if (isinstance(temperature, bool) or not isinstance(temperature, Real)):
+                raise TypeError("`temperature` must be a real number.")
+            if not isfinite(temperature) or temperature < 0:
+                raise ValueError("`temperature` must be finite and non-negative.")
+
+        top_p = getattr(self, "top_p", None)
+        if top_p is not None:
+            if isinstance(top_p, bool) or not isinstance(top_p, Real):
+                raise TypeError("`top_p` must be a real number.")
+            if not isfinite(top_p) or not 0 <= top_p <= 1:
+                raise ValueError("`top_p` must be finite and in the interval [0, 1].")
+
+        max_new_tokens = getattr(self, "max_new_tokens", None)
+        if max_new_tokens is not None:
+            if (isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, Integral)):
+                raise TypeError("`max_new_tokens` must be an integer.")
+            if max_new_tokens <= 0:
+                raise ValueError("`max_new_tokens` must be greater than zero.")
 
     def to_dict(self) -> dict[str, Any]:
         """Return a deep copy for generation or JSON serialization."""
-        return deepcopy(self.__dict__)
+        return serialize_paths(deepcopy(self.__dict__))
 
     @classmethod
     def from_dict(cls, values: dict[str, Any], **kwargs):
@@ -74,7 +122,7 @@ class TTSGenerationConfig:
     @classmethod
     def from_pretrained(
         cls,
-        pretrained_model_name_or_path: str,
+        pretrained_model_name_or_path: str | Path,
         *,
         subfolder: str = "",
         **kwargs,
@@ -105,10 +153,13 @@ class TTSGenerationConfig:
         """Apply known options and return unknown options."""
         unused = {}
         for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-            else:
+            if key not in self._COMMON_FIELDS and not hasattr(self, key):
                 unused[key] = value
+                continue
+            if value is None:
+                self.__dict__.pop(key, None)
+            else:
+                setattr(self, key, value)
         self.validate()
         return unused
 

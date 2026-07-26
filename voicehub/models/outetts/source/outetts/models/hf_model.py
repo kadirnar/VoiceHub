@@ -100,17 +100,24 @@ class HFModel:
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
 
     def _generate(self, input_ids: torch.Tensor, config: GenerationConfig):
+        sampling_kwargs = {}
         if config.sampler_config.temperature > 0:
-            config.additional_gen_config["do_sample"] = True
+            sampling_kwargs = {
+                "do_sample": True,
+                "temperature": config.sampler_config.temperature,
+                "top_k": config.sampler_config.top_k,
+                "top_p": config.sampler_config.top_p,
+                "min_p": config.sampler_config.min_p,
+            }
+        else:
+            sampling_kwargs["do_sample"] = False
+        generation_kwargs = dict(config.additional_gen_config)
+        generation_kwargs.update(sampling_kwargs)
         return self.model.generate(
             input_ids,
             max_length=config.max_length,
-            temperature=config.sampler_config.temperature,
             repetition_penalty=config.sampler_config.repetition_penalty,
-            top_k=config.sampler_config.top_k,
-            top_p=config.sampler_config.top_p,
-            min_p=config.sampler_config.min_p,
-            **config.additional_gen_config,
+            **generation_kwargs,
         )[0].tolist()
 
     def _generate_stream(self, input_ids: torch.Tensor, config: GenerationConfig):

@@ -75,6 +75,8 @@ def _multinomial_sample_one_no_sync(probs):  # Does multinomial sampling without
 
 
 def sample_topk(logits: torch.Tensor, topk: int, temperature: float):
+    if temperature == 0:
+        return torch.argmax(logits, dim=-1, keepdim=True).to(dtype=torch.int)
     logits = logits / temperature
 
     filter_value: float = -float("Inf")

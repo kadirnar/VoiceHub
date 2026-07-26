@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import math
+from numbers import Real
+
 from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
-from voicehub.models._shared import finish_audio_output, resolve_torch_dtype
+from voicehub.models._shared import finish_audio_output, resolve_torch_dtype, seeded_inference
 
 
 class HiggsTTSConfig(VoiceHubConfig):
@@ -41,6 +44,11 @@ class HiggsTTSForTextToSpeech(PreTrainedTTSModel):
 
     config_class = HiggsTTSConfig
     default_model_name_or_path = "bosonai/higgs-audio-v2-generation-3B-base"
+    passthrough_generation_options = frozenset({
+        "ras_win_len",
+        "ras_win_max_num_repeat",
+        "stop_strings",
+    })
 
     def __init__(
         self,
@@ -60,22 +68,29 @@ class HiggsTTSForTextToSpeech(PreTrainedTTSModel):
         self._training_backend = None
         super().__init__(config, device=device, lazy_load=lazy_load)
 
-    def _load_pretrained_model(self) -> None:
-        if self.is_training_load:
-            from voicehub.models.higgstts.training import load_higgs_training_backend
+    @staticmethod
+    def _load_data_types():
+        return import_optional(
+            "voicehub.models.higgstts.source.boson_multimodal.data_types",
+            model_type="higgstts",
+            install_extra="higgstts",
+        )
 
-            backend = load_higgs_training_backend(
-                self.config.name_or_path,
-                self.config.audio_tokenizer_name_or_path,
-                device=self.device,
-                torch_dtype=self.config.torch_dtype,
-            )
-            self.model = backend
-            self._training_backend = backend
-            self._types = None
-            self.config.sample_rate = backend.sample_rate
-            return
+    def _load_training_runtime(self) -> None:
+        from voicehub.models.higgstts.training import load_higgs_training_backend
 
+        backend = load_higgs_training_backend(
+            self.config.name_or_path,
+            self.config.audio_tokenizer_name_or_path,
+            device=self.device,
+            torch_dtype=self.config.torch_dtype,
+        )
+        self.model = backend
+        self._training_backend = backend
+        self._types = None
+        self.config.sample_rate = backend.sample_rate
+
+    def _load_serving_runtime(self) -> None:
         torch = import_optional(
             "torch",
             model_type="higgstts",
@@ -87,11 +102,7 @@ class HiggsTTSForTextToSpeech(PreTrainedTTSModel):
             model_type="higgstts",
             install_extra="higgstts",
         )
-        self._types = import_optional(
-            "voicehub.models.higgstts.source.boson_multimodal.data_types",
-            model_type="higgstts",
-            install_extra="higgstts",
-        )
+        self._types = self._load_data_types()
         self.model = runtime.HiggsAudioServeEngine(
             self.config.name_or_path,
             self.config.audio_tokenizer_name_or_path,
@@ -104,6 +115,47 @@ class HiggsTTSForTextToSpeech(PreTrainedTTSModel):
         )
         self._training_backend = None
         self.config.sample_rate = int(self.model.audio_tokenizer.sampling_rate)
+
+    def _load_pretrained_model(self) -> None:
+        if self.is_training_load:
+            self._load_training_runtime()
+        else:
+            self._load_serving_runtime()
+
+    def _validate_generation_inputs(self, model_inputs: dict) -> None:
+        max_new_tokens = model_inputs.get("max_new_tokens", 1024)
+        if (isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or max_new_tokens <= 0):
+            raise ValueError("`max_new_tokens` must be a positive integer.")
+        temperature = model_inputs.get("temperature", 0.3)
+        if (isinstance(temperature, bool) or not isinstance(temperature, Real) or
+                not math.isfinite(temperature) or temperature < 0):
+            raise ValueError("`temperature` must be a finite non-negative number.")
+        top_p = model_inputs.get("top_p", 0.95)
+        valid_top_p = (0 <= top_p <= 1 if isinstance(top_p, Real) and not isinstance(top_p, bool) else False)
+        if (isinstance(top_p, bool) or not isinstance(top_p, Real) or not math.isfinite(top_p) or
+                not valid_top_p or (temperature > 0 and top_p == 0)):
+            interval = "[0, 1]" if temperature == 0 else "(0, 1]"
+            raise ValueError(f"`top_p` must be in the interval {interval}.")
+        top_k = model_inputs.get("top_k", 50)
+        if top_k is not None and (isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0):
+            raise ValueError("`top_k` must be a positive integer or None.")
+        system_prompt = model_inputs.get("system_prompt")
+        if system_prompt is not None and (not isinstance(system_prompt, str) or not system_prompt.strip()):
+            raise ValueError("`system_prompt` must be a non-empty string or None.")
+        if not isinstance(model_inputs.get("force_audio_gen", True), bool):
+            raise TypeError("`force_audio_gen` must be a boolean.")
+        stop_strings = model_inputs.get("stop_strings")
+        if stop_strings is not None and (not isinstance(stop_strings, (list, tuple)) or
+                                         any(not isinstance(value, str) or not value
+                                             for value in stop_strings)):
+            raise TypeError("`stop_strings` must be a sequence of non-empty strings or "
+                            "None.")
+        ras_win_len = model_inputs.get("ras_win_len", 7)
+        if ras_win_len is not None and (isinstance(ras_win_len, bool) or not isinstance(ras_win_len, int)):
+            raise TypeError("`ras_win_len` must be an integer or None.")
+        ras_repeats = model_inputs.get("ras_win_max_num_repeat", 2)
+        if (isinstance(ras_repeats, bool) or not isinstance(ras_repeats, int) or ras_repeats <= 0):
+            raise ValueError("`ras_win_max_num_repeat` must be a positive integer.")
 
     @property
     def training_backend(self):
@@ -133,6 +185,27 @@ class HiggsTTSForTextToSpeech(PreTrainedTTSModel):
         finally:
             self._loading_for_training = False
 
+    def _ensure_serving_runtime(self) -> None:
+        if self.training_backend is None:
+            return
+        self.model = self._training_backend.build_inference_runtime(device=self.device, )
+        self._types = self._load_data_types()
+
+    def _build_chat_sample(
+        self,
+        text: str,
+        *,
+        system_prompt: str | None,
+    ):
+        return self._types.ChatMLSample(
+            messages=[
+                self._types.Message(
+                    role="system",
+                    content=system_prompt or self.config.system_prompt,
+                ),
+                self._types.Message(role="user", content=text),
+            ])
+
     def _generate(
         self,
         text: str,
@@ -144,46 +217,46 @@ class HiggsTTSForTextToSpeech(PreTrainedTTSModel):
         top_p: float = 0.95,
         top_k: int = 50,
         seed: int | None = None,
-        force_audio_gen: bool = False,
+        force_audio_gen: bool = True,
         **generation_options,
     ) -> TTSOutput:
-        self.load()
-        if self.training_backend is not None:
-            self.model = self._training_backend.build_inference_runtime(device=self.device, )
-            self._types = import_optional(
-                "voicehub.models.higgstts.source.boson_multimodal."
-                "data_types",
+        with seeded_inference(
+                seed,
+                device=self.device,
                 model_type="higgstts",
-                install_extra="higgstts",
+        ) as effective_seed:
+            self._ensure_serving_runtime()
+            sample = self._build_chat_sample(
+                text,
+                system_prompt=system_prompt,
             )
-        sample = self._types.ChatMLSample(
-            messages=[
-                self._types.Message(
-                    role="system",
-                    content=system_prompt or self.config.system_prompt,
-                ),
-                self._types.Message(role="user", content=text),
-            ])
-        response = self.model.generate(
-            chat_ml_sample=sample,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k,
-            seed=seed,
-            force_audio_gen=force_audio_gen,
-            **generation_options,
-        )
+            response = self.model.generate(
+                chat_ml_sample=sample,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                seed=effective_seed,
+                force_audio_gen=force_audio_gen,
+                **generation_options,
+            )
         if response.audio is None:
             raise RuntimeError("Higgs Audio returned text but did not generate audio.")
-        self.config.sample_rate = int(response.sampling_rate)
+        sample_rate = int(response.sampling_rate)
+        if sample_rate <= 0:
+            raise RuntimeError(
+                "Higgs Audio returned an invalid sampling rate: "
+                f"{response.sampling_rate!r}.")
+        self.config.sample_rate = sample_rate
         return finish_audio_output(
             response.audio,
-            response.sampling_rate,
+            sample_rate,
             output_file=output_file,
             metadata={
                 "generated_text": response.generated_text,
                 "usage": response.usage,
+                "seed": effective_seed,
+                "requested_seed": seed,
             },
         )
 

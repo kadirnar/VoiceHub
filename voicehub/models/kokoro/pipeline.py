@@ -1,6 +1,7 @@
 import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Generator, List, Optional, Tuple, Union
 
 import torch
@@ -156,7 +157,19 @@ class KPipeline:
         if voice.endswith('.pt'):
             f = voice
         else:
-            f = hf_hub_download(repo_id=self.repo_id, filename=f'voices/{voice}.pt')
+            snapshot_root = Path(self.repo_id).expanduser()
+            if snapshot_root.is_dir():
+                voice_path = snapshot_root / 'voices' / f'{voice}.pt'
+                if not voice_path.is_file():
+                    raise FileNotFoundError(
+                        f"Kokoro voice {voice!r} was not found in the local "
+                        f"snapshot: {voice_path}.")
+                f = str(voice_path.resolve())
+            else:
+                f = hf_hub_download(
+                    repo_id=self.repo_id,
+                    filename=f'voices/{voice}.pt',
+                )
             if not voice.startswith(self.lang_code):
                 v = LANG_CODES.get(voice, voice)
                 p = LANG_CODES.get(self.lang_code, self.lang_code)

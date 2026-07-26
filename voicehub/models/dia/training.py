@@ -345,6 +345,7 @@ def prepare_dia_training_inputs(
 @dataclass
 class DiaTrainingBackend:
     """Loaded official Dia model, processor, and native loss helpers."""
+
     model: Any
     processor: Any
     sample_rate: int

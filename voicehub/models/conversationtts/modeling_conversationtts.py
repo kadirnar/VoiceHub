@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+from math import isfinite
+from numbers import Real
 from pathlib import Path
+from typing import Any
 
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
-from voicehub.models._shared import finish_audio_output, resolve_torch_dtype
+from voicehub.models._shared import finish_audio_output, resolve_torch_dtype, seeded_inference, validate_local_file
 from voicehub.models.conversationtts.configuration_conversationtts import ConversationTTSConfig
 from voicehub.models.conversationtts.runtime import resume_for_inference
+
+_AUDIO_FRAME_MILLISECONDS = 40
+_MODEL_CONTEXT_TOKENS = 2_048
+_MINIMUM_TEXT_PROMPT_TOKENS = 5
+_MAX_AUDIO_LENGTH_MILLISECONDS = (
+    _MODEL_CONTEXT_TOKENS - _MINIMUM_TEXT_PROMPT_TOKENS) * _AUDIO_FRAME_MILLISECONDS
 
 
 class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
@@ -17,6 +26,9 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
 
     config_class = ConversationTTSConfig
     default_model_name_or_path = "AudioFoundation/SpeechFoundation"
+    passthrough_generation_options = frozenset()
+    _GENERATOR_MODULE = ("voicehub.models.conversationtts.source.conversationtts."
+                         "inference.generator")
 
     def __init__(
         self,
@@ -116,8 +128,7 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
             return
 
         generator_module = import_optional(
-            "voicehub.models.conversationtts.source.conversationtts."
-            "inference.generator",
+            self._GENERATOR_MODULE,
             model_type="conversationtts",
             install_extra="conversationtts",
         )
@@ -129,6 +140,10 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
                 text_tokenizer_path=str(self._text_tokenizer_path()),
                 audio_tokenizer_path=str(self._audio_tokenizer_path()),
             )
+            sample_rate = int(getattr(generator, "sample_rate", 0))
+            if sample_rate <= 0:
+                raise ValueError("The ConversationTTS generator reported an invalid "
+                                 "sample rate.")
         except BaseException:
             # Generator.setup_caches() runs before its tokenizer loads. A
             # tokenizer failure must not strand a cache-mutated training graph.
@@ -138,6 +153,7 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
             raise
         self._generator = generator
         self._generator_module = generator_module
+        self.config.sample_rate = sample_rate
         self._loaded_for_training = False
 
     @staticmethod
@@ -214,6 +230,74 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
             self._loaded_for_training = False
             raise
 
+    def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
+        super()._validate_generation_inputs(model_inputs)
+        speaker = model_inputs.get("speaker", 0)
+        if isinstance(speaker, bool) or not isinstance(speaker, int) or speaker < 0:
+            raise ValueError("`speaker` must be a non-negative integer.")
+
+        speaker_audio = model_inputs.get("speaker_audio_path")
+        reference_text = model_inputs.get("reference_text")
+        if speaker_audio is not None and (not isinstance(speaker_audio,
+                                                         (str, Path)) or not str(speaker_audio).strip()):
+            raise ValueError("`speaker_audio_path` must be a non-empty path or None.")
+        if reference_text is not None and (not isinstance(reference_text, str) or not reference_text.strip()):
+            raise ValueError("`reference_text` must be a non-empty string or None.")
+        if (speaker_audio is None) != (reference_text is None):
+            raise ValueError("`speaker_audio_path` and `reference_text` must be provided together.")
+        speaker_path = validate_local_file(
+            speaker_audio,
+            option_name="speaker_audio_path",
+        )
+        if speaker_path is not None:
+            model_inputs["speaker_audio_path"] = str(speaker_path)
+
+        max_audio_length_ms = model_inputs.get("max_audio_length_ms", 30_000)
+        if (isinstance(max_audio_length_ms, bool) or not isinstance(max_audio_length_ms, Real) or
+                not isfinite(max_audio_length_ms) or max_audio_length_ms < _AUDIO_FRAME_MILLISECONDS or
+                max_audio_length_ms >= _MAX_AUDIO_LENGTH_MILLISECONDS):
+            raise ValueError(
+                "`max_audio_length_ms` must be finite and in the interval "
+                f"[{_AUDIO_FRAME_MILLISECONDS}, "
+                f"{_MAX_AUDIO_LENGTH_MILLISECONDS}).")
+
+        temperature = model_inputs.get("temperature", 0.9)
+        if (isinstance(temperature, bool) or not isinstance(temperature, Real) or not isfinite(temperature) or
+                temperature <= 0):
+            raise ValueError("`temperature` must be finite and greater than zero.")
+
+        top_k = model_inputs.get("top_k", 30)
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or top_k <= 0:
+            raise ValueError("`top_k` must be a positive integer.")
+        audio_vocab_size = int(self.config.model_args["audio_vocab_size"])
+        if "top_k" in model_inputs and top_k > audio_vocab_size:
+            raise ValueError("`top_k` cannot exceed the audio vocabulary size "
+                             f"({audio_vocab_size}).")
+
+    def _speaker_context(
+        self,
+        *,
+        speaker: int,
+        speaker_audio_path: str | None,
+        reference_text: str | None,
+    ) -> list:
+        if speaker_audio_path is None:
+            return []
+        return [
+            self._generator_module.prepare_prompt(
+                reference_text,
+                speaker_audio_path,
+                segment_id=speaker,
+            )
+        ]
+
+    def _inference_generator(self):
+        if self._generator is None or self._generator_module is None:
+            raise RuntimeError(
+                "ConversationTTS inference runtime is not initialized. "
+                "Call load() before requesting generation.")
+        return self._generator
+
     def _generate(
         self,
         text: str,
@@ -225,28 +309,33 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
         max_audio_length_ms: float = 30_000,
         temperature: float = 0.9,
         top_k: int = 30,
+        seed: int | None = None,
         **generation_options,
     ) -> TTSOutput:
-        self.load()
-        context = []
-        if speaker_audio_path:
-            if not reference_text:
-                raise ValueError("reference_text is required with speaker_audio_path.")
-            context.append(
-                self._generator_module.prepare_prompt(
-                    reference_text,
-                    speaker_audio_path,
-                    segment_id=speaker,
-                ))
-        audio = self._generator.generate_v1(
-            text=text,
-            speaker=speaker,
-            max_audio_length_ms=max_audio_length_ms,
-            context=context,
-            temperature=temperature,
-            topk=top_k,
-            **generation_options,
+        generator = self._inference_generator()
+        top_k = min(
+            top_k,
+            int(self.config.model_args["audio_vocab_size"]),
         )
+        context = self._speaker_context(
+            speaker=speaker,
+            speaker_audio_path=speaker_audio_path,
+            reference_text=reference_text,
+        )
+        with seeded_inference(
+                seed,
+                device=self.device,
+                model_type="conversationtts",
+        ) as effective_seed:
+            audio = generator.generate_v1(
+                text=text,
+                speaker=speaker,
+                max_audio_length_ms=max_audio_length_ms,
+                context=context,
+                temperature=temperature,
+                topk=top_k,
+                **generation_options,
+            )
         return finish_audio_output(
             audio,
             self.sample_rate,
@@ -254,6 +343,8 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
             metadata={
                 "speaker": speaker,
                 "voice_cloned": bool(context),
+                "seed": effective_seed,
+                "requested_seed": seed,
                 "license": "CC BY-NC 4.0",
                 "commercial_use": False,
             },

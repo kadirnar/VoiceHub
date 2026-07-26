@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Optional, Union
 
 import torch
@@ -31,6 +32,41 @@ class KModel(torch.nn.Module):
         'hexgrad/Kokoro-82M-v1.1-zh': 'kokoro-v1_1-zh.pth',
     }
 
+    @staticmethod
+    def _local_snapshot_file(repo_id: str, filename: str) -> str | None:
+        root = Path(repo_id).expanduser()
+        if not root.is_dir():
+            return None
+        path = root / filename
+        if not path.is_file():
+            raise FileNotFoundError(f"Kokoro local snapshot is missing {filename!r}: {path}.")
+        return str(path.resolve())
+
+    @classmethod
+    def _model_file(cls, repo_id: str) -> str:
+        root = Path(repo_id).expanduser()
+        if root.is_dir():
+            preferred = tuple(root / filename for filename in cls.MODEL_NAMES.values())
+            for candidate in preferred:
+                if candidate.is_file():
+                    return str(candidate.resolve())
+            candidates = sorted(root.glob("*.pth"))
+            if len(candidates) == 1:
+                return str(candidates[0].resolve())
+            available = ", ".join(path.name for path in candidates) or "none"
+            raise FileNotFoundError(
+                "Kokoro local snapshot must contain one released model "
+                f"checkpoint at its root; found: {available}.")
+        try:
+            filename = cls.MODEL_NAMES[repo_id]
+        except KeyError as exc:
+            supported = ", ".join(cls.MODEL_NAMES)
+            raise ValueError(
+                f"Unknown Kokoro repository {repo_id!r}. Supported Hub "
+                f"repositories: {supported}; local snapshot directories are "
+                "also accepted.") from exc
+        return hf_hub_download(repo_id=repo_id, filename=filename)
+
     def __init__(
             self,
             repo_id: Optional[str] = None,
@@ -46,8 +82,13 @@ class KModel(torch.nn.Module):
         self.repo_id = repo_id
         if not isinstance(config, dict):
             if not config:
-                logger.debug("No config provided, downloading from HF")
-                config = hf_hub_download(repo_id=repo_id, filename='config.json')
+                config = self._local_snapshot_file(repo_id, 'config.json')
+                if config is None:
+                    logger.debug("No config provided, downloading from HF")
+                    config = hf_hub_download(
+                        repo_id=repo_id,
+                        filename='config.json',
+                    )
             with open(config, encoding='utf-8') as r:
                 config = json.load(r)
                 logger.debug(f"Loaded config: {config}")
@@ -73,7 +114,7 @@ class KModel(torch.nn.Module):
             disable_complex=disable_complex,
             **config['istftnet'])
         if not model:
-            model = hf_hub_download(repo_id=repo_id, filename=KModel.MODEL_NAMES[repo_id])
+            model = self._model_file(repo_id)
         for key, state_dict in torch.load(model, map_location='cpu', weights_only=True).items():
             assert hasattr(self, key), key
             try:

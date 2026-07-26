@@ -16,6 +16,7 @@ import torch
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 RUNTIME_ROOT = PACKAGE_ROOT / "runtime"
+TORCH_SEED_MAX = 2**64 - 1
 sys.path.insert(0, str(RUNTIME_ROOT))
 sys.path.insert(0, str(PACKAGE_ROOT))
 
@@ -86,6 +87,30 @@ def optimize_for_inference(model: SynthesizerTrn) -> None:
             encoder.remove_weight_norm()
 
 
+def seed_torch_device(seed: int, device: torch.device) -> None:
+    """Seed CPU and only the accelerator used by this runtime."""
+    torch.random.default_generator.manual_seed(seed)
+    if device.type == "cuda":
+        device_index = (
+            torch.cuda.current_device()
+            if device.index is None else device.index
+        )
+        with torch.cuda.device(device_index):
+            torch.cuda.manual_seed(seed)
+    elif (
+        device.type == "mps"
+        and hasattr(torch, "mps")
+        and hasattr(torch.mps, "manual_seed")
+    ):
+        torch.mps.manual_seed(seed)
+
+
+def offset_torch_seed(seed: int, offset: int) -> int:
+    """Offset a per-chunk seed without overflowing Torch's upper bound."""
+    candidate = seed + offset
+    return candidate if candidate <= TORCH_SEED_MAX else candidate % (2**64)
+
+
 class InflectTTS:
     def __init__(self, model_dir: str | Path = PACKAGE_ROOT, device: str = "cpu") -> None:
         self.root = Path(model_dir).resolve()
@@ -153,9 +178,10 @@ class InflectTTS:
                     )
                 )
             tokens, lengths = self._tokens(chunk)
-            torch.manual_seed(seed + index)
-            if self.device.type == "cuda":
-                torch.cuda.manual_seed_all(seed + index)
+            seed_torch_device(
+                offset_torch_seed(seed, index),
+                self.device,
+            )
             waveform = self.model.infer(
                 tokens,
                 lengths,
