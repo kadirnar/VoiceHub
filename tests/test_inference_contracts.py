@@ -395,7 +395,11 @@ class SharedInferenceHelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             model_path = Path(directory) / "model"
             model_path.mkdir()
-            with patch.dict(os.environ, {"HOME": directory}):
+            home_environment = {
+                "HOME": directory,
+                "USERPROFILE": directory,
+            }
+            with patch.dict(os.environ, home_environment):
                 model = LifecycleModel("~/model")
 
             missing = Path(directory) / "missing"
@@ -458,8 +462,8 @@ class SharedInferenceHelperTests(unittest.TestCase):
         self.assertEqual(
             serialized["backend_paths"],
             {
-                "vocoder": "vocoder/model.safetensors",
-                "references": ["speaker.wav"],
+                "vocoder": str(Path("vocoder/model.safetensors")),
+                "references": [str(Path("speaker.wav"))],
             },
         )
 

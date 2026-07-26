@@ -446,7 +446,21 @@ class InferenceHelperTests(unittest.TestCase):
     def test_kokoro_resolves_model_assets_from_local_snapshot(self):
         fake_loguru = ModuleType("loguru")
         fake_loguru.logger = SimpleNamespace(debug=Mock())
-        with _temporary_modules({"loguru": fake_loguru}):
+        fake_transformers = ModuleType("transformers")
+        fake_transformers.AlbertConfig = object
+        fake_istftnet = ModuleType("voicehub.models.kokoro.istftnet")
+        fake_istftnet.Decoder = object
+        fake_kokoro_modules = ModuleType("voicehub.models.kokoro.modules")
+        fake_kokoro_modules.CustomAlbert = object
+        fake_kokoro_modules.ProsodyPredictor = object
+        fake_kokoro_modules.TextEncoder = object
+        modules = {
+            "loguru": fake_loguru,
+            "transformers": fake_transformers,
+            "voicehub.models.kokoro.istftnet": fake_istftnet,
+            "voicehub.models.kokoro.modules": fake_kokoro_modules,
+        }
+        with _temporary_modules(modules):
             from voicehub.models.kokoro.model import KModel
 
         with tempfile.TemporaryDirectory() as directory:
