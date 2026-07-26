@@ -53,6 +53,21 @@ class OuteTTSForTextToSpeech(PreTrainedTTSModel):
         self._runtime = None
         super().__init__(config, device=device, lazy_load=lazy_load)
 
+    def _validate_training_runtime(self) -> None:
+        if self.config.backend.upper() != "HF":
+            raise ValueError(
+                "OuteTTS fine-tuning requires the differentiable HF backend; "
+                f"{self.config.backend!r} is an inference-only backend.")
+        options = self.config.additional_model_config
+        quantized = (
+            bool(options.get("load_in_4bit")) or bool(options.get("load_in_8bit")) or
+            options.get("quantization_config") is not None)
+        if quantized:
+            raise ValueError(
+                "OuteTTS's generic training adapter cannot optimize a "
+                "quantized HF runtime. Use an unquantized checkpoint or "
+                "register a PEFT-aware specialized adapter.")
+
     def _load_pretrained_model(self) -> None:
         runtime = import_optional(
             "voicehub.models.outetts.source.outetts",

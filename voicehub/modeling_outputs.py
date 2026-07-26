@@ -71,8 +71,15 @@ class TTSTrainingOutput:
     audio_values: Any | None = None
     hidden_states: Any | None = None
     attentions: Any | None = None
+    training_phase: str | None = None
+    optimizer_names: tuple[str, ...] = ()
     losses: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def phase(self) -> str | None:
+        """Backward-friendly short alias for the executed training phase."""
+        return self.training_phase
 
     def to_tuple(self) -> tuple[Any, ...]:
         """Return populated fields in declaration order."""
@@ -96,8 +103,11 @@ class TTSTrainingOutput:
             "audio_values",
             "hidden_states",
             "attentions",
+            "training_phase",
         )
         populated = [name for name in names if getattr(self, name) is not None]
+        if self.optimizer_names:
+            populated.append("optimizer_names")
         if self.losses:
             populated.append("losses")
         if self.metadata:

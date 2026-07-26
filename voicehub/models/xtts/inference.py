@@ -18,11 +18,27 @@ class XTTSConfig(VoiceHubConfig):
         self,
         *,
         language: str = "en",
+        training_text_loss_weight: float = 0.01,
+        training_mel_loss_weight: float = 1.0,
+        training_dvae_checkpoint: str | None = None,
+        training_mel_norm_file: str | None = None,
+        training_lr_milestones: tuple[int, ...] = (
+            900_000,
+            2_700_000,
+            5_400_000,
+        ),
+        training_lr_gamma: float = 0.5,
         sample_rate: int = 24000,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
         self.language = language
+        self.training_text_loss_weight = training_text_loss_weight
+        self.training_mel_loss_weight = training_mel_loss_weight
+        self.training_dvae_checkpoint = training_dvae_checkpoint
+        self.training_mel_norm_file = training_mel_norm_file
+        self.training_lr_milestones = training_lr_milestones
+        self.training_lr_gamma = training_lr_gamma
 
 
 class XTTSForTextToSpeech(PreTrainedTTSModel):
@@ -46,6 +62,8 @@ class XTTSForTextToSpeech(PreTrainedTTSModel):
             **config_overrides,
         )
         self._xtts_config = None
+        self._model_directory = None
+        self._loaded_for_training = False
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     def _load_pretrained_model(self) -> None:
@@ -69,11 +87,23 @@ class XTTSForTextToSpeech(PreTrainedTTSModel):
         model.load_checkpoint(
             xtts_config,
             checkpoint_dir=str(model_directory),
-            eval=True,
+            eval=not self.is_training_load,
         )
         model.to(self.device)
         self._xtts_config = xtts_config
+        self._model_directory = model_directory
+        self._loaded_for_training = self.is_training_load
         self.model = model
+
+    def _prepare_for_training(self) -> None:
+        if self._loaded_for_training:
+            return
+        self.model = None
+        self._loading_for_training = True
+        try:
+            self.load()
+        finally:
+            self._loading_for_training = False
 
     def _generate(
         self,

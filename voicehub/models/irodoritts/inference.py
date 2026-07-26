@@ -52,6 +52,7 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
             **config_overrides,
         )
         self._runtime_module = None
+        self._loaded_for_training = False
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     def _load_pretrained_model(self) -> None:
@@ -76,11 +77,22 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
             model_precision=self.config.model_precision,
             codec_device=self.device,
             codec_precision=self.config.codec_precision,
-            compile_model=self.config.compile_model,
+            compile_model=(self.config.compile_model and not self.is_training_load),
         )
         self.model = runtime.InferenceRuntime.from_key(key)
         self._runtime_module = runtime
         self.config.sample_rate = int(self.model.codec.sample_rate)
+        self._loaded_for_training = self.is_training_load
+
+    def _prepare_for_training(self) -> None:
+        if self._loaded_for_training:
+            return
+        self.model = None
+        self._loading_for_training = True
+        try:
+            self.load()
+        finally:
+            self._loading_for_training = False
 
     def _generate(
         self,

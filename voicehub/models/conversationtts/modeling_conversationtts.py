@@ -34,6 +34,7 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
         )
         self._generator = None
         self._generator_module = None
+        self._loaded_for_training = False
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     def _hub_file(self, repository_id: str, filename: str) -> Path:
@@ -81,7 +82,8 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
             self.config.audio_tokenizer_filename,
         )
 
-    def _load_pretrained_model(self) -> None:
+    def _build_raw_model(self):
+        """Construct the differentiable source model without serving state."""
         torch = import_optional(
             "torch",
             model_type="conversationtts",
@@ -93,32 +95,124 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
             model_type="conversationtts",
             install_extra="conversationtts",
         )
-        generator_module = import_optional(
-            "voicehub.models.conversationtts.source.conversationtts."
-            "inference.generator",
-            model_type="conversationtts",
-            install_extra="conversationtts",
-        )
         model = model_module.Model(model_module.ModelArgs(**self.config.model_args))
         dtype = resolve_torch_dtype(
             torch,
             self.config.torch_dtype,
             self.device,
         )
-        model.to(device=self.device, dtype=dtype).eval()
+        model.to(device=self.device, dtype=dtype)
+        return model
+
+    def _attach_inference_runtime(self) -> None:
+        """Attach tokenizers and KV caches to the current trained weights."""
+        if self.model is None:
+            raise RuntimeError(
+                "ConversationTTS cannot build its inference runtime before "
+                "the source model is loaded.")
+        if self._generator is not None:
+            self.model.eval()
+            self._loaded_for_training = False
+            return
+
+        generator_module = import_optional(
+            "voicehub.models.conversationtts.source.conversationtts."
+            "inference.generator",
+            model_type="conversationtts",
+            install_extra="conversationtts",
+        )
+        was_training = bool(getattr(self.model, "training", False))
+        self.model.eval()
+        try:
+            generator = generator_module.Generator(
+                self.model,
+                text_tokenizer_path=str(self._text_tokenizer_path()),
+                audio_tokenizer_path=str(self._audio_tokenizer_path()),
+            )
+        except BaseException:
+            # Generator.setup_caches() runs before its tokenizer loads. A
+            # tokenizer failure must not strand a cache-mutated training graph.
+            self._clear_inference_caches()
+            if was_training:
+                self.model.train()
+            raise
+        self._generator = generator
+        self._generator_module = generator_module
+        self._loaded_for_training = False
+
+    @staticmethod
+    def _clear_transformer_caches(transformer) -> None:
+        """Release TorchTune KV caches while preserving parameter identity."""
+        modules = getattr(transformer, "modules", None)
+        if not callable(modules):
+            return
+        for module in tuple(modules()):
+            if hasattr(module, "kv_cache"):
+                module.kv_cache = None
+            if hasattr(module, "cache_enabled"):
+                module.cache_enabled = False
+
+        caches_are_setup = getattr(transformer, "caches_are_setup", None)
+        if callable(caches_are_setup) and caches_are_setup():
+            raise RuntimeError(
+                "ConversationTTS could not remove the inference KV cache from "
+                "its training graph.")
+        caches_are_enabled = getattr(transformer, "caches_are_enabled", None)
+        if callable(caches_are_enabled) and caches_are_enabled():
+            raise RuntimeError("ConversationTTS could not disable the inference KV cache for "
+                               "training.")
+
+    def _clear_inference_caches(self) -> None:
+        """Remove serving-only cache modules and masks from the source
+        model."""
+        if self.model is None:
+            return
+        for transformer_name in ("backbone", "decoder"):
+            transformer = getattr(self.model, transformer_name, None)
+            if transformer is not None:
+                self._clear_transformer_caches(transformer)
+        for buffer_name in (
+                "backbone_causal_mask",
+                "decoder_causal_mask",
+        ):
+            buffers = getattr(self.model, "_buffers", {})
+            if buffer_name in buffers:
+                delattr(self.model, buffer_name)
+
+    def _prepare_for_training(self) -> None:
+        """Return to the raw differentiable graph without changing weights."""
+        self._generator = None
+        self._generator_module = None
+        self._clear_inference_caches()
+        if self.model is not None and hasattr(self.model, "train"):
+            self.model.train()
+        self._loaded_for_training = True
+
+    def _prepare_for_inference(self) -> None:
+        """Build serving objects lazily around the current trained weights."""
+        self._attach_inference_runtime()
+
+    def _load_pretrained_model(self) -> None:
+        model = self._build_raw_model()
         resume_for_inference(
             self._checkpoint_path(),
             None,
             model,
             self.device,
         )
-        self._generator = generator_module.Generator(
-            model,
-            text_tokenizer_path=str(self._text_tokenizer_path()),
-            audio_tokenizer_path=str(self._audio_tokenizer_path()),
-        )
-        self._generator_module = generator_module
         self.model = model
+        self._generator = None
+        self._generator_module = None
+        self._loaded_for_training = self.is_training_load
+        if self.is_training_load:
+            model.train()
+            return
+        try:
+            self._attach_inference_runtime()
+        except BaseException:
+            self.model = None
+            self._loaded_for_training = False
+            raise
 
     def _generate(
         self,

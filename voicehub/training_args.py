@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from importlib import import_module
+from numbers import Real
 from pathlib import Path
 from typing import Any
 
@@ -97,10 +99,62 @@ class TrainingArguments:
             "gradient_accumulation_steps": self.gradient_accumulation_steps,
         }
         for name, value in positive_values.items():
-            if value <= 0:
+            if (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
                 raise ValueError(f"`{name}` must be greater than zero.")
+        if (self.eval_accumulation_steps is not None and
+            (isinstance(self.eval_accumulation_steps, bool) or
+             not isinstance(self.eval_accumulation_steps, int) or self.eval_accumulation_steps <= 0)):
+            raise ValueError("`eval_accumulation_steps` must be a positive integer or "
+                             "None.")
+        if isinstance(self.max_steps, bool) or not isinstance(self.max_steps, int):
+            raise TypeError("`max_steps` must be an integer.")
+        if self.max_steps < -1 or self.max_steps == 0:
+            raise ValueError("`max_steps` must be -1 or a positive integer.")
+        if (isinstance(self.num_train_epochs, bool) or not isinstance(self.num_train_epochs, Real) or
+                not math.isfinite(float(self.num_train_epochs))):
+            raise TypeError("`num_train_epochs` must be a finite number.")
         if self.num_train_epochs <= 0 and self.max_steps <= 0:
             raise ValueError("Set a positive `num_train_epochs` or `max_steps`.")
+        optimizer_values = {
+            "learning_rate": (self.learning_rate, 0.0, False),
+            "weight_decay": (self.weight_decay, 0.0, False),
+            "adam_epsilon": (self.adam_epsilon, 0.0, True),
+            "max_grad_norm": (self.max_grad_norm, 0.0, False),
+        }
+        for name, (value, minimum, strict) in optimizer_values.items():
+            valid = (
+                not isinstance(value, bool) and isinstance(value, Real) and math.isfinite(float(value)) and
+                (value > minimum if strict else value >= minimum))
+            if not valid:
+                comparison = "greater than" if strict else "at least"
+                raise ValueError(f"`{name}` must be finite and {comparison} {minimum}.")
+        for name, value in (
+            ("adam_beta1", self.adam_beta1),
+            ("adam_beta2", self.adam_beta2),
+        ):
+            if (isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)) or
+                    not 0.0 <= value < 1.0):
+                raise ValueError(f"`{name}` must be in the interval [0, 1).")
+        for name, value in (
+            ("logging_steps", self.logging_steps),
+            ("save_steps", self.save_steps),
+            ("warmup_steps", self.warmup_steps),
+            ("dataloader_num_workers", self.dataloader_num_workers),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"`{name}` must be an integer.")
+        for name, value in (
+            ("eval_steps", self.eval_steps),
+            ("save_total_limit", self.save_total_limit),
+        ):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+                raise TypeError(f"`{name}` must be an integer or None.")
+        for name, value in (
+            ("seed", self.seed),
+            ("data_seed", self.data_seed),
+        ):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+                raise TypeError(f"`{name}` must be an integer or None.")
         if self.logging_strategy is IntervalStrategy.STEPS and self.logging_steps <= 0:
             raise ValueError("`logging_steps` must be positive for step logging.")
         if self.save_strategy is IntervalStrategy.STEPS and self.save_steps <= 0:
@@ -111,12 +165,17 @@ class TrainingArguments:
                 raise ValueError("`eval_steps` must be positive for step evaluation.")
         if self.save_total_limit is not None and self.save_total_limit <= 0:
             raise ValueError("`save_total_limit` must be greater than zero.")
-        if not 0.0 <= self.warmup_ratio <= 1.0:
+        if (isinstance(self.warmup_ratio, bool) or not isinstance(self.warmup_ratio, Real) or
+                not math.isfinite(float(self.warmup_ratio)) or not 0.0 <= self.warmup_ratio <= 1.0):
             raise ValueError("`warmup_ratio` must be between zero and one.")
         if self.warmup_steps < 0:
             raise ValueError("`warmup_steps` cannot be negative.")
         if self.fp16 and self.bf16:
             raise ValueError("At most one of `fp16` and `bf16` can be enabled.")
+        if (not isinstance(self.label_names, list) or not self.label_names or
+                any(not isinstance(name, str) or not name.strip() for name in self.label_names) or
+                len(set(self.label_names)) != len(self.label_names)):
+            raise ValueError("`label_names` must be a non-empty list of unique names.")
 
         if self.load_best_model_at_end:
             if self.eval_strategy is IntervalStrategy.NO:

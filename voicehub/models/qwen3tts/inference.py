@@ -19,12 +19,18 @@ class Qwen3TTSConfig(VoiceHubConfig):
         *,
         torch_dtype: str = "bfloat16",
         attention_implementation: str | None = None,
+        training_speaker_name: str = "voicehub",
+        training_speaker_id: int = 3000,
+        sub_talker_loss_weight: float = 0.3,
         sample_rate: int = 24000,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
         self.torch_dtype = torch_dtype
         self.attention_implementation = attention_implementation
+        self.training_speaker_name = training_speaker_name
+        self.training_speaker_id = training_speaker_id
+        self.sub_talker_loss_weight = sub_talker_loss_weight
 
 
 class Qwen3TTSForTextToSpeech(PreTrainedTTSModel):
@@ -48,6 +54,15 @@ class Qwen3TTSForTextToSpeech(PreTrainedTTSModel):
             **config_overrides,
         )
         super().__init__(config, device=device, lazy_load=lazy_load)
+
+    def _validate_training_runtime(self) -> None:
+        model_id = self.config.name_or_path.lower().replace("_", "-")
+        if ("customvoice" in model_id or "custom-voice" in model_id or "voicedesign" in model_id or
+                "voice-design" in model_id):
+            raise ValueError(
+                "The official Qwen3-TTS SFT recipe starts from a 12 Hz Base "
+                "checkpoint. Select Qwen/Qwen3-TTS-12Hz-0.6B-Base or "
+                "Qwen/Qwen3-TTS-12Hz-1.7B-Base.")
 
     def _load_pretrained_model(self) -> None:
         torch = import_optional(

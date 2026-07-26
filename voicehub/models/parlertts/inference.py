@@ -54,6 +54,7 @@ class ParlerTTSForTextToSpeech(PreTrainedTTSModel):
         )
         self.tokenizer = None
         self._torch = None
+        self._loaded_for_training = False
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     def _load_pretrained_model(self) -> None:
@@ -86,10 +87,22 @@ class ParlerTTSForTextToSpeech(PreTrainedTTSModel):
                 self.config.name_or_path,
                 **model_options,
             ).to(self.device))
-        self.model = torch.compile(model) if self.config.compile_model else model
+        should_compile = self.config.compile_model and not self.is_training_load
+        self.model = torch.compile(model) if should_compile else model
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(self.config.name_or_path)
         self._torch = torch
         self.config.sample_rate = self.model.config.sampling_rate
+        self._loaded_for_training = self.is_training_load
+
+    def _prepare_for_training(self) -> None:
+        if self._loaded_for_training:
+            return
+        self.model = None
+        self._loading_for_training = True
+        try:
+            self.load()
+        finally:
+            self._loading_for_training = False
 
     def _generate(
         self,

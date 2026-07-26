@@ -89,7 +89,7 @@ MOSS example:
 ```python
 model = AutoInferenceModel.from_pretrained(
     "moss-tts",
-    model_path="OpenMOSS-Team/MOSS-TTS-v1.5",
+    model_path="OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5",
     variant="local_v1_5",
     device="cuda",
 )
@@ -115,6 +115,44 @@ output = model(
     instruct="A calm, confident adult speaker.",
 )
 ```
+
+## Training-safe runtime selection
+
+Fine-tuning starts through `load_for_training()`, which can select a different
+construction path from inference and reject an incompatible backend:
+
+- Dia fine-tuning selects the official Transformers
+  `DiaForConditionalGeneration` checkpoint and processor. The original Nari
+  `Dia-1.6B` runtime remains inference-only.
+- Sesame CSM fine-tuning selects the official Transformers CSM graph, creates
+  labels with `CsmProcessor`, and keeps the Mimi codec frozen.
+- OmniVoice keeps `torch_dtype="float16"` as its inference default but uses
+  `training_torch_dtype="float32"` by default for training. Its registered
+  collator schema treats codebook tensors as codebook-first and time-last.
+- VoxCPM passes `training=True` through the vendored pipeline, disables the
+  denoiser and inference optimization, and applies the source freezing policy,
+  including the AudioVAE.
+- OuteTTS generic fine-tuning requires the HF backend and rejects
+  `load_in_4bit`, `load_in_8bit`, and non-`None` `quantization_config` options.
+- NeuTTS rejects a GGUF backbone for fine-tuning. An ONNX codec decoder does
+  not block preprocessed HF-backbone training because the codec is not an
+  optimized component and can remain frozen.
+- Qwen3-TTS fine-tuning starts from
+  `Qwen/Qwen3-TTS-12Hz-1.7B-Base`, exposed as
+  `model.training_default_model_name_or_path`. CustomVoice and VoiceDesign
+  checkpoints are inference/export targets for this recipe.
+- MOSS-TTS Delay, Local, and Realtime variants expose native loss paths. Local
+  v1.5 uses the integrated channel-wise supervised fine-tuning objective for
+  `OpenMOSS-Team/MOSS-TTS-Local-Transformer-v1.5`.
+
+Safetensors are weight containers, not proof of a trainable graph. When a
+model repository also publishes GGUF or another serving artifact, select the
+compatible unquantized PyTorch/Transformers checkpoint. Exact training resume
+uses a VoiceHub checkpoint because optimizer, scheduler, RNG, sampler, and
+recipe state are not present in a safetensors weight export.
+
+The exact model-by-model boundary is maintained in the
+[training model matrix](training_models.md).
 
 The [current model research](model_research.md) records the dated Hugging
 Face audit, download/trending signals, upstream source, licensing, and

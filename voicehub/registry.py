@@ -57,7 +57,7 @@ _MODEL_SPECS = (
         "dia",
         "voicehub.models.dia.modeling_dia",
         "DiaForTextToSpeech",
-        "nari-labs/Dia-1.6B",
+        "nari-labs/Dia-1.6B-0626",
         "dia",
         ("text-to-speech", "dialogue"),
         "voicehub.models.dia.configuration_dia",

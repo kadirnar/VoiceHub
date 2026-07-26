@@ -50,6 +50,12 @@ class Zonos2ForTextToSpeech(PreTrainedTTSModel):
         self._sampling_class = None
         super().__init__(config, device=device, lazy_load=lazy_load)
 
+    def _validate_training_runtime(self) -> None:
+        raise RuntimeError(
+            "ZONOS2's vendored TTSLLM is a fused inference engine rather than "
+            "a differentiable nn.Module. Fine-tuning requires a custom "
+            "training adapter built around the unfused training graph.")
+
     def _load_pretrained_model(self) -> None:
         torch = import_optional(
             "torch",

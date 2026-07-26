@@ -48,6 +48,7 @@ class EchoTTSForTextToSpeech(PreTrainedTTSModel):
         )
         self.fish_ae = None
         self.pca_state = None
+        self._loaded_for_training = False
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     def _load_pretrained_model(self) -> None:
@@ -56,14 +57,25 @@ class EchoTTSForTextToSpeech(PreTrainedTTSModel):
         self.model = load_model_from_hf(
             repo_id=self.config.name_or_path,
             device=self.device,
-            compile=self.config.compile_model,
-            delete_blockwise_modules=True,
+            compile=(self.config.compile_model and not self.is_training_load),
+            delete_blockwise_modules=not self.is_training_load,
         )
         self.fish_ae = load_fish_ae_from_hf(device=self.device)
         self.pca_state = load_pca_state_from_hf(
             repo_id=self.config.name_or_path,
             device=self.device,
         )
+        self._loaded_for_training = self.is_training_load
+
+    def _prepare_for_training(self) -> None:
+        if self._loaded_for_training:
+            return
+        self.model = None
+        self._loading_for_training = True
+        try:
+            self.load()
+        finally:
+            self._loading_for_training = False
 
     def _generate(
         self,

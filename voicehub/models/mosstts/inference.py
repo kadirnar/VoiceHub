@@ -21,6 +21,10 @@ class MossTTSConfig(VoiceHubConfig):
         codec_name_or_path: str = "OpenMOSS-Team/MOSS-Audio-Tokenizer-v2",
         torch_dtype: str = "bfloat16",
         attention_implementation: str | None = None,
+        training_channelwise_loss_weights: tuple[float, ...] | str = (1.0, 32.0),
+        training_adam_beta1: float = 0.9,
+        training_adam_beta2: float = 0.95,
+        training_adam_epsilon: float = 1e-4,
         sample_rate: int = 24000,
         **kwargs,
     ):
@@ -29,6 +33,10 @@ class MossTTSConfig(VoiceHubConfig):
         self.codec_name_or_path = codec_name_or_path
         self.torch_dtype = torch_dtype
         self.attention_implementation = attention_implementation
+        self.training_channelwise_loss_weights = training_channelwise_loss_weights
+        self.training_adam_beta1 = training_adam_beta1
+        self.training_adam_beta2 = training_adam_beta2
+        self.training_adam_epsilon = training_adam_epsilon
 
 
 class MossTTSForTextToSpeech(PreTrainedTTSModel):
@@ -68,6 +76,18 @@ class MossTTSForTextToSpeech(PreTrainedTTSModel):
         if "local" in model_id:
             return "local"
         return "delay"
+
+    def _validate_training_runtime(self) -> None:
+        # Local v1.5 uses a channel-wise supervised objective rather than a
+        # loss returned by its model forward. VoiceHub's built-in MOSS recipe
+        # supplies that objective for safetensors checkpoints.
+        identifier = self.config.name_or_path.lower()
+        if ("gguf" in identifier or "llama.cpp" in identifier or "llama_cpp" in identifier):
+            raise ValueError(
+                "MOSS-TTS fine-tuning requires the unquantized Hugging Face "
+                "safetensors graph, not its llama.cpp/GGUF serving artifact. "
+                "Use OpenMOSS-Team/MOSS-TTS-v1.5 (or the matching Local/"
+                "Realtime source checkpoint).")
 
     def _register_vendored_architectures(self, transformers) -> None:
         codec_config = import_optional(
