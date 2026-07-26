@@ -95,4 +95,18 @@ General compute and utility dependencies remain external: PyTorch,
 Transformers, NumPy, audio I/O, phonemizers, and platform runtimes such as
 ONNX Runtime. Neural architecture packages needed by the models—SNAC,
 S3Tokenizer, Perth, DAC, Vocos, Conformer, WavMark, and monotonic alignment—are
-vendored with their licenses.
+vendored with their licenses. Newer families apply the same rule to MOSS
+Audio Tokenizer, DACVAE, NeuCodec, Moshi/Mimi, and SilentCipher.
+
+## Source boundary
+
+An architecture is registered only when its executable model and codec path
+can run without importing an installable TTS project. General compute
+libraries such as PyTorch, Transformers, ONNX Runtime, tokenizers, and audio
+I/O remain regular dependencies. Upstream TTS packages are static-test
+failures even when they happen to be installed in the environment.
+
+The vendoring manifest is declarative: every current project defines copied
+source roots, namespace rewrites, license files, and separately licensed
+components. Running the script recreates the source tree and its provenance
+metadata from exact upstream commits.

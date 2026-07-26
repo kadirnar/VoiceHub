@@ -1,0 +1,8 @@
+{
+  "format": "inflect_v2_inference_checkpoint_v1",
+  "deployable_parameters": 9356513,
+  "tensor_count": 410,
+  "removed_tensor_count": 100,
+  "output_bytes": 37529995,
+  "sha256": "3eede065c9ccfa88ade0a5a9a5c23de34afcbbb32213e59aad44d5cf100fdee8"
+}

@@ -1,0 +1,7 @@
+{
+  "license": "MIT",
+  "model_type": "vibevoice",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "94da20d98b2fa7688e9cbfaf7692ddb4954f7600",
+  "upstream": "https://github.com/microsoft/VibeVoice"
+}

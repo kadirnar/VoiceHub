@@ -53,6 +53,7 @@ IGNORED_SUFFIXES = {
     ".pyc",
     ".safetensors",
     ".t7",
+    ".tar",
     ".wav",
     ".webm",
 }
@@ -64,6 +65,34 @@ class SourceProject:
     directory: str
     url: str
     license_name: str
+
+
+@dataclass(frozen=True)
+class CurrentSourceProject:
+    """Declarative layout for a current-generation upstream snapshot."""
+
+    model_type: str
+    directory: str
+    url: str
+    license_name: str
+    copies: tuple[tuple[str, str], ...]
+    import_roots: tuple[tuple[str, str], ...]
+    license_file: str = "LICENSE"
+    notices_file: str | None = None
+
+
+@dataclass(frozen=True)
+class CurrentSourceComponent:
+    """A separately licensed runtime component owned by one backend."""
+
+    model_type: str
+    directory: str
+    package_name: str
+    url: str
+    license_name: str
+    copies: tuple[tuple[str, str], ...]
+    import_roots: tuple[tuple[str, str], ...]
+    license_file: str = "LICENSE"
 
 
 PROJECTS = (
@@ -114,6 +143,301 @@ PROJECTS = (
         "styletts2",
         "https://github.com/yl4579/StyleTTS2",
         "MIT",
+    ),
+)
+
+CURRENT_PROJECTS = (
+    CurrentSourceProject(
+        "mosstts",
+        "moss-tts",
+        "https://github.com/OpenMOSS/MOSS-TTS",
+        "Apache-2.0",
+        (
+            ("moss_tts_delay", "moss_tts_delay"),
+            ("moss_tts_local", "moss_tts_local"),
+            ("moss_tts_local_v1.5", "moss_tts_local_v1_5"),
+            ("moss_tts_realtime", "moss_tts_realtime"),
+        ),
+        (
+            ("moss_tts_delay", "voicehub.models.mosstts.source.moss_tts_delay"),
+            ("moss_tts_local", "voicehub.models.mosstts.source.moss_tts_local"),
+            (
+                "moss_tts_local_v1_5",
+                "voicehub.models.mosstts.source.moss_tts_local_v1_5",
+            ),
+            (
+                "mossttsrealtime",
+                "voicehub.models.mosstts.source.moss_tts_realtime.mossttsrealtime",
+            ),
+            (
+                "moss_tts_realtime",
+                "voicehub.models.mosstts.source.moss_tts_realtime",
+            ),
+            (
+                "moss_audio_tokenizer",
+                "voicehub.models.mosstts.source.moss_audio_tokenizer",
+            ),
+        ),
+    ),
+    CurrentSourceProject(
+        "qwen3tts",
+        "qwen3-tts",
+        "https://github.com/QwenLM/Qwen3-TTS",
+        "Apache-2.0",
+        (("qwen_tts", "qwen_tts"), ),
+        (("qwen_tts", "voicehub.models.qwen3tts.source.qwen_tts"), ),
+    ),
+    CurrentSourceProject(
+        "irodoritts",
+        "irodori-tts",
+        "https://github.com/Aratako/Irodori-TTS",
+        "MIT",
+        (("irodori_tts", "irodori_tts"), ),
+        (
+            ("irodori_tts", "voicehub.models.irodoritts.source.irodori_tts"),
+            ("dacvae", "voicehub.models.irodoritts.source.dacvae"),
+            (
+                "silentcipher",
+                "voicehub.models.irodoritts.source.silentcipher",
+            ),
+        ),
+    ),
+    CurrentSourceProject(
+        "zonos",
+        "zonos",
+        "https://github.com/Zyphra/Zonos",
+        "Apache-2.0",
+        (("zonos", "zonos"), ),
+        (("zonos", "voicehub.models.zonos.source.zonos"), ),
+    ),
+    CurrentSourceProject(
+        "zonos2",
+        "zonos2",
+        "https://github.com/Zyphra/ZONOS2",
+        "MIT",
+        (("python/zonos2", "zonos2"), ),
+        (
+            ("zonos2", "voicehub.models.zonos2.source.zonos2"),
+            ("zonos", "voicehub.models.zonos.source.zonos"),
+            ("dac", "voicehub.third_party.dac"),
+        ),
+    ),
+    CurrentSourceProject(
+        "voxcpm",
+        "voxcpm",
+        "https://github.com/OpenBMB/VoxCPM",
+        "Apache-2.0",
+        (("src/voxcpm", "voxcpm"), ),
+        (("voxcpm", "voicehub.models.voxcpm.source.voxcpm"), ),
+    ),
+    CurrentSourceProject(
+        "omnivoice",
+        "omnivoice",
+        "https://github.com/k2-fsa/OmniVoice",
+        "Apache-2.0",
+        (("omnivoice", "omnivoice"), ),
+        (("omnivoice", "voicehub.models.omnivoice.source.omnivoice"), ),
+    ),
+    CurrentSourceProject(
+        "higgstts",
+        "higgs-audio",
+        "https://github.com/boson-ai/higgs-audio",
+        "Apache-2.0",
+        (("boson_multimodal", "boson_multimodal"), ),
+        (
+            (
+                "boson_multimodal",
+                "voicehub.models.higgstts.source.boson_multimodal",
+            ),
+            (
+                "dac",
+                "voicehub.models.higgstts.source.boson_multimodal."
+                "audio_processing.descriptaudiocodec.dac",
+            ),
+        ),
+    ),
+    CurrentSourceProject(
+        "xtts",
+        "xtts",
+        "https://github.com/coqui-ai/TTS",
+        "MPL-2.0",
+        (("TTS", "TTS"), ),
+        (("TTS", "voicehub.models.xtts.source.TTS"), ),
+        license_file="LICENSE.txt",
+    ),
+    CurrentSourceProject(
+        "vibevoice",
+        "vibevoice",
+        "https://github.com/microsoft/VibeVoice",
+        "MIT",
+        (("vibevoice", "vibevoice"), ),
+        (("vibevoice", "voicehub.models.vibevoice.source.vibevoice"), ),
+    ),
+    CurrentSourceProject(
+        "fishtts",
+        "fish-speech",
+        "https://github.com/fishaudio/fish-speech",
+        "Fish Audio Research License",
+        (("fish_speech", "fish_speech"), ),
+        (
+            ("fish_speech", "voicehub.models.fishtts.source.fish_speech"),
+            ("dac", "voicehub.third_party.dac"),
+        ),
+    ),
+    CurrentSourceProject(
+        "csm",
+        "csm",
+        "https://github.com/SesameAILabs/csm",
+        "Apache-2.0",
+        (
+            ("generator.py", "csm/generator.py"),
+            ("models.py", "csm/models.py"),
+            ("watermarking.py", "csm/watermarking.py"),
+        ),
+        (
+            ("generator", "voicehub.models.csm.source.csm.generator"),
+            ("models", "voicehub.models.csm.source.csm.models"),
+            ("watermarking", "voicehub.models.csm.source.csm.watermarking"),
+            ("moshi", "voicehub.models.csm.source.moshi"),
+            ("silentcipher", "voicehub.models.csm.source.silentcipher"),
+        ),
+    ),
+    CurrentSourceProject(
+        "neutts",
+        "neutts",
+        "https://github.com/neuphonic/neutts",
+        "NeuTTS Open License v1.0",
+        (("neutts", "neutts"), ),
+        (
+            ("neutts", "voicehub.models.neutts.source.neutts"),
+            ("neucodec", "voicehub.models.neutts.source.neucodec"),
+            ("perth", "voicehub.models.neutts.source.perth"),
+        ),
+    ),
+    CurrentSourceProject(
+        "supertonic",
+        "supertonic",
+        "https://github.com/supertone-inc/supertonic",
+        "MIT",
+        (("py", "supertonic"), ),
+        (("supertonic", "voicehub.models.supertonic.source.supertonic"), ),
+    ),
+    CurrentSourceProject(
+        "inflecttts",
+        "inflect",
+        "https://huggingface.co/owensong/Inflect-Micro-v2",
+        "Apache-2.0",
+        (
+            ("inference.py", "inflect/inference.py"),
+            ("inflect_nano_v2_frontend.py", "inflect/inflect_nano_v2_frontend.py"),
+            ("inflect_vits_frontend.py", "inflect/inflect_vits_frontend.py"),
+            ("runtime", "inflect/runtime"),
+            ("config.json", "inflect/config.json"),
+            ("model.pth.json", "inflect/model.pth.json"),
+            ("release_manifest.json", "inflect/release_manifest.json"),
+        ),
+        (
+            ("runtime", "voicehub.models.inflecttts.source.inflect.runtime"),
+            ("commons", "voicehub.models.inflecttts.source.inflect.runtime.commons"),
+            ("models", "voicehub.models.inflecttts.source.inflect.runtime.models"),
+            ("text", "voicehub.models.inflecttts.source.inflect.runtime.text"),
+            ("utils", "voicehub.models.inflecttts.source.inflect.runtime.utils"),
+            (
+                "inflect_nano_v2_frontend",
+                "voicehub.models.inflecttts.source.inflect.inflect_nano_v2_frontend",
+            ),
+            (
+                "inflect_vits_frontend",
+                "voicehub.models.inflecttts.source.inflect.inflect_vits_frontend",
+            ),
+        ),
+        notices_file="THIRD_PARTY_NOTICES.md",
+    ),
+)
+
+CURRENT_COMPONENTS = (
+    CurrentSourceComponent(
+        "mosstts",
+        "moss-audio-tokenizer",
+        "moss_audio_tokenizer",
+        "https://github.com/OpenMOSS/MOSS-Audio-Tokenizer",
+        "Apache-2.0",
+        (
+            ("__init__.py", "__init__.py"),
+            (
+                "configuration_moss_audio_tokenizer.py",
+                "configuration_moss_audio_tokenizer.py",
+            ),
+            (
+                "modeling_moss_audio_tokenizer.py",
+                "modeling_moss_audio_tokenizer.py",
+            ),
+            ("config.json", "config.json"),
+            ("onnx", "onnx"),
+            ("trt", "trt"),
+        ),
+        (),
+    ),
+    CurrentSourceComponent(
+        "irodoritts",
+        "dacvae",
+        "dacvae",
+        "https://github.com/facebookresearch/dacvae",
+        "Apache-2.0",
+        (("dacvae", "."), ),
+        (("dacvae", "voicehub.models.irodoritts.source.dacvae"), ),
+    ),
+    CurrentSourceComponent(
+        "neutts",
+        "neucodec",
+        "neucodec",
+        "https://github.com/neuphonic/neucodec",
+        "Apache-2.0",
+        (("neucodec", "."), ),
+        (("neucodec", "voicehub.models.neutts.source.neucodec"), ),
+    ),
+    CurrentSourceComponent(
+        "csm",
+        "moshi",
+        "moshi",
+        "https://github.com/kyutai-labs/moshi",
+        "Apache-2.0",
+        (("moshi/moshi", "."), ),
+        (("moshi", "voicehub.models.csm.source.moshi"), ),
+        license_file="LICENSE-APACHE",
+    ),
+    CurrentSourceComponent(
+        "csm",
+        "silentcipher",
+        "silentcipher",
+        "https://github.com/SesameAILabs/silentcipher",
+        "MIT",
+        (("src/silentcipher", "."), ),
+        ((
+            "silentcipher",
+            "voicehub.models.csm.source.silentcipher",
+        ), ),
+    ),
+    CurrentSourceComponent(
+        "irodoritts",
+        "silentcipher",
+        "silentcipher",
+        "https://github.com/SesameAILabs/silentcipher",
+        "MIT",
+        (("src/silentcipher", "."), ),
+        ((
+            "silentcipher",
+            "voicehub.models.irodoritts.source.silentcipher",
+        ), ),
+    ),
+    CurrentSourceComponent(
+        "neutts",
+        "perth",
+        "perth",
+        "https://github.com/resemble-ai/Perth",
+        "MIT",
+        (("src/perth", "."), ),
+        (("perth", "voicehub.models.neutts.source.perth"), ),
     ),
 )
 
@@ -192,11 +516,13 @@ IMPORT_ROOTS = {
 }
 
 
-def _ignore(_directory: str, names: list[str]) -> set[str]:
+def _ignore(directory: str, names: list[str]) -> set[str]:
     ignored = set()
     for name in names:
         path = Path(name)
-        if name in IGNORED_NAMES or path.suffix.lower() in IGNORED_SUFFIXES:
+        source_path = Path(directory) / name
+        if (name in IGNORED_NAMES or path.suffix.lower() in IGNORED_SUFFIXES or name.endswith("_test.py") or
+                source_path.is_symlink()):
             ignored.add(name)
     return ignored
 
@@ -214,6 +540,14 @@ def _copy_file(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
+def _copy_path(source: Path, destination: Path) -> None:
+    """Copy a declared file or directory while preserving package data."""
+    if source.is_dir():
+        _copy_tree(source, destination)
+    else:
+        _copy_file(source, destination)
+
+
 def _revision(repository: Path) -> str:
     return subprocess.check_output(
         ["git", "-C", str(repository), "rev-parse", "HEAD"],
@@ -222,6 +556,8 @@ def _revision(repository: Path) -> str:
 
 
 def _rewrite_imports(source_root: Path, replacements: dict[str, str]) -> None:
+    if not replacements:
+        return
     roots = sorted(replacements, key=len, reverse=True)
     from_pattern = re.compile(
         rf"^(?P<indent>\s*)from (?P<root>{'|'.join(map(re.escape, roots))})"
@@ -231,12 +567,14 @@ def _rewrite_imports(source_root: Path, replacements: dict[str, str]) -> None:
     import_pattern = re.compile(
         rf"^(?P<indent>\s*)import (?P<root>{'|'.join(map(re.escape, roots))})"
         r"(?P<tail>(?:\.[A-Za-z_][\w]*)*)"
-        r"(?P<alias>\s+as\s+[A-Za-z_][\w]*)?\s*$",
+        r"(?P<alias>\s+as\s+[A-Za-z_][\w]*)?"
+        r"(?P<suffix>\s*(?:#.*)?)$",
         re.MULTILINE,
     )
 
     for python_file in source_root.rglob("*.py"):
-        original = python_file.read_text(encoding="utf-8-sig")
+        raw = python_file.read_bytes()
+        original = raw.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
 
         def replace_from(match: re.Match[str]) -> str:
             target = replacements[match.group("root")]
@@ -247,12 +585,14 @@ def _rewrite_imports(source_root: Path, replacements: dict[str, str]) -> None:
             root = match.group("root")
             target = replacements[root] + match.group("tail")
             alias = match.group("alias") or f" as {root.split('.')[0]}"
-            return f"{match.group('indent')}import {target}{alias}"
+            return (f"{match.group('indent')}import {target}{alias}"
+                    f"{match.group('suffix')}")
 
         rewritten = from_pattern.sub(replace_from, original)
         rewritten = import_pattern.sub(replace_import, rewritten)
-        if rewritten != original:
-            python_file.write_text(rewritten, encoding="utf-8")
+        if rewritten.encode("utf-8") != raw:
+            with python_file.open("w", encoding="utf-8", newline="\n") as handle:
+                handle.write(rewritten)
 
 
 def _rewrite_runtime_names(model_type: str, source_root: Path) -> None:
@@ -463,6 +803,98 @@ def vendor_project(
         encoding="utf-8",
     )
     print(f"Vendored {project.model_type} at {metadata['revision'][:12]}")
+
+
+def vendor_current_project(
+    upstream_root: Path,
+    project: CurrentSourceProject,
+    *,
+    force: bool,
+) -> None:
+    """Vendor one declaratively described current-generation backend."""
+    upstream = upstream_root / project.directory
+    destination = MODEL_ROOT / project.model_type / "source"
+    if destination.exists():
+        if not force:
+            raise FileExistsError(
+                f"{destination} already exists; pass --force to replace the "
+                "generated snapshot")
+        shutil.rmtree(destination)
+
+    _write_package_file(destination)
+    for source_name, destination_name in project.copies:
+        target = destination / destination_name
+        _copy_path(upstream / source_name, target)
+        if target.is_dir():
+            _write_package_file(target)
+
+    _rewrite_imports(destination, dict(project.import_roots))
+    _copy_file(
+        upstream / project.license_file,
+        destination / "THIRD_PARTY_LICENSE",
+    )
+    if project.notices_file:
+        _copy_file(
+            upstream / project.notices_file,
+            destination / "THIRD_PARTY_NOTICES",
+        )
+
+    metadata = {
+        "model_type":
+        project.model_type,
+        "upstream":
+        project.url,
+        "revision":
+        _revision(upstream),
+        "license":
+        project.license_name,
+        "policy": (
+            "Upstream implementation source is vendored. Pretrained weights "
+            "are resolved separately and retain their upstream license."),
+    }
+    (destination / "SOURCE.json").write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(f"Vendored {project.model_type} at {metadata['revision'][:12]}")
+
+
+def vendor_current_components(upstream_root: Path) -> None:
+    """Attach separately released codecs to their owning backend snapshots."""
+    for component in CURRENT_COMPONENTS:
+        upstream = upstream_root / component.directory
+        source_root = MODEL_ROOT / component.model_type / "source"
+        destination = source_root / component.package_name
+        if destination.exists():
+            shutil.rmtree(destination)
+        _write_package_file(destination)
+        for source_name, destination_name in component.copies:
+            target = (destination if destination_name == "." else destination / destination_name)
+            if target == destination and (upstream / source_name).is_dir():
+                for child in (upstream / source_name).iterdir():
+                    _copy_path(child, destination / child.name)
+            else:
+                _copy_path(upstream / source_name, target)
+        _rewrite_imports(destination, dict(component.import_roots))
+        _copy_file(
+            upstream / component.license_file,
+            destination / "THIRD_PARTY_LICENSE",
+        )
+
+        metadata_path = source_root / "SOURCE.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata.setdefault("components", []).append({
+            "name": component.package_name,
+            "upstream": component.url,
+            "revision": _revision(upstream),
+            "license": component.license_name,
+        })
+        metadata_path.write_text(
+            json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        print(f"Vendored {component.model_type}/{component.package_name} at "
+              f"{_revision(upstream)[:12]}")
 
 
 def vendor_existing_runtime_components(
@@ -704,7 +1136,22 @@ def main() -> None:
         action="store_true",
         help="Replace previously generated source snapshots.",
     )
+    parser.add_argument(
+        "--current-only",
+        action="store_true",
+        help="Vendor only the current-generation project manifest.",
+    )
     args = parser.parse_args()
+
+    if args.current_only:
+        for project in CURRENT_PROJECTS:
+            vendor_current_project(
+                args.upstream_root.resolve(),
+                project,
+                force=args.force,
+            )
+        vendor_current_components(args.upstream_root.resolve())
+        return
 
     for project in PROJECTS:
         vendor_project(

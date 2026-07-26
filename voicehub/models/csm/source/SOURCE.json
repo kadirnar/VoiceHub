@@ -1,0 +1,21 @@
+{
+  "components": [
+    {
+      "license": "Apache-2.0",
+      "name": "moshi",
+      "revision": "e6a55d2722a65870ef52a6c9f6ecfc0e90f38362",
+      "upstream": "https://github.com/kyutai-labs/moshi"
+    },
+    {
+      "license": "MIT",
+      "name": "silentcipher",
+      "revision": "d46d7d0893a583d8968ab3a6626e2289faec9152",
+      "upstream": "https://github.com/SesameAILabs/silentcipher"
+    }
+  ],
+  "license": "Apache-2.0",
+  "model_type": "csm",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "daed31e6d42cf71873999075de204fa37d2acec3",
+  "upstream": "https://github.com/SesameAILabs/csm"
+}

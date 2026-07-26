@@ -1,0 +1,21 @@
+{
+  "components": [
+    {
+      "license": "Apache-2.0",
+      "name": "dacvae",
+      "revision": "414c20785fc3a28373073ea8ef7a1316eeeaca6e",
+      "upstream": "https://github.com/facebookresearch/dacvae"
+    },
+    {
+      "license": "MIT",
+      "name": "silentcipher",
+      "revision": "d46d7d0893a583d8968ab3a6626e2289faec9152",
+      "upstream": "https://github.com/SesameAILabs/silentcipher"
+    }
+  ],
+  "license": "MIT",
+  "model_type": "irodoritts",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "eaf74d6a19138f743acb5b71a445fd25a57db987",
+  "upstream": "https://github.com/Aratako/Irodori-TTS"
+}

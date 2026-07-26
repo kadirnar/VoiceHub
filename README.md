@@ -11,7 +11,8 @@
 - **Source included:** VoiceHub never delegates synthesis to a separately installed TTS package.
 - **Small base install:** model extras contain only general runtime dependencies.
 - **Actionable errors:** missing backends point to the exact installation extra.
-- **16 backends:** classic TTS, voice cloning, multilingual, dialogue, and prompted-style models.
+- **31 backends:** classic TTS, voice cloning, multilingual, dialogue,
+  realtime, and prompted-style models.
 
 ## Install
 
@@ -77,9 +78,24 @@ up before serving traffic.
 | `outetts`         | OuteTTS         | Speaker profiles, multiple runtimes |
 | `parlertts`       | Parler-TTS      | Natural-language style control      |
 | `styletts2`       | StyleTTS 2      | Style diffusion and voice cloning   |
+| `mosstts`         | MOSS-TTS        | Delay, Local, v1.5, Realtime        |
+| `qwen3tts`        | Qwen3-TTS       | Clone, CustomVoice, VoiceDesign     |
+| `irodoritts`      | Irodori-TTS     | Reference and caption conditioning  |
+| `zonos`           | Zonos 1         | Multilingual voice cloning          |
+| `zonos2`          | ZONOS2          | Batched MoE synthesis and cloning   |
+| `voxcpm`          | VoxCPM 1/2      | Streaming and voice cloning         |
+| `omnivoice`       | OmniVoice       | Multilingual cloning and design     |
+| `higgstts`        | Higgs Audio     | Expressive long-form generation     |
+| `xtts`            | XTTS v2         | Multilingual voice cloning          |
+| `vibevoice`       | VibeVoice       | Realtime cached-voice generation    |
+| `fishtts`         | Fish Speech S2  | Multilingual cloning                |
+| `csm`             | Sesame CSM      | Conversational speaker context      |
+| `neutts`          | NeuTTS          | Air, Nano, multilingual, 2E         |
+| `supertonic`      | Supertonic 3    | Fast multilingual ONNX inference    |
+| `inflecttts`      | Inflect v2      | Compact local synthesis             |
 
 Aliases such as `f5-tts`, `gpt-sovits`, `melo-tts`, `parler-tts`, and
-`style-tts2` are accepted.
+`style-tts2`, `moss-tts`, `qwen3-tts`, and `higgs-tts` are accepted.
 
 Discover models without importing their ML stacks:
 
@@ -141,6 +157,13 @@ ConversationTTS is the sole exception: its public repository has no source
 license, so redistribution is blocked until upstream grants one.
 LLaSA's vendored XCodec2 component is separately licensed under
 CC BY-NC 4.0 and is restricted to non-commercial use.
+
+Some newly included source families also carry restrictions outside
+VoiceHub's Apache-2.0 license: Fish Speech uses the Fish Audio Research
+License, NeuTTS and XTTS checkpoints use their respective custom licenses,
+and VibeVoice checkpoints have responsible-use conditions. Review
+[`SOURCE.json`](voicehub/models) and the selected checkpoint card before use.
+Fish Speech attribution must include “Built with Fish Audio”.
 
 ## Development
 

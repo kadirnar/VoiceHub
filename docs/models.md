@@ -44,11 +44,81 @@ call `model.load()` once during service startup to warm the checkpoint.
 | `outetts` | OuteTTS + shared DAC | Vendored |
 | `parlertts` | Parler-TTS + shared DAC | Vendored |
 | `styletts2` | StyleTTS 2 + monotonic alignment source | Vendored |
+| `mosstts` | MOSS-TTS + MOSS Audio Tokenizer | Vendored |
+| `qwen3tts` | Qwen3-TTS | Vendored |
+| `irodoritts` | Irodori-TTS + DACVAE + SilentCipher | Vendored |
+| `zonos` | Zonos v0.1 | Vendored |
+| `zonos2` | ZONOS2 + shared DAC | Vendored |
+| `voxcpm` | VoxCPM and VoxCPM2 | Vendored |
+| `omnivoice` | OmniVoice | Vendored |
+| `higgstts` | Higgs Audio v2/v2.5 | Vendored |
+| `xtts` | Coqui XTTS v2 architecture | Vendored (MPL-2.0) |
+| `vibevoice` | VibeVoice realtime | Vendored |
+| `fishtts` | Fish Speech S2/OpenAudio + DAC | Vendored (research license) |
+| `csm` | Sesame CSM + Moshi/Mimi + SilentCipher | Vendored |
+| `neutts` | NeuTTS + NeuCodec + Perth | Vendored (custom model license) |
+| `supertonic` | Supertonic 3 ONNX runtime | Vendored |
+| `inflecttts` | Inflect Micro/Nano v2 | Vendored |
 
 Each vendored directory contains `SOURCE.json` and `THIRD_PARTY_LICENSE`.
 `scripts/vendor_tts_sources.py` rebuilds deterministic snapshots from pinned
 upstream revisions. Pretrained weights are not copied except for Perth's
 small runtime watermark checkpoint.
+
+## Current-generation families
+
+The current backends keep checkpoint variants behind one architecture key:
+
+| Backend | Supported family variants |
+|---|---|
+| `mosstts` | Delay, Local, Local v1.5, Realtime, MOSS-TTS and MOSS-TTS-Nano checkpoints |
+| `qwen3tts` | 0.6B/1.7B Base, CustomVoice, VoiceDesign, and voice cloning |
+| `irodoritts` | v2, v3, and VoiceDesign-compatible checkpoints |
+| `zonos` / `zonos2` | Zonos v0.1 Transformer/Hybrid and ZONOS2 |
+| `voxcpm` | VoxCPM and VoxCPM2 |
+| `higgstts` | Higgs Audio v2/v2.5 source architecture |
+| `neutts` | Air, Nano, multilingual Nano, and 2E backbones |
+| `inflecttts` | Inflect Micro v2 and Nano v2 |
+
+Model weights, cached voice prompts, preset speaker embeddings, and ONNX
+graphs are not embedded in the wheel. They are resolved from a checkpoint
+repository or accepted as local paths.
+
+MOSS example:
+
+```python
+model = AutoInferenceModel.from_pretrained(
+    "moss-tts",
+    model_path="OpenMOSS-Team/MOSS-TTS-v1.5",
+    variant="local_v1_5",
+    device="cuda",
+)
+output = model(
+    "Source-integrated speech generation.",
+    speaker_audio_path="reference.wav",
+    output_file="moss.wav",
+)
+```
+
+Qwen3-TTS voice design:
+
+```python
+model = AutoInferenceModel.from_pretrained(
+    "qwen3-tts",
+    model_path="Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    device="cuda",
+)
+output = model(
+    "Merhaba, VoiceHub'a hoş geldiniz.",
+    mode="voice_design",
+    language="Turkish",
+    instruct="A calm, confident adult speaker.",
+)
+```
+
+The [current model research](model_research.md) records the dated Hugging
+Face audit, download/trending signals, upstream source, licensing, and
+source-only inclusion decisions.
 
 LLaSA uses the vendored XCodec2 architecture instead of the `xcodec2` pip
 package. The XCodec2 source and model are licensed CC BY-NC 4.0, so review
@@ -144,6 +214,9 @@ output = model(
 
 Only clone a voice with the speaker's permission and follow the selected
 checkpoint's license and disclosure requirements.
+
+Fish Speech is distributed under the Fish Audio Research License. Its
+required attribution is: **Built with Fish Audio**.
 
 ## ConversationTTS
 
