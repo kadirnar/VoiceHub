@@ -1,7 +1,7 @@
 """Built-in source-native fine-tuning recipes.
 
-These adapters preserve objectives published by the model authors while using
-VoiceHub's common optimization, checkpoint, and strategy layers.
+These adapters preserve objectives published by the model authors while
+using VoiceHub's common optimization, checkpoint, and strategy layers.
 """
 
 from __future__ import annotations
@@ -17,11 +17,7 @@ from voicehub.models.cosyvoice.training import CosyVoiceTrainingAdapter
 from voicehub.models.dia.training import DiaTrainingAdapter
 from voicehub.models.higgstts.training import HiggsTrainingAdapter
 from voicehub.models.xtts.training import XTTSTrainingAdapter
-from voicehub.training.adapters import (
-    BaseTrainingAdapter,
-    CausalLMTrainingAdapter,
-    FlowMatchingTrainingAdapter,
-)
+from voicehub.training.adapters import BaseTrainingAdapter, CausalLMTrainingAdapter, FlowMatchingTrainingAdapter
 from voicehub.training.contracts import TrainingContext
 from voicehub.training.ema import ExponentialMovingAverage
 
@@ -168,8 +164,7 @@ class ConversationTTSTrainingAdapter(
         required = ("tokens", "labels", "tokens_mask")
         missing = [name for name in required if name not in prepared]
         if missing:
-            raise ValueError(
-                "ConversationTTS fine-tuning requires: " + ", ".join(missing))
+            raise ValueError("ConversationTTS fine-tuning requires: " + ", ".join(missing))
         model = self.primary_model
         c0_logits, residual_logits, residual_labels = model(
             tokens=prepared["tokens"],
@@ -241,8 +236,7 @@ class F5TTSTrainingAdapter(
             self._ema = ExponentialMovingAverage(
                 self.primary_model,
                 decay=float(getattr(config, "ema_decay", 0.9999)),
-                update_after_step=int(
-                    getattr(config, "ema_update_after_step", 0)),
+                update_after_step=int(getattr(config, "ema_update_after_step", 0)),
                 update_every=int(getattr(config, "ema_update_every", 1)),
             )
         return self
@@ -251,15 +245,12 @@ class F5TTSTrainingAdapter(
         configuration = dict(super().recipe_resume_configuration())
         config = getattr(self.model, "config", None)
         configuration.update({
-            "resolved_ema_decay": float(
-                getattr(config, "ema_decay", 0.9999),
-            ),
-            "resolved_ema_update_after_step": int(
-                getattr(config, "ema_update_after_step", 0),
-            ),
-            "resolved_ema_update_every": int(
-                getattr(config, "ema_update_every", 1),
-            ),
+            "resolved_ema_decay":
+            float(getattr(config, "ema_decay", 0.9999), ),
+            "resolved_ema_update_after_step":
+            int(getattr(config, "ema_update_after_step", 0), ),
+            "resolved_ema_update_every":
+            int(getattr(config, "ema_update_every", 1), ),
         })
         return configuration
 
@@ -282,10 +273,7 @@ class F5TTSTrainingAdapter(
             if source in prepared and target not in prepared:
                 prepared[target] = prepared.pop(source)
         allowed = ("inp", "text", "lens", "noise_scheduler")
-        return {
-            name: prepared[name]
-            for name in allowed if name in prepared
-        }
+        return {name: prepared[name] for name in allowed if name in prepared}
 
     def on_optimizer_step(
         self,
@@ -383,8 +371,8 @@ class MossTTSTrainingAdapter(
         for parameter_name, parameter in parameters:
             normalized = parameter_name.lower()
             target = (
-                no_decay if parameter_name.endswith(".bias") or
-                "norm" in normalized or "ln_" in normalized else decay)
+                no_decay
+                if parameter_name.endswith(".bias") or "norm" in normalized or "ln_" in normalized else decay)
             target.append(parameter)
         groups = []
         if decay:
@@ -423,14 +411,10 @@ class MossTTSTrainingAdapter(
             raise ValueError(
                 "MOSS channelwise loss weights must contain two values or "
                 f"one value per head ({n_heads}).")
-        if (
-            any(not math.isfinite(value) or value < 0 for value in values)
-            or sum(values) <= 0
-        ):
+        if (any(not math.isfinite(value) or value < 0 for value in values) or sum(values) <= 0):
             raise ValueError(
                 "MOSS channelwise loss weights must be finite, non-negative, "
-                "and sum to a positive value."
-            )
+                "and sum to a positive value.")
         return values
 
     def execute_training_phase(
@@ -444,8 +428,7 @@ class MossTTSTrainingAdapter(
         required = ("input_ids", "attention_mask", "labels")
         missing = [name for name in required if name not in prepared]
         if missing:
-            raise ValueError(
-                "MOSS Local v1.5 fine-tuning requires: " + ", ".join(missing))
+            raise ValueError("MOSS Local v1.5 fine-tuning requires: " + ", ".join(missing))
         outputs = self.primary_model(
             input_ids=prepared["input_ids"],
             attention_mask=prepared["attention_mask"],
@@ -519,11 +502,8 @@ class MossTTSTrainingAdapter(
         total_weight = 0.0
         losses = {}
         text_targets = flat_labels[:, 0]
-        if (
-            hasattr(model, "_use_binary_local_text_head")
-            and model._use_binary_local_text_head()
-            and getattr(model, "local_text_lm_head", None) is not None
-        ):
+        if (hasattr(model, "_use_binary_local_text_head") and model._use_binary_local_text_head() and
+                getattr(model, "local_text_lm_head", None) is not None):
             logits = model.local_text_lm_head(local_hidden[:, 0, :])
             targets = torch.full_like(text_targets, -100)
             targets = targets.masked_fill(
@@ -551,8 +531,7 @@ class MossTTSTrainingAdapter(
             targets = audio_targets[:, channel_index]
             if not (targets != -100).any():
                 continue
-            logits = model.audio_lm_heads[channel_index](
-                local_hidden[:, channel_index, :])
+            logits = model.audio_lm_heads[channel_index](local_hidden[:, channel_index, :])
             channel_loss = functional.cross_entropy(
                 logits.float(),
                 targets,
@@ -593,8 +572,7 @@ class Qwen3TTSTrainingAdapter(
 
     def setup(self):
         super().setup()
-        model_type = str(
-            getattr(self.primary_model.config, "tts_model_type", "")).lower()
+        model_type = str(getattr(self.primary_model.config, "tts_model_type", "")).lower()
         speaker_encoder = getattr(self.primary_model, "speaker_encoder", None)
         if model_type != "base" or speaker_encoder is None:
             raise ValueError(
@@ -608,8 +586,7 @@ class Qwen3TTSTrainingAdapter(
     def recipe_resume_configuration(self):
         configuration = dict(super().recipe_resume_configuration())
         configuration["resolved_sub_talker_loss_weight"] = float(
-            getattr(self.model.config, "sub_talker_loss_weight", 0.3),
-        )
+            getattr(self.model.config, "sub_talker_loss_weight", 0.3), )
         return configuration
 
     def create_dataset(self, records, **kwargs):
@@ -644,8 +621,7 @@ class Qwen3TTSTrainingAdapter(
         )
         missing = [name for name in required if name not in batch]
         if missing:
-            raise ValueError(
-                "Qwen3-TTS fine-tuning requires: " + ", ".join(missing))
+            raise ValueError("Qwen3-TTS fine-tuning requires: " + ", ".join(missing))
         model = self.primary_model
         speaker_embedding = model.speaker_encoder(
             batch["ref_mels"].to(
@@ -660,12 +636,9 @@ class Qwen3TTSTrainingAdapter(
         input_text_ids = input_ids[:, :, 0]
         input_codec_ids = input_ids[:, :, 1]
         text_embeddings = model.talker.get_text_embeddings()(input_text_ids)
-        text_embeddings = (
-            model.talker.text_projection(text_embeddings) *
-            batch["text_embedding_mask"])
+        text_embeddings = (model.talker.text_projection(text_embeddings) * batch["text_embedding_mask"])
         codec_embeddings = (
-            model.talker.model.codec_embedding(input_codec_ids) *
-            batch["codec_embedding_mask"])
+            model.talker.model.codec_embedding(input_codec_ids) * batch["codec_embedding_mask"])
         codec_embeddings = codec_embeddings.clone()
         codec_embeddings[:, 6, :] = speaker_embedding
         input_embeddings = text_embeddings + codec_embeddings
@@ -673,11 +646,9 @@ class Qwen3TTSTrainingAdapter(
         codec_mask = batch["codec_mask"]
         for channel_index in range(1, codec_ids.shape[-1]):
             channel_embedding = (
-                model.talker.code_predictor.get_input_embeddings()[
-                    channel_index - 1](codec_ids[:, :, channel_index]))
-            input_embeddings = (
-                input_embeddings +
-                channel_embedding * codec_mask.unsqueeze(-1))
+                model.talker.code_predictor.get_input_embeddings()[channel_index - 1](
+                    codec_ids[:, :, channel_index]))
+            input_embeddings = (input_embeddings + channel_embedding * codec_mask.unsqueeze(-1))
 
         outputs = model.talker(
             inputs_embeds=input_embeddings,
@@ -695,13 +666,10 @@ class Qwen3TTSTrainingAdapter(
             talker_codec_ids,
             talker_hidden,
         )
-        sub_weight = float(
-            getattr(self.model.config, "sub_talker_loss_weight", 0.3))
+        sub_weight = float(getattr(self.model.config, "sub_talker_loss_weight", 0.3))
         if not math.isfinite(sub_weight) or sub_weight < 0:
-            raise ValueError(
-                "Qwen3-TTS sub-talker loss weight must be finite and "
-                "non-negative."
-            )
+            raise ValueError("Qwen3-TTS sub-talker loss weight must be finite and "
+                             "non-negative.")
         loss = outputs.loss + sub_weight * sub_loss
         return self._training_output(
             context,
@@ -716,9 +684,9 @@ class Qwen3TTSTrainingAdapter(
 
     def recipe_state_dict(self) -> Mapping[str, Any]:
         return {
-            "target_speaker_embedding":
-            (None if self._target_speaker_embedding is None else
-             self._target_speaker_embedding.detach().clone())
+            "target_speaker_embedding": (
+                None if self._target_speaker_embedding is None else
+                self._target_speaker_embedding.detach().clone())
         }
 
     def load_recipe_state_dict(
@@ -730,12 +698,10 @@ class Qwen3TTSTrainingAdapter(
         if not state_dict:
             return
         if strict and set(state_dict) != {"target_speaker_embedding"}:
-            raise ValueError(
-                "Qwen3-TTS recipe state must contain only "
-                "'target_speaker_embedding'.")
+            raise ValueError("Qwen3-TTS recipe state must contain only "
+                             "'target_speaker_embedding'.")
         embedding = state_dict.get("target_speaker_embedding")
-        self._target_speaker_embedding = (
-            None if embedding is None else embedding.detach().clone())
+        self._target_speaker_embedding = (None if embedding is None else embedding.detach().clone())
 
     def save_pretrained(self, save_directory) -> None:
         """Write a directly loadable Hugging Face safetensors directory."""
@@ -744,8 +710,7 @@ class Qwen3TTSTrainingAdapter(
             return
         model = self.primary_model
         speaker_id = int(getattr(self.model.config, "training_speaker_id", 3000))
-        speaker_name = str(
-            getattr(self.model.config, "training_speaker_name", "voicehub"))
+        speaker_name = str(getattr(self.model.config, "training_speaker_name", "voicehub"))
         embedding = model.talker.model.codec_embedding.weight
         if not 0 <= speaker_id < embedding.shape[0]:
             raise ValueError(
@@ -755,16 +720,11 @@ class Qwen3TTSTrainingAdapter(
         destination = Path(save_directory)
         state_dict = {
             name: value
-            for name, value in model.state_dict().items()
-            if not name.startswith("speaker_encoder.")
+            for name, value in model.state_dict().items() if not name.startswith("speaker_encoder.")
         }
         embedding_module = model.talker.model.codec_embedding
         embedding_key = next(
-            (
-                f"{name}.weight"
-                for name, module in model.named_modules()
-                if module is embedding_module
-            ),
+            (f"{name}.weight" for name, module in model.named_modules() if module is embedding_module),
             None,
         )
         if embedding_key is None or embedding_key not in state_dict:

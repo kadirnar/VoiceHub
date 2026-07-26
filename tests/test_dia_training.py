@@ -8,10 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from voicehub.models.dia.inference import (
-    DiaConfig,
-    DiaForTextToSpeech,
-)
+import voicehub.models.dia.training as dia_training
+from voicehub.models.dia.inference import DiaConfig, DiaForTextToSpeech
 from voicehub.models.dia.training import (
     DiaSFTDataset,
     DiaTrainingAdapter,
@@ -19,11 +17,9 @@ from voicehub.models.dia.training import (
     DiaTrainingCollator,
     load_dia_transformers_backend,
 )
+from voicehub.trainer_utils import NATIVE_EXPORT_DIR
 from voicehub.training.contracts import TrainingSupport
 from voicehub.training.specs import ModelTrainingSpec, TrainingFamily
-from voicehub.trainer_utils import NATIVE_EXPORT_DIR
-import voicehub.models.dia.training as dia_training
-
 
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -77,8 +73,7 @@ class DiaTrainingInputTests(unittest.TestCase):
         command = (
             "import sys; "
             "import voicehub.models.dia.training; "
-            "print('torch' in sys.modules, 'transformers' in sys.modules)"
-        )
+            "print('torch' in sys.modules, 'transformers' in sys.modules)")
         result = subprocess.run(
             [sys.executable, "-c", command],
             cwd=PROJECT_ROOT,
@@ -258,6 +253,7 @@ class DiaWrapperTests(unittest.TestCase):
         )
 
     def test_transformers_export_cannot_overwrite_voicehub_config(self):
+
         class NativeBackend:
 
             def save_pretrained(self, directory):
@@ -278,16 +274,13 @@ class DiaWrapperTests(unittest.TestCase):
         model._dia_backend = NativeBackend()
         with tempfile.TemporaryDirectory() as directory:
             model.save_pretrained(directory)
-            root_config = json.loads(
-                Path(directory, "config.json").read_text(encoding="utf-8")
-            )
+            root_config = json.loads(Path(directory, "config.json").read_text(encoding="utf-8"))
             native_config = json.loads(
                 Path(
                     directory,
                     NATIVE_EXPORT_DIR,
                     "config.json",
-                ).read_text(encoding="utf-8")
-            )
+                ).read_text(encoding="utf-8"))
 
         self.assertEqual(root_config["model_type"], "dia")
         self.assertEqual(native_config["model_type"], "dia-native")
@@ -311,9 +304,7 @@ class DiaTrainingBackendTests(unittest.TestCase):
 
             def forward(self, input_ids, labels, **kwargs):
                 del input_ids, kwargs
-                return SimpleNamespace(
-                    loss=(self.scale - labels.float().mean()).square(),
-                )
+                return SimpleNamespace(loss=(self.scale - labels.float().mean()).square(), )
 
         class FakeModelFactory:
 
@@ -346,9 +337,9 @@ class DiaTrainingBackendTests(unittest.TestCase):
             raise AssertionError(name)
 
         with patch.object(
-            dia_training,
-            "import_optional",
-            side_effect=optional_dependency,
+                dia_training,
+                "import_optional",
+                side_effect=optional_dependency,
         ):
             backend = load_dia_transformers_backend(
                 "nari-labs/Dia-1.6B-0626",
@@ -370,11 +361,7 @@ class DiaTrainingBackendTests(unittest.TestCase):
         self.assertFalse(backend.model.config.use_cache)
         self.assertFalse(processor.audio_tokenizer.training)
         self.assertTrue(
-            all(
-                not parameter.requires_grad
-                for parameter in processor.audio_tokenizer.parameters()
-            )
-        )
+            all(not parameter.requires_grad for parameter in processor.audio_tokenizer.parameters()))
 
         loss = backend.forward_loss(
             input_ids=torch.tensor([[1, 2]]),
@@ -382,12 +369,7 @@ class DiaTrainingBackendTests(unittest.TestCase):
         )
         loss.backward()
         self.assertIsNotNone(backend.model.scale.grad)
-        self.assertTrue(
-            all(
-                parameter.grad is None
-                for parameter in processor.audio_tokenizer.parameters()
-            )
-        )
+        self.assertTrue(all(parameter.grad is None for parameter in processor.audio_tokenizer.parameters()))
 
     def test_native_adapter_backpropagates_official_loss(self):
         import torch
@@ -422,7 +404,7 @@ class DiaTrainingBackendTests(unittest.TestCase):
         spec = ModelTrainingSpec(
             model_type="dia",
             family=TrainingFamily.SEQ2SEQ,
-            module_paths=("model",),
+            module_paths=("model", ),
             support=TrainingSupport.NATIVE,
             native_training=True,
         )
@@ -440,12 +422,7 @@ class DiaTrainingBackendTests(unittest.TestCase):
 
         self.assertEqual(output.loss.ndim, 0)
         self.assertIsNotNone(runtime.scale.grad)
-        self.assertTrue(
-            all(
-                parameter.grad is None
-                for parameter in processor.audio_tokenizer.parameters()
-            )
-        )
+        self.assertTrue(all(parameter.grad is None for parameter in processor.audio_tokenizer.parameters()))
 
     def test_backend_exports_transformers_safetensors(self):
         import torch
@@ -465,9 +442,7 @@ class DiaTrainingBackendTests(unittest.TestCase):
                 self.saved = (Path(directory), safe_serialization)
 
         model = SaveableModel()
-        processor = FakeProcessor(
-            audio_tokenizer=torch.nn.Linear(1, 1),
-        )
+        processor = FakeProcessor(audio_tokenizer=torch.nn.Linear(1, 1), )
         backend = DiaTrainingBackend(
             model=model,
             processor=processor,

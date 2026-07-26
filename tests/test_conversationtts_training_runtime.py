@@ -7,12 +7,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from voicehub import Trainer, TrainingArguments
-from voicehub.models.conversationtts.inference import (
-    ConversationTTSConfig,
-    ConversationTTSForTextToSpeech,
-)
+from voicehub.models.conversationtts.inference import ConversationTTSConfig, ConversationTTSForTextToSpeech
 from voicehub.models.conversationtts.runtime import resume_for_inference
-
 
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 
@@ -25,12 +21,11 @@ class ConversationTTSCheckpointTests(unittest.TestCase):
                 "model": {
                     "module.weight": 3,
                 },
-            }),
-        )
+            }), )
         model = Mock()
         with patch(
-            "voicehub.models.conversationtts.runtime.import_optional",
-            return_value=torch,
+                "voicehub.models.conversationtts.runtime.import_optional",
+                return_value=torch,
         ):
             resume_for_inference("/checkpoint.pt", None, model, "cpu")
 
@@ -50,12 +45,11 @@ class ConversationTTSCheckpointTests(unittest.TestCase):
                         "weight": 4,
                     },
                 },
-            ]),
-        )
+            ]), )
         model = Mock()
         with patch(
-            "voicehub.models.conversationtts.runtime.import_optional",
-            return_value=torch,
+                "voicehub.models.conversationtts.runtime.import_optional",
+                return_value=torch,
         ):
             resume_for_inference("/checkpoint.pt", None, model, "cpu")
 
@@ -76,15 +70,13 @@ class ConversationTTSCheckpointTests(unittest.TestCase):
         model.load_state_dict.assert_called_once_with({"weight": 4})
 
     def test_checkpoint_does_not_retry_unsafe_content_failures(self):
-        torch = SimpleNamespace(
-            load=Mock(side_effect=RuntimeError("unsafe checkpoint")),
-        )
+        torch = SimpleNamespace(load=Mock(side_effect=RuntimeError("unsafe checkpoint")), )
         with (
-            patch(
-                "voicehub.models.conversationtts.runtime.import_optional",
-                return_value=torch,
-            ),
-            self.assertRaisesRegex(RuntimeError, "unsafe checkpoint"),
+                patch(
+                    "voicehub.models.conversationtts.runtime.import_optional",
+                    return_value=torch,
+                ),
+                self.assertRaisesRegex(RuntimeError, "unsafe checkpoint"),
         ):
             resume_for_inference(
                 "/checkpoint.pt",
@@ -220,16 +212,14 @@ class ConversationTTSTrainingRuntimeTests(unittest.TestCase):
                     {
                         "zero_loss": logits.detach().mean(),
                     },
-                )
-            ),
+                )),
             CrossEntropyAndAccuracy_residual=(
                 lambda logits, labels, loss_weights, ignore_id=0: (
                     logits.mean(),
                     {
                         "residual_loss": logits.detach().mean(),
                     },
-                )
-            ),
+                )),
         )
 
     def _model(self):
@@ -266,31 +256,31 @@ class ConversationTTSTrainingRuntimeTests(unittest.TestCase):
             model.weight.data.fill_(1.0)
 
         with (
-            patch(
-                "voicehub.models.conversationtts."
-                "modeling_conversationtts.import_optional",
-                side_effect=import_runtime,
-            ),
-            patch(
-                "voicehub.models.conversationtts."
-                "modeling_conversationtts.resume_for_inference",
-                side_effect=restore_checkpoint,
-            ),
-            patch.object(
-                ConversationTTSForTextToSpeech,
-                "_checkpoint_path",
-                return_value=Path("/unused/checkpoint.pt"),
-            ),
-            patch.object(
-                ConversationTTSForTextToSpeech,
-                "_text_tokenizer_path",
-                return_value=Path("/unused/text-tokenizer"),
-            ) as text_tokenizer,
-            patch.object(
-                ConversationTTSForTextToSpeech,
-                "_audio_tokenizer_path",
-                return_value=Path("/unused/audio-tokenizer.safetensors"),
-            ) as audio_tokenizer,
+                patch(
+                    "voicehub.models.conversationtts."
+                    "modeling_conversationtts.import_optional",
+                    side_effect=import_runtime,
+                ),
+                patch(
+                    "voicehub.models.conversationtts."
+                    "modeling_conversationtts.resume_for_inference",
+                    side_effect=restore_checkpoint,
+                ),
+                patch.object(
+                    ConversationTTSForTextToSpeech,
+                    "_checkpoint_path",
+                    return_value=Path("/unused/checkpoint.pt"),
+                ),
+                patch.object(
+                    ConversationTTSForTextToSpeech,
+                    "_text_tokenizer_path",
+                    return_value=Path("/unused/text-tokenizer"),
+                ) as text_tokenizer,
+                patch.object(
+                    ConversationTTSForTextToSpeech,
+                    "_audio_tokenizer_path",
+                    return_value=Path("/unused/audio-tokenizer.safetensors"),
+                ) as audio_tokenizer,
         ):
             yield SimpleNamespace(
                 imported=imported,
@@ -304,13 +294,11 @@ class ConversationTTSTrainingRuntimeTests(unittest.TestCase):
         def import_source(name, **_kwargs):
             if name.endswith("models.model_new"):
                 return self.loss_module
-            raise AssertionError(
-                f"Unexpected ConversationTTS recipe import: {name}"
-            )
+            raise AssertionError(f"Unexpected ConversationTTS recipe import: {name}")
 
         with patch(
-            "voicehub.training.recipes.import_optional",
-            side_effect=import_source,
+                "voicehub.training.recipes.import_optional",
+                side_effect=import_source,
         ):
             yield
 

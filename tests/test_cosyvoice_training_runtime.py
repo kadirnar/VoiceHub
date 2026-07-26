@@ -5,10 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from voicehub.models.cosyvoice.inference import (
-    CosyVoiceConfig,
-    CosyVoiceForTextToSpeech,
-)
+from voicehub.models.cosyvoice.inference import CosyVoiceConfig, CosyVoiceForTextToSpeech
 from voicehub.models.cosyvoice.training import (
     CosyVoiceTrainingAdapter,
     CosyVoiceTrainingArtifacts,
@@ -25,6 +22,7 @@ if TORCH_AVAILABLE:
 
 
 class _HyperPyYamlStub:
+
     def __init__(self, configs):
         self.configs = configs
         self.overrides = None
@@ -37,10 +35,9 @@ class _HyperPyYamlStub:
 
 
 class CosyVoicePackagingTests(unittest.TestCase):
+
     def test_extra_covers_official_yaml_and_eager_matcha_imports(self):
-        pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(
-            encoding="utf-8"
-        )
+        pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
         section_start = pyproject.index("cosyvoice = [")
         section_end = pyproject.index("\n]", section_start)
         cosyvoice_extra = pyproject[section_start:section_end]
@@ -63,39 +60,34 @@ class CosyVoicePackagingTests(unittest.TestCase):
             "wget",
         }
 
-        missing = sorted(
-            dependency
-            for dependency in required
-            if f'"{dependency}"' not in cosyvoice_extra
-        )
+        missing = sorted(dependency for dependency in required if f'"{dependency}"' not in cosyvoice_extra)
 
         self.assertEqual(missing, [])
 
 
 @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")
 class CosyVoiceTrainingRuntimeTests(unittest.TestCase):
+
     def test_training_loader_builds_only_the_selected_yaml_component(self):
         component = torch.nn.Linear(2, 1)
         checkpoint_state = {
             "weight": torch.full_like(component.weight, 3.0),
             "bias": torch.full_like(component.bias, -2.0),
         }
-        hyperpyyaml = _HyperPyYamlStub(
-            {
-                "llm": component,
-                "train_conf": {
-                    "optim": "adamw",
-                    "optim_conf": {
-                        "lr": 2e-4,
-                    },
-                    "scheduler": "warmuplr",
-                    "scheduler_conf": {
-                        "warmup_steps": 10,
-                    },
+        hyperpyyaml = _HyperPyYamlStub({
+            "llm": component,
+            "train_conf": {
+                "optim": "adamw",
+                "optim_conf": {
+                    "lr": 2e-4,
                 },
-                "sample_rate": 22_050,
-            }
-        )
+                "scheduler": "warmuplr",
+                "scheduler_conf": {
+                    "warmup_steps": 10,
+                },
+            },
+            "sample_rate": 22_050,
+        })
 
         with tempfile.TemporaryDirectory() as directory:
             model_directory = Path(directory)
@@ -114,11 +106,11 @@ class CosyVoiceTrainingRuntimeTests(unittest.TestCase):
                 raise AssertionError(f"Unexpected import: {module_name}")
 
             with (
-                patch(
-                    "voicehub.models.cosyvoice.training.import_optional",
-                    side_effect=import_stub,
-                ),
-                patch.object(torch, "load", return_value=checkpoint_state),
+                    patch(
+                        "voicehub.models.cosyvoice.training.import_optional",
+                        side_effect=import_stub,
+                    ),
+                    patch.object(torch, "load", return_value=checkpoint_state),
             ):
                 backend = load_cosyvoice_training_backend(
                     model_directory,
@@ -156,22 +148,18 @@ class CosyVoiceTrainingRuntimeTests(unittest.TestCase):
         checkpoint_state = {
             "weight": torch.full_like(component.weight, 4.0),
         }
-        hyperpyyaml = _HyperPyYamlStub(
-            {
-                "flow": component,
-                "train_conf": {
-                    "optim": "adam",
-                    "optim_conf": {
-                        "lr": 1e-3,
-                    },
-                    "scheduler": "constantlr",
-                    "scheduler_conf": {},
+        hyperpyyaml = _HyperPyYamlStub({
+            "flow": component,
+            "train_conf": {
+                "optim": "adam",
+                "optim_conf": {
+                    "lr": 1e-3,
                 },
-            }
-        )
-        safetensors = SimpleNamespace(
-            load_file=lambda path, device: checkpoint_state,
-        )
+                "scheduler": "constantlr",
+                "scheduler_conf": {},
+            },
+        })
+        safetensors = SimpleNamespace(load_file=lambda path, device: checkpoint_state, )
 
         with tempfile.TemporaryDirectory() as directory:
             model_directory = Path(directory)
@@ -189,8 +177,8 @@ class CosyVoiceTrainingRuntimeTests(unittest.TestCase):
                 raise AssertionError(f"Unexpected import: {module_name}")
 
             with patch(
-                "voicehub.models.cosyvoice.training.import_optional",
-                side_effect=import_stub,
+                    "voicehub.models.cosyvoice.training.import_optional",
+                    side_effect=import_stub,
             ):
                 backend = load_cosyvoice_training_backend(
                     model_directory,
@@ -239,22 +227,18 @@ class CosyVoiceTrainingRuntimeTests(unittest.TestCase):
             model._cosyvoice_training_backend = None
 
         with (
-            patch.object(
-                model,
-                "_load_full_inference_model",
-                side_effect=load_full_runtime,
-            ) as load_full,
-            patch.object(
-                model,
-                "_select_inference",
-                return_value=iter(
-                    [
-                        {
-                            "tts_speech": torch.tensor([[1.0, 2.0]]),
-                        }
-                    ]
+                patch.object(
+                    model,
+                    "_load_full_inference_model",
+                    side_effect=load_full_runtime,
+                ) as load_full,
+                patch.object(
+                    model,
+                    "_select_inference",
+                    return_value=iter([{
+                        "tts_speech": torch.tensor([[1.0, 2.0]]),
+                    }]),
                 ),
-            ),
         ):
             output = model._generate("portable artifact")
 
@@ -271,10 +255,10 @@ class CosyVoiceTrainingRuntimeTests(unittest.TestCase):
         self.assertIs(model._cosyvoice_training_backend, backend)
         self.assertIsNot(model.model, backend)
 
-    def test_same_adapter_resumes_on_its_optimizer_owned_backend_after_generate(
-        self,
-    ):
+    def test_same_adapter_resumes_on_its_optimizer_owned_backend_after_generate(self, ):
+
         class SourceComponent(torch.nn.Module):
+
             def __init__(self, scale):
                 super().__init__()
                 self.scale = torch.nn.Parameter(torch.tensor(float(scale)))
@@ -330,49 +314,40 @@ class CosyVoiceTrainingRuntimeTests(unittest.TestCase):
                     save_strategy="no",
                     use_cpu=True,
                 ),
-                train_dataset=[
-                    {
-                        "batch": {
-                            "values": torch.tensor([2.0]),
-                        }
+                train_dataset=[{
+                    "batch": {
+                        "values": torch.tensor([2.0]),
                     }
-                ],
+                }],
                 data_collator=lambda features: features[0],
                 training_adapter=adapter,
                 optimizer_factory=lambda _name, parameters, _args: torch.optim.SGD(
                     [parameter for _, parameter in parameters],
                     lr=0.1,
                 ),
-                scheduler_factory=lambda _name, optimizer, _steps, _args: (
-                    torch.optim.lr_scheduler.LambdaLR(
-                        optimizer,
-                        lambda _step: 1.0,
-                    )
-                ),
+                scheduler_factory=lambda _name, optimizer, _steps, _args:
+                (torch.optim.lr_scheduler.LambdaLR(
+                    optimizer,
+                    lambda _step: 1.0,
+                )),
             )
             trainer._move_model_to_device()
             trainer.create_optimizer_and_scheduler(1)
-            optimizer_parameter = trainer.optimizer.optimizers[
-                "language_model"
-            ].param_groups[0]["params"][0]
+            optimizer_parameter = trainer.optimizer.optimizers["language_model"].param_groups[0]["params"][0]
 
             with (
-                patch.object(
-                    model,
-                    "_load_full_inference_model",
-                    side_effect=load_full_runtime,
-                ),
-                patch.object(
-                    model,
-                    "_select_inference",
-                    return_value=iter(
-                        [
-                            {
-                                "tts_speech": torch.tensor([[1.0]]),
-                            }
-                        ]
+                    patch.object(
+                        model,
+                        "_load_full_inference_model",
+                        side_effect=load_full_runtime,
                     ),
-                ),
+                    patch.object(
+                        model,
+                        "_select_inference",
+                        return_value=iter([{
+                            "tts_speech": torch.tensor([[1.0]]),
+                        }]),
+                    ),
             ):
                 model._generate("inspect, then continue training")
 
@@ -413,8 +388,7 @@ class CosyVoiceTrainingRuntimeTests(unittest.TestCase):
                 llm=object(),
                 flow=inference_component,
                 hift=object(),
-            )
-        )
+            ))
 
         training_component = torch.nn.Linear(1, 1, bias=False)
         training_component.weight.data.zero_()
@@ -433,9 +407,9 @@ class CosyVoiceTrainingRuntimeTests(unittest.TestCase):
             model._cosyvoice_training_backend = backend
 
         with patch.object(
-            model,
-            "_load_training_model",
-            side_effect=load_training_runtime,
+                model,
+                "_load_training_model",
+                side_effect=load_training_runtime,
         ) as load_training:
             model._prepare_for_training()
 
@@ -466,12 +440,8 @@ class CosyVoiceTrainingRuntimeTests(unittest.TestCase):
                 model_type="cosyvoice",
                 training_component="llm",
             ),
-            model=SimpleNamespace(
-                model=SimpleNamespace(llm=component),
-            ),
-            _cosyvoice_training_backend=SimpleNamespace(
-                train_conf=train_conf,
-            ),
+            model=SimpleNamespace(model=SimpleNamespace(llm=component), ),
+            _cosyvoice_training_backend=SimpleNamespace(train_conf=train_conf, ),
         )
         adapter = CosyVoiceTrainingAdapter(
             wrapper,

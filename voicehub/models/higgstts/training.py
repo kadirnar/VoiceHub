@@ -434,9 +434,7 @@ class _HiggsCollator:
         return {
             "round_to": 8,
             "pad_left": False,
-            "return_audio_in_tokens": bool(
-                getattr(config, "encode_audio_in_tokens", False)
-            ),
+            "return_audio_in_tokens": bool(getattr(config, "encode_audio_in_tokens", False)),
             "base_model": getattr(config, "name_or_path", None),
             "audio_tokenizer": getattr(
                 config,
@@ -462,10 +460,7 @@ class HiggsTrainingAdapter(CausalLMTrainingAdapter):
 
     def setup(self):
         backend = getattr(self.model, "_training_backend", None)
-        if (
-            backend is not None
-            and getattr(self.model, "model", None) is not backend
-        ):
+        if (backend is not None and getattr(self.model, "model", None) is not backend):
             self.model._prepare_for_training()
         super().setup()
         runtime = self.model.model

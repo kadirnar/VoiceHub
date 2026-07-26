@@ -10,8 +10,9 @@ from typing import Any
 class ExponentialMovingAverage:
     """Track a module's trainable parameters after successful updates.
 
-    The implementation intentionally relies only on the tensor protocol used by
-    PyTorch objects and does not import PyTorch at module import time.
+    The implementation intentionally relies only on the tensor protocol
+    used by PyTorch objects and does not import PyTorch at module import
+    time.
     """
 
     STATE_VERSION = 1
@@ -48,10 +49,7 @@ class ExponentialMovingAverage:
         except TypeError:
             parameters = module.named_parameters()
         return tuple(
-            (name, parameter)
-            for name, parameter in parameters
-            if getattr(parameter, "requires_grad", False)
-        )
+            (name, parameter) for name, parameter in parameters if getattr(parameter, "requires_grad", False))
 
     def _initialize(self) -> None:
         if self._shadow:
@@ -95,20 +93,16 @@ class ExponentialMovingAverage:
         if set(parameters) != set(self._shadow):
             raise ValueError("EMA target parameter topology does not match the shadow.")
         for name, parameter in parameters.items():
-            parameter.data.copy_(
-                self._shadow[name].to(
-                    device=parameter.device,
-                    dtype=parameter.dtype,
-                ))
+            parameter.data.copy_(self._shadow[name].to(
+                device=parameter.device,
+                dtype=parameter.dtype,
+            ))
 
     @contextmanager
     def average_parameters(self, module=None):
         """Temporarily evaluate a module with averaged parameters."""
         target = module or self.module
-        original = {
-            name: parameter.detach().clone()
-            for name, parameter in self._named_parameters(target)
-        }
+        original = {name: parameter.detach().clone() for name, parameter in self._named_parameters(target)}
         self.copy_to(target)
         try:
             yield target
@@ -141,16 +135,12 @@ class ExponentialMovingAverage:
         if not isinstance(state_dict, Mapping):
             raise TypeError("EMA state must be a mapping.")
         if state_dict.get("version") != self.STATE_VERSION:
-            raise ValueError(
-                f"Unsupported EMA state version {state_dict.get('version')!r}.")
+            raise ValueError(f"Unsupported EMA state version {state_dict.get('version')!r}.")
         shadow = state_dict.get("shadow")
         if not isinstance(shadow, Mapping):
             raise TypeError("EMA state must contain a shadow mapping.")
 
-        current_names = {
-            name
-            for name, _ in self._named_parameters(self.module)
-        }
+        current_names = {name for name, _ in self._named_parameters(self.module)}
         received_names = set(shadow)
         if strict and received_names != current_names:
             missing = sorted(current_names - received_names)
@@ -168,4 +158,3 @@ class ExponentialMovingAverage:
             name: value.detach().clone()
             for name, value in shadow.items() if name in current_names
         }
-

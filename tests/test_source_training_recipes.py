@@ -21,46 +21,21 @@ class SourceTrainingRecipeTests(unittest.TestCase):
 
     def test_qwen_residual_codebook_loss_uses_aligned_labels(self):
         source_path = (
-            Path(__file__).parents[1]
-            / "voicehub"
-            / "models"
-            / "qwen3tts"
-            / "source"
-            / "qwen_tts"
-            / "core"
-            / "models"
-            / "modeling_qwen3_tts.py"
-        )
+            Path(__file__).parents[1] / "voicehub" / "models" / "qwen3tts" / "source" / "qwen_tts" / "core" /
+            "models" / "modeling_qwen3_tts.py")
         tree = ast.parse(source_path.read_text(encoding="utf-8"))
         predictor = next(
-            node
-            for node in tree.body
-            if (
-                isinstance(node, ast.ClassDef)
-                and node.name
-                == "Qwen3TTSTalkerCodePredictorModelForConditionalGeneration"
-            )
-        )
+            node for node in tree.body if (
+                isinstance(node, ast.ClassDef) and
+                node.name == "Qwen3TTSTalkerCodePredictorModelForConditionalGeneration"))
         forward_finetune = next(
-            node
-            for node in predictor.body
-            if isinstance(node, ast.FunctionDef)
-            and node.name == "forward_finetune"
-        )
+            node for node in predictor.body
+            if isinstance(node, ast.FunctionDef) and node.name == "forward_finetune")
         loss_call = next(
-            node
-            for node in ast.walk(forward_finetune)
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "loss_function"
-            )
-        )
-        shift_labels = next(
-            keyword.value
-            for keyword in loss_call.keywords
-            if keyword.arg == "shift_labels"
-        )
+            node for node in ast.walk(forward_finetune) if (
+                isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and
+                node.func.attr == "loss_function"))
+        shift_labels = next(keyword.value for keyword in loss_call.keywords if keyword.arg == "shift_labels")
         self.assertIsInstance(shift_labels, ast.Name)
         self.assertEqual(shift_labels.id, "labels")
 
@@ -81,10 +56,8 @@ class SourceTrainingRecipeTests(unittest.TestCase):
 
             def __init__(self, codebook_count, hidden_size):
                 super().__init__()
-                self.embeddings = torch.nn.ModuleList([
-                    torch.nn.Embedding(32, hidden_size)
-                    for _ in range(codebook_count - 1)
-                ])
+                self.embeddings = torch.nn.ModuleList(
+                    [torch.nn.Embedding(32, hidden_size) for _ in range(codebook_count - 1)])
 
             def get_input_embeddings(self):
                 return self.embeddings
@@ -172,8 +145,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
                 talker_hidden_states,
             ):
                 self.sub_talker_codec_ids = codec_ids.detach().clone()
-                self.sub_talker_hidden_states = (
-                    talker_hidden_states.detach().clone())
+                self.sub_talker_hidden_states = (talker_hidden_states.detach().clone())
                 logits = talker_hidden_states.unsqueeze(1)
                 return logits, talker_hidden_states.square().mean()
 
@@ -205,8 +177,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
             config=SimpleNamespace(
                 model_type="qwen3tts",
                 sub_talker_loss_weight=0.3,
-            ),
-        )
+            ), )
         adapter = ReadyQwenAdapter(
             wrapper,
             get_training_spec("qwen3tts"),
@@ -259,14 +230,10 @@ class SourceTrainingRecipeTests(unittest.TestCase):
         import torch
 
         adapter = HiggsTrainingAdapter(
-            SimpleNamespace(
-                config=SimpleNamespace(model_type="higgstts"),
-            ),
+            SimpleNamespace(config=SimpleNamespace(model_type="higgstts"), ),
             get_training_spec("higgstts"),
         )
-        adapter.primary_model = SimpleNamespace(
-            audio_codebook_weights=torch.tensor([1.0, 1.0]),
-        )
+        adapter.primary_model = SimpleNamespace(audio_codebook_weights=torch.tensor([1.0, 1.0]), )
 
         text_logits = torch.full((1, 3, 5), -10.0)
         text_logits[0, 0, 1] = 10.0
@@ -310,8 +277,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
                 model_type="xtts",
                 training_text_loss_weight=0.01,
                 training_mel_loss_weight=1.0,
-            ),
-        )
+            ), )
         adapter = ReadyXTTSAdapter(wrapper, get_training_spec("xtts"))
         parameter = torch.nn.Parameter(torch.tensor(1.0))
 
@@ -334,8 +300,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
             adapter.create_training_context(
                 inputs,
                 training_phase="language_model",
-            ),
-        )
+            ), )
 
         self.assertAlmostEqual(output.loss.item(), 3.02, places=6)
         self.assertAlmostEqual(output.losses["loss_text_ce"].item(), 0.02)
@@ -343,9 +308,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
         output.loss.backward()
         self.assertAlmostEqual(parameter.grad.item(), 3.02, places=6)
         self.assertEqual(
-            adapter.artifact_manifest()["checkpoint_semantics"][
-                "save_pretrained"
-            ],
+            adapter.artifact_manifest()["checkpoint_semantics"]["save_pretrained"],
             "component-weight-warm-start",
         )
 
@@ -391,9 +354,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
                     "cond_lens": batch["cond_lens"],
                 }
 
-        wrapper = SimpleNamespace(
-            config=SimpleNamespace(model_type="xtts"),
-        )
+        wrapper = SimpleNamespace(config=SimpleNamespace(model_type="xtts"), )
         adapter = RawEvalAdapter(wrapper, get_training_spec("xtts"))
         raw_record = {
             "padded_text": torch.tensor([1, 2], dtype=torch.long),
@@ -448,9 +409,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
                 model_type="cosyvoice",
                 training_component="llm",
             ),
-            model=SimpleNamespace(
-                model=SimpleNamespace(llm=component),
-            ),
+            model=SimpleNamespace(model=SimpleNamespace(llm=component), ),
         )
         adapter = ReadyCosyVoiceAdapter(
             wrapper,
@@ -462,8 +421,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
                     "values": torch.tensor([1.0, 3.0])
                 }},
                 training_phase="language_model",
-            ),
-        )
+            ), )
 
         self.assertEqual(output.loss.item(), 4.0)
         self.assertEqual(output.optimizer_names, ("language_model", ))
@@ -471,9 +429,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
         output.loss.backward()
         self.assertEqual(component.scale.grad.item(), 2.0)
         self.assertEqual(
-            adapter.artifact_manifest()["checkpoint_semantics"][
-                "save_pretrained"
-            ],
+            adapter.artifact_manifest()["checkpoint_semantics"]["save_pretrained"],
             "component-weight-warm-start",
         )
 
@@ -521,10 +477,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
                 safe_serialization,
             ):
                 self.destination = Path(destination)
-                self.saved_state = {
-                    name: value.detach().clone()
-                    for name, value in state_dict.items()
-                }
+                self.saved_state = {name: value.detach().clone() for name, value in state_dict.items()}
                 self.saved_model_type = self.config.tts_model_type
                 self.safe_serialization = safe_serialization
 
@@ -549,9 +502,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
         )
         adapter.primary_model = model
         adapter._target_speaker_embedding = torch.tensor([7.0, 8.0, 9.0])
-        original_embedding = (
-            model.talker.model.codec_embedding.weight.detach().clone()
-        )
+        original_embedding = (model.talker.model.codec_embedding.weight.detach().clone())
 
         with tempfile.TemporaryDirectory() as directory:
             adapter.save_pretrained(directory)
@@ -573,9 +524,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
     def test_qwen_projects_text_embeddings_to_talker_hidden_size(self):
         adapter, model, batch = self._qwen_training_fixture()
 
-        output = adapter.execute_training_phase(
-            adapter.create_training_context(batch),
-        )
+        output = adapter.execute_training_phase(adapter.create_training_context(batch), )
 
         projection = model.talker.text_projection
         self.assertEqual(projection.input_shape, (1, 10, 3))
@@ -589,9 +538,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
 
         adapter, model, batch = self._qwen_training_fixture()
 
-        adapter.execute_training_phase(
-            adapter.create_training_context(batch),
-        )
+        adapter.execute_training_phase(adapter.create_training_context(batch), )
 
         talker = model.talker
         torch.testing.assert_close(

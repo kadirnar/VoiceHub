@@ -9,16 +9,11 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
+import voicehub.models.csm.training as csm_training
 from voicehub.models.csm.inference import CSMForTextToSpeech
-from voicehub.models.csm.training import (
-    CSMTrainingBackend,
-    CSMTrainingCollator,
-    prepare_csm_training_inputs,
-)
+from voicehub.models.csm.training import CSMTrainingBackend, CSMTrainingCollator, prepare_csm_training_inputs
 from voicehub.trainer import Trainer
 from voicehub.training_args import TrainingArguments
-import voicehub.models.csm.training as csm_training
-
 
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -78,8 +73,7 @@ class CSMTrainingInputTests(unittest.TestCase):
         command = (
             "import sys; "
             "import voicehub.models.csm.training; "
-            "print('torch' in sys.modules, 'transformers' in sys.modules)"
-        )
+            "print('torch' in sys.modules, 'transformers' in sys.modules)")
         result = subprocess.run(
             [sys.executable, "-c", command],
             cwd=PROJECT_ROOT,
@@ -175,10 +169,7 @@ class CSMTrainingInputTests(unittest.TestCase):
             ["3", "4"],
         )
         self.assertEqual(
-            [
-                conversation[0]["content"][0]["text"]
-                for conversation in conversations
-            ],
+            [conversation[0]["content"][0]["text"] for conversation in conversations],
             ["alpha", "beta"],
         )
 
@@ -197,8 +188,8 @@ class CSMTrainingInputTests(unittest.TestCase):
 
     def test_depth_decoder_ratio_is_validated(self):
         with self.assertRaisesRegex(
-            ValueError,
-            "depth_decoder_labels_ratio",
+                ValueError,
+                "depth_decoder_labels_ratio",
         ):
             CSMTrainingCollator(
                 FakeProcessor(),
@@ -262,9 +253,9 @@ class CSMTrainingBackendTests(unittest.TestCase):
             raise AssertionError(name)
 
         with patch.object(
-            csm_training,
-            "import_optional",
-            side_effect=optional_dependency,
+                csm_training,
+                "import_optional",
+                side_effect=optional_dependency,
         ):
             backend = csm_training.load_csm_training_backend(
                 "sesame/csm-1b",
@@ -279,11 +270,7 @@ class CSMTrainingBackendTests(unittest.TestCase):
         self.assertNotIn("torch_dtype", loaded["model_kwargs"])
         self.assertFalse(backend.model.config.use_cache)
         self.assertTrue(
-            all(
-                not parameter.requires_grad
-                for parameter in backend.model.codec_model.parameters()
-            )
-        )
+            all(not parameter.requires_grad for parameter in backend.model.codec_model.parameters()))
         self.assertFalse(backend.model.codec_model.training)
 
         backend.model.train()
@@ -298,12 +285,7 @@ class CSMTrainingBackendTests(unittest.TestCase):
         self.assertFalse(backend.model.codec_model.training)
         loss.backward()
         self.assertIsNotNone(backend.model.scale.grad)
-        self.assertTrue(
-            all(
-                parameter.grad is None
-                for parameter in backend.model.codec_model.parameters()
-            )
-        )
+        self.assertTrue(all(parameter.grad is None for parameter in backend.model.codec_model.parameters()))
 
     def test_scalar_loss_requires_exactly_one_native_value(self):
         import torch
@@ -363,10 +345,7 @@ class CSMTrainingBackendTests(unittest.TestCase):
             def forward(self, input_ids, labels=None, **kwargs):
                 del input_ids, kwargs
                 target = (
-                    torch.zeros((), dtype=self.scale.dtype)
-                    if labels is None
-                    else labels.float().mean()
-                )
+                    torch.zeros((), dtype=self.scale.dtype) if labels is None else labels.float().mean())
                 return SimpleNamespace(
                     loss=(self.scale - target).square(),
                     logits=self.scale.expand(1, 1, 1),
@@ -420,17 +399,15 @@ class CSMTrainingBackendTests(unittest.TestCase):
             trainer._ensure_model_loaded()
             trainer._move_model_to_device()
             trainer.save_model(directory)
-            self.assertTrue(
-                (Path(directory) / "model_state.pt").is_file()
-            )
+            self.assertTrue((Path(directory) / "model_state.pt").is_file())
 
             restored = CSMForTextToSpeech.from_pretrained(
                 directory,
                 device="cpu",
             )
             with patch(
-                "voicehub.models.csm.training.load_csm_training_backend",
-                return_value=restored_backend,
+                    "voicehub.models.csm.training.load_csm_training_backend",
+                    return_value=restored_backend,
             ) as loader:
                 output = restored.generate(
                     "Portable CSM.",
@@ -456,9 +433,7 @@ class CSMTrainingBackendTests(unittest.TestCase):
         self.assertEqual(output.metadata["backend"], "transformers")
         self.assertEqual(output.metadata["speaker"], 3)
         self.assertEqual(output.metadata["context_segments"], 0)
-        conversation, processor_kwargs = (
-            restored_processor.generation_calls[0]
-        )
+        conversation, processor_kwargs = (restored_processor.generation_calls[0])
         self.assertEqual(
             conversation,
             [{
@@ -502,8 +477,8 @@ class CSMWrapperBackendSelectionTests(unittest.TestCase):
         model = CSMForTextToSpeech(device="cpu")
 
         with patch(
-            "voicehub.models.csm.training.load_csm_training_backend",
-            return_value=backend,
+                "voicehub.models.csm.training.load_csm_training_backend",
+                return_value=backend,
         ) as loader:
             model._loading_for_training = True
             try:
@@ -520,9 +495,7 @@ class CSMWrapperBackendSelectionTests(unittest.TestCase):
         self.assertIs(model.training_backend, backend)
         self.assertEqual(
             model.prepare_training_inputs({}, phase="default"),
-            {
-                "labels": "prepared"
-            },
+            {"labels": "prepared"},
         )
 
     def test_existing_inference_runtime_is_reloaded_for_training(self):
@@ -537,9 +510,9 @@ class CSMWrapperBackendSelectionTests(unittest.TestCase):
             return model
 
         with patch.object(
-            model,
-            "load",
-            side_effect=load_training_runtime,
+                model,
+                "load",
+                side_effect=load_training_runtime,
         ) as load:
             model._prepare_for_training()
 
@@ -579,14 +552,13 @@ class CSMWrapperBackendSelectionTests(unittest.TestCase):
             "torch": fake_torch,
             "torchaudio": object(),
             "voicehub.models.csm.source.csm.generator": runtime,
-            "voicehub.models.csm.source.csm.models":
-                SimpleNamespace(Model=SourceModelFactory),
+            "voicehub.models.csm.source.csm.models": SimpleNamespace(Model=SourceModelFactory),
         }
 
         model = CSMForTextToSpeech(device="cpu")
         with patch(
-            "voicehub.models.csm.inference.import_optional",
-            side_effect=lambda name, **kwargs: modules[name],
+                "voicehub.models.csm.inference.import_optional",
+                side_effect=lambda name, **kwargs: modules[name],
         ):
             model._load_pretrained_model()
 
