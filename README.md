@@ -7,6 +7,7 @@
 ## Why VoiceHub
 
 - **One lifecycle:** every architecture uses config, lazy loading, generation, and a normalized output.
+- **One trainer:** shared arguments, callbacks, evaluation, and resumable checkpoints.
 - **Fast imports:** ML frameworks and model weights are loaded only when the selected backend needs them.
 - **Source included:** VoiceHub never delegates synthesis to a separately installed TTS package.
 - **Small base install:** model extras contain only general runtime dependencies.
@@ -28,6 +29,12 @@ Install only the backend you plan to use:
 python -m pip install "voicehub[parlertts]"
 python -m pip install "voicehub[f5tts]"
 python -m pip install "voicehub[melotts]"
+```
+
+Install PyTorch training support independently of any inference backend:
+
+```bash
+python -m pip install "voicehub[training]"
 ```
 
 TTS implementations and their third-party licenses are included in the
@@ -147,6 +154,46 @@ Every synthesis call returns `TTSOutput`, containing `audio`, `sample_rate`,
 See the
 [model guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/models.md)
 and [architecture guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/architecture.md).
+
+## Training
+
+`Trainer` and `TrainingArguments` follow the Transformers training vocabulary
+without adding Transformers or PyTorch to the base installation:
+
+```python
+from voicehub import Trainer, TrainingArguments
+
+trainer = Trainer(
+    model=model,
+    args=TrainingArguments(
+        output_dir="runs/my-tts-model",
+        num_train_epochs=10,
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=4,
+        eval_strategy="steps",
+        eval_steps=250,
+        save_strategy="steps",
+        save_steps=250,
+        load_best_model_at_end=True,
+    ),
+    train_dataset=train_dataset,
+    eval_dataset=validation_dataset,
+    processing_class=processor,
+)
+trainer.train(resume_from_checkpoint=True)
+```
+
+Trainable models return `TTSTrainingOutput(loss=..., logits=...)`, a mapping
+with `loss`, or a tuple with loss first. Architecture-specific objectives can
+be connected through `compute_loss_func`; variable-length speech batches can
+provide a custom `data_collator`. The common loop includes gradient
+accumulation and clipping, AdamW schedules, mixed precision, callbacks,
+evaluation/prediction, best-model selection, checkpoint rotation, and
+resumable optimizer/scheduler/RNG state.
+
+See the
+[trainer guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/trainer.md)
+for the loss contract and extension points.
 
 ## Source policy
 

@@ -55,3 +55,52 @@ class TTSOutput:
     def to_dict(self) -> dict[str, Any]:
         """Return populated output fields as a regular dictionary."""
         return {key: getattr(self, key) for key in self.keys()}
+
+
+@dataclass
+class TTSTrainingOutput:
+    """Differentiable output contract consumed by :class:`voicehub.Trainer`.
+
+    ``loss`` deliberately comes first, matching Transformers model
+    outputs. Architecture-specific training implementations can leave
+    unused fields empty and place additional values in ``metadata``.
+    """
+
+    loss: Any | None = None
+    logits: Any | None = None
+    audio_values: Any | None = None
+    hidden_states: Any | None = None
+    attentions: Any | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_tuple(self) -> tuple[Any, ...]:
+        """Return populated fields in declaration order."""
+        return tuple(getattr(self, key) for key in self.keys())
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self.to_tuple())
+
+    def __getitem__(self, key: str | int):
+        if isinstance(key, str):
+            if key not in self.keys():
+                raise KeyError(key)
+            return getattr(self, key)
+        return self.to_tuple()[key]
+
+    def keys(self) -> tuple[str, ...]:
+        """Return fields that carry a value."""
+        names = (
+            "loss",
+            "logits",
+            "audio_values",
+            "hidden_states",
+            "attentions",
+        )
+        populated = [name for name in names if getattr(self, name) is not None]
+        if self.metadata:
+            populated.append("metadata")
+        return tuple(populated)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return populated fields as a mapping."""
+        return {key: getattr(self, key) for key in self.keys()}
