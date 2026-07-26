@@ -5,8 +5,7 @@ from torch import nn
 
 
 class TransformerEncoderLayer(nn.Module):
-    """
-    Encoder layer module.
+    """Encoder layer module.
 
     Args:
         size (int): Input dimension.
@@ -48,8 +47,7 @@ class TransformerEncoderLayer(nn.Module):
         att_cache: torch.Tensor = torch.zeros((0, 0, 0, 0)),
         cnn_cache: torch.Tensor = torch.zeros((0, 0, 0, 0)),
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Compute encoded features.
+        """Compute encoded features.
 
         Args:
             x (torch.Tensor): (#batch, time, size)
@@ -91,8 +89,7 @@ class TransformerEncoderLayer(nn.Module):
 
 
 class ConformerEncoderLayer(nn.Module):
-    """
-    Encoder layer module.
+    """Encoder layer module.
 
     Args:
         size (int): Input dimension.
@@ -151,8 +148,7 @@ class ConformerEncoderLayer(nn.Module):
         att_cache: torch.Tensor = torch.zeros((0, 0, 0, 0)),
         cnn_cache: torch.Tensor = torch.zeros((0, 0, 0, 0)),
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Compute encoded features.
+        """Compute encoded features.
 
         Args:
             x (torch.Tensor): (#batch, time, size)

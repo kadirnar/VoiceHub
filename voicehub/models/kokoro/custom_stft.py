@@ -6,8 +6,8 @@ from attr import attr
 
 
 class CustomSTFT(nn.Module):
-    """
-    STFT/iSTFT without unfold/complex ops, using conv1d and conv_transpose1d.
+    """STFT/iSTFT without unfold/complex ops, using conv1d and
+    conv_transpose1d.
 
     - forward STFT => Real-part conv1d + Imag-part conv1d
     - inverse STFT => Real-part conv_transpose1d + Imag-part conv_transpose1d + sum
@@ -92,7 +92,8 @@ class CustomSTFT(nn.Module):
         self.register_buffer("weight_backward_imag", torch.from_numpy(backward_imag).float().unsqueeze(1))
 
     def transform(self, waveform: torch.Tensor):
-        """Forward STFT => returns magnitude, phase Output shape => (batch, freq_bins, frames)"""
+        """Forward STFT => returns magnitude, phase Output shape => (batch,
+        freq_bins, frames)"""
         # waveform shape => (B, T).  conv1d expects (B, 1, T).
         # Optional center pad
         if self.center:
@@ -174,8 +175,7 @@ class CustomSTFT(nn.Module):
         return waveform
 
     def forward(self, x: torch.Tensor):
-        """
-        Full STFT -> iSTFT pass: returns time-domain reconstruction.
+        """Full STFT -> iSTFT pass: returns time-domain reconstruction.
 
         Same interface as your original code.
         """

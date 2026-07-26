@@ -3,7 +3,8 @@ from torch import Tensor
 
 
 def multinomial(input: Tensor, num_samples: int, replacement=False, *, generator=None):
-    """Batched multinomial that works for tensors with more than 2 dimensions."""
+    """Batched multinomial that works for tensors with more than 2
+    dimensions."""
     input_ = input.reshape(-1, input.shape[-1])
     output_ = torch.multinomial(input_, num_samples=num_samples, replacement=replacement, generator=generator)
     output = output_.reshape(*list(input.shape[:-1]), -1)
@@ -11,7 +12,8 @@ def multinomial(input: Tensor, num_samples: int, replacement=False, *, generator
 
 
 def sample_top_k(probs: Tensor, k: int) -> Tensor:
-    """Zero-out probabilities below the top-*k* threshold, renormalise, and sample."""
+    """Zero-out probabilities below the top-*k* threshold, renormalise, and
+    sample."""
     top_k_value, _ = torch.topk(probs, k, dim=-1)
     min_value_top_k = top_k_value[..., [-1]]
     probs *= (probs >= min_value_top_k).float()
@@ -21,7 +23,8 @@ def sample_top_k(probs: Tensor, k: int) -> Tensor:
 
 
 def sample_top_p(probs: Tensor, p: float) -> Tensor:
-    """Nucleus sampling: keep the smallest set of tokens whose cumulative probability exceeds *p*."""
+    """Nucleus sampling: keep the smallest set of tokens whose cumulative
+    probability exceeds *p*."""
     probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True)
     probs_sum = torch.cumsum(probs_sort, dim=-1)
     mask = probs_sum - probs_sort > p
@@ -34,7 +37,8 @@ def sample_top_p(probs: Tensor, p: float) -> Tensor:
 
 
 def sample_top_p_top_k(probs: Tensor, p: float, top_k: int):
-    """Combined nucleus + top-k sampling: apply top-p first, then top-k within the surviving set."""
+    """Combined nucleus + top-k sampling: apply top-p first, then top-k within
+    the surviving set."""
     probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True)
     probs_sum = torch.cumsum(probs_sort, dim=-1)
     mask = probs_sum - probs_sort > p

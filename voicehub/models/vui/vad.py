@@ -21,7 +21,8 @@ pipeline_name = "pyannote/voice-activity-detection"
 
 @torch.autocast("cuda", enabled=False)
 def detect_voice_activity(waveform, pipe=None):
-    """Detect speech segments in a 16 kHz waveform and return ``(start, end)`` pairs in seconds."""
+    """Detect speech segments in a 16 kHz waveform and return ``(start, end)``
+    pairs in seconds."""
     waveform = waveform.flatten().float()[None]
     global pipeline
 
@@ -53,7 +54,8 @@ def load_vad_model(
     model_fp=None,
     batch_size=32,
 ):
-    """Download (if needed) and instantiate the WhisperX VAD segmentation pipeline."""
+    """Download (if needed) and instantiate the WhisperX VAD segmentation
+    pipeline."""
     model_dir = torch.hub._get_torch_home()
     os.makedirs(model_dir, exist_ok=True)
     if model_fp is None:
@@ -102,9 +104,8 @@ def load_vad_model(
 
 
 class Binarize:
-    """
-    Binarize detection scores using hysteresis thresholding, with min-cut operation to ensure not segments are
-    longer than max_duration.
+    """Binarize detection scores using hysteresis thresholding, with min-cut
+    operation to ensure not segments are longer than max_duration.
 
     Parameters
     ----------
@@ -159,8 +160,7 @@ class Binarize:
         self.max_duration = max_duration
 
     def __call__(self, scores: SlidingWindowFeature) -> Annotation:
-        """
-        Binarize detection scores.
+        """Binarize detection scores.
 
         Parameters
         ----------
@@ -239,7 +239,8 @@ class Binarize:
 
 
 class VoiceActivitySegmentation(VoiceActivityDetection):
-    """Thin wrapper around ``pyannote`` that returns raw segmentation scores instead of binarised output."""
+    """Thin wrapper around ``pyannote`` that returns raw segmentation scores
+    instead of binarised output."""
 
     def __init__(
         self,
@@ -256,8 +257,7 @@ class VoiceActivitySegmentation(VoiceActivityDetection):
         )
 
     def apply(self, file: AudioFile, hook: Callable | None = None) -> Annotation:
-        """
-        Apply voice activity detection.
+        """Apply voice activity detection.
 
         Parameters
         ----------
@@ -290,7 +290,8 @@ class VoiceActivitySegmentation(VoiceActivityDetection):
 
 
 def merge_vad(vad_arr, pad_onset=0.0, pad_offset=0.0, min_duration_off=0.0, min_duration_on=0.0):
-    """Merge an array of ``(start, end)`` VAD segments with padding and minimum-duration filtering."""
+    """Merge an array of ``(start, end)`` VAD segments with padding and
+    minimum-duration filtering."""
     active = Annotation()
     for k, vad_t in enumerate(vad_arr):
         region = Segment(vad_t[0] - pad_onset, vad_t[1] + pad_offset)

@@ -1,5 +1,2 @@
-include requirements.txt
-graft voicehub/models
-graft voicehub/third_party
-recursive-include voicehub *.json *.yaml *.yml *.txt *.md
+graft voicehub
 global-exclude __pycache__ *.py[cod] .DS_Store

@@ -18,8 +18,7 @@ SPEECH_VOCAB_SIZE = 6561
 
 
 class S3Tokenizer(S3TokenizerV2):
-    """
-    s3tokenizer.S3TokenizerV2 with the following changes:
+    """s3tokenizer.S3TokenizerV2 with the following changes:
 
     - a more integrated `forward`
     - compute `log_mel_spectrogram` using `_mel_filters` and `window` in `register_buffers`
@@ -43,9 +42,8 @@ class S3Tokenizer(S3TokenizerV2):
         )
 
     def pad(self, wavs, sr) -> List[torch.Tensor]:
-        """Given a list of wavs with the same `sample_rate`, pad them so that the length is multiple of 40ms
-        (S3 runs at 25 token/sec).
-        """
+        """Given a list of wavs with the same `sample_rate`, pad them so that
+        the length is multiple of 40ms (S3 runs at 25 token/sec)."""
         processed_wavs = []
         for wav in wavs:
             if isinstance(wav, np.ndarray):

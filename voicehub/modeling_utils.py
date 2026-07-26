@@ -51,7 +51,8 @@ class PreTrainedTTSModel(BaseTTSModel, ABC):
         model_path: str | None = None,
         **overrides,
     ) -> VoiceHubConfig:
-        """Normalize legacy constructor arguments into a typed configuration."""
+        """Normalize legacy constructor arguments into a typed
+        configuration."""
         if isinstance(config, VoiceHubConfig):
             normalized = config
             if model_path is not None:
@@ -88,7 +89,8 @@ class PreTrainedTTSModel(BaseTTSModel, ABC):
         config_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ):
-        """Construct a model from local files or a Hub repository identifier."""
+        """Construct a model from local files or a Hub repository
+        identifier."""
         if config is None:
             config_values = dict(config_kwargs or {})
             if pretrained_model_name_or_path:
@@ -132,7 +134,8 @@ class PreTrainedTTSModel(BaseTTSModel, ABC):
 
     @staticmethod
     def _resolve_device(device: str) -> str:
-        """Resolve ``auto`` only when loading, keeping package imports cheap."""
+        """Resolve ``auto`` only when loading, keeping package imports
+        cheap."""
         if device != "auto":
             return device
         try:

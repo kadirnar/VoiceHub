@@ -34,7 +34,7 @@ call `model.load()` once during service startup to warm the checkpoint.
 | `chatterbox` | VoiceHub Chatterbox + vendored S3Tokenizer/Perth | Included |
 | `kokoro` | VoiceHub Kokoro source | Included |
 | `echo` | VoiceHub Echo-TTS source | Included |
-| `conversationtts` | Upstream has no source license | Blocked |
+| `conversationtts` | ConversationTTS + bundled MimiCodec | Vendored (CC BY-NC 4.0) |
 | `llasa` | LLaSA adapter + XCodec2 architecture source | Vendored (CC BY-NC 4.0) |
 | `cosyvoice` | CosyVoice + Matcha-TTS | Vendored |
 | `f5tts` | F5-TTS + BigVGAN + Vocos | Vendored |
@@ -220,8 +220,23 @@ required attribution is: **Built with Fish Audio**.
 
 ## ConversationTTS
 
-The public ConversationTTS repository had no license at audited revision
-`b3851f7`. Unlicensed code cannot legally be redistributed, so VoiceHub does
-not silently clone it or depend on an installable package. The registry entry
-is present, but `load()` raises `SourceLicenseError` until upstream publishes
-a compatible license.
+ConversationTTS revision `b3851f7` declares its source, checkpoints, datasets,
+and evaluation tools under CC BY-NC 4.0. VoiceHub therefore includes its
+executable model, inference, text-tokenizer, and MimiCodec runtime source. The
+license does not permit commercial use:
+
+```python
+model = AutoInferenceModel.from_pretrained(
+    "conversationtts",
+    model_path="AudioFoundation/SpeechFoundation",
+    device="cuda",
+)
+output = model(
+    "A source-integrated conversational model.",
+    speaker_audio_path="reference.wav",
+    reference_text="Transcript of the reference speaker.",
+    output_file="conversation.wav",
+)
+```
+
+The main checkpoint and Mimi tokenizer weights remain external Hub artifacts.

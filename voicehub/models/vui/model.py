@@ -16,7 +16,8 @@ from voicehub.models.vui.utils import load_what_you_can
 
 
 class KVCache(nn.Module):
-    """Fixed-size key/value buffer for autoregressive inference with in-place updates."""
+    """Fixed-size key/value buffer for autoregressive inference with in-place
+    updates."""
 
     def __init__(
         self,
@@ -56,7 +57,8 @@ def repeat_kv(x: torch.Tensor, n_reps: int) -> torch.Tensor:
 
 
 class MHA(nn.Module):
-    """Multi-Head Attention with optional grouped-query attention and rotary embeddings."""
+    """Multi-Head Attention with optional grouped-query attention and rotary
+    embeddings."""
 
     def __init__(
         self,
@@ -144,7 +146,8 @@ class MHA(nn.Module):
 
 
 class MLP(nn.Module):
-    """Standard two-layer feed-forward with configurable activation and dropout."""
+    """Standard two-layer feed-forward with configurable activation and
+    dropout."""
 
     def __init__(self, *, d_model: int, bias: bool, dropout: float, act=nn.GELU, **kwargs):
         super().__init__()
@@ -190,7 +193,8 @@ class RMSNorm(nn.Module):
 
 
 class Block(nn.Module):
-    """Pre-norm transformer block with causal self-attention and a LLaMA-style MLP."""
+    """Pre-norm transformer block with causal self-attention and a LLaMA-style
+    MLP."""
 
     def __init__(
         self,
@@ -244,7 +248,8 @@ class Block(nn.Module):
 
 
 class Decoder(nn.Module):
-    """Stack of transformer blocks with RoPE and optional KV-cache for inference."""
+    """Stack of transformer blocks with RoPE and optional KV-cache for
+    inference."""
 
     def __init__(
         self,
@@ -330,7 +335,8 @@ class Decoder(nn.Module):
 
 
 class Vui(nn.Module):
-    """Vui text-to-speech model: byte-level text encoder + multi-codebook audio decoder."""
+    """Vui text-to-speech model: byte-level text encoder + multi-codebook audio
+    decoder."""
 
     BASE = "vui-100m-base.pt"
     COHOST = "vui-cohost-100m.pt"

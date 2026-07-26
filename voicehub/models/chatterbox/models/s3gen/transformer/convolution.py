@@ -15,8 +15,7 @@ class ConvolutionModule(nn.Module):
             norm: str = "batch_norm",
             causal: bool = False,
             bias: bool = True):
-        """
-        Construct an ConvolutionModule object.
+        """Construct an ConvolutionModule object.
 
         Args:
             channels (int): The number of channels of conv layers.
@@ -79,8 +78,7 @@ class ConvolutionModule(nn.Module):
             mask_pad: torch.Tensor = torch.ones((0, 0, 0), dtype=torch.bool),
             cache: torch.Tensor = torch.zeros((0, 0, 0)),
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Compute convolution module.
+        """Compute convolution module.
 
         Args:
             x (torch.Tensor): Input tensor (#batch, time, channels).

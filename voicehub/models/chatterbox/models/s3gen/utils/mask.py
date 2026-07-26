@@ -7,8 +7,7 @@ def subsequent_mask(
         size: int,
         device: torch.device = torch.device("cpu"),
 ) -> torch.Tensor:
-    """
-    Create mask for subsequent steps (size, size).
+    """Create mask for subsequent steps (size, size).
 
     This mask is used only in decoder which works in an auto-regressive mode.
     This means the current step could only do attention with its left steps.
@@ -43,8 +42,8 @@ def subsequent_chunk_mask(
         num_left_chunks: int = -1,
         device: torch.device = torch.device("cpu"),
 ) -> torch.Tensor:
-    """
-    Create mask for subsequent steps (size, size) with chunk size, this is for streaming encoder.
+    """Create mask for subsequent steps (size, size) with chunk size, this is
+    for streaming encoder.
 
     Args:
         size (int): size of mask
@@ -81,8 +80,7 @@ def add_optional_chunk_mask(
         static_chunk_size: int,
         num_decoding_left_chunks: int,
         enable_full_context: bool = True):
-    """
-    Apply optional mask for encoder.
+    """Apply optional mask for encoder.
 
     Args:
         xs (torch.Tensor): padded input, (B, L, D), L for max length

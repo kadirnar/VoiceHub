@@ -1,4 +1,5 @@
 {
+  "commercial_use": false,
   "license": "Fish Audio Research License",
   "model_type": "fishtts",
   "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",

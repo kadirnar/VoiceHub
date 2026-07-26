@@ -24,7 +24,8 @@ def exists(v):
 
 
 def default(*args):
-    """Return the first non-``None`` argument, or ``None`` if all are ``None``."""
+    """Return the first non-``None`` argument, or ``None`` if all are
+    ``None``."""
     for arg in args:
         if exists(arg):
             return arg
@@ -32,7 +33,8 @@ def default(*args):
 
 
 def maybe(fn):
-    """Wrap *fn* so that it returns ``None`` unchanged instead of calling through."""
+    """Wrap *fn* so that it returns ``None`` unchanged instead of calling
+    through."""
 
     @wraps(fn)
     def inner(x, *args, **kwargs):
@@ -58,7 +60,8 @@ def round_ste(z: Tensor) -> Tensor:
 
 
 class FSQ(Module):
-    """Finite Scalar Quantization: maps continuous features to a fixed grid of levels per dimension."""
+    """Finite Scalar Quantization: maps continuous features to a fixed grid of
+    levels per dimension."""
 
     def __init__(
         self,
@@ -147,9 +150,8 @@ class FSQ(Module):
         return (zhat * self._basis).sum(dim=-1).to(int32)
 
     def indices_to_level_indices(self, indices):
-        """Converts indices to indices at each level, perhaps needed for a transformer with factorized
-        embeddings.
-        """
+        """Converts indices to indices at each level, perhaps needed for a
+        transformer with factorized embeddings."""
         indices = rearrange(indices, "... -> ... 1")
         codes_non_centered = (indices // self._basis) % self._levels
         return codes_non_centered
@@ -173,8 +175,7 @@ class FSQ(Module):
         return codes
 
     def forward(self, z: Tensor):
-        """
-        Einstein notation.
+        """Einstein notation.
 
         b - batch
         n - sequence (or flattened spatial dimensions)
@@ -262,7 +263,8 @@ def snake(x, alpha):
 
 
 class Snake1d(nn.Module):
-    """Learnable Snake activation for 1-D signals with per-channel frequency."""
+    """Learnable Snake activation for 1-D signals with per-channel
+    frequency."""
 
     def __init__(self, channels):
         super().__init__()
@@ -300,7 +302,8 @@ class ResidualUnit(nn.Module):
 
 
 class EncoderBlock(nn.Module):
-    """Encoder down-sampling block: residual units followed by a strided convolution."""
+    """Encoder down-sampling block: residual units followed by a strided
+    convolution."""
 
     def __init__(self, dim: int = 16, stride: int = 1):
         super().__init__()
@@ -323,7 +326,8 @@ class EncoderBlock(nn.Module):
 
 
 class Encoder(nn.Module):
-    """Multi-stage convolutional encoder that progressively down-samples the waveform."""
+    """Multi-stage convolutional encoder that progressively down-samples the
+    waveform."""
 
     def __init__(
         self,
@@ -355,7 +359,8 @@ class Encoder(nn.Module):
 
 
 class DecoderBlock(nn.Module):
-    """Decoder up-sampling block: transposed convolution followed by residual units."""
+    """Decoder up-sampling block: transposed convolution followed by residual
+    units."""
 
     def __init__(self, input_dim: int = 16, output_dim: int = 8, stride: int = 1):
         super().__init__()
@@ -378,7 +383,8 @@ class DecoderBlock(nn.Module):
 
 
 class Decoder(nn.Module):
-    """Multi-stage convolutional decoder that progressively up-samples to a waveform."""
+    """Multi-stage convolutional decoder that progressively up-samples to a
+    waveform."""
 
     def __init__(
         self,
@@ -413,7 +419,8 @@ class Decoder(nn.Module):
 
 
 class FiniteScalarQuantize(nn.Module):
-    """Single-codebook FSQ layer with optional strided down-sampling and MLP post-processing."""
+    """Single-codebook FSQ layer with optional strided down-sampling and MLP
+    post-processing."""
 
     def __init__(self, latent_dim: int, levels: list[int], *, stride: int = 1, mlp: bool = False):
         super().__init__()
@@ -519,9 +526,8 @@ class ResidualFiniteScalarQuantize(nn.Module):
         return z_q
 
     def forward(self, z: Tensor, n_quantizers: int | None = None):
-        """
-        Quantized the input tensor using a fixed set of `n` codebooks and returns the corresponding codebook
-        vectors.
+        """Quantized the input tensor using a fixed set of `n` codebooks and
+        returns the corresponding codebook vectors.
 
         Parameters
         ----------
@@ -582,7 +588,8 @@ class ResidualFiniteScalarQuantize(nn.Module):
 
 
 class FluacConfig(BaseModel):
-    """Configuration for the Fluac neural audio codec (encoder + FSQ quantiser + decoder)."""
+    """Configuration for the Fluac neural audio codec (encoder + FSQ quantiser
+    + decoder)."""
 
     sample_rate: int = 44100
 
@@ -611,7 +618,8 @@ class FluacConfig(BaseModel):
 
 
 class Fluac(nn.Module):
-    """Fluac: a lightweight neural audio codec with FSQ-based residual quantisation."""
+    """Fluac: a lightweight neural audio codec with FSQ-based residual
+    quantisation."""
 
     Q9_22KHZ = "fluac-22hz-22khz.pt"
 

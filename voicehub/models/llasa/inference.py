@@ -139,7 +139,8 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
         top_p: float | None = None,
         seed: int | None = None,
     ) -> TTSOutput:
-        """Synthesize text, optionally conditioning on aligned reference audio."""
+        """Synthesize text, optionally conditioning on aligned reference
+        audio."""
         self.load()
         torch = self._torch
         if seed is not None:

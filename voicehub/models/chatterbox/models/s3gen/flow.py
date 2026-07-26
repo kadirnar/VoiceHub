@@ -11,7 +11,8 @@ from voicehub.models.chatterbox.models.s3gen.utils.mask import make_pad_mask
 
 
 class MaskedDiffWithXvec(torch.nn.Module):
-    """Masked diffusion module conditioned on speaker x-vectors for non-causal mel generation."""
+    """Masked diffusion module conditioned on speaker x-vectors for non-causal
+    mel generation."""
 
     def __init__(
         self,
@@ -156,7 +157,8 @@ class MaskedDiffWithXvec(torch.nn.Module):
 
 
 class CausalMaskedDiffWithXvec(torch.nn.Module):
-    """Causal variant of MaskedDiffWithXvec for streaming speech token to mel-spectrogram generation."""
+    """Causal variant of MaskedDiffWithXvec for streaming speech token to mel-
+    spectrogram generation."""
 
     def __init__(
         self,

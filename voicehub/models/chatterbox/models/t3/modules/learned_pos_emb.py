@@ -5,7 +5,8 @@ from torch import Tensor, nn
 
 
 class LearnedPositionEmbeddings(nn.Module):
-    """Learnable absolute positional embeddings initialized with GPT-2 style normal distribution."""
+    """Learnable absolute positional embeddings initialized with GPT-2 style
+    normal distribution."""
 
     def __init__(self, seq_len, model_dim, init=.02):
         super().__init__()

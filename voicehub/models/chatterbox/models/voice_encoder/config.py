@@ -1,5 +1,6 @@
 class VoiceEncConfig:
-    """Configuration for the LSTM-based voice encoder used in speaker verification."""
+    """Configuration for the LSTM-based voice encoder used in speaker
+    verification."""
 
     num_mels = 40
     sample_rate = 16000

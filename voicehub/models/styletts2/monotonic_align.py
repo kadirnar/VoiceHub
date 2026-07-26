@@ -1,9 +1,9 @@
-"""
-Pure-Python monotonic alignment used by the vendored StyleTTS 2 code.
+"""Pure-Python monotonic alignment used by the vendored StyleTTS 2 code.
 
-The API mirrors Resemble AI's MIT-licensed ``monotonic_align`` extension, whose Cython sources are preserved
-under ``source/third_party/monotonic_align``. This fallback keeps VoiceHub wheels self-contained and avoids a
-Git/pip build.
+The API mirrors Resemble AI's MIT-licensed ``monotonic_align``
+extension, whose Cython sources are preserved under
+``source/third_party/monotonic_align``. This fallback keeps VoiceHub
+wheels self-contained and avoids a Git/pip build.
 """
 
 from __future__ import annotations

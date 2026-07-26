@@ -26,7 +26,7 @@ import tqdm
 from huggingface_hub import hf_hub_download
 from pydub import AudioSegment, silence
 from transformers import pipeline
-from voicehub.third_party.vocos import Vocos
+from voicehub.components.audio.vocoders.vocos import Vocos
 
 from voicehub.models.f5tts.source.f5_tts.model import CFM
 from voicehub.models.f5tts.source.f5_tts.model.utils import convert_char_to_pinyin, get_tokenizer
@@ -117,7 +117,7 @@ def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=dev
             model_path = hf_hub_download(repo_id=repo_id, cache_dir=hf_cache_dir, filename="pytorch_model.bin")
         vocoder = Vocos.from_hparams(config_path)
         state_dict = torch.load(model_path, map_location="cpu", weights_only=True)
-        from voicehub.third_party.vocos.feature_extractors import EncodecFeatures
+        from voicehub.components.audio.vocoders.vocos.feature_extractors import EncodecFeatures
 
         if isinstance(vocoder.feature_extractor, EncodecFeatures):
             encodec_parameters = {

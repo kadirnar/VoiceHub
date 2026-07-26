@@ -81,7 +81,7 @@ FORBIDDEN_TTS_PACKAGES = {
     "zonos",
     "zonos2",
 }
-SOURCE_INTEGRATED_MODELS = (ISSUE_MODEL_TYPES | CURRENT_MODEL_TYPES) - {"conversationtts"}
+SOURCE_INTEGRATED_MODELS = ISSUE_MODEL_TYPES | CURRENT_MODEL_TYPES
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -128,6 +128,15 @@ class RegistryTests(unittest.TestCase):
         constructor_parameters = None
         for spec in AutoInferenceModel.available_models():
             with self.subTest(model_type=spec.model_type):
+                self.assertEqual(
+                    spec.module,
+                    f"voicehub.models.{spec.model_type}.modeling_{spec.model_type}",
+                )
+                self.assertEqual(
+                    spec.config_module,
+                    f"voicehub.models.{spec.model_type}."
+                    f"configuration_{spec.model_type}",
+                )
                 module = import_module(spec.module)
                 model_class = getattr(module, spec.class_name)
                 config_class = getattr(
@@ -187,6 +196,41 @@ class RegistryTests(unittest.TestCase):
                 metadata = json.loads((source / "SOURCE.json").read_text(encoding="utf-8"))
                 self.assertEqual(metadata["model_type"], model_type)
                 self.assertTrue(metadata["revision"])
+
+    def test_shared_components_are_connected_to_models(self):
+        expected = {
+            "dia": ("dac", ),
+            "f5tts": ("vocos", ),
+            "openvoice": ("wavmark", ),
+            "zonos2": ("dac", ),
+        }
+        for model_type, components in expected.items():
+            with self.subTest(model_type=model_type):
+                self.assertEqual(
+                    get_model_spec(model_type).components,
+                    components,
+                )
+
+    def test_noncommercial_models_remain_discoverable(self):
+        for model_type in ("conversationtts", "fishtts", "llasa"):
+            with self.subTest(model_type=model_type):
+                license_spec = get_model_spec(model_type).license
+                self.assertIsNotNone(license_spec)
+                self.assertFalse(license_spec.commercial_use)
+
+    def test_component_tree_replaces_ambiguous_third_party_package(self):
+        self.assertFalse((REPOSITORY_ROOT / "voicehub" / "third_party").exists())
+        self.assertTrue((REPOSITORY_ROOT / "voicehub" / "components" / "registry.py").is_file())
+
+    def test_project_metadata_uses_pyproject_toml_only(self):
+        pyproject = REPOSITORY_ROOT / "pyproject.toml"
+        metadata = pyproject.read_text(encoding="utf-8")
+        self.assertTrue(pyproject.is_file())
+        self.assertIn("[build-system]", metadata)
+        self.assertIn("[project]", metadata)
+        self.assertIn("[project.optional-dependencies]", metadata)
+        self.assertFalse((REPOSITORY_ROOT / "setup.py").exists())
+        self.assertFalse((REPOSITORY_ROOT / "requirements.txt").exists())
 
     def test_missing_optional_dependency_has_install_hint(self):
         with self.assertRaisesRegex(

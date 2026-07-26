@@ -56,10 +56,10 @@ class Snake(nn.Module):
         self.no_div_by_zero = 0.000000001
 
     def forward(self, x):
-        """
-        Forward pass of the function.
+        """Forward pass of the function.
 
-        Applies the function to the input elementwise. Snake ∶= x + 1/a * sin^2 (xa)
+        Applies the function to the input elementwise. Snake ∶= x + 1/a
+        * sin^2 (xa)
         """
         alpha = self.alpha.unsqueeze(0).unsqueeze(-1)  # line up with x to [B, C, T]
         if self.alpha_logscale:

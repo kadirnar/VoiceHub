@@ -39,8 +39,7 @@ def find_multiple(n: int, k: int) -> int:
 
 
 def unpad1d(x: Tensor, paddings: tuple[int, int]) -> Tensor:
-    """
-    Remove padding from x, handling properly zero padding.
+    """Remove padding from x, handling properly zero padding.
 
     Only for 1d!
     """
@@ -52,7 +51,8 @@ def unpad1d(x: Tensor, paddings: tuple[int, int]) -> Tensor:
 
 
 def get_extra_padding_for_conv1d(x: Tensor, kernel_size: int, stride: int, padding_total: int = 0) -> int:
-    """See pad_for_conv1d; enough right pad so striding evenly covers length."""
+    """See pad_for_conv1d; enough right pad so striding evenly covers
+    length."""
     length = x.shape[-1]
     n_frames = (length - kernel_size + padding_total) / stride + 1
     ideal_length = (math.ceil(n_frames) - 1) * stride + (kernel_size - padding_total)
@@ -65,9 +65,8 @@ def pad1d(
     mode: str = "zeros",
     value: float = 0.0,
 ) -> Tensor:
-    """Reflect‑safe 1D pad: if reflect would underflow on small inputs, insert temporary right zero-pad before
-    reflecting.
-    """
+    """Reflect‑safe 1D pad: if reflect would underflow on small inputs, insert
+    temporary right zero-pad before reflecting."""
     length = x.shape[-1]
     padding_left, padding_right = paddings
     assert padding_left >= 0 and padding_right >= 0, (padding_left, padding_right)
@@ -126,8 +125,7 @@ class Snake1d(nn.Module):
 
 
 class VectorQuantize(nn.Module):
-    """
-    VQ with factorized, l2-normalized codes (ViT‑VQGAN style).
+    """VQ with factorized, l2-normalized codes (ViT‑VQGAN style).
 
     I/O in (B, D, T).
     """
@@ -348,10 +346,10 @@ def CausalWNConvTranspose1d(*args, **kwargs):
 
 
 class ConvNeXtBlock(nn.Module):
-    r"""
-    ConvNeXt Block (1D).
+    r"""ConvNeXt Block (1D).
 
-    DwConv -> (N, C, L) → (N, L, C) -> LN -> Linear -> GELU -> Linear -> (N, C, L) with residual
+    DwConv -> (N, C, L) → (N, L, C) -> LN -> Linear -> GELU -> Linear ->
+    (N, C, L) with residual
     """
 
     def __init__(

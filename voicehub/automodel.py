@@ -13,11 +13,12 @@ MODEL_TYPE_TO_MODEL_CLASS_NAME = {name: spec.class_name for name, spec in MODEL_
 
 
 class AutoInferenceModel:
-    """
-    Factory class that dynamically loads and instantiates TTS model backends.
+    """Factory class that dynamically loads and instantiates TTS model
+    backends.
 
-    Uses a registry mapping to resolve short model-type strings to their concrete inference classes, importing
-    the appropriate module on demand so that unused backends are never loaded.
+    Uses a registry mapping to resolve short model-type strings to their
+    concrete inference classes, importing the appropriate module on
+    demand so that unused backends are never loaded.
     """
 
     @classmethod
@@ -33,8 +34,7 @@ class AutoInferenceModel:
         device: str = "cuda",
         **kwargs,
     ):
-        """
-        Dynamically load and instantiate the appropriate model class.
+        """Dynamically load and instantiate the appropriate model class.
 
         Args:
             model_type: Registry key or documented alias.

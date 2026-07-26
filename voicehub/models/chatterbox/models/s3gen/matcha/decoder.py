@@ -7,8 +7,8 @@ import torch.nn.functional as F
 from diffusers.models.activations import get_activation
 from einops import pack, rearrange, repeat
 
+from voicehub.components.neural.conformer import ConformerBlock
 from voicehub.models.chatterbox.models.s3gen.matcha.transformer import BasicTransformerBlock
-from voicehub.third_party.conformer import ConformerBlock
 
 
 class SinusoidalPosEmb(torch.nn.Module):
@@ -79,7 +79,8 @@ class Downsample1D(nn.Module):
 
 
 class TimestepEmbedding(nn.Module):
-    """MLP that projects sinusoidal timestep embeddings to a higher-dimensional space."""
+    """MLP that projects sinusoidal timestep embeddings to a higher-dimensional
+    space."""
 
     def __init__(
         self,
@@ -128,8 +129,7 @@ class TimestepEmbedding(nn.Module):
 
 
 class Upsample1D(nn.Module):
-    """
-    A 1D upsampling layer with an optional convolution.
+    """A 1D upsampling layer with an optional convolution.
 
     Parameters:
         channels (`int`):
@@ -170,7 +170,8 @@ class Upsample1D(nn.Module):
 
 
 class ConformerWrapper(ConformerBlock):
-    """Wrapper around ConformerBlock to match the transformer block interface signature."""
+    """Wrapper around ConformerBlock to match the transformer block interface
+    signature."""
 
     def __init__(  # pylint: disable=useless-super-delegation
         self,
@@ -211,7 +212,8 @@ class ConformerWrapper(ConformerBlock):
 
 
 class Decoder(nn.Module):
-    """U-Net style 1D decoder with configurable transformer/conformer blocks for flow matching."""
+    """U-Net style 1D decoder with configurable transformer/conformer blocks
+    for flow matching."""
 
     def __init__(
         self,
@@ -365,8 +367,7 @@ class Decoder(nn.Module):
                     nn.init.constant_(m.bias, 0)
 
     def forward(self, x, mask, mu, t, spks=None, cond=None):
-        """
-        Forward pass of the UNet1DConditional model.
+        """Forward pass of the UNet1DConditional model.
 
         Args:
             x (torch.Tensor): shape (batch_size, in_channels, time)

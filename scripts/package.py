@@ -1,23 +1,24 @@
 import subprocess
+import sys
+from pathlib import Path
 
 
-def run_command(command):
-    """
-    Executes a given command using the subprocess module.
+def run_command(*command: str) -> None:
+    """Executes a given command using the subprocess module.
 
     Args:
-        command (str): The command to be executed.
+        command: The command and its arguments.
     """
-    subprocess.run(command, shell=True, check=True)
+    subprocess.run(command, check=True)
 
 
-def main():
-    """Main function to package and upload a Python package using setup.py and twine."""
-    sdist_command = "python setup.py sdist"
-    twine_command = "twine upload dist/*"
-
-    run_command(sdist_command)
-    run_command(twine_command)
+def main() -> None:
+    """Build PEP 517 artifacts from pyproject.toml and upload with Twine."""
+    run_command(sys.executable, "-m", "build")
+    artifacts = sorted(str(path) for pattern in ("*.whl", "*.tar.gz") for path in Path("dist").glob(pattern))
+    if not artifacts:
+        raise FileNotFoundError("No distributions were created in dist/.")
+    run_command(sys.executable, "-m", "twine", "upload", *artifacts)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from voicehub.third_party.conformer import ConformerBlock
+from voicehub.components.neural.conformer import ConformerBlock
 from diffusers.models.activations import get_activation
 from einops import pack, rearrange, repeat
 

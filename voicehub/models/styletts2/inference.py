@@ -58,7 +58,7 @@ class StyleTTS2ForTextToSpeech(PreTrainedTTSModel):
         if config_path is None:
             config_path = (Path(__file__).parent / "source" / "styletts2" / "Configs" / "config_libritts.yml")
 
-        from voicehub.models.styletts2.modeling_styletts2 import StyleTTS2Runtime
+        from voicehub.models.styletts2.runtime import StyleTTS2Runtime
 
         self.model = StyleTTS2Runtime(
             checkpoint_path=self.config.name_or_path,

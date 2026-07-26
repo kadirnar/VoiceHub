@@ -5,8 +5,7 @@ from pydantic import BaseModel, BeforeValidator, Field
 
 
 class DataConfig(BaseModel, frozen=True):
-    """
-    Configuration for data loading and preprocessing.
+    """Configuration for data loading and preprocessing.
 
     Attributes:
         text_length: Maximum length of text sequences (must be multiple of 128).
@@ -46,8 +45,7 @@ class DataConfig(BaseModel, frozen=True):
 
 
 class EncoderConfig(BaseModel, frozen=True):
-    """
-    Configuration for the encoder component of the Dia model.
+    """Configuration for the encoder component of the Dia model.
 
     Attributes:
         n_layer: Number of transformer layers.
@@ -65,8 +63,7 @@ class EncoderConfig(BaseModel, frozen=True):
 
 
 class DecoderConfig(BaseModel, frozen=True):
-    """
-    Configuration for the decoder component of the Dia model.
+    """Configuration for the decoder component of the Dia model.
 
     Attributes:
         n_layer: Number of transformer layers.
@@ -90,8 +87,7 @@ class DecoderConfig(BaseModel, frozen=True):
 
 
 class ModelConfig(BaseModel, frozen=True):
-    """
-    Main configuration container for the Dia model architecture.
+    """Main configuration container for the Dia model architecture.
 
     Attributes:
         encoder: Configuration for the encoder component.
@@ -121,8 +117,7 @@ class TrainingConfig(BaseModel, frozen=True):
 
 
 class DiaConfig(BaseModel, frozen=True):
-    """
-    Master configuration for the Dia model.
+    """Master configuration for the Dia model.
 
     Combines all sub-configurations into a single validated object.
 
@@ -140,8 +135,7 @@ class DiaConfig(BaseModel, frozen=True):
     data: DataConfig
 
     def save(self, path: str) -> None:
-        """
-        Save the current configuration instance to a JSON file.
+        """Save the current configuration instance to a JSON file.
 
         Ensures the parent directory exists and the file has a .json extension.
 
@@ -158,8 +152,7 @@ class DiaConfig(BaseModel, frozen=True):
 
     @classmethod
     def load(cls, path: str) -> "DiaConfig | None":
-        """
-        Load and validate a Dia configuration from a JSON file.
+        """Load and validate a Dia configuration from a JSON file.
 
         Args:
             path: The path to the configuration file.

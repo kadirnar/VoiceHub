@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from voicehub.third_party.dac.nn.quantize import ResidualVectorQuantize
+from voicehub.components.audio.codecs.dac.nn.quantize import ResidualVectorQuantize
 from torch.nn.utils.parametrizations import weight_norm
 from torch.nn.utils.parametrize import remove_parametrizations
 

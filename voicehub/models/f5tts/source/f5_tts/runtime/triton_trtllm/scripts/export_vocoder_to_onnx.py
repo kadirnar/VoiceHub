@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 from conv_stft import STFT
 from huggingface_hub import hf_hub_download
-from voicehub.third_party.vocos import Vocos
+from voicehub.components.audio.vocoders.vocos import Vocos
 
 
 opset_version = 17

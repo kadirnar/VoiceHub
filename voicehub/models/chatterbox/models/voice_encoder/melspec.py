@@ -22,7 +22,8 @@ def preemphasis(wav, hp):
 
 
 def melspectrogram(wav, hp, pad=True):
-    """Compute a mel-spectrogram from a waveform with optional pre-emphasis and normalization."""
+    """Compute a mel-spectrogram from a waveform with optional pre-emphasis and
+    normalization."""
     # Run through pre-emphasis
     if hp.preemphasis > 0:
         wav = preemphasis(wav, hp)

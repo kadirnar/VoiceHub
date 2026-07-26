@@ -14,14 +14,16 @@ logger = logging.getLogger(__name__)
 
 
 class EnTokenizer:
-    """English text tokenizer wrapping HuggingFace Tokenizers with special token support."""
+    """English text tokenizer wrapping HuggingFace Tokenizers with special
+    token support."""
 
     def __init__(self, vocab_file_path):
         self.tokenizer: Tokenizer = Tokenizer.from_file(vocab_file_path)
         self.check_vocabset_sot_eot()
 
     def check_vocabset_sot_eot(self):
-        """Verify that start-of-text and end-of-text tokens exist in the vocabulary."""
+        """Verify that start-of-text and end-of-text tokens exist in the
+        vocabulary."""
         voc = self.tokenizer.get_vocab()
         assert SOT in voc
         assert EOT in voc
@@ -33,14 +35,16 @@ class EnTokenizer:
         return text_tokens
 
     def encode(self, txt: str, verbose=False):
-        """clean_text > (append `lang_id`) > replace SPACE > encode text using Tokenizer."""
+        """clean_text > (append `lang_id`) > replace SPACE > encode text using
+        Tokenizer."""
         txt = txt.replace(' ', SPACE)
         code = self.tokenizer.encode(txt)
         ids = code.ids
         return ids
 
     def decode(self, seq):
-        """Decode token IDs back to text, handling special tokens and whitespace."""
+        """Decode token IDs back to text, handling special tokens and
+        whitespace."""
         if isinstance(seq, torch.Tensor):
             seq = seq.cpu().numpy()
 

@@ -16,7 +16,8 @@ from voicehub.models.chatterbox.models.s3gen.utils.mask import add_optional_chun
 
 
 def mask_to_bias(mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-    """Convert a boolean attention mask to an additive bias tensor for scaled dot-product attention."""
+    """Convert a boolean attention mask to an additive bias tensor for scaled
+    dot-product attention."""
     assert mask.dtype == torch.bool
     assert dtype in [torch.float32, torch.bfloat16, torch.float16]
     mask = mask.to(dtype)
@@ -28,7 +29,8 @@ def mask_to_bias(mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
 
 
 class Transpose(torch.nn.Module):
-    """Utility module that transposes two dimensions of a tensor in the forward pass."""
+    """Utility module that transposes two dimensions of a tensor in the forward
+    pass."""
 
     def __init__(self, dim0: int, dim1: int):
         super().__init__()
@@ -41,7 +43,8 @@ class Transpose(torch.nn.Module):
 
 
 class CausalBlock1D(Block1D):
-    """Causal variant of Block1D using left-padded convolution to prevent future information leakage."""
+    """Causal variant of Block1D using left-padded convolution to prevent
+    future information leakage."""
 
     def __init__(self, dim: int, dim_out: int):
         super().__init__(dim, dim_out)
@@ -59,7 +62,8 @@ class CausalBlock1D(Block1D):
 
 
 class CausalResnetBlock1D(ResnetBlock1D):
-    """Causal variant of ResnetBlock1D with CausalBlock1D sub-blocks for streaming inference."""
+    """Causal variant of ResnetBlock1D with CausalBlock1D sub-blocks for
+    streaming inference."""
 
     def __init__(self, dim: int, dim_out: int, time_emb_dim: int, groups: int = 8):
         super().__init__(dim, dim_out, time_emb_dim, groups)
@@ -68,7 +72,8 @@ class CausalResnetBlock1D(ResnetBlock1D):
 
 
 class CausalConv1d(torch.nn.Conv1d):
-    """1D convolution with left-only padding to ensure causal (non-future-looking) behavior."""
+    """1D convolution with left-only padding to ensure causal (non-future-
+    looking) behavior."""
 
     def __init__(
             self,
@@ -104,7 +109,8 @@ class CausalConv1d(torch.nn.Conv1d):
 
 
 class ConditionalDecoder(nn.Module):
-    """U-Net style 1D conditional decoder with transformer blocks for CFM-based mel generation."""
+    """U-Net style 1D conditional decoder with transformer blocks for CFM-based
+    mel generation."""
 
     def __init__(
         self,
@@ -119,11 +125,10 @@ class ConditionalDecoder(nn.Module):
         num_heads=8,
         act_fn="gelu",
     ):
-        """
-        This decoder requires an input with the same shape of the target.
+        """This decoder requires an input with the same shape of the target.
 
-        So, if your text content is shorter or longer than the outputs, please re-sampling it before feeding
-        to the decoder.
+        So, if your text content is shorter or longer than the outputs,
+        please re-sampling it before feeding to the decoder.
         """
         super().__init__()
         channels = tuple(channels)
@@ -232,8 +237,7 @@ class ConditionalDecoder(nn.Module):
                     nn.init.constant_(m.bias, 0)
 
     def forward(self, x, mask, mu, t, spks=None, cond=None):
-        """
-        Forward pass of the UNet1DConditional model.
+        """Forward pass of the UNet1DConditional model.
 
         Args:
             x (torch.Tensor): shape (batch_size, in_channels, time)

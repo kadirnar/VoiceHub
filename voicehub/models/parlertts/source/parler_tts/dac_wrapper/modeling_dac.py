@@ -1,5 +1,5 @@
 import torch
-from voicehub.third_party.dac.model import DAC
+from voicehub.components.audio.codecs.dac.model import DAC
 from torch import nn
 
 from transformers import PreTrainedModel

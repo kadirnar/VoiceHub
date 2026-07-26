@@ -14,7 +14,8 @@ from voicehub.models.vui.vad import detect_voice_activity as vad
 
 
 def ensure_spaces_around_tags(text: str):
-    """Ensure whitespace exists before ``[`` and after ``]`` markers in the text."""
+    """Ensure whitespace exists before ``[`` and after ``]`` markers in the
+    text."""
     # Add space before '[' if not preceded by space, '<', or '['
     text = re.sub(
         r"(?<![<\[\s])(\[)",
@@ -60,7 +61,8 @@ def asr(chunk, model=None, prefix=None):
 
 
 def replace_numbers_with_words(text):
-    """Replace all digit sequences in *text* with their English word equivalents."""
+    """Replace all digit sequences in *text* with their English word
+    equivalents."""
     global engine
 
     if engine is None:
@@ -80,8 +82,7 @@ valid_non_speech = [f"[{v}]" for v in valid_non_speech]
 
 
 def remove_all_invalid_non_speech(txt):
-    """
-    Remove all non-speech markers that are not in the valid_non_speech list.
+    """Remove all non-speech markers that are not in the valid_non_speech list.
 
     Only keeps valid non-speech markers like [breath], [sigh], etc.
     """
@@ -100,7 +101,8 @@ def remove_all_invalid_non_speech(txt):
 
 
 def simple_clean(text):
-    """Normalise text for TTS: expand numbers, strip special characters, add trailing pause."""
+    """Normalise text for TTS: expand numbers, strip special characters, add
+    trailing pause."""
     text = re.sub(r"(\d+)am", r"\1 AM", text)
     text = re.sub(r"(\d+)pm", r"\1 PM", text)
     text = replace_numbers_with_words(text)
@@ -144,8 +146,7 @@ def generate(
         top_p: float | None = None,
         max_gen_len: int = int(120 * 21.53),
 ):
-    """
-    Autoregressively generate multi-codebook audio codes from cleaned text.
+    """Autoregressively generate multi-codebook audio codes from cleaned text.
 
     Args:
         self: The Vui model instance (bound externally).
@@ -308,11 +309,10 @@ def render(
     top_p: float | None = None,
     max_secs: int = 100,
 ):
-    """
-    Render audio from text.
+    """Render audio from text.
 
-    Uses generate for text < 1000 characters, otherwise breaks text into sections and uses chunking with
-    context.
+    Uses generate for text < 1000 characters, otherwise breaks text into
+    sections and uses chunking with context.
     """
     text = remove_all_invalid_non_speech(text)
     text = simple_clean(text)

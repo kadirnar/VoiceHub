@@ -16,7 +16,7 @@ def _get_dac():
     """Lazy load and cache the DAC 44kHz model."""
     global _dac_model
     if _dac_model is None:
-        import voicehub.third_party.dac as dac_module
+        import voicehub.components.audio.codecs.dac as dac_module
 
         _dac_model = (
             dac_module.DAC.load(dac_module.utils.download(model_type="44khz"))

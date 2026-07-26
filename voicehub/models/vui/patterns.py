@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Pattern:
-    """
-    Base implementation of a pattern over a sequence with multiple codebooks.
+    """Base implementation of a pattern over a sequence with multiple
+    codebooks.
 
     The codebook pattern consists in a layout, defining for each sequence step
     the list of coordinates of each codebook timestep in the resulting interleaved sequence.
@@ -57,8 +57,7 @@ class Pattern:
         )
 
     def _validate_layout(self):
-        """
-        Runs checks on the layout to ensure a valid pattern is defined.
+        """Runs checks on the layout to ensure a valid pattern is defined.
 
         A pattern is considered invalid if:
             - Multiple timesteps for a same codebook are defined in the same sequence step
@@ -101,11 +100,11 @@ class Pattern:
         return self.layout[0] == []
 
     def get_sequence_coords_with_timestep(self, t: int, q: int | None = None):
-        """
-        Get codebook coordinates in the layout that corresponds to the specified timestep t and optionally to
-        the codebook q.
+        """Get codebook coordinates in the layout that corresponds to the
+        specified timestep t and optionally to the codebook q.
 
-        Coordinates are returned as a tuple with the sequence step and the actual codebook coordinates.
+        Coordinates are returned as a tuple with the sequence step and
+        the actual codebook coordinates.
         """
         assert (t <= self.timesteps), "provided timesteps is greater than the pattern's number of timesteps"
         if q is not None:
@@ -133,8 +132,8 @@ class Pattern:
         keep_only_valid_steps: bool,
         device: torch.device | str = "cpu",
     ):
-        """
-        Build scatter indexes corresponding to the pattern, up to the provided sequence_steps.
+        """Build scatter indexes corresponding to the pattern, up to the
+        provided sequence_steps.
 
         Args:
             timesteps (int): Maximum number of timesteps steps to consider.
@@ -172,8 +171,7 @@ class Pattern:
 
     def build_pattern_sequence(
             self, z: torch.Tensor, special_token: int, keep_only_valid_steps: bool = False):
-        """
-        Build sequence corresponding to the pattern from the input tensor z.
+        """Build sequence corresponding to the pattern from the input tensor z.
 
         The sequence is built using up to sequence_steps if specified, and non-pattern coordinates are filled with the special token.
 
@@ -206,9 +204,8 @@ class Pattern:
         is_model_output: bool = False,
         device: torch.device | str = "cpu",
     ):
-        """
-        Builds scatter indexes required to retrieve the original multi-codebook sequence from interleaving
-        pattern.
+        """Builds scatter indexes required to retrieve the original multi-
+        codebook sequence from interleaving pattern.
 
         Args:
             sequence_steps (int): Sequence steps.
@@ -251,10 +248,10 @@ class Pattern:
 
     def revert_pattern_sequence(
             self, s: torch.Tensor, special_token: int, keep_only_valid_steps: bool = False):
-        """
-        Revert a sequence built from the pattern back to the original multi-codebook sequence without
-        interleaving. The sequence is reverted using up to timesteps if specified, and non-pattern coordinates
-        are filled with the special token.
+        """Revert a sequence built from the pattern back to the original multi-
+        codebook sequence without interleaving. The sequence is reverted using
+        up to timesteps if specified, and non-pattern coordinates are filled
+        with the special token.
 
         Args:
             s (torch.Tensor): Interleaved sequence tensor obtained from the pattern, of shape [B, K, S].
@@ -281,9 +278,8 @@ class Pattern:
         special_token: float,
         keep_only_valid_steps: bool = False,
     ):
-        """
-        Revert model logits obtained on a sequence built from the pattern back to a tensor matching the
-        original sequence.
+        """Revert model logits obtained on a sequence built from the pattern
+        back to a tensor matching the original sequence.
 
         This method is similar to ``revert_pattern_sequence`` with the following specificities:
         1. It is designed to work with the extra cardinality dimension
@@ -304,8 +300,7 @@ class Pattern:
 
 
 class CodebooksPatternProvider(ABC):
-    """
-    Abstraction around providing pattern for interleaving codebooks.
+    """Abstraction around providing pattern for interleaving codebooks.
 
     The CodebooksPatternProvider abstraction allows to implement various strategies to
     define interleaving pattern of sequences composed of multiple codebooks. For a given
@@ -330,8 +325,7 @@ class CodebooksPatternProvider(ABC):
 
     @abstractmethod
     def get_pattern(self, timesteps: int) -> Pattern:
-        """
-        Builds pattern with specific interleaving between codebooks.
+        """Builds pattern with specific interleaving between codebooks.
 
         Args:
             timesteps (int): Total number of timesteps.
@@ -340,8 +334,7 @@ class CodebooksPatternProvider(ABC):
 
 
 class DelayedPatternProvider(CodebooksPatternProvider):
-    """
-    Provider for delayed pattern across delayed codebooks.
+    """Provider for delayed pattern across delayed codebooks.
 
     Codebooks are delayed in the sequence and sequence steps will contain codebooks from different timesteps.
 
