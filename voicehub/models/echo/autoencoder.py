@@ -477,7 +477,7 @@ class DownsampleResidualVectorQuantize(nn.Module):
         z = self.pre_module(
             z)  # (B, D, T) or (B, T, D) depending on module; original uses channels-first in/out
 
-        semantic_z, semantic_codes, semantic_latents, semantic_commitment_loss, semantic_codebook_loss = \
+        semantic_z, semantic_codes, semantic_latents, semantic_commitment_loss, semantic_codebook_loss =\
             self.semantic_quantizer(z)
         residual_z = z - semantic_z
         residual_z, codes, latents, commitment_loss, codebook_loss = self.quantizer(

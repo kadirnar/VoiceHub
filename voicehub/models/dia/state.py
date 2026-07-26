@@ -205,8 +205,8 @@ class DecoderOutput:
     """
     Accumulator for tokens generated during autoregressive decoding.
 
-    Stores the full ``(B, T, C)`` grid of generated codebook indices and
-    tracks how many prefill steps each batch element consumed.
+    Stores the full ``(B, T, C)`` grid of generated codebook indices and tracks how many prefill steps each
+    batch element consumed.
     """
 
     generated_tokens: torch.Tensor

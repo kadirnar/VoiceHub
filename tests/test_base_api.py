@@ -28,7 +28,10 @@ class DummyForTextToSpeech(PreTrainedTTSModel):
         return TTSOutput(
             audio=[0.0],
             sample_rate=self.sample_rate,
-            metadata={"text": text, **kwargs},
+            metadata={
+                "text": text,
+                **kwargs
+            },
         )
 
 
@@ -64,11 +67,7 @@ class BaseApiTests(unittest.TestCase):
         self.assertEqual(output["sample_rate"], 24000)
 
     def test_generation_config_controls_uniform_generate_method(self):
-        model = DummyForTextToSpeech(
-            DummyConfig(
-                generation_config={"speed": 1.1},
-            )
-        )
+        model = DummyForTextToSpeech(DummyConfig(generation_config={"speed": 1.1}, ))
         output = model.generate(
             "hello",
             generation_config=TTSGenerationConfig(seed=7),
@@ -126,10 +125,7 @@ class BaseApiTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             model.save_pretrained(directory)
-            files = {
-                path.name
-                for path in Path(directory).iterdir()
-            }
+            files = {path.name for path in Path(directory).iterdir()}
             loaded = AutoModelForTextToSpeech.from_pretrained(directory)
 
         self.assertEqual(

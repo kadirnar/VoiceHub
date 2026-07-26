@@ -110,9 +110,7 @@ class AutoProcessor:
     """Create the processor paired with a VoiceHub TTS configuration."""
 
     def __init__(self):
-        raise OSError(
-            "AutoProcessor must be created with from_config/from_pretrained."
-        )
+        raise OSError("AutoProcessor must be created with from_config/from_pretrained.")
 
     @classmethod
     def from_config(
@@ -137,9 +135,7 @@ class AutoProcessor:
         """Construct a processor without importing a model runtime."""
         if config is None:
             if model_type is None:
-                config = AutoConfig.from_pretrained(
-                    pretrained_model_name_or_path
-                )
+                config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
             else:
                 config = AutoConfig.for_model(
                     model_type,

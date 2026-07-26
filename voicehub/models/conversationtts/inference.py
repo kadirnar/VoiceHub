@@ -57,8 +57,7 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
         raise SourceLicenseError(
             "Audio-Foundation-Models/ConversationTTS does not publish a "
             "source-code license. VoiceHub cannot legally vendor or "
-            "redistribute that implementation until upstream adds one."
-        )
+            "redistribute that implementation until upstream adds one.")
 
     def _generate(self, text: str, **kwargs) -> TTSOutput:
         self.load()

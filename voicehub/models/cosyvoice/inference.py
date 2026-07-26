@@ -62,9 +62,7 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
         )
         model_directory = Path(self.config.name_or_path).expanduser()
         if not model_directory.is_dir():
-            model_directory = Path(
-                runtime.snapshot_download(self.config.name_or_path)
-            )
+            model_directory = Path(runtime.snapshot_download(self.config.name_or_path))
 
         common = {
             "model_dir": str(model_directory),
@@ -82,9 +80,7 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
             model_class = runtime.CosyVoice
             common["load_jit"] = self.config.load_jit
         else:
-            raise ValueError(
-                f"{model_directory} does not contain a CosyVoice model config."
-            )
+            raise ValueError(f"{model_directory} does not contain a CosyVoice model config.")
 
         self.model = model_class(**common)
         self.config.name_or_path = str(model_directory)
@@ -112,15 +108,12 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
                 if not speakers:
                     raise ValueError(
                         "This checkpoint has no built-in speaker; provide "
-                        "speaker_audio_path for zero-shot synthesis."
-                    )
+                        "speaker_audio_path for zero-shot synthesis.")
                 speaker = speakers[0]
             return self.model.inference_sft(text, speaker, **common)
         if mode == "zero_shot":
             if not speaker_audio_path or not prompt_text:
-                raise ValueError(
-                    "zero_shot requires speaker_audio_path and prompt_text."
-                )
+                raise ValueError("zero_shot requires speaker_audio_path and prompt_text.")
             return self.model.inference_zero_shot(
                 text,
                 prompt_text,
@@ -129,9 +122,7 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
             )
         if mode == "cross_lingual":
             if not speaker_audio_path:
-                raise ValueError(
-                    "cross_lingual requires speaker_audio_path."
-                )
+                raise ValueError("cross_lingual requires speaker_audio_path.")
             return self.model.inference_cross_lingual(
                 text,
                 speaker_audio_path,
@@ -140,10 +131,8 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
         if mode == "instruct":
             if hasattr(self.model, "inference_instruct2"):
                 if not speaker_audio_path:
-                    raise ValueError(
-                        "CosyVoice 2/3 instruct mode requires "
-                        "speaker_audio_path."
-                    )
+                    raise ValueError("CosyVoice 2/3 instruct mode requires "
+                                     "speaker_audio_path.")
                 return self.model.inference_instruct2(
                     text,
                     instruct_text,
@@ -151,19 +140,15 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
                     **common,
                 )
             if speaker is None:
-                raise ValueError(
-                    "CosyVoice 1 instruct mode requires speaker."
-                )
+                raise ValueError("CosyVoice 1 instruct mode requires speaker.")
             return self.model.inference_instruct(
                 text,
                 speaker,
                 instruct_text,
                 **common,
             )
-        raise ValueError(
-            "mode must be one of: auto, sft, zero_shot, cross_lingual, "
-            "instruct."
-        )
+        raise ValueError("mode must be one of: auto, sft, zero_shot, cross_lingual, "
+                         "instruct.")
 
     def _generate(
         self,

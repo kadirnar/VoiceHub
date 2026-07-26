@@ -220,8 +220,10 @@ class RelPositionMultiHeadedAttention(MultiHeadedAttention):
         pos_emb: torch.Tensor = torch.empty(0),
         cache: torch.Tensor = torch.zeros((0, 0, 0, 0))
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Compute 'Scaled Dot Product Attention' with rel. positional encoding.
-        Args:
+        """
+        Compute 'Scaled Dot Product Attention' with rel.
+
+        positional encoding. Args:
             query (torch.Tensor): Query tensor (#batch, time1, size).
             key (torch.Tensor): Key tensor (#batch, time2, size).
             value (torch.Tensor): Value tensor (#batch, time2, size).

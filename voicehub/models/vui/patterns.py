@@ -173,8 +173,9 @@ class Pattern:
     def build_pattern_sequence(
             self, z: torch.Tensor, special_token: int, keep_only_valid_steps: bool = False):
         """
-        Build sequence corresponding to the pattern from the input tensor z. The sequence is built using up to
-        sequence_steps if specified, and non-pattern coordinates are filled with the special token.
+        Build sequence corresponding to the pattern from the input tensor z.
+
+        The sequence is built using up to sequence_steps if specified, and non-pattern coordinates are filled with the special token.
 
         Args:
             z (torch.Tensor): Input tensor of multi-codebooks sequence, of shape [B, K, T].
@@ -340,8 +341,9 @@ class CodebooksPatternProvider(ABC):
 
 class DelayedPatternProvider(CodebooksPatternProvider):
     """
-    Provider for delayed pattern across delayed codebooks. Codebooks are delayed in the sequence and sequence
-    steps will contain codebooks from different timesteps.
+    Provider for delayed pattern across delayed codebooks.
+
+    Codebooks are delayed in the sequence and sequence steps will contain codebooks from different timesteps.
 
     Example:
         Taking timesteps=4 and n_q=3, delays=None, the multi-codebook sequence:

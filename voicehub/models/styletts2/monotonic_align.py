@@ -1,8 +1,9 @@
-"""Pure-Python monotonic alignment used by the vendored StyleTTS 2 code.
+"""
+Pure-Python monotonic alignment used by the vendored StyleTTS 2 code.
 
-The API mirrors Resemble AI's MIT-licensed ``monotonic_align`` extension, whose
-Cython sources are preserved under ``source/third_party/monotonic_align``.
-This fallback keeps VoiceHub wheels self-contained and avoids a Git/pip build.
+The API mirrors Resemble AI's MIT-licensed ``monotonic_align`` extension, whose Cython sources are preserved
+under ``source/third_party/monotonic_align``. This fallback keeps VoiceHub wheels self-contained and avoids a
+Git/pip build.
 """
 
 from __future__ import annotations
@@ -24,10 +25,8 @@ def maximum_path_c(
         if text_length <= 0 or frame_length <= 0:
             continue
         if frame_length < text_length:
-            raise ValueError(
-                "A monotonic alignment needs at least as many frames as "
-                "text tokens."
-            )
+            raise ValueError("A monotonic alignment needs at least as many frames as "
+                             "text tokens.")
 
         scores = np.full(
             (text_length, frame_length),
@@ -47,32 +46,23 @@ def maximum_path_c(
                 text_length - (frame_length - frame_index),
             )
             for text_index in range(
-                min_text_index,
-                max_text_index + 1,
+                    min_text_index,
+                    max_text_index + 1,
             ):
                 stay_score = scores[text_index, frame_index - 1]
                 advance_score = (
-                    scores[text_index - 1, frame_index - 1]
-                    if text_index > 0
-                    else negative_infinity
-                )
+                    scores[text_index - 1, frame_index - 1] if text_index > 0 else negative_infinity)
                 if advance_score >= stay_score:
                     best_score = advance_score
                     previous[text_index, frame_index] = 1
                 else:
                     best_score = stay_score
-                scores[text_index, frame_index] = (
-                    best_score
-                    + values[batch_index, text_index, frame_index]
-                )
+                scores[text_index, frame_index] = (best_score + values[batch_index, text_index, frame_index])
 
         text_index = text_length - 1
         for frame_index in range(frame_length - 1, -1, -1):
             paths[batch_index, text_index, frame_index] = 1
-            if (
-                frame_index > 0
-                and previous[text_index, frame_index]
-            ):
+            if (frame_index > 0 and previous[text_index, frame_index]):
                 text_index -= 1
 
 
@@ -81,17 +71,9 @@ def mask_from_lens(similarity, symbol_lens, mel_lens):
     import torch
 
     _, symbols, frames = similarity.size()
-    symbol_mask = (
-        torch.arange(symbols, device=symbol_lens.device)[None, :]
-        < symbol_lens[:, None]
-    )
-    frame_mask = (
-        torch.arange(frames, device=mel_lens.device)[None, :]
-        < mel_lens[:, None]
-    )
-    return (
-        symbol_mask.unsqueeze(2) * frame_mask.unsqueeze(1)
-    ).to(similarity)
+    symbol_mask = (torch.arange(symbols, device=symbol_lens.device)[None, :] < symbol_lens[:, None])
+    frame_mask = (torch.arange(frames, device=mel_lens.device)[None, :] < mel_lens[:, None])
+    return (symbol_mask.unsqueeze(2) * frame_mask.unsqueeze(1)).to(similarity)
 
 
 def maximum_path(value, mask=None):
@@ -102,13 +84,7 @@ def maximum_path(value, mask=None):
         mask = torch.ones_like(value)
     device = value.device
     dtype = value.dtype
-    values = (
-        (value * mask)
-        .detach()
-        .cpu()
-        .numpy()
-        .astype(np.float32)
-    )
+    values = ((value * mask).detach().cpu().numpy().astype(np.float32))
     mask_array = mask.detach().cpu().numpy()
     paths = np.zeros_like(values, dtype=np.int32)
     text_lengths = mask_array.sum(1)[:, 0].astype(np.int32)

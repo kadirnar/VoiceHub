@@ -74,20 +74,15 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
             install_extra="llasa",
         )
         dtype = getattr(torch, self.config.torch_dtype)
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained(
-            self.config.name_or_path
-        )
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained(self.config.name_or_path)
         self.model = (
             transformers.AutoModelForCausalLM.from_pretrained(
                 self.config.name_or_path,
                 torch_dtype=dtype,
-            ).eval().to(self.device)
-        )
+            ).eval().to(self.device))
         self.codec = (
-            codec_module.XCodec2Model.from_pretrained(
-                self.config.codec_name_or_path,
-            ).eval().to(self.device)
-        )
+            codec_module.XCodec2Model.from_pretrained(self.config.codec_name_or_path, ).eval().to(
+                self.device))
         self._torch = torch
 
     @staticmethod
@@ -118,9 +113,7 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
         audio, sample_rate = sf.read(audio_path, always_2d=False)
         if audio.ndim > 1:
             audio = audio.mean(axis=1)
-        waveform = self._torch.from_numpy(
-            np.asarray(audio, dtype=np.float32)
-        )
+        waveform = self._torch.from_numpy(np.asarray(audio, dtype=np.float32))
         if sample_rate != self.sample_rate:
             torchaudio = import_optional(
                 "torchaudio",
@@ -161,18 +154,14 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
                     input_waveform=reference,
                     sample_rate=self.sample_rate,
                 )
-            prefix_ids = [
-                int(value)
-                for value in encoded[0, 0].detach().cpu().tolist()
-            ]
+            prefix_ids = [int(value) for value in encoded[0, 0].detach().cpu().tolist()]
             # XCodec2 emits 50 tokens per second at 16 kHz.
             prompt_samples = len(prefix_ids) * (self.sample_rate // 50)
 
         formatted_text = (
             "<|TEXT_UNDERSTANDING_START|>"
             f"{reference_text}{text}"
-            "<|TEXT_UNDERSTANDING_END|>"
-        )
+            "<|TEXT_UNDERSTANDING_END|>")
         prefix = "".join(self._ids_to_speech_tokens(prefix_ids))
         chat = [
             {
@@ -190,33 +179,19 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
             return_tensors="pt",
             continue_final_message=True,
         ).to(self.device)
-        speech_end_id = self.tokenizer.convert_tokens_to_ids(
-            "<|SPEECH_GENERATION_END|>"
-        )
+        speech_end_id = self.tokenizer.convert_tokens_to_ids("<|SPEECH_GENERATION_END|>")
         with torch.no_grad():
             generated = self.model.generate(
                 input_ids,
-                max_new_tokens=(
-                    self.config.max_new_tokens
-                    if max_new_tokens is None
-                    else max_new_tokens
-                ),
+                max_new_tokens=(self.config.max_new_tokens if max_new_tokens is None else max_new_tokens),
                 eos_token_id=speech_end_id,
                 do_sample=True,
                 top_p=self.config.top_p if top_p is None else top_p,
-                temperature=(
-                    self.config.temperature
-                    if temperature is None
-                    else temperature
-                ),
+                temperature=(self.config.temperature if temperature is None else temperature),
             )
             generated_ids = generated[0, input_ids.shape[1]:]
-            token_strings = self.tokenizer.convert_ids_to_tokens(
-                generated_ids.detach().cpu().tolist()
-            )
-            speech_ids = prefix_ids + self._extract_speech_ids(
-                token_strings
-            )
+            token_strings = self.tokenizer.convert_ids_to_tokens(generated_ids.detach().cpu().tolist())
+            speech_ids = prefix_ids + self._extract_speech_ids(token_strings)
             codec_tokens = torch.tensor(
                 speech_ids,
                 device=self.device,
@@ -226,11 +201,7 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
         if prompt_samples:
             waveform = waveform[prompt_samples:]
         waveform = waveform.detach().cpu()
-        file_path = (
-            self.save_audio(output_file, waveform, self.sample_rate)
-            if output_file
-            else None
-        )
+        file_path = (self.save_audio(output_file, waveform, self.sample_rate) if output_file else None)
         return TTSOutput(
             audio=waveform,
             sample_rate=self.sample_rate,

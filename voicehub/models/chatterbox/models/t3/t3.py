@@ -69,7 +69,7 @@ class T3(nn.Module):
     def prepare_conditioning(self, t3_cond: T3Cond):
         """Token cond data needs to be embedded, so that needs to be here instead of in `T3CondEnc`."""
         if t3_cond.cond_prompt_speech_tokens is not None and t3_cond.cond_prompt_speech_emb is None:
-            t3_cond.cond_prompt_speech_emb = self.speech_emb(t3_cond.cond_prompt_speech_tokens) + \
+            t3_cond.cond_prompt_speech_emb = self.speech_emb(t3_cond.cond_prompt_speech_tokens) +\
                 self.speech_pos_emb(t3_cond.cond_prompt_speech_tokens)
         return self.cond_enc(t3_cond)  # (B, len_cond, dim)
 

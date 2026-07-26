@@ -163,7 +163,6 @@ class SineGen(torch.nn.Module):
         :param f0: [B, 1, sample_len], Hz
         :return: [B, 1, sample_len]
         """
-
         F_mat = torch.zeros((f0.size(0), self.harmonic_num + 1, f0.size(-1))).to(f0.device)
         for i in range(self.harmonic_num + 1):
             F_mat[:, i:i + 1, :] = f0 * (i + 1) / self.sampling_rate

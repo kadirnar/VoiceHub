@@ -97,9 +97,7 @@ class MeloTTSForTextToSpeech(PreTrainedTTSModel):
                 speaker_id = speaker_ids[speaker]
             except KeyError as exc:
                 available = ", ".join(speaker_ids)
-                raise ValueError(
-                    f"Unknown speaker {speaker!r}. Available: {available}."
-                ) from exc
+                raise ValueError(f"Unknown speaker {speaker!r}. Available: {available}.") from exc
 
         audio = self.model.tts_to_file(
             text,

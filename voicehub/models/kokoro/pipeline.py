@@ -117,8 +117,8 @@ class KPipeline:
             except RuntimeError as e:
                 if device == 'cuda':
                     raise RuntimeError(
-                        f"""Failed to initialize model on CUDA: {e}.
-                                       Try setting device='cpu' or check CUDA installation.""")
+                        f"Failed to initialize model on CUDA: {e}. "
+                        "Try setting device='cpu' or check CUDA installation.")
                 raise
         self.voices = {}  # lazily populated voice embedding cache
         if lang_code in 'ab':

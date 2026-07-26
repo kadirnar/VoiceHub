@@ -113,8 +113,5 @@ class TTSGenerationConfig:
         return unused
 
     def __repr__(self) -> str:
-        fields = ", ".join(
-            f"{key}={value!r}"
-            for key, value in sorted(self.to_dict().items())
-        )
+        fields = ", ".join(f"{key}={value!r}" for key, value in sorted(self.to_dict().items()))
         return f"{self.__class__.__name__}({fields})"

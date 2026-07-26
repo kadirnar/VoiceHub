@@ -28,7 +28,6 @@ def mel_spectrogram(
         fmax=8000,
         center=False):
     """Compute mel-spectrogram from a waveform using STFT and mel filterbank projection."""
-
     if isinstance(y, np.ndarray):
         y = torch.tensor(y).float()
 

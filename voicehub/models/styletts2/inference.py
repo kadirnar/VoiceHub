@@ -52,23 +52,13 @@ class StyleTTS2ForTextToSpeech(PreTrainedTTSModel):
 
     def _load_pretrained_model(self) -> None:
         if not self.config.name_or_path:
-            raise ValueError(
-                "StyleTTS 2 requires model_path pointing to an official "
-                "checkpoint."
-            )
+            raise ValueError("StyleTTS 2 requires model_path pointing to an official "
+                             "checkpoint.")
         config_path = self.config.config_path
         if config_path is None:
-            config_path = (
-                Path(__file__).parent
-                / "source"
-                / "styletts2"
-                / "Configs"
-                / "config_libritts.yml"
-            )
+            config_path = (Path(__file__).parent / "source" / "styletts2" / "Configs" / "config_libritts.yml")
 
-        from voicehub.models.styletts2.modeling_styletts2 import (
-            StyleTTS2Runtime,
-        )
+        from voicehub.models.styletts2.modeling_styletts2 import StyleTTS2Runtime
 
         self.model = StyleTTS2Runtime(
             checkpoint_path=self.config.name_or_path,

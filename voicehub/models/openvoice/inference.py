@@ -62,16 +62,12 @@ class OpenVoiceForTextToSpeech(PreTrainedTTSModel):
             model_type="openvoice",
             install_extra="openvoice",
         )
-        converter_directory = (
-            Path(self.config.name_or_path).expanduser() / "converter"
-        )
+        converter_directory = (Path(self.config.name_or_path).expanduser() / "converter")
         converter = openvoice_api.ToneColorConverter(
             str(converter_directory / "config.json"),
             device=self.device,
         )
-        converter.load_ckpt(
-            str(converter_directory / "checkpoint.pth")
-        )
+        converter.load_ckpt(str(converter_directory / "checkpoint.pth"))
         self.model = converter
 
     def _base_model(self, language: str):
@@ -107,9 +103,7 @@ class OpenVoiceForTextToSpeech(PreTrainedTTSModel):
             speaker_id = speaker_ids[speaker]
         except KeyError as exc:
             available = ", ".join(speaker_ids)
-            raise ValueError(
-                f"Unknown base speaker {speaker!r}. Available: {available}."
-            ) from exc
+            raise ValueError(f"Unknown base speaker {speaker!r}. Available: {available}.") from exc
 
         target_embedding, _ = self._se_extractor.get_se(
             speaker_audio_path,
@@ -118,11 +112,7 @@ class OpenVoiceForTextToSpeech(PreTrainedTTSModel):
         )
         speaker_key = speaker.lower().replace("_", "-")
         source_embedding_path = (
-            Path(self.config.name_or_path).expanduser()
-            / "base_speakers"
-            / "ses"
-            / f"{speaker_key}.pth"
-        )
+            Path(self.config.name_or_path).expanduser() / "base_speakers" / "ses" / f"{speaker_key}.pth")
         torch = import_optional(
             "torch",
             model_type="openvoice",
@@ -137,8 +127,8 @@ class OpenVoiceForTextToSpeech(PreTrainedTTSModel):
         temporary_path = None
         try:
             with tempfile.NamedTemporaryFile(
-                suffix=".wav",
-                delete=False,
+                    suffix=".wav",
+                    delete=False,
             ) as temporary:
                 temporary_path = Path(temporary.name)
             base_model.tts_to_file(
@@ -150,21 +140,13 @@ class OpenVoiceForTextToSpeech(PreTrainedTTSModel):
             )
             output_path = (
                 Path(output_file).expanduser()
-                if output_file
-                else temporary_path.with_name(
-                    f"{temporary_path.stem}-converted.wav"
-                )
-            )
+                if output_file else temporary_path.with_name(f"{temporary_path.stem}-converted.wav"))
             self.model.convert(
                 audio_src_path=str(temporary_path),
                 src_se=source_embedding,
                 tgt_se=target_embedding,
                 output_path=str(output_path),
-                message=(
-                    self.config.watermark
-                    if watermark is None
-                    else watermark
-                ),
+                message=(self.config.watermark if watermark is None else watermark),
             )
             soundfile = import_optional(
                 "soundfile",
@@ -177,7 +159,10 @@ class OpenVoiceForTextToSpeech(PreTrainedTTSModel):
                 audio=audio,
                 sample_rate=sample_rate,
                 file_path=str(output_path) if output_file else None,
-                metadata={"speaker": speaker, "language": language},
+                metadata={
+                    "speaker": speaker,
+                    "language": language
+                },
             )
         finally:
             if temporary_path is not None:

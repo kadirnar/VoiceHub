@@ -69,9 +69,7 @@ class PreLookaheadLayer(nn.Module):
         )
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        """
-        inputs: (batch_size, seq_len, channels)
-        """
+        """Inputs: (batch_size, seq_len, channels)"""
         outputs = inputs.transpose(1, 2).contiguous()
         # look ahead
         outputs = F.pad(outputs, (0, self.pre_lookahead_len), mode='constant', value=0.0)

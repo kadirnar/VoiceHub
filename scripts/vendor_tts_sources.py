@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Vendor upstream TTS implementations into VoiceHub.
+"""
+Vendor upstream TTS implementations into VoiceHub.
 
-The resulting packages never import the installable upstream TTS projects.
-Only general-purpose runtime dependencies (PyTorch, Transformers, etc.) remain
-external. Model weights are deliberately not copied.
+The resulting packages never import the installable upstream TTS projects. Only general-purpose runtime
+dependencies (PyTorch, Transformers, etc.) remain external. Model weights are deliberately not copied.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MODEL_ROOT = REPOSITORY_ROOT / "voicehub" / "models"
@@ -118,7 +117,6 @@ PROJECTS = (
     ),
 )
 
-
 IMPORT_ROOTS = {
     "cosyvoice": {
         "cosyvoice": "voicehub.models.cosyvoice.source.cosyvoice",
@@ -127,60 +125,37 @@ IMPORT_ROOTS = {
     },
     "f5tts": {
         "f5_tts": "voicehub.models.f5tts.source.f5_tts",
-        "third_party.BigVGAN": (
-            "voicehub.models.f5tts.source.third_party.BigVGAN"
-        ),
-        "alias_free_activation": (
-            "voicehub.models.f5tts.source.third_party.BigVGAN."
-            "alias_free_activation"
-        ),
-        "activations": (
-            "voicehub.models.f5tts.source.third_party.BigVGAN.activations"
-        ),
+        "third_party.BigVGAN": ("voicehub.models.f5tts.source.third_party.BigVGAN"),
+        "alias_free_activation":
+        ("voicehub.models.f5tts.source.third_party.BigVGAN."
+         "alias_free_activation"),
+        "activations": ("voicehub.models.f5tts.source.third_party.BigVGAN.activations"),
         "bigvgan": "voicehub.models.f5tts.source.third_party.BigVGAN.bigvgan",
         "env": "voicehub.models.f5tts.source.third_party.BigVGAN.env",
-        "meldataset": (
-            "voicehub.models.f5tts.source.third_party.BigVGAN.meldataset"
-        ),
+        "meldataset": ("voicehub.models.f5tts.source.third_party.BigVGAN.meldataset"),
         "vocos": "voicehub.third_party.vocos",
     },
     "gptsovits": {
         "GPT_SoVITS": "voicehub.models.gptsovits.source.GPT_SoVITS",
-        "TTS_infer_pack": (
-            "voicehub.models.gptsovits.source.GPT_SoVITS.TTS_infer_pack"
-        ),
-        "feature_extractor": (
-            "voicehub.models.gptsovits.source.GPT_SoVITS.feature_extractor"
-        ),
+        "TTS_infer_pack": ("voicehub.models.gptsovits.source.GPT_SoVITS.TTS_infer_pack"),
+        "feature_extractor": ("voicehub.models.gptsovits.source.GPT_SoVITS.feature_extractor"),
         "BigVGAN": "voicehub.models.gptsovits.source.GPT_SoVITS.BigVGAN",
         "f5_tts": "voicehub.models.gptsovits.source.GPT_SoVITS.f5_tts",
         "module": "voicehub.models.gptsovits.source.GPT_SoVITS.module",
         "text": "voicehub.models.gptsovits.source.GPT_SoVITS.text",
         "AR": "voicehub.models.gptsovits.source.GPT_SoVITS.AR",
         "tools": "voicehub.models.gptsovits.source.tools",
-        "process_ckpt": (
-            "voicehub.models.gptsovits.source.GPT_SoVITS.process_ckpt"
-        ),
+        "process_ckpt": ("voicehub.models.gptsovits.source.GPT_SoVITS.process_ckpt"),
         "sv": "voicehub.models.gptsovits.source.GPT_SoVITS.sv",
-        "ERes2NetV2": (
-            "voicehub.models.gptsovits.source.GPT_SoVITS.eres2net.ERes2NetV2"
-        ),
-        "pooling_layers": (
-            "voicehub.models.gptsovits.source.GPT_SoVITS.eres2net."
-            "pooling_layers"
-        ),
-        "fusion": (
-            "voicehub.models.gptsovits.source.GPT_SoVITS.eres2net.fusion"
-        ),
-        "kaldi": (
-            "voicehub.models.gptsovits.source.GPT_SoVITS.eres2net.kaldi"
-        ),
+        "ERes2NetV2": ("voicehub.models.gptsovits.source.GPT_SoVITS.eres2net.ERes2NetV2"),
+        "pooling_layers": ("voicehub.models.gptsovits.source.GPT_SoVITS.eres2net."
+                           "pooling_layers"),
+        "fusion": ("voicehub.models.gptsovits.source.GPT_SoVITS.eres2net.fusion"),
+        "kaldi": ("voicehub.models.gptsovits.source.GPT_SoVITS.eres2net.kaldi"),
     },
     "melotts": {
         "melo": "voicehub.models.melotts.source.melo",
-        "mel_processing": (
-            "voicehub.models.melotts.source.melo.mel_processing"
-        ),
+        "mel_processing": ("voicehub.models.melotts.source.melo.mel_processing"),
         "data_utils": "voicehub.models.melotts.source.melo.data_utils",
         "attentions": "voicehub.models.melotts.source.melo.attentions",
         "transforms": "voicehub.models.melotts.source.melo.transforms",
@@ -203,21 +178,13 @@ IMPORT_ROOTS = {
         "dac": "voicehub.third_party.dac",
     },
     "styletts2": {
-        "monotonic_align.core": (
-            "voicehub.models.styletts2.monotonic_align"
-        ),
+        "monotonic_align.core": ("voicehub.models.styletts2.monotonic_align"),
         "monotonic_align": "voicehub.models.styletts2.monotonic_align",
         "Modules": "voicehub.models.styletts2.source.styletts2.Modules",
         "Utils": "voicehub.models.styletts2.source.styletts2.Utils",
-        "meldataset": (
-            "voicehub.models.styletts2.source.styletts2.meldataset"
-        ),
-        "text_utils": (
-            "voicehub.models.styletts2.source.styletts2.text_utils"
-        ),
-        "optimizers": (
-            "voicehub.models.styletts2.source.styletts2.optimizers"
-        ),
+        "meldataset": ("voicehub.models.styletts2.source.styletts2.meldataset"),
+        "text_utils": ("voicehub.models.styletts2.source.styletts2.text_utils"),
+        "optimizers": ("voicehub.models.styletts2.source.styletts2.optimizers"),
         "losses": "voicehub.models.styletts2.source.styletts2.losses",
         "models": "voicehub.models.styletts2.source.styletts2.models",
         "utils": "voicehub.models.styletts2.source.styletts2.utils",
@@ -273,10 +240,8 @@ def _rewrite_imports(source_root: Path, replacements: dict[str, str]) -> None:
 
         def replace_from(match: re.Match[str]) -> str:
             target = replacements[match.group("root")]
-            return (
-                f"{match.group('indent')}from {target}{match.group('tail')} "
-                "import "
-            )
+            return (f"{match.group('indent')}from {target}{match.group('tail')} "
+                    "import ")
 
         def replace_import(match: re.Match[str]) -> str:
             root = match.group("root")
@@ -402,9 +367,7 @@ def _vendor_styletts2(upstream: Path, destination: Path) -> dict[str, str]:
     for directory in ("Configs", "Modules", "Utils"):
         _copy_tree(upstream / directory, package / directory)
     monotonic_root = upstream.parent / "monotonic_align"
-    monotonic_destination = (
-        destination / "third_party" / "monotonic_align"
-    )
+    monotonic_destination = (destination / "third_party" / "monotonic_align")
     _write_package_file(destination / "third_party")
     _copy_tree(
         monotonic_root / "monotonic_align",
@@ -459,8 +422,7 @@ def vendor_project(
         if not force:
             raise FileExistsError(
                 f"{destination} already exists; pass --force to replace the "
-                "generated snapshot"
-            )
+                "generated snapshot")
         shutil.rmtree(destination)
 
     _write_package_file(destination)
@@ -470,9 +432,7 @@ def vendor_project(
     )
     _rewrite_imports(destination, IMPORT_ROOTS[project.model_type])
     if project.model_type == "gptsovits":
-        ap_bwe_package = (
-            "voicehub.models.gptsovits.source.tools.AP_BWE_main"
-        )
+        ap_bwe_package = ("voicehub.models.gptsovits.source.tools.AP_BWE_main")
         _rewrite_imports(
             destination / "tools",
             {
@@ -484,15 +444,19 @@ def vendor_project(
     _copy_file(upstream / "LICENSE", destination / "THIRD_PARTY_LICENSE")
 
     metadata = {
-        "model_type": project.model_type,
-        "upstream": project.url,
-        "revision": _revision(upstream),
-        "license": project.license_name,
-        "nested_revisions": nested_revisions,
+        "model_type":
+        project.model_type,
+        "upstream":
+        project.url,
+        "revision":
+        _revision(upstream),
+        "license":
+        project.license_name,
+        "nested_revisions":
+        nested_revisions,
         "policy": (
             "Upstream implementation source is vendored. Pretrained weights "
-            "are resolved separately and are not part of this source snapshot."
-        ),
+            "are resolved separately and are not part of this source snapshot."),
     }
     (destination / "SOURCE.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",
@@ -533,28 +497,24 @@ def vendor_existing_runtime_components(
             "https://github.com/hubertsiuzdak/snac",
         ),
     )
-    destinations = {
-        model_type: MODEL_ROOT / model_type / "source"
-        for model_type, *_ in components
-    }
+    destinations = {model_type: MODEL_ROOT / model_type / "source" for model_type, *_ in components}
     for destination in destinations.values():
         if destination.exists():
             if not force:
                 raise FileExistsError(
                     f"{destination} already exists; pass --force to replace "
-                    "the generated snapshot"
-                )
+                    "the generated snapshot")
             shutil.rmtree(destination)
         _write_package_file(destination)
 
     metadata_by_model: dict[str, list[dict[str, str]]] = {}
     for (
-        model_type,
-        package_name,
-        repository,
-        package_source,
-        license_name,
-        url,
+            model_type,
+            package_name,
+            repository,
+            package_source,
+            license_name,
+            url,
     ) in components:
         destination = destinations[model_type] / package_name
         _copy_tree(package_source, destination)
@@ -564,20 +524,14 @@ def vendor_existing_runtime_components(
         )
         _rewrite_imports(
             destination,
-            {
-                package_name: (
-                    f"voicehub.models.{model_type}.source.{package_name}"
-                )
-            },
+            {package_name: (f"voicehub.models.{model_type}.source.{package_name}")},
         )
-        metadata_by_model.setdefault(model_type, []).append(
-            {
-                "name": package_name,
-                "upstream": url,
-                "revision": _revision(repository),
-                "license": license_name,
-            }
-        )
+        metadata_by_model.setdefault(model_type, []).append({
+            "name": package_name,
+            "upstream": url,
+            "revision": _revision(repository),
+            "license": license_name,
+        })
 
     for model_type, components_metadata in metadata_by_model.items():
         destination = destinations[model_type]
@@ -586,15 +540,13 @@ def vendor_existing_runtime_components(
                 {
                     "model_type": model_type,
                     "components": components_metadata,
-                    "policy": (
-                        "Runtime component source is vendored; pretrained "
-                        "weights remain external."
-                    ),
+                    "policy":
+                    ("Runtime component source is vendored; pretrained "
+                     "weights remain external."),
                 },
                 indent=2,
                 sort_keys=True,
-            )
-            + "\n",
+            ) + "\n",
             encoding="utf-8",
         )
         print(f"Vendored {model_type} runtime components")
@@ -612,28 +564,25 @@ def vendor_llasa_codec(
         if not force:
             raise FileExistsError(
                 f"{destination} already exists; pass --force to replace "
-                "the generated snapshot"
-            )
+                "the generated snapshot")
         shutil.rmtree(destination)
 
     _write_package_file(destination)
     package = destination / "xcodec2"
     _write_package_file(package)
     for filename in (
-        "config.json",
-        "configuration_bigcodec.py",
-        "modeling_xcodec2.py",
-        "module.py",
+            "config.json",
+            "configuration_bigcodec.py",
+            "modeling_xcodec2.py",
+            "module.py",
     ):
         _copy_file(upstream / filename, package / filename)
     _copy_tree(upstream / "vq", package / "vq")
     _rewrite_imports(
         package,
         {
-            "configuration_bigcodec": (
-                "voicehub.models.llasa.source.xcodec2."
-                "configuration_bigcodec"
-            ),
+            "configuration_bigcodec": ("voicehub.models.llasa.source.xcodec2."
+                                       "configuration_bigcodec"),
             "vq": "voicehub.models.llasa.source.xcodec2.vq",
         },
     )
@@ -644,19 +593,21 @@ def vendor_llasa_codec(
     (destination / "SOURCE.json").write_text(
         json.dumps(
             {
-                "model_type": "llasa",
-                "upstream": "https://huggingface.co/HKUSTAudio/xcodec2",
-                "revision": XCODEC2_REVISION,
-                "license": "CC-BY-NC-4.0",
+                "model_type":
+                "llasa",
+                "upstream":
+                "https://huggingface.co/HKUSTAudio/xcodec2",
+                "revision":
+                XCODEC2_REVISION,
+                "license":
+                "CC-BY-NC-4.0",
                 "policy": (
                     "XCodec2 architecture source is vendored. LLaSA and "
-                    "codec weights remain external Hub artifacts."
-                ),
+                    "codec weights remain external Hub artifacts."),
             },
             indent=2,
             sort_keys=True,
-        )
-        + "\n",
+        ) + "\n",
         encoding="utf-8",
     )
     print(f"Vendored llasa codec at {XCODEC2_REVISION[:12]}")
@@ -702,8 +653,7 @@ def vendor_shared_components(
         if not force:
             raise FileExistsError(
                 f"{THIRD_PARTY_ROOT} already exists; pass --force to replace "
-                "the generated snapshot"
-            )
+                "the generated snapshot")
         shutil.rmtree(THIRD_PARTY_ROOT)
     _write_package_file(THIRD_PARTY_ROOT)
 
@@ -719,28 +669,23 @@ def vendor_shared_components(
             destination,
             {name: f"voicehub.third_party.{name}"},
         )
-        metadata.append(
-            {
-                "name": name,
-                "upstream": url,
-                "revision": _revision(repository),
-                "license": license_name,
-            }
-        )
+        metadata.append({
+            "name": name,
+            "upstream": url,
+            "revision": _revision(repository),
+            "license": license_name,
+        })
 
     (THIRD_PARTY_ROOT / "SOURCE.json").write_text(
         json.dumps(
             {
                 "components": metadata,
-                "policy": (
-                    "Reusable architecture source is vendored; checkpoints "
-                    "remain external."
-                ),
+                "policy": ("Reusable architecture source is vendored; checkpoints "
+                           "remain external."),
             },
             indent=2,
             sort_keys=True,
-        )
-        + "\n",
+        ) + "\n",
         encoding="utf-8",
     )
     print("Vendored shared runtime components")

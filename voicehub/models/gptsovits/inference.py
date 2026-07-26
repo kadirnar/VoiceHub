@@ -50,31 +50,20 @@ class GPTSoVITSForTextToSpeech(PreTrainedTTSModel):
 
     def _load_pretrained_model(self) -> None:
         runtime = import_optional(
-            (
-                "voicehub.models.gptsovits.source.GPT_SoVITS."
-                "TTS_infer_pack.TTS"
-            ),
+            ("voicehub.models.gptsovits.source.GPT_SoVITS."
+             "TTS_infer_pack.TTS"),
             model_type="gptsovits",
             install_extra="gptsovits",
         )
         config_source = self.config.runtime_config
         if config_source is None:
             config_path = (
-                Path(self.config.name_or_path).expanduser()
-                if self.config.name_or_path
-                else (
-                    Path(__file__).parent
-                    / "source"
-                    / "GPT_SoVITS"
-                    / "configs"
-                    / "tts_infer.yaml"
-                )
-            )
+                Path(self.config.name_or_path).expanduser() if self.config.name_or_path else
+                (Path(__file__).parent / "source" / "GPT_SoVITS" / "configs" / "tts_infer.yaml"))
             if not config_path.is_file():
                 raise FileNotFoundError(
                     "GPT-SoVITS requires a local inference YAML or "
-                    "`runtime_config` containing checkpoint paths."
-                )
+                    "`runtime_config` containing checkpoint paths.")
             config_source = str(config_path)
 
         runtime_config = runtime.TTS_Config(config_source)
@@ -128,14 +117,10 @@ class GPTSoVITSForTextToSpeech(PreTrainedTTSModel):
         )
         sample_rates = {sample_rate for sample_rate, _ in results}
         if len(sample_rates) != 1:
-            raise RuntimeError(
-                "GPT-SoVITS returned chunks with different sample rates."
-            )
+            raise RuntimeError("GPT-SoVITS returned chunks with different sample rates.")
         self.config.sample_rate = sample_rates.pop()
         output = TTSOutput(
-            audio=np.concatenate(
-                [np.asarray(chunk).reshape(-1) for _, chunk in results]
-            ),
+            audio=np.concatenate([np.asarray(chunk).reshape(-1) for _, chunk in results]),
             sample_rate=self.sample_rate,
             metadata={"seed": seed},
         )

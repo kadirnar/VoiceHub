@@ -66,9 +66,7 @@ class OuteTTSForTextToSpeech(PreTrainedTTSModel):
         )
         model_config = runtime.ModelConfig(
             model_path=self.config.name_or_path,
-            tokenizer_path=(
-                self.config.tokenizer_path or self.config.name_or_path
-            ),
+            tokenizer_path=(self.config.tokenizer_path or self.config.name_or_path),
             interface_version=interface_version,
             backend=backend,
             device=self.device,

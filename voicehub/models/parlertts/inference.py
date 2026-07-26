@@ -9,8 +9,7 @@ from voicehub.modeling_utils import PreTrainedTTSModel
 
 DEFAULT_DESCRIPTION = (
     "A clear, expressive speaker delivers high-quality speech at a moderate "
-    "speed and pitch in a close, noise-free recording."
-)
+    "speed and pitch in a close, noise-free recording.")
 
 
 class ParlerTTSConfig(VoiceHubConfig):
@@ -75,9 +74,7 @@ class ParlerTTSForTextToSpeech(PreTrainedTTSModel):
         )
         model_options = {}
         if self.config.attention_implementation:
-            model_options["attn_implementation"] = (
-                self.config.attention_implementation
-            )
+            model_options["attn_implementation"] = (self.config.attention_implementation)
         if self.config.torch_dtype:
             model_options["torch_dtype"] = getattr(
                 torch,
@@ -88,12 +85,9 @@ class ParlerTTSForTextToSpeech(PreTrainedTTSModel):
             source.ParlerTTSForConditionalGeneration.from_pretrained(
                 self.config.name_or_path,
                 **model_options,
-            ).to(self.device)
-        )
+            ).to(self.device))
         self.model = torch.compile(model) if self.config.compile_model else model
-        self.tokenizer = transformers.AutoTokenizer.from_pretrained(
-            self.config.name_or_path
-        )
+        self.tokenizer = transformers.AutoTokenizer.from_pretrained(self.config.name_or_path)
         self._torch = torch
         self.config.sample_rate = self.model.config.sampling_rate
 

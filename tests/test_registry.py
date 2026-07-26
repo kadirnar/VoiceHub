@@ -1,11 +1,11 @@
 import ast
-import json
 import inspect
-from importlib import import_module
+import json
 import subprocess
 import sys
 import unittest
 import warnings
+from importlib import import_module
 from pathlib import Path
 
 from voicehub import AutoInferenceModel, PreTrainedTTSModel
@@ -91,9 +91,7 @@ class RegistryTests(unittest.TestCase):
                     import_module(spec.config_module),
                     spec.config_class,
                 )
-                package = import_module(
-                    f"voicehub.models.{spec.model_type}"
-                )
+                package = import_module(f"voicehub.models.{spec.model_type}")
 
                 self.assertTrue(spec.class_name.endswith("ForTextToSpeech"))
                 self.assertTrue(spec.config_class.endswith("Config"))
@@ -115,11 +113,7 @@ class RegistryTests(unittest.TestCase):
                     PreTrainedTTSModel.forward,
                 )
 
-                parameters = tuple(
-                    inspect.signature(
-                        model_class.__init__
-                    ).parameters
-                )
+                parameters = tuple(inspect.signature(model_class.__init__).parameters)
                 if constructor_parameters is None:
                     constructor_parameters = parameters
                 self.assertEqual(parameters, constructor_parameters)
@@ -134,15 +128,8 @@ class RegistryTests(unittest.TestCase):
             for node in ast.walk(tree):
                 imported_roots = []
                 if isinstance(node, ast.Import):
-                    imported_roots = [
-                        alias.name.split(".", 1)[0]
-                        for alias in node.names
-                    ]
-                elif (
-                    isinstance(node, ast.ImportFrom)
-                    and node.level == 0
-                    and node.module
-                ):
+                    imported_roots = [alias.name.split(".", 1)[0] for alias in node.names]
+                elif (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module):
                     imported_roots = [node.module.split(".", 1)[0]]
                 for root in imported_roots:
                     if root in FORBIDDEN_TTS_PACKAGES:
@@ -152,17 +139,9 @@ class RegistryTests(unittest.TestCase):
     def test_vendored_issue_sources_include_license_and_provenance(self):
         for model_type in SOURCE_INTEGRATED_MODELS:
             with self.subTest(model_type=model_type):
-                source = (
-                    REPOSITORY_ROOT
-                    / "voicehub"
-                    / "models"
-                    / model_type
-                    / "source"
-                )
+                source = (REPOSITORY_ROOT / "voicehub" / "models" / model_type / "source")
                 self.assertTrue((source / "THIRD_PARTY_LICENSE").is_file())
-                metadata = json.loads(
-                    (source / "SOURCE.json").read_text(encoding="utf-8")
-                )
+                metadata = json.loads((source / "SOURCE.json").read_text(encoding="utf-8"))
                 self.assertEqual(metadata["model_type"], model_type)
                 self.assertTrue(metadata["revision"])
 

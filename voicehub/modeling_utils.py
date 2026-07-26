@@ -37,9 +37,7 @@ class PreTrainedTTSModel(BaseTTSModel, ABC):
         self.config = config
         if not self.config.architectures:
             self.config.architectures = [self.__class__.__name__]
-        self.generation_config = self.generation_config_class.from_model_config(
-            config
-        )
+        self.generation_config = self.generation_config_class.from_model_config(config)
         self.model = None
         self.processor = self.processor_class()
         if not lazy_load:
@@ -66,11 +64,7 @@ class PreTrainedTTSModel(BaseTTSModel, ABC):
                 raise TypeError("Pass a path either as `config` or `model_path`, not both.")
             model_path = config
         return cls.config_class(
-            name_or_path=(
-                cls.default_model_name_or_path
-                if model_path is None
-                else model_path
-            ),
+            name_or_path=(cls.default_model_name_or_path if model_path is None else model_path),
             **overrides,
         )
 
@@ -124,9 +118,7 @@ class PreTrainedTTSModel(BaseTTSModel, ABC):
             generation_path = source / "generation_config.json"
             processor_path = source / "processor_config.json"
             if generation_path.is_file():
-                model.generation_config = (
-                    cls.generation_config_class.from_pretrained(source)
-                )
+                model.generation_config = (cls.generation_config_class.from_pretrained(source))
             if processor_path.is_file():
                 model.processor = cls.processor_class.from_pretrained(source)
         return model
@@ -181,10 +173,7 @@ class PreTrainedTTSModel(BaseTTSModel, ABC):
     def _validate_model_kwargs(self, model_kwargs: dict[str, Any]) -> None:
         """Reject misspelled generation options with an actionable error."""
         parameters = signature(self._generate).parameters
-        if any(
-            parameter.kind is Parameter.VAR_KEYWORD
-            for parameter in parameters.values()
-        ):
+        if any(parameter.kind is Parameter.VAR_KEYWORD for parameter in parameters.values()):
             return
         unknown = sorted(set(model_kwargs) - set(parameters))
         if unknown:
@@ -192,8 +181,7 @@ class PreTrainedTTSModel(BaseTTSModel, ABC):
             invalid = ", ".join(unknown)
             raise ValueError(
                 f"Unsupported generation option(s): {invalid}. "
-                f"{self.__class__.__name__} accepts: {supported}."
-            )
+                f"{self.__class__.__name__} accepts: {supported}.")
 
     def generate(
         self,
@@ -206,9 +194,7 @@ class PreTrainedTTSModel(BaseTTSModel, ABC):
         defaults = self.generation_config.to_dict()
         if generation_config is not None:
             if not isinstance(generation_config, TTSGenerationConfig):
-                raise TypeError(
-                    "`generation_config` must be a TTSGenerationConfig."
-                )
+                raise TypeError("`generation_config` must be a TTSGenerationConfig.")
             defaults.update(generation_config.to_dict())
         defaults.update(kwargs)
         return self.forward(text, **defaults)

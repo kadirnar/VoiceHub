@@ -171,7 +171,6 @@ class Binarize:
         active : Annotation
             Binarized scores.
         """
-
         num_frames, num_classes = scores.data.shape
         frames = scores.sliding_window
         timestamps = [frames[i].middle for i in range(num_frames)]
@@ -273,7 +272,6 @@ class VoiceActivitySegmentation(VoiceActivityDetection):
         speech : Annotation
             Speech regions.
         """
-
         # setup hook (e.g. for debugging purposes)
         hook = self.setup_hook(file, hook=hook)
 

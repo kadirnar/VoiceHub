@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -120,8 +120,7 @@ class VoiceHubConfig:
         defaults = VoiceHubConfig().to_dict()
         return {
             key: value
-            for key, value in self.to_dict().items()
-            if key == "model_type" or defaults.get(key) != value
+            for key, value in self.to_dict().items() if key == "model_type" or defaults.get(key) != value
         }
 
     def update(self, values: dict[str, Any]) -> None:
