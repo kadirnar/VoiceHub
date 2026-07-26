@@ -2,10 +2,10 @@
 
 The upstream repository
 [`Audio-Foundation-Models/ConversationTTS`](https://github.com/Audio-Foundation-Models/ConversationTTS)
-did not contain a source-code license when VoiceHub audited revision
-`b3851f7`.
+declares the source, checkpoints, datasets, and evaluation tools under
+CC BY-NC 4.0 at revision `b3851f7`.
 
-VoiceHub therefore registers the architecture and its configuration, but does
-not copy or execute the upstream implementation. Calling `load()` raises
-`SourceLicenseError`. The integration can be completed as soon as upstream
-publishes a redistribution-compatible license.
+VoiceHub vendors the executable model, inference, text-tokenizer, and
+MimiCodec runtime source. Checkpoint weights remain external. Commercial use
+is not granted by CC BY-NC 4.0; this restriction is exposed through
+`get_model_spec("conversationtts").license`.

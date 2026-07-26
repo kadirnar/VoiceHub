@@ -103,7 +103,7 @@ class ToneColorConverter(OpenVoiceBaseClass):
         super().__init__(*args, **kwargs)
 
         if kwargs.get('enable_watermark', True):
-            import voicehub.third_party.wavmark as wavmark
+            import voicehub.components.audio.watermarking.wavmark as wavmark
             self.watermark_model = wavmark.load_model().to(self.device)
         else:
             self.watermark_model = None

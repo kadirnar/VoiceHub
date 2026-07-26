@@ -46,7 +46,7 @@ from tensorrt_llm.logger import logger
 from tensorrt_llm.runtime.session import Session, TensorInfo
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm import tqdm
-from voicehub.third_party.vocos import Vocos
+from voicehub.components.audio.vocoders.vocos import Vocos
 
 
 sys.path.append(f"{os.path.dirname(os.path.abspath(__file__))}/../../../../src/")
@@ -231,7 +231,7 @@ def load_vocoder(
                 model_path = hf_hub_download(repo_id=repo_id, cache_dir=hf_cache_dir, filename="pytorch_model.bin")
             vocoder = Vocos.from_hparams(config_path)
             state_dict = torch.load(model_path, map_location="cpu", weights_only=True)
-            from voicehub.third_party.vocos.feature_extractors import EncodecFeatures
+            from voicehub.components.audio.vocoders.vocos.feature_extractors import EncodecFeatures
 
             if isinstance(vocoder.feature_extractor, EncodecFeatures):
                 encodec_parameters = {

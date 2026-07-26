@@ -1,4 +1,4 @@
-import voicehub.third_party.dac as dac
+import voicehub.components.audio.codecs.dac as dac
 import torch
 import tqdm 
 import torch.nn as nn

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""
-Vendor upstream TTS implementations into VoiceHub.
+"""Vendor upstream TTS implementations into VoiceHub.
 
-The resulting packages never import the installable upstream TTS projects. Only general-purpose runtime
-dependencies (PyTorch, Transformers, etc.) remain external. Model weights are deliberately not copied.
+The resulting packages never import the installable upstream TTS
+projects. Only general-purpose runtime dependencies (PyTorch,
+Transformers, etc.) remain external. Model weights are deliberately not
+copied.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 MODEL_ROOT = REPOSITORY_ROOT / "voicehub" / "models"
-THIRD_PARTY_ROOT = REPOSITORY_ROOT / "voicehub" / "third_party"
+COMPONENT_ROOT = REPOSITORY_ROOT / "voicehub" / "components"
 IGNORED_NAMES = {
     ".cache",
     ".git",
@@ -42,6 +43,7 @@ Apache-2.0 license. Review its non-commercial restriction before use.
 IGNORED_SUFFIXES = {
     ".bin",
     ".ckpt",
+    ".checkpoint",
     ".flac",
     ".gif",
     ".jpeg",
@@ -79,6 +81,7 @@ class CurrentSourceProject:
     import_roots: tuple[tuple[str, str], ...]
     license_file: str = "LICENSE"
     notices_file: str | None = None
+    commercial_use: bool | None = True
 
 
 @dataclass(frozen=True)
@@ -147,6 +150,32 @@ PROJECTS = (
 )
 
 CURRENT_PROJECTS = (
+    CurrentSourceProject(
+        "conversationtts",
+        "conversationtts",
+        "https://github.com/Audio-Foundation-Models/ConversationTTS",
+        "CC BY-NC 4.0",
+        (
+            ("inference", "conversationtts/inference"),
+            ("models", "conversationtts/models"),
+            ("tools/tokenizer", "conversationtts/tools/tokenizer"),
+            ("llama3_2", "conversationtts/llama3_2"),
+            ("readme.md", "conversationtts/UPSTREAM_README.md"),
+        ),
+        (
+            (
+                "inference",
+                "voicehub.models.conversationtts.source.conversationtts.inference",
+            ),
+            (
+                "models",
+                "voicehub.models.conversationtts.source.conversationtts.models",
+            ),
+            ("tools", "voicehub.models.conversationtts.source.conversationtts.tools"),
+        ),
+        license_file="readme.md",
+        commercial_use=False,
+    ),
     CurrentSourceProject(
         "mosstts",
         "moss-tts",
@@ -219,7 +248,7 @@ CURRENT_PROJECTS = (
         (
             ("zonos2", "voicehub.models.zonos2.source.zonos2"),
             ("zonos", "voicehub.models.zonos.source.zonos"),
-            ("dac", "voicehub.third_party.dac"),
+            ("dac", "voicehub.components.audio.codecs.dac"),
         ),
     ),
     CurrentSourceProject(
@@ -281,8 +310,9 @@ CURRENT_PROJECTS = (
         (("fish_speech", "fish_speech"), ),
         (
             ("fish_speech", "voicehub.models.fishtts.source.fish_speech"),
-            ("dac", "voicehub.third_party.dac"),
+            ("dac", "voicehub.components.audio.codecs.dac"),
         ),
+        commercial_use=False,
     ),
     CurrentSourceProject(
         "csm",
@@ -445,7 +475,7 @@ IMPORT_ROOTS = {
     "cosyvoice": {
         "cosyvoice": "voicehub.models.cosyvoice.source.cosyvoice",
         "matcha": "voicehub.models.cosyvoice.source.matcha",
-        "conformer": "voicehub.third_party.conformer",
+        "conformer": "voicehub.components.neural.conformer",
     },
     "f5tts": {
         "f5_tts": "voicehub.models.f5tts.source.f5_tts",
@@ -457,7 +487,7 @@ IMPORT_ROOTS = {
         "bigvgan": "voicehub.models.f5tts.source.third_party.BigVGAN.bigvgan",
         "env": "voicehub.models.f5tts.source.third_party.BigVGAN.env",
         "meldataset": ("voicehub.models.f5tts.source.third_party.BigVGAN.meldataset"),
-        "vocos": "voicehub.third_party.vocos",
+        "vocos": "voicehub.components.audio.vocoders.vocos",
     },
     "gptsovits": {
         "GPT_SoVITS": "voicehub.models.gptsovits.source.GPT_SoVITS",
@@ -491,15 +521,15 @@ IMPORT_ROOTS = {
     },
     "openvoice": {
         "openvoice": "voicehub.models.openvoice.source.openvoice",
-        "wavmark": "voicehub.third_party.wavmark",
+        "wavmark": "voicehub.components.audio.watermarking.wavmark",
     },
     "outetts": {
         "outetts": "voicehub.models.outetts.source.outetts",
-        "dac": "voicehub.third_party.dac",
+        "dac": "voicehub.components.audio.codecs.dac",
     },
     "parlertts": {
         "parler_tts": "voicehub.models.parlertts.source.parler_tts",
-        "dac": "voicehub.third_party.dac",
+        "dac": "voicehub.components.audio.codecs.dac",
     },
     "styletts2": {
         "monotonic_align.core": ("voicehub.models.styletts2.monotonic_align"),
@@ -612,6 +642,20 @@ def _rewrite_runtime_names(model_type: str, source_root: Path) -> None:
             ('__import__("text." +', f'__import__("{package}" +'),
             ("__import__('text.' +", f"__import__('{package}' +"),
         )
+    elif model_type == "conversationtts":
+        runtime_import = ("from voicehub.models.conversationtts.runtime import "
+                          "resume_for_inference")
+        replacements = (
+            (
+                "from voicehub.models.conversationtts.source.conversationtts."
+                "utils.train_utils import resume_for_inference",
+                runtime_import,
+            ),
+            (
+                "from utils.train_utils import resume_for_inference",
+                runtime_import,
+            ),
+        )
     elif model_type == "melotts":
         replacements = (
             (
@@ -649,6 +693,34 @@ def _write_package_file(directory: Path) -> None:
             '"""Vendored upstream source; see SOURCE.json and THIRD_PARTY_LICENSE."""\n',
             encoding="utf-8",
         )
+
+
+def _write_parent_package_files(path: Path, package_root: Path) -> None:
+    """Make every copied source parent an explicit Python package."""
+    parent = path.parent
+    while parent != package_root:
+        _write_package_file(parent)
+        parent = parent.parent
+
+
+def _normalize_source_text(source_root: Path) -> None:
+    """Normalize vendored Python/Markdown text without reformatting code."""
+    candidates = [
+        path for path in source_root.rglob("*") if path.is_file() and path.suffix.lower() in {".md", ".py"}
+    ]
+    candidates.extend(
+        path for path in (
+            source_root / "THIRD_PARTY_LICENSE",
+            source_root / "THIRD_PARTY_NOTICES",
+        ) if path.is_file())
+    for text_file in candidates:
+        try:
+            original = text_file.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            continue
+        normalized = "\n".join(line.rstrip() for line in original.splitlines()).rstrip() + "\n"
+        if normalized != original:
+            text_file.write_text(normalized, encoding="utf-8")
 
 
 def _vendor_cosyvoice(upstream: Path, destination: Path) -> dict[str, str]:
@@ -758,6 +830,8 @@ def vendor_project(
 ) -> None:
     upstream = upstream_root / project.directory
     destination = MODEL_ROOT / project.model_type / "source"
+    if not upstream.is_dir():
+        raise FileNotFoundError(f"Missing upstream repository directory: {upstream}")
     if destination.exists():
         if not force:
             raise FileExistsError(
@@ -814,6 +888,15 @@ def vendor_current_project(
     """Vendor one declaratively described current-generation backend."""
     upstream = upstream_root / project.directory
     destination = MODEL_ROOT / project.model_type / "source"
+    required_paths = [upstream / source_name for source_name, _ in project.copies]
+    required_paths.append(upstream / project.license_file)
+    if project.notices_file:
+        required_paths.append(upstream / project.notices_file)
+    missing_paths = [path for path in required_paths if not path.exists()]
+    if missing_paths:
+        missing = ", ".join(str(path) for path in missing_paths)
+        raise FileNotFoundError(f"Missing upstream source path(s) for {project.model_type}: "
+                                f"{missing}")
     if destination.exists():
         if not force:
             raise FileExistsError(
@@ -825,10 +908,12 @@ def vendor_current_project(
     for source_name, destination_name in project.copies:
         target = destination / destination_name
         _copy_path(upstream / source_name, target)
+        _write_parent_package_files(target, destination)
         if target.is_dir():
             _write_package_file(target)
 
     _rewrite_imports(destination, dict(project.import_roots))
+    _rewrite_runtime_names(project.model_type, destination)
     _copy_file(
         upstream / project.license_file,
         destination / "THIRD_PARTY_LICENSE",
@@ -838,6 +923,7 @@ def vendor_current_project(
             upstream / project.notices_file,
             destination / "THIRD_PARTY_NOTICES",
         )
+    _normalize_source_text(destination)
 
     metadata = {
         "model_type":
@@ -848,6 +934,8 @@ def vendor_current_project(
         _revision(upstream),
         "license":
         project.license_name,
+        "commercial_use":
+        project.commercial_use,
         "policy": (
             "Upstream implementation source is vendored. Pretrained weights "
             "are resolved separately and retain their upstream license."),
@@ -861,6 +949,16 @@ def vendor_current_project(
 
 def vendor_current_components(upstream_root: Path) -> None:
     """Attach separately released codecs to their owning backend snapshots."""
+    required_paths = []
+    for component in CURRENT_COMPONENTS:
+        upstream = upstream_root / component.directory
+        required_paths.extend(upstream / source_name for source_name, _ in component.copies)
+        required_paths.append(upstream / component.license_file)
+    missing_paths = [path for path in required_paths if not path.exists()]
+    if missing_paths:
+        missing = ", ".join(str(path) for path in missing_paths)
+        raise FileNotFoundError(f"Missing upstream component source path(s): {missing}")
+
     for component in CURRENT_COMPONENTS:
         upstream = upstream_root / component.directory
         source_root = MODEL_ROOT / component.model_type / "source"
@@ -1054,6 +1152,8 @@ def vendor_shared_components(
     components = (
         (
             "dac",
+            "audio/codecs/dac",
+            "voicehub.components.audio.codecs.dac",
             upstream_root / "dac",
             upstream_root / "dac" / "dac",
             "MIT",
@@ -1061,6 +1161,8 @@ def vendor_shared_components(
         ),
         (
             "vocos",
+            "audio/vocoders/vocos",
+            "voicehub.components.audio.vocoders.vocos",
             upstream_root / "vocos",
             upstream_root / "vocos" / "vocos",
             "MIT",
@@ -1068,6 +1170,8 @@ def vendor_shared_components(
         ),
         (
             "conformer",
+            "neural/conformer",
+            "voicehub.components.neural.conformer",
             upstream_root / "conformer",
             upstream_root / "conformer" / "conformer",
             "MIT",
@@ -1075,23 +1179,42 @@ def vendor_shared_components(
         ),
         (
             "wavmark",
+            "audio/watermarking/wavmark",
+            "voicehub.components.audio.watermarking.wavmark",
             upstream_root / "wavmark",
             upstream_root / "wavmark" / "src" / "wavmark",
             "MIT",
             "https://github.com/wavmark/wavmark",
         ),
     )
-    if THIRD_PARTY_ROOT.exists():
-        if not force:
-            raise FileExistsError(
-                f"{THIRD_PARTY_ROOT} already exists; pass --force to replace "
-                "the generated snapshot")
-        shutil.rmtree(THIRD_PARTY_ROOT)
-    _write_package_file(THIRD_PARTY_ROOT)
+    required_paths = [
+        path for _, _, _, repository, source, _, _ in components
+        for path in (repository, source, repository / "LICENSE")
+    ]
+    missing_paths = [path for path in required_paths if not path.exists()]
+    if missing_paths:
+        missing = ", ".join(str(path) for path in missing_paths)
+        raise FileNotFoundError(f"Missing upstream shared component path(s): {missing}")
+
+    for package in (
+            COMPONENT_ROOT,
+            COMPONENT_ROOT / "audio",
+            COMPONENT_ROOT / "audio" / "codecs",
+            COMPONENT_ROOT / "audio" / "vocoders",
+            COMPONENT_ROOT / "audio" / "watermarking",
+            COMPONENT_ROOT / "neural",
+    ):
+        _write_package_file(package)
 
     metadata = []
-    for name, repository, source, license_name, url in components:
-        destination = THIRD_PARTY_ROOT / name
+    for name, relative_path, import_path, repository, source, license_name, url in components:
+        destination = COMPONENT_ROOT / relative_path
+        if destination.exists():
+            if not force:
+                raise FileExistsError(
+                    f"{destination} already exists; pass --force to replace "
+                    "the generated component")
+            shutil.rmtree(destination)
         _copy_tree(source, destination)
         _copy_file(
             repository / "LICENSE",
@@ -1099,7 +1222,7 @@ def vendor_shared_components(
         )
         _rewrite_imports(
             destination,
-            {name: f"voicehub.third_party.{name}"},
+            {name: import_path},
         )
         metadata.append({
             "name": name,
@@ -1108,7 +1231,7 @@ def vendor_shared_components(
             "license": license_name,
         })
 
-    (THIRD_PARTY_ROOT / "SOURCE.json").write_text(
+    (COMPONENT_ROOT / "SOURCE.json").write_text(
         json.dumps(
             {
                 "components": metadata,

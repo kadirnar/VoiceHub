@@ -60,6 +60,7 @@ signatures. Backend-specific synthesis options exist only in the private
 The important directories are:
 
 ```text
+pyproject.toml              PEP 517/621 build and dependency metadata
 voicehub/
   auto.py                    automatic config/model factories
   configuration_utils.py     serializable config base
@@ -68,9 +69,19 @@ voicehub/
   modeling_outputs.py        normalized generation output
   processing_utils.py        processor and BatchFeature
   registry.py                lazy architecture registry
-  third_party/               shared vendored DAC/Vocos/etc.
+  policies/
+    licensing.py             model/checkpoint usage restrictions
+  components/
+    registry.py              model-to-component relationships
+    audio/
+      codecs/dac/            shared neural audio codec
+      vocoders/vocos/        shared neural vocoder
+      watermarking/wavmark/  shared audio watermarking
+    neural/conformer/        shared neural building block
   models/<name>/
-    inference.py             thin VoiceHub integration
+    configuration_<name>.py  architecture configuration when split
+    modeling_<name>.py       pretrained model adapter when split
+    inference.py             compatibility import surface
     source/                  isolated upstream implementation
       SOURCE.json            repository and exact revision
       THIRD_PARTY_LICENSE    upstream license
@@ -82,6 +93,19 @@ Model source imports are rewritten into the `voicehub.models...source`
 namespace. This prevents collisions with similarly named site-packages and
 makes an accidentally installed TTS package irrelevant to model resolution.
 Heavy ML imports and checkpoint downloads happen only in `load()`.
+
+Shared components are not anonymous dependencies. `ComponentSpec` stores
+their category, import path, upstream repository, and license.
+`ModelSpec.components` resolves the corresponding entries through
+`MODEL_COMPONENTS`, so the relationship is inspectable without importing
+PyTorch:
+
+```python
+from voicehub.registry import get_model_spec
+
+spec = get_model_spec("zonos2")
+print(spec.components)  # ("dac",)
+```
 
 `save_pretrained()` writes the complete portable API metadata:
 
@@ -97,6 +121,12 @@ ONNX Runtime. Neural architecture packages needed by the models—SNAC,
 S3Tokenizer, Perth, DAC, Vocos, Conformer, WavMark, and monotonic alignment—are
 vendored with their licenses. Newer families apply the same rule to MOSS
 Audio Tokenizer, DACVAE, NeuCodec, Moshi/Mimi, and SilentCipher.
+
+Commercial-use restrictions do not remove otherwise licensed source from the
+registry. `voicehub.policies.licensing` records special terms separately from
+VoiceHub's Apache-2.0 package license. An absent license and a non-commercial
+license are different: the former grants no redistribution rights, while the
+latter is included with its usage restriction exposed as metadata.
 
 ## Source boundary
 

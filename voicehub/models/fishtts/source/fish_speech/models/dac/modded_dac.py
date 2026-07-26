@@ -7,8 +7,8 @@ import numpy as np
 import torch
 from audiotools import AudioSignal
 from audiotools.ml import BaseModel
-from voicehub.third_party.dac.model.base import CodecMixin
-from voicehub.third_party.dac.nn.layers import Snake1d, WNConv1d, WNConvTranspose1d
+from voicehub.components.audio.codecs.dac.model.base import CodecMixin
+from voicehub.components.audio.codecs.dac.nn.layers import Snake1d, WNConv1d, WNConvTranspose1d
 from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.nn.utils.parametrizations import weight_norm

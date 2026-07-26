@@ -1,0 +1,8 @@
+{
+  "commercial_use": false,
+  "license": "CC BY-NC 4.0",
+  "model_type": "conversationtts",
+  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "revision": "b3851f70c2dc0d35ba609734b08915637fe2a733",
+  "upstream": "https://github.com/Audio-Foundation-Models/ConversationTTS"
+}

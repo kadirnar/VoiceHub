@@ -1,4 +1,5 @@
 {
+  "commercial_use": true,
   "license": "MIT",
   "model_type": "zonos2",
   "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",

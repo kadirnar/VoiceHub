@@ -1,3 +1,0 @@
-huggingface-hub>=0.28
-numpy>=1.23
-soundfile>=0.12

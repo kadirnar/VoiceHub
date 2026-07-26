@@ -35,6 +35,7 @@ and Qwen3 checkpoint families requested for this release.
 
 | Family | Upstream source | Source/license result |
 |---|---|---|
+| ConversationTTS | <https://github.com/Audio-Foundation-Models/ConversationTTS> | CC BY-NC 4.0; model, inference, tokenizer, and MimiCodec runtime source included |
 | MOSS-TTS | <https://github.com/OpenMOSS/MOSS-TTS> | Apache-2.0; MOSS Audio Tokenizer source included |
 | Qwen3-TTS | <https://github.com/QwenLM/Qwen3-TTS> | Apache-2.0 |
 | Irodori-TTS | <https://github.com/Aratako/Irodori-TTS> | MIT; DACVAE and SilentCipher source included |
@@ -51,6 +52,10 @@ and Qwen3 checkpoint families requested for this release.
 | Inflect v2 | <https://huggingface.co/owensong/Inflect-Micro-v2> | Apache-2.0 model-specific source included |
 
 **Built with Fish Audio**
+
+Commercial-use restrictions are recorded as metadata, not used as an
+exclusion rule. `conversationtts`, `fishtts`, and `llasa` remain discoverable
+and report `commercial_use=False`.
 
 ## Audited but not registered
 

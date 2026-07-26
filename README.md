@@ -68,7 +68,7 @@ up before serving traffic.
 | `chatterbox`      | Chatterbox      | Voice cloning                       |
 | `kokoro`          | Kokoro          | Multilingual                        |
 | `echo`            | Echo-TTS        | Voice cloning                       |
-| `conversationtts` | ConversationTTS | Blocked: upstream source unlicensed |
+| `conversationtts` | ConversationTTS | CC BY-NC multilingual conversation  |
 | `llasa`           | LLaSA           | Multilingual synthesis and cloning  |
 | `cosyvoice`       | CosyVoice 1/2/3 | Cloning, multilingual, streaming    |
 | `f5tts`           | F5-TTS          | Voice cloning                       |
@@ -103,7 +103,9 @@ Discover models without importing their ML stacks:
 from voicehub import AutoInferenceModel
 
 for spec in AutoInferenceModel.available_models():
-    print(spec.model_type, spec.capabilities)
+    print(spec.model_type, spec.capabilities, spec.components)
+    if spec.license:
+        print(spec.license.license_id, spec.license.commercial_use)
 ```
 
 ## Common API
@@ -148,15 +150,18 @@ and [architecture guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/arc
 
 ## Source policy
 
-Upstream implementation snapshots live under `voicehub/models/*/source`;
-shared neural components live under `voicehub/third_party`. Every vendored
-snapshot records its exact revision and license. A static test rejects imports
-of external TTS packages.
+Upstream implementation snapshots live under `voicehub/models/*/source`.
+Reusable code is organized by role under `voicehub/components`: codecs,
+vocoders, watermarking, and neural blocks. `ModelSpec.components` connects
+each backend to the shared components it uses. Every snapshot records its
+exact revision and license, and a static test rejects imports of external TTS
+packages.
 
-ConversationTTS is the sole exception: its public repository has no source
-license, so redistribution is blocked until upstream grants one.
-LLaSA's vendored XCodec2 component is separately licensed under
-CC BY-NC 4.0 and is restricted to non-commercial use.
+Non-commercial licenses are supported and exposed through
+`ModelSpec.license`; they are not treated as an integration failure.
+ConversationTTS and LLaSA/XCodec2 are CC BY-NC 4.0 and Fish Speech uses the
+Fish Audio Research License. These backends are included, but they must not
+be used commercially without the required additional permission.
 
 Some newly included source families also carry restrictions outside
 VoiceHub's Apache-2.0 license: Fish Speech uses the Fish Audio Research
@@ -164,6 +169,9 @@ License, NeuTTS and XTTS checkpoints use their respective custom licenses,
 and VibeVoice checkpoints have responsible-use conditions. Review
 [`SOURCE.json`](voicehub/models) and the selected checkpoint card before use.
 Fish Speech attribution must include “Built with Fish Audio”.
+
+Build and dependency metadata has one source of truth in `pyproject.toml`.
+The repository no longer executes `setup.py` during installation or release.
 
 ## Development
 

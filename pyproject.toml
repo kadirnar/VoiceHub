@@ -1,0 +1,401 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voicehub"
+dynamic = ["version"]
+description = "A unified, source-integrated inference interface for text-to-speech models"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "kadirnardev", email = "kadir.nar@hotmail.com" }]
+keywords = ["text-to-speech", "tts", "speech", "voice-cloning", "transformers"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Typing :: Typed",
+]
+dependencies = [
+  "huggingface-hub>=0.28",
+  "numpy>=1.23",
+  "soundfile>=0.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/kadirnar/VoiceHub"
+Repository = "https://github.com/kadirnar/VoiceHub"
+Issues = "https://github.com/kadirnar/VoiceHub/issues"
+Documentation = "https://github.com/kadirnar/VoiceHub/tree/main/docs"
+
+[project.optional-dependencies]
+orpheustts = [
+  "torch",
+  "transformers",
+]
+dia = [
+  "torch",
+  "torchaudio",
+  "safetensors",
+  "descript-audiotools",
+  "einops",
+]
+vui = [
+  "torch",
+  "torchaudio",
+  "transformers",
+  "pydantic",
+  "einops",
+  "inflect",
+  "pyannote.audio",
+]
+chatterbox = [
+  "torch",
+  "torchaudio",
+  "transformers",
+  "diffusers",
+  "librosa",
+  "safetensors",
+  "einops",
+  "onnx",
+  "bitstring",
+  "pandas",
+  "praat-parselmouth",
+  "pyloudnorm",
+  "PyWavelets",
+  "scikit-learn",
+]
+kokoro = [
+  "torch",
+  "transformers",
+  "misaki",
+  "loguru",
+]
+echo = [
+  "torch",
+  "torchaudio",
+  "transformers",
+  "einops",
+]
+conversationtts = [
+  "torch>=2.5",
+  "torchaudio>=2.5",
+  "torchao",
+  "torchtune",
+  "huggingface-hub",
+  "safetensors",
+  "tokenizers",
+  "sentencepiece",
+  "omegaconf",
+  "einops",
+  "vector-quantize-pytorch",
+  "peft",
+  "pyyaml",
+]
+llasa = [
+  "torch",
+  "torchaudio",
+  "transformers",
+  "einops",
+  "torchtune",
+  "vector-quantize-pytorch",
+]
+cosyvoice = [
+  "torch",
+  "torchaudio",
+  "huggingface-hub",
+  "modelscope",
+  "hyperpyyaml",
+  "onnxruntime",
+  "transformers",
+  "diffusers",
+  "x-transformers",
+  "einops",
+  "inflect",
+]
+f5tts = [
+  "torch",
+  "torchaudio",
+  "transformers",
+  "cached-path",
+  "hydra-core",
+  "omegaconf",
+  "x-transformers",
+  "torchdiffeq",
+  "ema-pytorch",
+  "librosa",
+  "pydub",
+  "matplotlib",
+  "einops",
+  "scipy",
+  "tqdm",
+]
+gptsovits = [
+  "torch",
+  "torchaudio",
+  "transformers",
+  "librosa",
+  "ffmpeg-python",
+  "peft",
+  "pyyaml",
+  "pytorch-lightning",
+  "einops",
+  "x-transformers",
+  "pypinyin",
+  "jieba-fast",
+  "cn2an",
+  "nltk",
+  "soundfile",
+]
+melotts = [
+  "torch",
+  "torchaudio",
+  "transformers",
+  "librosa",
+  "cached-path",
+  "gruut",
+  "gruut-ipa",
+  "num2words",
+  "anyascii",
+  "pypinyin",
+  "jieba",
+]
+openvoice = [
+  "torch",
+  "torchaudio",
+  "transformers",
+  "librosa",
+  "faster-whisper",
+  "inflect",
+  "eng-to-ipa",
+  "pypinyin",
+  "jieba",
+  "cn2an",
+  "unidecode",
+  "resampy",
+]
+outetts = [
+  "torch",
+  "torchaudio",
+  "transformers",
+  "loguru",
+  "einops",
+  "inflect",
+  "uroman",
+]
+parlertts = [
+  "torch",
+  "transformers",
+  "numpy",
+  "packaging",
+]
+styletts2 = [
+  "torch",
+  "torchaudio",
+  "transformers",
+  "librosa",
+  "phonemizer",
+  "nltk",
+  "munch",
+  "pyyaml",
+  "einops",
+  "einops-exts",
+  "scipy",
+]
+mosstts = [
+  "torch",
+  "torchaudio",
+  "transformers>=4.57",
+  "accelerate",
+  "safetensors",
+  "librosa",
+  "einops",
+  "tiktoken",
+  "orjson",
+  "scipy",
+  "tqdm",
+  "pyyaml",
+]
+qwen3tts = [
+  "torch",
+  "torchaudio",
+  "transformers>=4.57",
+  "accelerate",
+  "librosa",
+  "onnxruntime",
+  "einops",
+]
+irodoritts = [
+  "torch>=2.10",
+  "torchaudio>=2.10",
+  "torchcodec>=0.10,<0.11",
+  "transformers<5",
+  "peft>=0.18",
+  "safetensors>=0.7",
+  "sentencepiece",
+  "librosa",
+  "numba",
+  "pyyaml",
+  "tqdm",
+]
+zonos = [
+  "torch>=2.5",
+  "torchaudio>=2.5",
+  "transformers>=4.48",
+  "inflect>=7.5",
+  "kanjize",
+  "phonemizer",
+  "sudachidict-full",
+  "sudachipy",
+]
+zonos2 = [
+  "torch",
+  "torchaudio",
+  "transformers>=4.56",
+  "msgpack",
+  "pyzmq",
+  "apache-tvm-ffi",
+  "ninja",
+  "pynini",
+  "regex",
+  "sacremoses",
+]
+voxcpm = [
+  "torch>=2.5",
+  "torchaudio>=2.5",
+  "torchcodec",
+  "transformers>=4.36",
+  "einops",
+  "inflect",
+  "addict",
+  "wetext",
+  "pydantic",
+  "simplejson",
+  "sortedcontainers",
+  "librosa",
+  "argbind",
+  "safetensors",
+]
+omnivoice = [
+  "torch>=2.4",
+  "torchaudio>=2.4",
+  "transformers>=5.3",
+  "accelerate",
+  "pydub",
+  "librosa",
+]
+higgstts = [
+  "torch",
+  "torchaudio",
+  "torchvision",
+  "transformers>=4.45.1,<4.47",
+  "accelerate",
+  "librosa",
+  "dacite",
+  "json-repair",
+  "pydantic",
+  "vector-quantize-pytorch",
+  "omegaconf",
+  "langid",
+  "jieba",
+]
+xtts = [
+  "torch>=2.1",
+  "torchaudio",
+  "transformers>=4.33",
+  "coqpit>=0.0.16",
+  "librosa>=0.10",
+  "scipy",
+  "scikit-learn",
+  "numba",
+  "inflect",
+  "anyascii",
+  "pysbd",
+  "unidecode",
+  "num2words",
+  "gruut[de,es,fr]",
+  "jieba",
+  "pypinyin",
+  "hangul-romanize",
+  "jamo",
+  "nltk",
+]
+vibevoice = [
+  "torch",
+  "transformers>=4.51.3,<5",
+  "accelerate",
+  "diffusers",
+  "numba",
+  "scipy",
+  "librosa",
+  "ml-collections",
+  "absl-py",
+  "pydub",
+]
+fishtts = [
+  "torch",
+  "torchaudio",
+  "transformers<=4.57.3",
+  "hydra-core",
+  "omegaconf",
+  "lightning",
+  "einops",
+  "einx[torch]",
+  "librosa",
+  "natsort",
+  "loguru",
+  "loralib",
+  "resampy",
+  "ormsgpack",
+  "tiktoken",
+  "safetensors",
+]
+csm = [
+  "torch",
+  "torchaudio",
+  "torchao",
+  "torchtune",
+  "tokenizers",
+  "transformers",
+  "sentencepiece",
+  "safetensors",
+]
+neutts = [
+  "torch>=2.8",
+  "torchaudio>=2.8",
+  "transformers>=5.1",
+  "librosa",
+  "phonemizer",
+]
+supertonic = [
+  "onnxruntime>=1.23",
+  "librosa",
+  "pyyaml",
+]
+inflecttts = [
+  "torch",
+  "num2words",
+  "phonemizer",
+]
+test = [
+  "pre-commit",
+  "pytest",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = { attr = "voicehub.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["voicehub*"]
+exclude = ["tests*"]

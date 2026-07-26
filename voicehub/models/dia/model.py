@@ -112,8 +112,7 @@ class Dia:
         device: torch.device | None = None,
         load_dac: bool = True,
     ):
-        """
-        Initializes the Dia model.
+        """Initializes the Dia model.
 
         Args:
             config: The configuration object for the model.
@@ -150,8 +149,7 @@ class Dia:
         device: torch.device | None = None,
         load_dac: bool = True,
     ) -> "Dia":
-        """
-        Loads the Dia model from local configuration and checkpoint files.
+        """Loads the Dia model from local configuration and checkpoint files.
 
         Args:
             config_path: Path to the configuration JSON file.
@@ -195,8 +193,7 @@ class Dia:
         device: torch.device | None = None,
         load_dac: bool = True,
     ) -> "Dia":
-        """
-        Loads the Dia model from a Hugging Face Hub repository.
+        """Loads the Dia model from a Hugging Face Hub repository.
 
         Downloads the configuration and checkpoint files from the specified
         repository ID and then loads the model.
@@ -234,8 +231,7 @@ class Dia:
         return dia
 
     def _load_dac_model(self):
-        """
-        Loads the Descript Audio Codec (DAC) model.
+        """Loads the Descript Audio Codec (DAC) model.
 
         Downloads the DAC model if necessary and loads it onto the specified device.
         Sets the DAC model to evaluation mode.
@@ -243,7 +239,7 @@ class Dia:
         Raises:
             RuntimeError: If downloading or loading the DAC model fails.
         """
-        from voicehub.third_party import dac
+        from voicehub.components.audio.codecs import dac
 
         try:
             dac_model_path = dac.utils.download()
@@ -254,8 +250,8 @@ class Dia:
         self.dac_model = dac_model
 
     def _encode_text(self, text: str) -> torch.Tensor:
-        """
-        Encodes the input text string into a tensor of token IDs using byte-level encoding.
+        """Encodes the input text string into a tensor of token IDs using byte-
+        level encoding.
 
         Special tokens [S1] and [S2] are replaced by their byte values. The resulting
         sequence is truncated to the maximum configured text length.
@@ -298,8 +294,7 @@ class Dia:
 
     def _prepare_audio_prompt(self,
                               audio_prompts: list[torch.Tensor | None]) -> tuple[torch.Tensor, list[int]]:
-        """
-        Prepares the audio prompt tensor for the decoder.
+        """Prepares the audio prompt tensor for the decoder.
 
         Handles padding, adds the beginning-of-sequence (BOS) token, applies the
         delay pattern, and determines the number of prefill steps for each item
@@ -365,8 +360,7 @@ class Dia:
         audio_prompts: list[torch.Tensor | None],
         max_tokens: int | None = None,
     ):
-        """
-        Initializes the model state for generation.
+        """Initializes the model state for generation.
 
         Encodes the text input (conditional and unconditional), prepares the
         encoder and decoder states (including KV caches and cross-attention),
@@ -426,8 +420,7 @@ class Dia:
         top_k: int,
         current_idx: int,
     ) -> torch.Tensor:
-        """
-        Performs a single step of the decoder inference.
+        """Performs a single step of the decoder inference.
 
         Takes the tokens from the previous step, runs them through the decoder
         (for both conditional and unconditional paths), applies classifier-free
@@ -484,8 +477,7 @@ class Dia:
         return pred_BxC
 
     def _generate_output(self, generated_codes: torch.Tensor, lengths_Bx: torch.Tensor) -> list[np.ndarray]:
-        """
-        Converts generated delayed codes into audio waveforms.
+        """Converts generated delayed codes into audio waveforms.
 
         Reverts the delay pattern applied during generation, decodes the resulting
         codebook using the DAC model (if loaded), and returns a list of audio
@@ -544,7 +536,8 @@ class Dia:
     @torch.no_grad()
     @torch.inference_mode()
     def _encode(self, audio: torch.Tensor) -> torch.Tensor:
-        """Encodes the given audio waveform into a tensor of DAC codebook indices."""
+        """Encodes the given audio waveform into a tensor of DAC codebook
+        indices."""
         audio = audio.unsqueeze(0)
         audio_data = self.dac_model.preprocess(audio, DEFAULT_SAMPLE_RATE)
         _, encoded_frame, _, _, _ = self.dac_model.encode(audio_data)
@@ -562,8 +555,7 @@ class Dia:
         return audio_values.squeeze()
 
     def load_audio(self, audio_path: str) -> torch.Tensor:
-        """
-        Loads and preprocesses an audio file for use as a prompt.
+        """Loads and preprocesses an audio file for use as a prompt.
 
         Loads the audio file, resamples it to the target sample rate if necessary,
         preprocesses it using the DAC model's preprocessing, and encodes it into
@@ -592,8 +584,7 @@ class Dia:
         return self._encode(audio.to(self.device))
 
     def save_audio(self, path: str, audio: np.ndarray):
-        """
-        Saves the generated audio waveform to a file.
+        """Saves the generated audio waveform to a file.
 
         Uses the soundfile library to write the NumPy audio array to the specified
         path with the default sample rate.
@@ -621,8 +612,7 @@ class Dia:
         use_cfg_filter: bool | None = None,
         verbose: bool = False,
     ) -> np.ndarray | list[np.ndarray]:
-        """
-        Generates audio corresponding to the input text.
+        """Generates audio corresponding to the input text.
 
         Args:
             text: The input text prompt, or a list of text prompts for batch generation.
