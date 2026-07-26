@@ -74,6 +74,50 @@ class TrainerApiTests(unittest.TestCase):
                 load_best_model_at_end=True,
             )
 
+    def test_training_arguments_reject_invalid_numeric_types_and_ranges(self):
+        invalid = (
+            ({
+                "gradient_accumulation_steps": True
+            }, ValueError),
+            ({
+                "eval_accumulation_steps": 1.5
+            }, ValueError),
+            ({
+                "max_steps": -2
+            }, ValueError),
+            ({
+                "max_steps": 0
+            }, ValueError),
+            ({
+                "num_train_epochs": float("nan")
+            }, TypeError),
+            ({
+                "learning_rate": float("inf")
+            }, ValueError),
+            ({
+                "adam_epsilon": 0.0
+            }, ValueError),
+            ({
+                "adam_beta2": 1.0
+            }, ValueError),
+            ({
+                "eval_steps": 1.5
+            }, TypeError),
+            ({
+                "save_total_limit": True
+            }, TypeError),
+            ({
+                "warmup_ratio": float("nan")
+            }, ValueError),
+            ({
+                "label_names": ["labels", "labels"]
+            }, ValueError),
+        )
+        for values, error in invalid:
+            with self.subTest(values=values):
+                with self.assertRaises(error):
+                    TrainingArguments(**values)
+
     def test_trainer_state_round_trip(self):
         state = TrainerState(
             epoch=1.5,
@@ -269,12 +313,21 @@ class TrainerLoopTests(unittest.TestCase):
         self.assertIn(("save", 4), recorder.events)
 
     def test_resume_from_last_checkpoint(self):
+
+        class StopAtTwo(TrainerCallback):
+
+            def on_step_end(self, args, state, control, **kwargs):
+                if state.global_step == 2:
+                    control.should_save = True
+                    control.should_training_stop = True
+                return control
+
         with tempfile.TemporaryDirectory() as directory:
             first = Trainer(
                 model=self._model(),
                 args=TrainingArguments(
                     output_dir=directory,
-                    max_steps=2,
+                    max_steps=4,
                     per_device_train_batch_size=2,
                     logging_strategy="no",
                     save_steps=1,
@@ -282,6 +335,7 @@ class TrainerLoopTests(unittest.TestCase):
                     use_cpu=True,
                 ),
                 train_dataset=self._dataset(),
+                callbacks=[StopAtTwo],
             )
             first.train()
 

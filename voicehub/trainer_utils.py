@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import random
+from collections.abc import Iterator, Sized
 from enum import Enum
 from importlib import import_module
 from pathlib import Path
@@ -17,6 +19,29 @@ MODEL_STATE_NAME = "model_state.pt"
 OPTIMIZER_NAME = "optimizer.pt"
 SCHEDULER_NAME = "scheduler.pt"
 RNG_STATE_NAME = "rng_state.pth"
+SCALER_STATE_NAME = "scaler.pt"
+TRAINING_RUNTIME_STATE_NAME = "training_runtime.pt"
+TRAINING_RECIPE_NAME = "training_recipe.json"
+NATIVE_EXPORT_DIR = "native_export"
+CHECKPOINT_MANIFEST_NAME = "checkpoint_manifest.json"
+CHECKPOINT_COMPLETE_NAME = ".complete"
+CHECKPOINT_FORMAT_VERSION = 3
+FORMAT_V2_REQUIRED_FILES = (
+    MODEL_STATE_NAME,
+    OPTIMIZER_NAME,
+    SCHEDULER_NAME,
+    TRAINER_STATE_NAME,
+    TRAINING_ARGS_NAME,
+    RNG_STATE_NAME,
+    TRAINING_RUNTIME_STATE_NAME,
+)
+LEGACY_RESUME_FILES = (
+    MODEL_STATE_NAME,
+    OPTIMIZER_NAME,
+    SCHEDULER_NAME,
+    TRAINER_STATE_NAME,
+    RNG_STATE_NAME,
+)
 
 
 class ExplicitEnum(str, Enum):
@@ -86,6 +111,59 @@ class EvalPrediction:
         return tuple(self)[index]
 
 
+class EpochRandomSampler:
+    """Deterministic epoch-addressable sampler without an eager Torch import.
+
+    A seed plus epoch reproduces the exact permutation after resume,
+    unlike a mutable generator whose state has already advanced when a
+    DataLoader creates its iterator.
+    """
+
+    def __init__(
+        self,
+        data_source: Sized,
+        *,
+        seed: int,
+        shuffle: bool = True,
+    ):
+        self.data_source = data_source
+        self.seed = int(seed)
+        self.shuffle = bool(shuffle)
+        self.epoch = 0
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
+    def __iter__(self) -> Iterator[int]:
+        length = len(self.data_source)
+        if not self.shuffle:
+            return iter(range(length))
+        torch = import_module("torch")
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + self.epoch)
+        return iter(torch.randperm(length, generator=generator).tolist())
+
+    def __len__(self) -> int:
+        return len(self.data_source)
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "seed": self.seed,
+            "shuffle": self.shuffle,
+            "epoch": self.epoch,
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        checkpoint_seed = int(state_dict["seed"])
+        if checkpoint_seed != self.seed:
+            raise ValueError(
+                "Sampler seed in the checkpoint does not match the current "
+                f"training run ({checkpoint_seed} != {self.seed}).")
+        if bool(state_dict["shuffle"]) != self.shuffle:
+            raise ValueError("Sampler shuffle mode differs from the checkpoint.")
+        self.epoch = int(state_dict["epoch"])
+
+
 def set_seed(seed: int) -> None:
     """Seed Python, NumPy, and installed compute backends."""
     random.seed(seed)
@@ -117,6 +195,64 @@ def get_last_checkpoint(folder: str | Path) -> str | None:
         try:
             step = int(path.name.rsplit("-", 1)[1])
         except (IndexError, ValueError):
+            continue
+        manifest = path / CHECKPOINT_MANIFEST_NAME
+        complete = path / CHECKPOINT_COMPLETE_NAME
+        if manifest.is_file():
+            if not complete.is_file():
+                continue
+            try:
+                payload = json.loads(manifest.read_text(encoding="utf-8"))
+            except (OSError, TypeError, ValueError):
+                continue
+            format_version = payload.get("format_version")
+            manifest_step = payload.get("global_step")
+            if (isinstance(format_version, bool) or not isinstance(format_version, int) or
+                    format_version <= 0 or format_version > CHECKPOINT_FORMAT_VERSION or
+                    isinstance(manifest_step, bool) or not isinstance(manifest_step, int) or
+                    manifest_step != step):
+                continue
+            required = payload.get("required_files")
+            if (not isinstance(required, list) or
+                    any(not isinstance(name, str) or Path(name).name != name or name in ("", ".", "..")
+                        for name in required) or any(not (path / name).is_file() for name in required)):
+                continue
+            if (format_version >= 2 and not set(FORMAT_V2_REQUIRED_FILES).issubset(required)):
+                continue
+            integrity = payload.get("file_integrity")
+            if format_version >= 2 and not isinstance(integrity, dict):
+                continue
+            if format_version >= 3 and not isinstance(
+                    payload.get("resume_signature"),
+                    dict,
+            ):
+                continue
+            if integrity is not None:
+                if not isinstance(integrity, dict):
+                    continue
+                invalid_size = False
+                for name in required:
+                    record = integrity.get(name)
+                    if (not isinstance(record, dict) or record.get("size") != (path / name).stat().st_size):
+                        invalid_size = True
+                        break
+                    expected = record.get("sha256")
+                    if not isinstance(expected, str):
+                        invalid_size = True
+                        break
+                    digest = hashlib.sha256()
+                    with (path / name).open("rb") as handle:
+                        for chunk in iter(
+                                lambda: handle.read(1024 * 1024),
+                                b"",
+                        ):
+                            digest.update(chunk)
+                    if digest.hexdigest() != expected:
+                        invalid_size = True
+                        break
+                if invalid_size:
+                    continue
+        elif any(not (path / name).is_file() for name in LEGACY_RESUME_FILES):
             continue
         checkpoints.append((step, path))
     if not checkpoints:

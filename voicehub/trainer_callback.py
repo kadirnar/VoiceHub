@@ -25,6 +25,8 @@ class TrainerState:
     log_history: list[dict[str, Any]] = field(default_factory=list)
     best_metric: float | None = None
     best_model_checkpoint: str | None = None
+    train_epoch: int | None = None
+    train_batch_cursor: int | None = None
     is_local_process_zero: bool = True
     is_world_process_zero: bool = True
     is_hyper_param_search: bool = False
@@ -68,6 +70,17 @@ class TrainerControl:
 
 class TrainerCallback:
     """Base class for non-invasive Trainer customizations."""
+
+    def resume_fingerprint(self) -> Any:
+        """Return immutable configuration that affects exact continuation."""
+        return None
+
+    def state_dict(self) -> dict[str, Any]:
+        """Return callback state that must survive checkpoint resume."""
+        return {}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Restore callback state from a Trainer checkpoint."""
 
     def on_init_end(self, args, state, control, **kwargs):
         return control
@@ -167,7 +180,8 @@ class EarlyStoppingCallback(TrainerCallback):
             raise ValueError("EarlyStoppingCallback requires `load_best_model_at_end=True`.")
         if args.metric_for_best_model is None:
             raise ValueError("EarlyStoppingCallback requires `metric_for_best_model`.")
-        self.early_stopping_patience_counter = 0
+        if state.global_step == 0:
+            self.early_stopping_patience_counter = 0
         return control
 
     def on_evaluate(self, args, state, control, metrics=None, **kwargs):
@@ -195,6 +209,23 @@ class EarlyStoppingCallback(TrainerCallback):
             if (self.early_stopping_patience_counter >= self.early_stopping_patience):
                 control.should_training_stop = True
         return control
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "early_stopping_patience_counter": self.early_stopping_patience_counter,
+        }
+
+    def resume_fingerprint(self) -> dict[str, Any]:
+        return {
+            "early_stopping_patience": self.early_stopping_patience,
+            "early_stopping_threshold": self.early_stopping_threshold,
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        self.early_stopping_patience_counter = int(state_dict.get(
+            "early_stopping_patience_counter",
+            0,
+        ))
 
 
 class CallbackHandler:
@@ -234,6 +265,38 @@ class CallbackHandler:
 
     def remove_callback(self, callback) -> None:
         self.pop_callback(callback)
+
+    @staticmethod
+    def _callback_key(callback: TrainerCallback) -> str:
+        callback_type = type(callback)
+        return f"{callback_type.__module__}.{callback_type.__qualname__}"
+
+    def state_dict(self) -> dict[str, Any]:
+        """Serialize stateful callbacks by stable qualified class name."""
+        state = {}
+        for callback in self.callbacks:
+            callback_state = callback.state_dict()
+            if callback_state:
+                state[self._callback_key(callback)] = callback_state
+        return state
+
+    def load_state_dict(
+        self,
+        state_dict: dict[str, Any],
+        *,
+        strict: bool = False,
+    ) -> None:
+        """Restore callback state without requiring optional integrations."""
+        callbacks = {self._callback_key(callback): callback for callback in self.callbacks}
+        if strict:
+            unexpected = set(state_dict) - set(callbacks)
+            if unexpected:
+                names = ", ".join(sorted(unexpected))
+                raise ValueError(f"Checkpoint has unregistered callback state: {names}.")
+        for name, callback_state in state_dict.items():
+            callback = callbacks.get(name)
+            if callback is not None:
+                callback.load_state_dict(callback_state)
 
     def call_event(self, event, args, state, control, **kwargs):
         for callback in self.callbacks:

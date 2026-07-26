@@ -51,6 +51,12 @@ class NeuTTSForTextToSpeech(PreTrainedTTSModel):
         )
         super().__init__(config, device=device, lazy_load=lazy_load)
 
+    def _validate_training_runtime(self) -> None:
+        if self.config.name_or_path.lower().endswith((".gguf", "-gguf")):
+            raise ValueError(
+                "NeuTTS fine-tuning requires a differentiable Transformers "
+                "backbone; GGUF checkpoints are inference-only.")
+
     def _load_pretrained_model(self) -> None:
         runtime = import_optional(
             "voicehub.models.neutts.source.neutts.neutts",

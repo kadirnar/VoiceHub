@@ -37,15 +37,18 @@ Documentation = "https://github.com/kadirnar/VoiceHub/tree/main/docs"
 
 [project.optional-dependencies]
 training = [
+  "safetensors>=0.4",
   "torch>=2.1",
 ]
 orpheustts = [
   "torch",
+  "torchaudio",
   "transformers",
 ]
 dia = [
   "torch",
   "torchaudio",
+  "transformers>=4.53",
   "safetensors",
   "descript-audiotools",
   "einops",
@@ -116,12 +119,28 @@ cosyvoice = [
   "huggingface-hub",
   "modelscope",
   "hyperpyyaml",
+  "safetensors",
   "onnxruntime",
   "transformers",
   "diffusers",
   "x-transformers",
   "einops",
   "inflect",
+  "omegaconf",
+  "openai-whisper",
+  "tiktoken",
+  "pyarrow",
+  "pyworld",
+  "librosa",
+  "scipy",
+  "hydra-core",
+  "lightning",
+  "rich",
+  "gdown",
+  "matplotlib",
+  "wget",
+  "regex",
+  "tqdm",
 ]
 f5tts = [
   "torch",
@@ -359,6 +378,8 @@ fishtts = [
   "ormsgpack",
   "tiktoken",
   "safetensors",
+  "datasets",
+  "protobuf",
 ]
 csm = [
   "torch",
@@ -366,7 +387,7 @@ csm = [
   "torchao",
   "torchtune",
   "tokenizers",
-  "transformers",
+  "transformers>=4.52.1",
   "sentencepiece",
   "safetensors",
 ]

@@ -1239,7 +1239,16 @@ class Qwen3TTSTalkerCodePredictorModelForConditionalGeneration(Qwen3TTSPreTraine
 
         loss = None
         if labels is not None:
-            loss = self.loss_function(logits=logits, labels=labels, vocab_size=self.config.vocab_size, **kwargs)
+            # Each residual-codebook logit is already aligned with the label
+            # at the same index. The generic causal-LM loss otherwise shifts
+            # this sequence a second time and drops one codebook target.
+            loss = self.loss_function(
+                logits=logits,
+                labels=labels,
+                shift_labels=labels,
+                vocab_size=self.config.vocab_size,
+                **kwargs,
+            )
 
         return Qwen3TTSTalkerCodePredictorOutputWithPast(
             loss=loss,

@@ -19,6 +19,8 @@ class HiggsTTSConfig(VoiceHubConfig):
         *,
         audio_tokenizer_name_or_path: str = "bosonai/higgs-audio-v2-tokenizer",
         torch_dtype: str = "bfloat16",
+        training_text_loss_weight: float = 1.0,
+        training_audio_loss_weight: float = 1.0,
         system_prompt: str = (
             "Generate audio following instruction.\n\n"
             "<|scene_desc_start|>\nAudio is recorded from a quiet room.\n"
@@ -29,6 +31,8 @@ class HiggsTTSConfig(VoiceHubConfig):
         super().__init__(sample_rate=sample_rate, **kwargs)
         self.audio_tokenizer_name_or_path = audio_tokenizer_name_or_path
         self.torch_dtype = torch_dtype
+        self.training_text_loss_weight = training_text_loss_weight
+        self.training_audio_loss_weight = training_audio_loss_weight
         self.system_prompt = system_prompt
 
 
@@ -53,9 +57,25 @@ class HiggsTTSForTextToSpeech(PreTrainedTTSModel):
             **config_overrides,
         )
         self._types = None
+        self._training_backend = None
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     def _load_pretrained_model(self) -> None:
+        if self.is_training_load:
+            from voicehub.models.higgstts.training import load_higgs_training_backend
+
+            backend = load_higgs_training_backend(
+                self.config.name_or_path,
+                self.config.audio_tokenizer_name_or_path,
+                device=self.device,
+                torch_dtype=self.config.torch_dtype,
+            )
+            self.model = backend
+            self._training_backend = backend
+            self._types = None
+            self.config.sample_rate = backend.sample_rate
+            return
+
         torch = import_optional(
             "torch",
             model_type="higgstts",
@@ -82,7 +102,36 @@ class HiggsTTSForTextToSpeech(PreTrainedTTSModel):
                 self.device,
             ),
         )
+        self._training_backend = None
         self.config.sample_rate = int(self.model.audio_tokenizer.sampling_rate)
+
+    @property
+    def training_backend(self):
+        """Return the cache-free runtime after a training load."""
+        if (self._training_backend is not None and self.model is self._training_backend):
+            return self._training_backend
+        return None
+
+    def _prepare_for_training(self) -> None:
+        if self._training_backend is not None:
+            # A Trainer artifact may have been converted to a serving shell
+            # for generation. Reattach its same trained model and discard the
+            # fresh inference caches instead of reloading the base checkpoint.
+            self.model = self._training_backend
+            self._types = None
+            self._training_backend.prepare_for_training()
+            return
+
+        # Drop the serving engine as a unit. This releases its StaticCache
+        # buckets before the trainable model is loaded.
+        self.model = None
+        self._types = None
+        self._training_backend = None
+        self._loading_for_training = True
+        try:
+            self.load()
+        finally:
+            self._loading_for_training = False
 
     def _generate(
         self,
@@ -99,6 +148,14 @@ class HiggsTTSForTextToSpeech(PreTrainedTTSModel):
         **generation_options,
     ) -> TTSOutput:
         self.load()
+        if self.training_backend is not None:
+            self.model = self._training_backend.build_inference_runtime(device=self.device, )
+            self._types = import_optional(
+                "voicehub.models.higgstts.source.boson_multimodal."
+                "data_types",
+                model_type="higgstts",
+                install_extra="higgstts",
+            )
         sample = self._types.ChatMLSample(
             messages=[
                 self._types.Message(

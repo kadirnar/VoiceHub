@@ -21,6 +21,9 @@ class F5TTSConfig(VoiceHubConfig):
         vocabulary_path: str = "",
         ode_method: str = "euler",
         use_ema: bool = True,
+        ema_decay: float = 0.9999,
+        ema_update_after_step: int = 0,
+        ema_update_every: int = 1,
         vocoder_path: str | None = None,
         cache_dir: str | None = None,
         sample_rate: int = 24000,
@@ -32,6 +35,9 @@ class F5TTSConfig(VoiceHubConfig):
         self.vocabulary_path = vocabulary_path
         self.ode_method = ode_method
         self.use_ema = use_ema
+        self.ema_decay = ema_decay
+        self.ema_update_after_step = ema_update_after_step
+        self.ema_update_every = ema_update_every
         self.vocoder_path = vocoder_path
         self.cache_dir = cache_dir
 

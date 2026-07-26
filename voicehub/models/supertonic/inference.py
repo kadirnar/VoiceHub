@@ -53,6 +53,12 @@ class SupertonicForTextToSpeech(PreTrainedTTSModel):
         self._model_directory = None
         super().__init__(config, device=device, lazy_load=lazy_load)
 
+    def _validate_training_runtime(self) -> None:
+        raise RuntimeError(
+            "The published Supertonic runtime contains ONNX inference "
+            "sessions only and cannot receive gradients. Register a custom "
+            "PyTorch training adapter backed by a trainable checkpoint.")
+
     def _load_pretrained_model(self) -> None:
         model_directory = resolve_model_directory(
             self.config.name_or_path,

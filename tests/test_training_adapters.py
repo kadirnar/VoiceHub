@@ -6,11 +6,18 @@ from voicehub import (
     AutoInferenceModel,
     AutoTrainingAdapter,
     DataCollatorForTTSTraining,
+    ModelTrainingSpec,
     PreTrainedTTSModel,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
     TrainingFamily,
+    TrainingPhaseKind,
+    TrainingPhaseSpec,
+    TrainingRecipeKind,
+    TrainingSupport,
     TTSOutput,
+    VITSTrainingAdapter,
     VoiceHubConfig,
     get_training_spec,
     list_training_specs,
@@ -31,6 +38,7 @@ EXPECTED_ADAPTERS = {
     TrainingFamily.SEQ2SEQ: Seq2SeqTrainingAdapter,
     TrainingFamily.FLOW_MATCHING: FlowMatchingTrainingAdapter,
     TrainingFamily.ACOUSTIC: AcousticTrainingAdapter,
+    TrainingFamily.VITS: VITSTrainingAdapter,
     TrainingFamily.COMPOSITE: CompositeTrainingAdapter,
 }
 
@@ -53,9 +61,9 @@ class TrainingProfileTests(unittest.TestCase):
                     model_spec.install_extra,
                 )
 
-    def test_all_five_training_families_are_used(self):
+    def test_all_builtin_training_families_are_used(self):
         families = {spec.family for spec in list_training_specs()}
-        self.assertEqual(families, set(TrainingFamily))
+        self.assertTrue(set(TrainingFamily).issubset(families))
 
     def test_all_lazy_models_resolve_an_adapter_without_loading(self):
         for model_spec in AutoInferenceModel.available_models():
@@ -133,24 +141,20 @@ class TrainingAdapterLoopTests(unittest.TestCase):
     def _composite_model():
         import torch
 
-        class CompositeModel(torch.nn.Module):
+        class PhaseModel(torch.nn.Module):
 
             def __init__(self):
                 super().__init__()
                 self.scale = torch.nn.Parameter(torch.tensor(0.5))
 
-            def forward(self, input_values):
+            def forward(self, input_values, labels):
                 predictions = input_values * self.scale
                 return {
                     "logits": predictions,
-                    "loss_dict": {
-                        "mel_loss": predictions.square().mean(),
-                        "generator_loss": (predictions - 1).square().mean(),
-                        "discriminator_loss": (predictions + 1).square().mean(),
-                    },
+                    "loss": (predictions - labels).square().mean(),
                 }
 
-        return CompositeModel()
+        return PhaseModel()
 
     @classmethod
     def _composite_runtime(cls):
@@ -161,15 +165,48 @@ class TrainingAdapterLoopTests(unittest.TestCase):
             def __init__(self):
                 self.generator = cls._composite_model()
                 self.model = self.generator
-                self.discriminator = torch.nn.Linear(2, 1)
+                self.discriminator = cls._composite_model()
 
         return Runtime()
 
-    def _train_once(self, model_type, module_factory, dataset):
+    @staticmethod
+    def _composite_spec():
+        return ModelTrainingSpec(
+            model_type="dummy-composite",
+            family=TrainingFamily.COMPOSITE,
+            module_paths=("model.generator", "model.discriminator"),
+            component_paths=("model.generator", "model.discriminator"),
+            support=TrainingSupport.PREPROCESSED,
+            separate_optimizers=True,
+            recipe_kind=TrainingRecipeKind.ADVERSARIAL,
+            phases=(
+                TrainingPhaseSpec(
+                    name="generator",
+                    kind=TrainingPhaseKind.GENERATOR,
+                    component_paths=("model.generator", ),
+                    optimizer_names=("generator", ),
+                    forward_component="model.generator",
+                    loss_keys=("loss", ),
+                    frozen_component_paths=("model.discriminator", ),
+                ),
+                TrainingPhaseSpec(
+                    name="discriminator",
+                    kind=TrainingPhaseKind.DISCRIMINATOR,
+                    component_paths=("model.discriminator", ),
+                    optimizer_names=("discriminator", ),
+                    forward_component="model.discriminator",
+                    loss_keys=("loss", ),
+                    frozen_component_paths=("model.generator", ),
+                ),
+            ),
+        )
+
+    def _train_once(self, model_type, module_factory, dataset, *, spec=None):
         model = self.DummyForTextToSpeech(
             self._config(model_type),
             module_factory,
         )
+        training_adapter = (AutoTrainingAdapter.from_model(model, spec=spec) if spec is not None else None)
         with tempfile.TemporaryDirectory() as directory:
             trainer = Trainer(
                 model=model,
@@ -182,6 +219,7 @@ class TrainingAdapterLoopTests(unittest.TestCase):
                     use_cpu=True,
                 ),
                 train_dataset=dataset,
+                training_adapter=training_adapter,
             )
             output = trainer.train()
         self.assertEqual(output.global_step, 1)
@@ -208,7 +246,7 @@ class TrainingAdapterLoopTests(unittest.TestCase):
             dataset,
         )
         sequence = self._train_once(
-            "dia",
+            "parlertts",
             self._token_model,
             dataset,
         )
@@ -220,6 +258,58 @@ class TrainingAdapterLoopTests(unittest.TestCase):
             sequence.training_adapter,
             Seq2SeqTrainingAdapter,
         )
+
+    def test_adapter_prediction_accepts_unlabeled_batches(self):
+        import torch
+
+        model = self.DummyForTextToSpeech(
+            self._config("orpheustts"),
+            self._token_model,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            trainer = Trainer(
+                model=model,
+                args=TrainingArguments(
+                    output_dir=directory,
+                    per_device_eval_batch_size=2,
+                    use_cpu=True,
+                ),
+            )
+            output = trainer.predict([
+                {
+                    "input_ids": torch.tensor([1, 2, 3])
+                },
+                {
+                    "input_ids": torch.tensor([2, 3, 4])
+                },
+            ])
+
+        self.assertIsNone(output.label_ids)
+        self.assertNotIn("test_loss", output.metrics)
+        self.assertEqual(tuple(output.predictions.shape), (2, 3, 8))
+
+    def test_adapter_device_move_notifies_wrapper_runtime(self):
+        import torch
+
+        class Runtime(torch.nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(()))
+
+            def forward(self, input_ids):
+                return {"logits": input_ids * self.weight}
+
+        model = self.DummyForTextToSpeech(
+            self._config("orpheustts"),
+            Runtime,
+        )
+        devices = []
+        model._set_training_device = devices.append
+        adapter = model.get_training_adapter()
+        adapter.to("cpu")
+
+        self.assertEqual(devices, ["cpu"])
 
     def test_flow_and_acoustic_families_train(self):
         import torch
@@ -235,14 +325,27 @@ class TrainingAdapterLoopTests(unittest.TestCase):
             },
         ]
         flow = self._train_once(
-            "f5tts",
+            "dummy-flow",
             self._regression_model,
             dataset,
+            spec=ModelTrainingSpec(
+                model_type="dummy-flow",
+                family=TrainingFamily.FLOW_MATCHING,
+                module_paths=("model", ),
+                support=TrainingSupport.PREPROCESSED,
+                fallback_objective="velocity_mse",
+            ),
         )
         acoustic = self._train_once(
-            "melotts",
+            "dummy-acoustic",
             self._regression_model,
             dataset,
+            spec=ModelTrainingSpec(
+                model_type="dummy-acoustic",
+                family=TrainingFamily.ACOUSTIC,
+                module_paths=("model", ),
+                support=TrainingSupport.PREPROCESSED,
+            ),
         )
         self.assertIsInstance(
             flow.training_adapter,
@@ -267,9 +370,10 @@ class TrainingAdapterLoopTests(unittest.TestCase):
             },
         ]
         trainer = self._train_once(
-            "styletts2",
+            "dummy-composite",
             self._composite_runtime,
             dataset,
+            spec=self._composite_spec(),
         )
         self.assertIsInstance(
             trainer.training_adapter,
@@ -321,6 +425,14 @@ class TrainingAdapterLoopTests(unittest.TestCase):
     def test_composite_optimizer_and_scheduler_resume_together(self):
         import torch
 
+        class StopAfterOne(TrainerCallback):
+
+            def on_step_end(self, args, state, control, **kwargs):
+                if state.global_step == 1:
+                    control.should_save = True
+                    control.should_training_stop = True
+                return control
+
         dataset = [
             {
                 "input_values": torch.tensor([0.2, 0.4]),
@@ -333,27 +445,11 @@ class TrainingAdapterLoopTests(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as directory:
             first = Trainer(
-                model=self.DummyForTextToSpeech(
-                    self._config("styletts2"),
-                    self._composite_runtime,
-                ),
-                args=TrainingArguments(
-                    output_dir=directory,
-                    max_steps=1,
-                    per_device_train_batch_size=2,
-                    logging_strategy="no",
-                    save_steps=1,
-                    use_cpu=True,
-                ),
-                train_dataset=dataset,
-            )
-            first.train()
-
-            resumed = Trainer(
-                model=self.DummyForTextToSpeech(
-                    self._config("styletts2"),
-                    self._composite_runtime,
-                ),
+                model=(
+                    first_model := self.DummyForTextToSpeech(
+                        self._config("dummy-composite"),
+                        self._composite_runtime,
+                    )),
                 args=TrainingArguments(
                     output_dir=directory,
                     max_steps=2,
@@ -363,13 +459,40 @@ class TrainingAdapterLoopTests(unittest.TestCase):
                     use_cpu=True,
                 ),
                 train_dataset=dataset,
+                training_adapter=AutoTrainingAdapter.from_model(
+                    first_model,
+                    spec=self._composite_spec(),
+                ),
+                callbacks=[StopAfterOne],
+            )
+            first.train()
+
+            resumed = Trainer(
+                model=(
+                    resumed_model := self.DummyForTextToSpeech(
+                        self._config("dummy-composite"),
+                        self._composite_runtime,
+                    )),
+                args=TrainingArguments(
+                    output_dir=directory,
+                    max_steps=2,
+                    per_device_train_batch_size=2,
+                    logging_strategy="no",
+                    save_steps=1,
+                    use_cpu=True,
+                ),
+                train_dataset=dataset,
+                training_adapter=AutoTrainingAdapter.from_model(
+                    resumed_model,
+                    spec=self._composite_spec(),
+                ),
             )
             output = resumed.train(resume_from_checkpoint=True)
 
         self.assertEqual(output.global_step, 2)
         self.assertIsInstance(resumed.optimizer, OptimizerBundle)
 
-    def test_recursive_discovery_finds_nested_trainable_module(self):
+    def test_inference_only_profile_rejects_before_module_discovery(self):
 
         class Runtime:
 
@@ -381,14 +504,25 @@ class TrainingAdapterLoopTests(unittest.TestCase):
             lambda: Runtime(self._regression_model()),
         )
         adapter = AutoTrainingAdapter.from_model(model)
-        adapter.setup()
-        self.assertGreater(
-            sum(parameter.numel() for parameter in adapter.parameters()),
-            0,
-        )
+        with self.assertRaisesRegex(ValueError, "inference-only"):
+            adapter.setup()
+        self.assertFalse(model.is_loaded)
 
     def test_model_init_preserves_explicit_data_collator(self):
         import torch
+
+        class NativeRegression(torch.nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.scale = torch.nn.Parameter(torch.tensor(0.5))
+
+            def forward(self, input_values, labels):
+                predictions = input_values * self.scale
+                return {
+                    "loss": (predictions - labels).square().mean(),
+                    "logits": predictions,
+                }
 
         collator_calls = []
 
@@ -400,10 +534,7 @@ class TrainingAdapterLoopTests(unittest.TestCase):
             }
 
         trainer = Trainer(
-            model_init=lambda: self.DummyForTextToSpeech(
-                self._config("melotts"),
-                self._regression_model,
-            ),
+            model_init=NativeRegression,
             args=TrainingArguments(
                 max_steps=1,
                 per_device_train_batch_size=2,

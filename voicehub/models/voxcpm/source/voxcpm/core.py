@@ -18,6 +18,7 @@ class VoxCPM:
         zipenhancer_model_path: str | None = "iic/speech_zipenhancer_ans_multiloss_16k_base",
         enable_denoiser: bool = True,
         optimize: bool = True,
+        training: bool = False,
         device: str | None = None,
         lora_config: Optional[LoRAConfig] = None,
         lora_weights_path: Optional[str] = None,
@@ -32,6 +33,8 @@ class VoxCPM:
                 id or local path. If None, denoiser will not be initialized.
             enable_denoiser: Whether to initialize the denoiser pipeline.
             optimize: Whether to optimize the model with torch.compile. True by default, but can be disabled for debugging.
+            training: Build the differentiable training graph and apply the
+                upstream parameter-freezing policy.
             device: Runtime device. If set to ``None`` or ``"auto"``, VoxCPM
                 will choose automatically (preferring CUDA, then MPS, then CPU).
                 If set explicitly, that device is used or a clear error is raised.
@@ -67,6 +70,7 @@ class VoxCPM:
             self.tts_model = VoxCPM2Model.from_local(
                 voxcpm_model_path,
                 optimize=optimize,
+                training=training,
                 device=device,
                 lora_config=lora_config,
             )
@@ -75,6 +79,7 @@ class VoxCPM:
             self.tts_model = VoxCPMModel.from_local(
                 voxcpm_model_path,
                 optimize=optimize,
+                training=training,
                 device=device,
                 lora_config=lora_config,
             )
@@ -112,6 +117,7 @@ class VoxCPM:
         cache_dir: str = None,
         local_files_only: bool = False,
         optimize: bool = True,
+        training: bool = False,
         device: str | None = None,
         lora_config: Optional[LoRAConfig] = None,
         lora_weights_path: Optional[str] = None,
@@ -123,6 +129,8 @@ class VoxCPM:
             hf_model_id: Explicit Hugging Face repository id (e.g. "org/repo") or local path.
             load_denoiser: Whether to initialize the denoiser pipeline.
             optimize: Whether to optimize the model with torch.compile. True by default, but can be disabled for debugging.
+            training: Build the differentiable training graph instead of the
+                cast/compiled inference graph.
             zipenhancer_model_id: Denoiser model id or path for ModelScope
                 acoustic noise suppression.
             cache_dir: Custom cache directory for the snapshot.
@@ -168,6 +176,7 @@ class VoxCPM:
             zipenhancer_model_path=zipenhancer_model_id if load_denoiser else None,
             enable_denoiser=load_denoiser,
             optimize=optimize,
+            training=training,
             device=device,
             lora_config=lora_config,
             lora_weights_path=lora_weights_path,

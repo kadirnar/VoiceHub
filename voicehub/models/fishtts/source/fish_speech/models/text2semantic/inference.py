@@ -359,15 +359,15 @@ def generate(
     return seq
 
 
-def init_model(checkpoint_path, device, precision, compile=False):
-    model = DualARTransformer.from_pretrained(checkpoint_path, load_weights=True)
+def prepare_model_for_inference(model, device, *, compile=False):
+    """Attach Fish's serving decoder to an existing semantic model.
 
-    model = model.to(device=device, dtype=precision)
-    logger.info(f"Restored model from checkpoint")
-
+    Keeping this operation separate from checkpoint loading lets training
+    integrations reuse the exact parameter objects owned by their optimizer
+    when they temporarily switch to generation.
+    """
     if isinstance(model, DualARTransformer):
         decode_one_token = decode_one_token_ar
-        # prefill_n_tokens = decode_one_token_ar
         logger.info("Using DualARTransformer")
     else:
         raise ValueError("Unsupported model type")
@@ -389,7 +389,22 @@ def init_model(checkpoint_path, device, precision, compile=False):
             fullgraph=True,
         )
 
-    return model.eval(), decode_one_token
+    model.eval()
+    return decode_one_token
+
+
+def init_model(checkpoint_path, device, precision, compile=False):
+    model = DualARTransformer.from_pretrained(checkpoint_path, load_weights=True)
+
+    model = model.to(device=device, dtype=precision)
+    logger.info("Restored model from checkpoint")
+    decode_one_token = prepare_model_for_inference(
+        model,
+        device,
+        compile=compile,
+    )
+
+    return model, decode_one_token
 
 
 @torch.inference_mode()

@@ -47,6 +47,7 @@ class VoxCPMForTextToSpeech(PreTrainedTTSModel):
             model_path=model_path,
             **config_overrides,
         )
+        self._loaded_for_training = False
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     def _load_pretrained_model(self) -> None:
@@ -57,11 +58,34 @@ class VoxCPMForTextToSpeech(PreTrainedTTSModel):
         )
         self.model = runtime.VoxCPM.from_pretrained(
             self.config.name_or_path,
-            load_denoiser=self.config.load_denoiser,
-            optimize=self.config.optimize,
+            load_denoiser=(self.config.load_denoiser and not self.is_training_load),
+            optimize=(self.config.optimize and not self.is_training_load),
+            training=self.is_training_load,
             device=self.device,
         )
         self.config.sample_rate = int(self.model.tts_model.sample_rate)
+        self._loaded_for_training = self.is_training_load
+
+    def _prepare_for_training(self) -> None:
+        if self._loaded_for_training:
+            return
+        self.model = None
+        self._loading_for_training = True
+        try:
+            self.load()
+        finally:
+            self._loading_for_training = False
+
+    def _set_training_device(self, device: str) -> None:
+        """Keep the source forward's explicit device routing synchronized."""
+        super()._set_training_device(device)
+        runtime = getattr(self.model, "tts_model", None)
+        if runtime is None:
+            return
+        runtime.device = str(device)
+        config = getattr(runtime, "config", None)
+        if config is not None and hasattr(config, "device"):
+            config.device = str(device)
 
     def _generate(
         self,

@@ -159,17 +159,20 @@ and [architecture guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/arc
 
 `Trainer` and `TrainingArguments` follow the Transformers training vocabulary
 without adding Transformers or PyTorch to the base installation. Every
-registered backend has a `ModelTrainingSpec`; `Trainer` automatically selects
-its model-family adapter:
+registered backend has an audited `ModelTrainingSpec`. Directly runnable
+profiles use the built-in family adapters, while source-native recipes that
+need architecture-specific orchestration require a specialized adapter:
 
 ```python
 from voicehub import AutoModelForTextToSpeech, Trainer, TrainingArguments
 
 model = AutoModelForTextToSpeech.from_pretrained(
-    "F5TTS_v1_Base",
-    model_type="f5tts",
+    "parler-tts/parler-tts-mini-v1",
+    model_type="parlertts",
     device="cuda",
+    lazy_load=True,
 )
+model.validate_training_support()
 
 trainer = Trainer(
     model=model,
@@ -186,22 +189,32 @@ trainer = Trainer(
     ),
     train_dataset=train_dataset,
     eval_dataset=validation_dataset,
-    processing_class=processor,
 )
 trainer.train(resume_from_checkpoint=True)
 ```
 
+This example assumes that dataset items already contain Parler's
+backend-shaped training tensors. The generic trainer does not silently turn
+raw text/audio into architecture-specific codec, alignment, flow, or
+adversarial targets.
+
 Trainable models return `TTSTrainingOutput(loss=..., logits=...)`, a mapping
 with `loss`, or a tuple with loss first. Architecture-specific objectives can
-be connected through `compute_loss_func`. The automatic adapters cover causal
-codec LMs, sequence-to-sequence models, flow/diffusion models, acoustic
-regression models, and composite/GAN systems. Composite source modules receive
-separate named optimizer and scheduler states. Variable-length token, mel, and
-waveform batches use `DataCollatorForTTSTraining`.
+be connected through `compute_loss_func` for a true single-phase model.
+Declarative recipes cover causal codec LMs, sequence-to-sequence models,
+flow/diffusion models, acoustic regression, VITS, and composite/GAN systems.
+Composite source modules receive separately routed, named optimizer and
+scheduler states. Variable-length token, mel, waveform, and nested
+architecture-specific batches use `DataCollatorForTTSTraining`.
+
+Support is deliberately variant-aware. Differentiable native and preprocessed
+profiles run directly; custom profiles fail until their specialized adapter is
+registered; ONNX/GGUF, fused, quantized, or inference-pruned variants are
+rejected before loading when they cannot preserve a verified gradient path.
 
 The common loop includes gradient accumulation and clipping, AdamW schedules,
 mixed precision, callbacks, evaluation/prediction, best-model selection,
-checkpoint rotation, and resumable model/optimizer/scheduler/RNG state.
+checkpoint rotation, and atomic resumable model/optimizer/scheduler/RNG state.
 
 See the
 [trainer guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/trainer.md)

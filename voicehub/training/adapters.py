@@ -1,27 +1,51 @@
-"""Trainable-module discovery and objective adapters for TTS model families."""
+"""Trainable-module discovery and phase-aware objective adapters."""
 
 from __future__ import annotations
 
 import inspect
 from collections import deque
 from collections.abc import Mapping
+from dataclasses import asdict, is_dataclass
+from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSTrainingOutput
 from voicehub.training.collators import DataCollatorForTTSTraining
+from voicehub.training.contracts import TrainingContext, TrainingPhaseKind, TrainingPhaseSpec, TrainingSupport
 from voicehub.training.specs import ModelTrainingSpec
 
 
 class BaseTrainingAdapter:
-    """Expose an inference wrapper's source modules through a training API."""
+    """Expose an inference wrapper's source modules through a training API.
+
+    Backends with unusual preprocessing should override
+    :meth:`prepare_training_inputs`. Backends with non-standard orchestration
+    can override :meth:`execute_training_phase` while retaining phase planning,
+    parameter routing, and checkpoint behavior.
+    """
+
+    ADAPTER_STATE_VERSION = 2
+    SUPPORTED_ADAPTER_STATE_VERSIONS = (1, 2)
+    RECIPE_VERSION = 1
+    supports_custom_recipe = False
+    supports_quantized_training = False
+    supports_compiled_training = False
+    native_export_semantics = "component-weight-warm-start"
 
     def __init__(self, model, spec: ModelTrainingSpec):
+        if not isinstance(spec, ModelTrainingSpec):
+            raise TypeError("Training adapters require a ModelTrainingSpec.")
         self.model = model
         self.spec = spec
         self.primary_model = None
+        self.primary_path: str | None = None
         self._components: list[tuple[str, Any]] = []
-        self.data_collator = DataCollatorForTTSTraining()
+        self._component_by_path: dict[str, Any] = {}
+        self._current_context: TrainingContext | None = None
+        self._registered_specialization = False
+        self.data_collator = DataCollatorForTTSTraining(field_schemas=self.spec.field_schemas, )
 
     @property
     def model_type(self) -> str:
@@ -31,48 +55,509 @@ class BaseTrainingAdapter:
     def is_ready(self) -> bool:
         return self.primary_model is not None
 
+    @property
+    def current_context(self) -> TrainingContext | None:
+        """The context being executed, or ``None`` outside a forward call."""
+        return self._current_context
+
+    @property
+    def current_phase(self) -> TrainingPhaseSpec:
+        if self._current_context is not None:
+            return self._current_context.phase
+        return self.spec.get_phase()
+
     def setup(self):
-        """Load the wrapper and resolve all trainable source components."""
+        """Load the wrapper for training and resolve all source components."""
         if self.is_ready:
+            self._validate_loaded_training_graph()
             return self
-        if hasattr(self.model, "load"):
+        self.validate_support()
+
+        load_for_training = getattr(self.model, "load_for_training", None)
+        if callable(load_for_training):
+            load_for_training()
+        elif hasattr(self.model, "load"):
             self.model.load()
 
+        component_paths = list(self.spec.component_paths)
+        for phase in self.spec.phases:
+            component_paths.extend(phase.component_paths)
+            if phase.forward_component is not None:
+                component_paths.append(phase.forward_component)
+        component_paths = list(dict.fromkeys(component_paths))
+
         components = []
-        for path in self.spec.component_paths:
+        for path in component_paths:
             candidate = self._resolve_path(path)
-            if self._is_trainable(candidate):
+            if candidate is None:
+                continue
+            if self._has_trainable_parameters(candidate):
+                self._component_by_path[path] = candidate
                 components.append((path, candidate))
 
         for path in self.spec.module_paths:
             candidate = self._resolve_path(path)
-            if self._is_trainable(candidate):
-                self.primary_model = candidate
-                components.insert(0, (path, candidate))
-                break
+            if not self._is_forward_module(candidate):
+                continue
+            self.primary_model = candidate
+            self.primary_path = path
+            self._component_by_path[path] = candidate
+            components.insert(0, (path, candidate))
+            break
+
+        discovered = []
+        if self.primary_model is None and self.spec.allow_module_discovery:
+            discovered = self._discover_trainable_modules(self.model)
+            for path, candidate in discovered:
+                self._component_by_path.setdefault(path, candidate)
+            for path, candidate in discovered:
+                if self._is_forward_module(candidate):
+                    self.primary_model = candidate
+                    self.primary_path = path
+                    break
+            components.extend(discovered)
 
         if self.primary_model is None:
-            discovered = self._discover_trainable_modules(self.model)
-            if discovered:
-                self.primary_model = discovered[0][1]
-                components.insert(0, discovered[0])
+            # A phase can select a callable source component even when the
+            # wrapper has no single root nn.Module.
+            for path in component_paths:
+                candidate = self._resolve_path(path)
+                if self._is_forward_module(candidate):
+                    self.primary_model = candidate
+                    self.primary_path = path
+                    self._component_by_path[path] = candidate
+                    components.insert(0, (path, candidate))
+                    break
 
         if self.primary_model is None:
             checked = ", ".join(self.spec.module_paths)
+            discovery_hint = (
+                " Bounded module discovery is disabled for this production "
+                "profile; declare an exact path or explicitly opt in."
+                if not self.spec.allow_module_discovery else "")
             raise TypeError(
                 f"{self.model_type!r} loaded successfully but no trainable "
-                f"PyTorch module was found. Checked: {checked}.")
+                f"callable module was found. Checked: {checked}."
+                f"{discovery_hint}")
 
         self._components = self._deduplicate_components(components)
+        if not self._components:
+            self._components = [(self.primary_path or "model", self.primary_model)]
+        self._validate_loaded_training_graph()
         return self
 
+    def build_training_graph(self):
+        """Construct and validate the recipe-owned trainable graph.
+
+        This is the public graph-factory boundary for future recipes
+        that need to attach discriminators, frozen tokenizers, EMA
+        copies, or parameter-efficient adapters. The default graph is
+        the set of exact module paths resolved by :meth:`setup`.
+        """
+        self.setup()
+        self._restore_portable_recipe_state()
+        return self
+
+    def _restore_portable_recipe_state(self) -> None:
+        """Hydrate recipe-owned state retained by a portable model load.
+
+        Portable component weights are restored by the short-lived
+        adapter used during :meth:`PreTrainedTTSModel.load`. Recipe
+        state must instead be applied after the caller's concrete
+        adapter has finished building auxiliary objects such as EMA
+        shadows.
+        """
+        payload = getattr(
+            self.model,
+            "_pending_training_recipe_state",
+            None,
+        )
+        if payload is None:
+            return
+        if not isinstance(payload, Mapping):
+            raise TypeError("Pending portable training recipe state must be a mapping.")
+        model_type = payload.get("model_type")
+        if model_type != self.model_type:
+            raise ValueError(
+                "Portable training recipe state targets "
+                f"{model_type!r}, not {self.model_type!r}.")
+        recipe_id = payload.get("recipe_id")
+        if recipe_id != self.recipe_id:
+            raise ValueError(
+                "Portable training recipe state was written for "
+                f"{recipe_id!r}, but the active adapter is "
+                f"{self.recipe_id!r}.")
+        state = payload.get("state")
+        if not isinstance(state, Mapping):
+            raise TypeError(
+                "Pending portable training recipe payload must contain a "
+                "mapping under 'state'.")
+        self.load_recipe_state_dict(state, strict=True)
+        self.model._pending_training_recipe_state = None
+
+    @property
+    def recipe_id(self) -> str:
+        """Stable identifier used to reject incompatible exact resumes."""
+        return f"{type(self).__module__}.{type(self).__qualname__}"
+
+    def artifact_manifest(self) -> dict[str, Any]:
+        """Describe the recipe, external artifacts, and save semantics.
+
+        Safetensors and source checkpoints are weight warm starts. Exact
+        continuation is deliberately represented separately because it
+        also needs optimizer, scheduler, scaler, RNG, callback, sampler,
+        and recipe-owned state.
+        """
+        config = getattr(self.model, "config", None)
+        return {
+            "format_version": 1,
+            "model_type": self.model_type,
+            "family": self.spec.family_name,
+            "support": self.spec.support.value,
+            "recipe_id": self.recipe_id,
+            "recipe_version": self.RECIPE_VERSION,
+            "recipe_kind": self.spec.recipe_kind.value,
+            "phases": [phase.name for phase in self.spec.phases],
+            "base_model": getattr(config, "name_or_path", None),
+            "training_default_model": (self.spec.training_default_model_name_or_path),
+            "source_entrypoints": list(self.spec.source_entrypoints),
+            "checkpoint_semantics": {
+                "safetensors": "weight-warm-start",
+                "voicehub_checkpoint": "exact-resume",
+                "save_pretrained": self.native_export_semantics,
+            },
+            "training_strategy": "pluggable",
+            "quantized_training": self.supports_quantized_training,
+        }
+
+    @classmethod
+    def _manifest_value(cls, value: Any) -> Any:
+        """Normalize recipe configuration into deterministic JSON values."""
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        if isinstance(value, Enum):
+            return cls._manifest_value(value.value)
+        if isinstance(value, Path):
+            return str(value)
+        if is_dataclass(value):
+            return cls._manifest_value(asdict(value))
+        if isinstance(value, Mapping):
+            return {
+                str(key): cls._manifest_value(item)
+                for key, item in sorted(
+                    value.items(),
+                    key=lambda pair: str(pair[0]),
+                )
+            }
+        if isinstance(value, (tuple, list)):
+            return [cls._manifest_value(item) for item in value]
+        if isinstance(value, (set, frozenset)):
+            return sorted(
+                (cls._manifest_value(item) for item in value),
+                key=repr,
+            )
+        attributes = getattr(value, "__dict__", None)
+        if isinstance(attributes, Mapping):
+            return {
+                "__class__": (f"{type(value).__module__}.{type(value).__qualname__}"),
+                "attributes": cls._manifest_value(attributes),
+            }
+        return {
+            "__class__": f"{type(value).__module__}.{type(value).__qualname__}",
+        }
+
+    def recipe_resume_configuration(self) -> Mapping[str, Any]:
+        """Return model-specific settings that affect exact continuation.
+
+        Configuration keys prefixed with ``training_`` are included by
+        default. Specialized recipes can override this hook to add
+        resolved defaults or other objective/schedule controls.
+        """
+        config = getattr(self.model, "config", None)
+        if config is None:
+            return {}
+        to_dict = getattr(config, "to_dict", None)
+        values = to_dict() if callable(to_dict) else getattr(config, "__dict__", {})
+        if not isinstance(values, Mapping):
+            return {}
+        return {
+            str(key): self._manifest_value(value)
+            for key, value in sorted(values.items()) if str(key).startswith("training_")
+        }
+
+    def resume_signature(self) -> dict[str, Any]:
+        """Describe recipe topology and controls required for exact resume."""
+        phases = []
+        for phase in self.spec.phases:
+            phases.append({
+                "name":
+                phase.name,
+                "kind":
+                phase.kind.value,
+                "component_paths":
+                list(phase.component_paths),
+                "optimizer_names":
+                list(phase.optimizer_names),
+                "forward_component":
+                phase.forward_component,
+                "forward_method":
+                phase.forward_method,
+                "label_names":
+                list(phase.label_names),
+                "prediction_keys":
+                list(phase.prediction_keys),
+                "loss_keys":
+                list(phase.loss_keys),
+                "loss_weights": [[name, weight] for name, weight in phase.loss_weights],
+                "input_aliases": [[source, destination] for source, destination in phase.input_aliases],
+                "required_inputs":
+                list(phase.required_inputs),
+                "frequency":
+                phase.frequency,
+                "offset":
+                phase.offset,
+                "fallback_objective":
+                phase.fallback_objective,
+                "detach_inputs":
+                list(phase.detach_inputs),
+                "frozen_component_paths":
+                list(phase.frozen_component_paths, ),
+            })
+        return {
+            "recipe_id": self.recipe_id,
+            "recipe_version": self.RECIPE_VERSION,
+            "model_type": self.model_type,
+            "family": self.spec.family_name,
+            "support": self.spec.support.value,
+            "recipe_kind": self.spec.recipe_kind.value,
+            "module_paths": list(self.spec.module_paths),
+            "component_paths": list(self.spec.component_paths),
+            "training_default_model": (self.spec.training_default_model_name_or_path),
+            "default_phase": self.spec.default_phase,
+            "separate_optimizers": self.spec.separate_optimizers,
+            "field_schemas": self._manifest_value(self.spec.field_schemas, ),
+            "phases": phases,
+            "configuration": self._manifest_value(self.recipe_resume_configuration(), ),
+        }
+
+    def validate_support(self) -> None:
+        """Validate capability and checkpoint variant without loading
+        weights."""
+        if self.spec.support is TrainingSupport.INFERENCE_ONLY:
+            raise ValueError(
+                f"{self.model_type!r} currently exposes an inference-only "
+                "runtime. Register a specialized training adapter and profile "
+                "instead of loading its fused or inference-optimized checkpoint.")
+        if (self.spec.support is TrainingSupport.CUSTOM and not self.supports_custom_recipe and
+                not self._registered_specialization):
+            raise ValueError(
+                f"{self.model_type!r} requires a specialized training adapter "
+                "for its source-native recipe. Register one with "
+                "AutoTrainingAdapter.register() before setup.")
+        self._validate_configured_training_artifact()
+        validate_runtime = getattr(self.model, "_validate_training_runtime", None)
+        if callable(validate_runtime):
+            validate_runtime()
+
+    @staticmethod
+    def _configuration_items(value: Any) -> Mapping[str, Any]:
+        if isinstance(value, Mapping):
+            return value
+        to_dict = getattr(value, "to_dict", None)
+        if callable(to_dict):
+            try:
+                output = to_dict()
+            except (AttributeError, TypeError, ValueError):
+                output = None
+            if isinstance(output, Mapping):
+                return output
+        attributes = getattr(value, "__dict__", None)
+        return attributes if isinstance(attributes, Mapping) else {}
+
+    @classmethod
+    def _quantization_setting(cls, value: Any) -> str | None:
+        """Return the first explicit quantization control in a config."""
+        pending = [(value, 0)]
+        visited = set()
+        boolean_keys = {
+            "is_quantized",
+            "is_loaded_in_4bit",
+            "is_loaded_in_8bit",
+            "load_in_4bit",
+            "load_in_8bit",
+        }
+        object_keys = {
+            "hf_quantizer",
+            "quantization_config",
+            "quantization_method",
+        }
+        nested_keys = {
+            "additional_model_config",
+            "model_kwargs",
+        }
+        while pending:
+            current, depth = pending.pop()
+            if id(current) in visited:
+                continue
+            visited.add(id(current))
+            values = cls._configuration_items(current)
+            for key in boolean_keys:
+                if bool(values.get(key, False)):
+                    return key
+            for key in object_keys:
+                setting = values.get(key)
+                is_empty = (
+                    setting is None or setting is False or isinstance(setting, str) and not setting or
+                    isinstance(setting, Mapping) and not setting)
+                if not is_empty:
+                    return key
+            if depth < 2:
+                for key in nested_keys:
+                    nested = values.get(key)
+                    if nested is not None:
+                        pending.append((nested, depth + 1))
+        return None
+
+    def _validate_configured_training_artifact(self) -> None:
+        """Reject clearly serving-only artifacts before allocating weights."""
+        config = getattr(self.model, "config", None)
+        identifier = str(getattr(config, "name_or_path", "")).lower()
+        serving_markers = (
+            ".gguf",
+            "-gguf",
+            "/gguf",
+            "llama.cpp",
+            "llama_cpp",
+            ".onnx",
+            ".engine",
+        )
+        if any(marker in identifier for marker in serving_markers):
+            raise ValueError(
+                f"{self.model_type!r} fine-tuning requires a differentiable "
+                "PyTorch/source checkpoint; the selected artifact "
+                f"{identifier!r} is a serving-only format.")
+        quantized_markers = (
+            "int4",
+            "int8",
+            "4bit",
+            "8bit",
+            "gptq",
+            "awq",
+        )
+        if (not self.supports_quantized_training and
+                any(marker in identifier for marker in quantized_markers)):
+            raise ValueError(
+                f"{self.model_type!r} does not provide a quantization-aware "
+                "training adapter. Select an unquantized checkpoint or "
+                "register a PEFT/QLoRA-aware adapter.")
+        setting = self._quantization_setting(config)
+        if setting is not None and not self.supports_quantized_training:
+            raise ValueError(
+                f"{self.model_type!r} training configuration enables "
+                f"{setting!r}, but this adapter supports full-precision "
+                "fine-tuning only.")
+
+    def _validate_loaded_training_graph(self) -> None:
+        """Backstop artifact checks against the exact resolved components."""
+        roots = [self.primary_model]
+        roots.extend(component for _, component in self._components)
+        objects = []
+        seen = set()
+        for root in roots:
+            if root is None or id(root) in seen:
+                continue
+            seen.add(id(root))
+            objects.append(root)
+
+        serving_module_markers = (
+            "onnxruntime",
+            "llama_cpp",
+            "tensorrt",
+            "vllm",
+        )
+        compiled_markers = (
+            "torch._dynamo",
+            "optimizedmodule",
+            "scriptmodule",
+        )
+        quantized_module_markers = (
+            "bitsandbytes",
+            "auto_gptq",
+            "gptqmodel",
+            "awq",
+            "torchao",
+            "quanto",
+            "linear4bit",
+            "linear8bitlt",
+            "quantlinear",
+        )
+        inspected = []
+        inspected_ids = set()
+        for root in objects:
+            modules = getattr(root, "modules", None)
+            candidates = modules() if callable(modules) else (root, )
+            for candidate in candidates:
+                if id(candidate) in inspected_ids:
+                    continue
+                inspected_ids.add(id(candidate))
+                if len(inspected) >= 16_384:
+                    raise RuntimeError(
+                        "Training graph validation exceeded 16,384 modules; "
+                        "declare a narrower trainable component path.")
+                inspected.append(candidate)
+                qualified = (f"{type(candidate).__module__}."
+                             f"{type(candidate).__qualname__}").lower()
+                if any(marker in qualified for marker in serving_module_markers):
+                    raise TypeError(
+                        f"{self.model_type!r} resolved serving runtime "
+                        f"{qualified!r} as a trainable component.")
+                if (not self.supports_compiled_training and
+                        any(marker in qualified for marker in compiled_markers)):
+                    raise TypeError(
+                        f"{self.model_type!r} resolved compiled/scripted "
+                        f"component {qualified!r}; load its unfused source "
+                        "module for training.")
+                setting = self._quantization_setting(candidate)
+                is_known_quantized = any(marker in qualified for marker in quantized_module_markers)
+                if (not self.supports_quantized_training and (setting is not None or is_known_quantized)):
+                    detail = setting or qualified
+                    raise TypeError(
+                        f"{self.model_type!r} resolved quantized training "
+                        f"component {detail!r}, but its adapter is not "
+                        "PEFT/QLoRA-aware.")
+
+        for component_name, component in self._components:
+            parameters = getattr(component, "named_parameters", None)
+            if not callable(parameters):
+                continue
+            for parameter_name, parameter in parameters():
+                if not getattr(parameter, "requires_grad", False):
+                    continue
+                dtype = getattr(parameter, "dtype", None)
+                is_floating = bool(getattr(dtype, "is_floating_point", False))
+                is_complex = bool(getattr(dtype, "is_complex", False))
+                if dtype is not None and not (is_floating or is_complex):
+                    raise TypeError(
+                        f"Trainable parameter {component_name}."
+                        f"{parameter_name} has non-differentiable dtype "
+                        f"{dtype}.")
+
     def _resolve_path(self, path: str):
-        current = self.model
+        return self._resolve_from(self.model, path)
+
+    @staticmethod
+    def _resolve_from(root, path: str):
+        current = root
         for part in path.split("."):
             if isinstance(current, Mapping):
                 if part not in current:
                     return None
                 current = current[part]
+            elif isinstance(current, (list, tuple)) and part.isdigit():
+                index = int(part)
+                if not 0 <= index < len(current):
+                    return None
+                current = current[index]
             else:
                 current = getattr(current, part, None)
             if current is None:
@@ -80,15 +565,23 @@ class BaseTrainingAdapter:
         return current
 
     @staticmethod
-    def _is_trainable(candidate) -> bool:
+    def _has_trainable_parameters(candidate) -> bool:
         if candidate is None or not hasattr(candidate, "parameters"):
-            return False
-        if not callable(candidate) and not callable(getattr(candidate, "forward", None)):
             return False
         try:
             return any(getattr(parameter, "requires_grad", False) for parameter in candidate.parameters())
         except (AttributeError, TypeError):
             return False
+
+    @classmethod
+    def _is_forward_module(cls, candidate) -> bool:
+        return cls._has_trainable_parameters(candidate) and (
+            callable(candidate) or callable(getattr(candidate, "forward", None)))
+
+    @classmethod
+    def _is_trainable(cls, candidate) -> bool:
+        """Backward-compatible alias for trainable callable detection."""
+        return cls._is_forward_module(candidate)
 
     @classmethod
     def _discover_trainable_modules(
@@ -107,9 +600,10 @@ class BaseTrainingAdapter:
             if identity in visited:
                 continue
             visited.add(identity)
-            if cls._is_trainable(value):
+            if cls._has_trainable_parameters(value):
                 discovered.append((path, value))
-                continue
+                if cls._is_forward_module(value):
+                    continue
             if depth >= max_depth:
                 continue
             for name, child in cls._iter_children(value):
@@ -160,40 +654,135 @@ class BaseTrainingAdapter:
             output.append((name, component))
         return output
 
+    @staticmethod
+    def _safe_component_name(path: str) -> str:
+        return path.replace(".", "_")
+
+    @staticmethod
+    def _named_trainable_parameters(component):
+        try:
+            parameters = component.named_parameters(remove_duplicate=True)
+        except TypeError:
+            parameters = component.named_parameters()
+        for name, parameter in parameters:
+            if getattr(parameter, "requires_grad", False):
+                yield name, parameter
+
+    def _parameter_owner_components(self):
+        # Prefer the most specific source path so a child module owns its
+        # parameters instead of inheriting a broad parent prefix.
+        routed = []
+        for phase in self.spec.phases:
+            for component_path, _ in phase.component_optimizer_routes:
+                component = self._component_by_path.get(component_path)
+                if component is None:
+                    component = self._resolve_path(component_path)
+                if self._has_trainable_parameters(component):
+                    routed.append((component_path, component))
+        candidates = (self._deduplicate_components(routed) if routed else self._components)
+        indexed = list(enumerate(candidates))
+        indexed.sort(key=lambda item: (
+            -item[1][0].count("."),
+            item[0],
+        ))
+        return [component for _, component in indexed]
+
     def named_parameters(self):
         """Yield every trainable parameter exactly once across components."""
         self.setup()
-        seen = set()
-        for component_name, component in self._components:
-            safe_name = component_name.replace(".", "_")
-            for name, parameter in component.named_parameters():
-                if id(parameter) in seen:
+        seen_parameters = set()
+        seen_names: dict[str, int] = {}
+        for component_name, component in self._parameter_owner_components():
+            prefix = self._safe_component_name(component_name)
+            for name, parameter in self._named_trainable_parameters(component):
+                identity = id(parameter)
+                if identity in seen_parameters:
                     continue
-                seen.add(id(parameter))
-                yield f"{safe_name}.{name}", parameter
+                full_name = f"{prefix}.{name}"
+                previous = seen_names.get(full_name)
+                if previous is not None and previous != identity:
+                    raise RuntimeError(f"Parameter name collision while resolving {full_name!r}.")
+                seen_parameters.add(identity)
+                seen_names[full_name] = identity
+                yield full_name, parameter
 
     def parameters(self):
         for _, parameter in self.named_parameters():
             yield parameter
 
-    def named_parameter_groups(self):
-        """Partition composite components without assigning a parameter
-        twice."""
+    def _phase_component_routes(
+        self,
+        phases: tuple[TrainingPhaseSpec, ...],
+    ) -> list[tuple[str, str, Any]]:
+        routes = []
+        for phase in phases:
+            for component_path, optimizer_name in phase.component_optimizer_routes:
+                component = self._component_by_path.get(component_path)
+                if component is None:
+                    component = self._resolve_path(component_path)
+                if not self._has_trainable_parameters(component):
+                    continue
+                routes.append((optimizer_name, component_path, component))
+        return routes
+
+    def named_parameter_groups(
+        self,
+        training_phase: str | TrainingPhaseSpec | None = None,
+    ):
+        """Return collision-free parameter groups routed to named optimizers.
+
+        Shared parameters assigned to two optimizer names are rejected
+        instead of being silently stepped twice.
+        """
         self.setup()
+        phases = ((self.select_training_phase(training_phase), )
+                  if training_phase is not None else self.spec.phases)
+        routes = self._phase_component_routes(phases)
+        if routes:
+            grouped: dict[str, list[tuple[str, Any]]] = {}
+            owners: dict[int, str] = {}
+            names_by_group: dict[str, dict[str, int]] = {}
+            for optimizer_name, component_path, component in routes:
+                parameters = grouped.setdefault(optimizer_name, [])
+                seen_names = names_by_group.setdefault(optimizer_name, {})
+                prefix = self._safe_component_name(component_path)
+                for name, parameter in self._named_trainable_parameters(component):
+                    identity = id(parameter)
+                    previous_owner = owners.get(identity)
+                    if previous_owner is not None:
+                        if previous_owner != optimizer_name:
+                            raise ValueError(
+                                f"Parameter {component_path}.{name} is routed to both "
+                                f"{previous_owner!r} and {optimizer_name!r}.")
+                        continue
+                    full_name = f"{prefix}.{name}"
+                    previous_identity = seen_names.get(full_name)
+                    if previous_identity is not None and previous_identity != identity:
+                        raise ValueError(
+                            f"Optimizer {optimizer_name!r} has two parameters named "
+                            f"{full_name!r}.")
+                    owners[identity] = optimizer_name
+                    seen_names[full_name] = identity
+                    parameters.append((full_name, parameter))
+            return [(name, parameters) for name, parameters in grouped.items() if parameters]
+
+        # Legacy profiles without optimizer routes retain component partitioning.
         seen = set()
         groups = []
+        group_names = set()
         for component_name, component in reversed(self._components):
             parameters = []
-            for name, parameter in component.named_parameters():
-                if (id(parameter) in seen or not getattr(parameter, "requires_grad", False)):
+            for name, parameter in self._named_trainable_parameters(component):
+                if id(parameter) in seen:
                     continue
                 seen.add(id(parameter))
                 parameters.append((name, parameter))
             if parameters:
-                groups.append((
-                    component_name.replace(".", "_"),
-                    parameters,
-                ))
+                group_name = self._safe_component_name(component_name)
+                if group_name in group_names:
+                    raise ValueError(f"Component paths collide on optimizer name {group_name!r}.")
+                group_names.add(group_name)
+                groups.append((group_name, parameters))
         groups.reverse()
         return groups
 
@@ -202,98 +791,798 @@ class BaseTrainingAdapter:
         for _, component in self._components:
             if hasattr(component, "to"):
                 component.to(device)
+        set_training_device = getattr(
+            self.model,
+            "_set_training_device",
+            None,
+        )
+        if callable(set_training_device):
+            set_training_device(str(device))
         return self
 
-    def train(self):
+    def train(self, mode: bool = True):
         self.setup()
         for _, component in self._components:
-            component.train()
+            component.train(mode)
         return self
 
     def eval(self):
+        return self.train(False)
+
+    def _gradient_checkpoint_targets(self):
         self.setup()
-        for _, component in self._components:
-            component.eval()
-        return self
+        targets = [self.model, self.primary_model]
+        targets.extend(component for _, component in self._components)
+        output = []
+        seen = set()
+        for target in targets:
+            if target is None or id(target) in seen:
+                continue
+            seen.add(id(target))
+            output.append(target)
+        return output
+
+    def _set_gradient_checkpointing(self, enabled: bool, **kwargs) -> None:
+        delegated = 0
+        method_name = ("gradient_checkpointing_enable" if enabled else "gradient_checkpointing_disable")
+        for target in self._gradient_checkpoint_targets():
+            method = getattr(target, method_name, None)
+            if callable(method):
+                method(**kwargs)
+                delegated += 1
+                continue
+            setter = getattr(target, "set_gradient_checkpointing", None)
+            if callable(setter):
+                setter(enabled)
+                delegated += 1
+        if not delegated:
+            action = "enable" if enabled else "disable"
+            raise ValueError(
+                f"{self.model_type!r} has no component that can {action} "
+                "gradient checkpointing.")
+
+    def gradient_checkpointing_enable(self, **kwargs) -> None:
+        """Delegate checkpointing to every component that implements it."""
+        self._set_gradient_checkpointing(True, **kwargs)
+
+    def gradient_checkpointing_disable(self, **kwargs) -> None:
+        """Disable delegated component checkpointing."""
+        self._set_gradient_checkpointing(False, **kwargs)
 
     def state_dict(self):
-        """Serialize all resolved components without duplicate parameters."""
+        """Serialize a versioned adapter state with an exact topology."""
         self.setup()
+        state_components = self._state_components()
+        topology = tuple(name for name, _ in state_components)
         return {
             "__voicehub_training_adapter__": self.model_type,
+            "__voicehub_training_adapter_version__": self.ADAPTER_STATE_VERSION,
+            "topology": topology,
             "components": {
                 name: component.state_dict()
-                for name, component in self._components
+                for name, component in state_components
             },
+            "recipe_state": self.recipe_state_dict(),
         }
 
-    def load_state_dict(self, state_dict):
+    def recipe_state_dict(self) -> Mapping[str, Any]:
+        """Return model-recipe state not owned by a trainable component.
+
+        EMA shadows, loss-balancer statistics, or source-native counters
+        belong here. The default recipe has no additional state.
+        """
+        return {}
+
+    def load_recipe_state_dict(
+        self,
+        state_dict: Mapping[str, Any],
+        *,
+        strict: bool = True,
+    ) -> None:
+        """Restore state returned by :meth:`recipe_state_dict`."""
+        if not isinstance(state_dict, Mapping):
+            raise TypeError("Training recipe state must be a mapping.")
+        if strict and state_dict:
+            unexpected = ", ".join(sorted(str(key) for key in state_dict))
+            raise ValueError(
+                "This training adapter does not own recipe state, but the "
+                f"checkpoint contains: {unexpected}.")
+
+    def _state_components(self):
+        """Return the smallest component roots that cover adapter
+        parameters."""
+        indexed = list(enumerate(self._components))
+        parameter_sets = {}
+        for _, (name, component) in indexed:
+            try:
+                parameter_sets[name] = {id(parameter) for parameter in component.parameters()}
+            except (AttributeError, TypeError):
+                parameter_sets[name] = set()
+
+        by_coverage = sorted(
+            indexed,
+            key=lambda item: (
+                -len(parameter_sets[item[1][0]]),
+                item[0],
+            ),
+        )
+        covered = set()
+        selected_indices = []
+        for index, (name, _) in by_coverage:
+            parameters = parameter_sets[name]
+            if parameters and parameters <= covered:
+                continue
+            selected_indices.append(index)
+            covered.update(parameters)
+        selected = set(selected_indices)
+        return [component for index, component in indexed if index in selected]
+
+    @staticmethod
+    def _load_component_state(component, state, *, strict: bool):
+        try:
+            return component.load_state_dict(state, strict=strict)
+        except TypeError:
+            return component.load_state_dict(state)
+
+    def load_state_dict(
+        self,
+        state_dict,
+        strict: bool = True,
+        *,
+        load_recipe_state: bool = True,
+    ):
+        """Load adapter state, rejecting incompatible versions/topologies.
+
+        ``load_recipe_state=False`` is reserved for the portable wrapper
+        lifecycle: component weights are restored immediately, while the
+        recipe payload is retained until the caller-owned adapter has built
+        its auxiliary graph.
+        """
         self.setup()
-        if "components" not in state_dict:
-            return self.primary_model.load_state_dict(state_dict)
-        available = dict(self._components)
+        if not isinstance(state_dict, Mapping):
+            raise TypeError("Training adapter state must be a mapping.")
+
+        marker = state_dict.get("__voicehub_training_adapter__")
+        if marker is None and "components" not in state_dict:
+            # Preserve support for raw source-module checkpoints.
+            return self._load_component_state(
+                self.primary_model,
+                state_dict,
+                strict=strict,
+            )
+        if marker != self.model_type:
+            raise ValueError(f"Adapter checkpoint targets {marker!r}, not {self.model_type!r}.")
+
+        version = state_dict.get("__voicehub_training_adapter_version__")
+        if version not in self.SUPPORTED_ADAPTER_STATE_VERSIONS:
+            supported = ", ".join(str(item) for item in self.SUPPORTED_ADAPTER_STATE_VERSIONS)
+            raise ValueError(
+                f"Unsupported training adapter state version {version!r}; "
+                f"supported versions are: {supported}.")
+        component_states = state_dict.get("components")
+        topology = state_dict.get("topology")
+        if not isinstance(component_states, Mapping):
+            raise TypeError("Adapter checkpoint 'components' must be a mapping.")
+        if not isinstance(topology, (tuple, list)):
+            raise TypeError("Adapter checkpoint 'topology' must be a sequence.")
+        topology = tuple(topology)
+        if topology != tuple(component_states):
+            raise ValueError("Adapter checkpoint topology does not match its component payload.")
+
+        available = dict(self._state_components())
+        expected = tuple(available)
+        missing = tuple(name for name in expected if name not in component_states)
+        unexpected = tuple(name for name in topology if name not in available)
+        if strict and (missing or unexpected or topology != expected):
+            details = []
+            if missing:
+                details.append(f"missing={missing}")
+            if unexpected:
+                details.append(f"unexpected={unexpected}")
+            if not details:
+                details.append(f"expected_order={expected}, checkpoint_order={topology}")
+            raise ValueError("Training adapter checkpoint topology mismatch: " + ", ".join(details))
+
         results = {}
-        for name, component_state in state_dict["components"].items():
-            if name in available:
-                results[name] = available[name].load_state_dict(component_state)
+        for name in topology:
+            component = available.get(name)
+            if component is not None:
+                results[name] = self._load_component_state(
+                    component,
+                    component_states[name],
+                    strict=strict,
+                )
+        if load_recipe_state:
+            recipe_state = state_dict.get("recipe_state", {})
+            self.load_recipe_state_dict(recipe_state, strict=strict)
         return results
 
-    def __call__(self, **inputs) -> TTSTrainingOutput:
-        self.setup()
-        forward_inputs = dict(inputs.pop("model_inputs", {}) or {})
-        forward_inputs.update(inputs)
-        labels = self._find_labels(forward_inputs)
-        self._map_labels_to_signature(
-            self.primary_model,
-            forward_inputs,
-            labels,
-        )
-        prepared = self._filter_forward_inputs(
-            self.primary_model,
-            forward_inputs,
-        )
-        outputs = self.primary_model(**prepared)
-        losses = self._extract_losses(outputs)
-        predictions = self._extract_predictions(outputs)
-        loss = self._aggregate_losses(losses)
-        if loss is None:
-            loss = self.compute_objective(predictions, labels)
-            losses = {"loss": loss}
-        return TTSTrainingOutput(
-            loss=loss,
-            logits=predictions,
-            audio_values=self._get_value(outputs, "audio_values"),
-            losses=losses,
-            metadata={
-                "model_type": self.model_type,
-                "training_family": self.spec.family.value,
-            },
+    def select_training_phase(
+        self,
+        training_phase: str | TrainingPhaseSpec | None = None,
+    ) -> TrainingPhaseSpec:
+        """Resolve an explicit phase control value."""
+        if training_phase is None:
+            return self.spec.get_phase()
+        if isinstance(training_phase, TrainingPhaseSpec):
+            registered = self.spec.phase_map.get(training_phase.name)
+            if registered != training_phase:
+                raise ValueError(
+                    f"Phase {training_phase.name!r} is not part of "
+                    f"{self.model_type!r}'s training profile.")
+            return training_phase
+        if not isinstance(training_phase, str):
+            raise TypeError("training_phase must be a phase name or TrainingPhaseSpec.")
+        return self.spec.get_phase(training_phase)
+
+    def select_evaluation_phase(
+        self,
+        training_phase: str | TrainingPhaseSpec | None = None,
+    ) -> TrainingPhaseSpec:
+        """Resolve the phase used for evaluation and prediction."""
+        return self.select_training_phase(training_phase)
+
+    def plan_training_phases(self, step: int) -> tuple[TrainingPhaseSpec, ...]:
+        """Return every phase scheduled for a zero-based recipe step."""
+        return tuple(phase for phase in self.spec.phases if phase.is_scheduled(step))
+
+    def create_training_context(
+        self,
+        inputs: Mapping[str, Any],
+        *,
+        training_phase: str | TrainingPhaseSpec | None = None,
+        step: int | None = None,
+        epoch: float | None = None,
+        is_training: bool = True,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> TrainingContext:
+        return TrainingContext(
+            phase=self.select_training_phase(training_phase),
+            inputs=inputs,
+            step=step,
+            epoch=epoch,
+            is_training=is_training,
+            metadata=metadata or {},
         )
 
-    def _find_labels(self, inputs):
-        for name in self.spec.label_names:
+    def prepare_training_inputs(
+        self,
+        inputs: Mapping[str, Any],
+        context: TrainingContext,
+    ) -> Mapping[str, Any]:
+        """Model-specific hook for converting a batch to backend inputs."""
+        prepare = getattr(self.model, "prepare_training_inputs", None)
+        if callable(prepare):
+            return prepare(dict(inputs), phase=context.phase.name)
+        return inputs
+
+    def prepare_batch(
+        self,
+        inputs: Mapping[str, Any],
+        context: TrainingContext,
+    ) -> Mapping[str, Any]:
+        """Public batch-preparation boundary used by recipe integrations."""
+        return self.prepare_training_inputs(inputs, context)
+
+    def optimizer_plan(self) -> dict[str, tuple[str, ...]]:
+        """Return declared component routes for each named optimizer."""
+        plan: dict[str, list[str]] = {}
+        for phase in self.spec.phases:
+            for path, name in phase.component_optimizer_routes:
+                paths = plan.setdefault(name, [])
+                if path not in paths:
+                    paths.append(path)
+        return {name: tuple(paths) for name, paths in plan.items()}
+
+    def create_optimizer(
+        self,
+        name: str,
+        parameters: list[tuple[str, Any]],
+        training_args,
+    ):
+        """Optionally create a source-native optimizer for one route.
+
+        Returning ``None`` delegates to :class:`voicehub.Trainer`'s
+        AdamW default. Specialized recipes can preserve upstream
+        optimizer choices without taking ownership of the complete
+        training loop.
+        """
+        del name, parameters, training_args
+        return None
+
+    def create_scheduler(
+        self,
+        name: str,
+        optimizer,
+        num_training_steps: int,
+        training_args,
+    ):
+        """Optionally create a source-native scheduler for one route."""
+        del name, optimizer, num_training_steps, training_args
+        return None
+
+    def on_before_optimizer_step(
+        self,
+        *,
+        optimizer_names: tuple[str, ...] | None,
+        step: int,
+    ) -> None:
+        """Run immediately before a routed optimizer update."""
+
+    def on_optimizer_step(
+        self,
+        *,
+        optimizer_names: tuple[str, ...] | None,
+        step: int,
+    ) -> None:
+        """Run after a successful optimizer update.
+
+        EMA and other update-coupled recipe state should be advanced
+        here so skipped mixed-precision steps cannot mutate it.
+        """
+
+    def on_optimizer_step_skipped(
+        self,
+        *,
+        optimizer_names: tuple[str, ...] | None,
+        step: int,
+    ) -> None:
+        """Run when precision overflow prevents an optimizer update."""
+
+    def save_pretrained(self, save_directory) -> None:
+        """Optionally export source-native weights or inference artifacts.
+
+        VoiceHub always writes its portable adapter checkpoint
+        separately. Recipes can additionally emit Hugging Face
+        safetensors, component weights, or a complete upstream layout
+        from this hook. Declare the exact meaning through
+        ``native_export_semantics``.
+        """
+        del save_directory
+
+    def create_dataset(self, records, **kwargs):
+        """Build a source-native dataset when the recipe provides one."""
+        del records, kwargs
+        raise NotImplementedError(
+            f"{self.model_type!r} does not provide a built-in raw-data "
+            "dataset. Pass a preprocessed dataset and data collator.")
+
+    def on_training_phase_start(self, context: TrainingContext) -> None:
+        """Hook invoked immediately before one phase forward."""
+
+    def on_training_phase_end(
+        self,
+        context: TrainingContext,
+        output: TTSTrainingOutput,
+    ) -> TTSTrainingOutput:
+        """Hook invoked after a phase output has been normalized."""
+        return output
+
+    def execute_training_plan(
+        self,
+        inputs: Mapping[str, Any],
+        *,
+        step: int,
+        epoch: float | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> tuple[TTSTrainingOutput, ...]:
+        """Execute all phases due at ``step`` in declared order."""
+        flattened = self.flatten_model_inputs(inputs)
+        outputs = []
+        for phase in self.plan_training_phases(step):
+            context = self.create_training_context(
+                flattened,
+                training_phase=phase,
+                step=step,
+                epoch=epoch,
+                metadata=metadata,
+            )
+            outputs.append(self.execute_training_phase(context))
+        return tuple(outputs)
+
+    def compute_step(
+        self,
+        context: TrainingContext,
+    ) -> TTSTrainingOutput:
+        """Execute one native recipe step.
+
+        Specialized adapters normally override
+        ``execute_training_phase``; this named boundary lets execution
+        strategies compose or replace a recipe without depending on that
+        historical method name.
+        """
+        return self.execute_training_phase(context)
+
+    def __call__(self, **inputs) -> TTSTrainingOutput:
+        """Execute one phase selected by the ``training_phase`` control
+        field."""
+        self.setup()
+        forward_inputs = self.flatten_model_inputs(inputs)
+        training_phase = forward_inputs.pop("training_phase", None)
+        supplied_context = forward_inputs.pop("training_context", None)
+        if supplied_context is not None:
+            if not isinstance(supplied_context, TrainingContext):
+                raise TypeError("training_context must be a TrainingContext.")
+            if training_phase is not None:
+                raise ValueError("Pass either training_phase or training_context, not both.")
+            merged = dict(supplied_context.inputs)
+            merged.update(forward_inputs)
+            context = supplied_context.with_inputs(merged)
+        else:
+            context = self.create_training_context(
+                forward_inputs,
+                training_phase=training_phase,
+            )
+        return self.execute_training_phase(context)
+
+    @staticmethod
+    def flatten_model_inputs(inputs: Mapping[str, Any]) -> dict[str, Any]:
+        """Merge the portable ``model_inputs`` namespace into one native
+        batch."""
+        if not isinstance(inputs, Mapping):
+            raise TypeError("Training inputs must be a mapping.")
+        outer = dict(inputs)
+        nested = outer.pop("model_inputs", None)
+        if nested is None:
+            return outer
+        if not isinstance(nested, Mapping):
+            raise TypeError("model_inputs must be a mapping when provided.")
+        collisions = tuple(sorted(set(nested).intersection(outer)))
+        if collisions:
+            raise ValueError("model_inputs duplicates top-level training keys: " + ", ".join(collisions))
+        flattened = dict(nested)
+        flattened.update(outer)
+        return flattened
+
+    # Retained for compatibility with adapters built against VoiceHub 0.3.
+    _flatten_model_inputs = flatten_model_inputs
+
+    def execute_training_phase(
+        self,
+        context: TrainingContext,
+    ) -> TTSTrainingOutput:
+        """Prepare, invoke, and normalize one backend phase."""
+        self.setup()
+        if not isinstance(context, TrainingContext):
+            raise TypeError("execute_training_phase requires a TrainingContext.")
+        phase = self.select_training_phase(context.phase)
+
+        forward_inputs = self._apply_input_aliases(
+            dict(context.inputs),
+            phase,
+        )
+        prepared_by_model = self.prepare_batch(
+            forward_inputs,
+            context.with_inputs(forward_inputs),
+        )
+        if not isinstance(prepared_by_model, Mapping):
+            raise TypeError("prepare_batch() must return a mapping.")
+        forward_inputs = dict(prepared_by_model)
+        forward_inputs = self._detach_phase_inputs(forward_inputs, phase)
+        labels = self._find_labels(forward_inputs, phase)
+        optional_inputs = (set(phase.label_names) if not context.is_training and labels is None else set())
+        self._validate_required_inputs(
+            forward_inputs,
+            phase,
+            optional_inputs=optional_inputs,
+        )
+        context = TrainingContext(
+            phase=phase,
+            inputs=forward_inputs,
+            step=context.step,
+            epoch=context.epoch,
+            is_training=context.is_training,
+            metadata=context.metadata,
+        )
+
+        target, forward = self._resolve_phase_callable(phase)
+        self._map_labels_to_signature(
+            forward,
+            forward_inputs,
+            labels,
+            phase.label_names,
+        )
+        prepared = self._filter_forward_inputs(forward, forward_inputs)
+
+        previous_context = self._current_context
+        self._current_context = context
+        try:
+            self.on_training_phase_start(context)
+            frozen_parameters = self._freeze_phase_components(phase)
+            try:
+                outputs = self._invoke_forward(target, forward, prepared, phase)
+            finally:
+                self._restore_frozen_parameters(frozen_parameters)
+            losses = self._extract_losses(outputs, phase)
+            predictions = self._extract_predictions(outputs, phase)
+            loss = self._aggregate_losses(losses, phase)
+            if loss is None:
+                if labels is None and not context.is_training:
+                    losses = {}
+                else:
+                    loss = self.compute_phase_objective(
+                        predictions,
+                        labels,
+                        context,
+                    )
+                    losses = {"loss": loss}
+            metadata = self._get_value(outputs, "metadata")
+            metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+            metadata.update({
+                "model_type": self.model_type,
+                "training_family": self.spec.family_name,
+                "training_support": self.spec.support.value,
+                "training_phase": phase.name,
+                "optimizer_names": phase.optimizer_names,
+            })
+            normalized = TTSTrainingOutput(
+                loss=loss,
+                logits=predictions,
+                audio_values=self._get_value(outputs, "audio_values"),
+                hidden_states=self._get_value(outputs, "hidden_states"),
+                attentions=self._get_value(outputs, "attentions"),
+                losses=losses,
+                metadata=metadata,
+                training_phase=phase.name,
+                optimizer_names=phase.optimizer_names,
+            )
+            return self.on_training_phase_end(context, normalized)
+        finally:
+            self._current_context = previous_context
+
+    def execute_prediction_phase(self, context: TrainingContext):
+        """Run a label-free backend forward without inventing an objective.
+
+        Specialized training adapters often require labels in
+        ``execute_training_phase`` even though their underlying module can
+        return logits without them. Prediction deliberately bypasses that
+        supervised recipe while retaining phase selection, input aliases,
+        model-specific batch preparation, and strategy execution.
+        """
+        self.setup()
+        if not isinstance(context, TrainingContext):
+            raise TypeError("execute_prediction_phase requires a TrainingContext.")
+        phase = self.select_evaluation_phase(context.phase)
+        forward_inputs = self._apply_input_aliases(
+            dict(context.inputs),
+            phase,
+        )
+        prepared_by_model = self.prepare_batch(
+            forward_inputs,
+            context.with_inputs(forward_inputs),
+        )
+        if not isinstance(prepared_by_model, Mapping):
+            raise TypeError("prepare_batch() must return a mapping.")
+        forward_inputs = self._detach_phase_inputs(
+            dict(prepared_by_model),
+            phase,
+        )
+        self._validate_required_inputs(
+            forward_inputs,
+            phase,
+            optional_inputs=set(phase.label_names),
+        )
+        target, forward = self._resolve_phase_callable(phase)
+        labels = self._find_labels(forward_inputs, phase)
+        if labels is not None:
+            self._map_labels_to_signature(
+                forward,
+                forward_inputs,
+                labels,
+                phase.label_names,
+            )
+        prepared = self._filter_forward_inputs(forward, forward_inputs)
+
+        previous_context = self._current_context
+        self._current_context = context.with_inputs(forward_inputs)
+        try:
+            return self._invoke_forward(
+                target,
+                forward,
+                prepared,
+                phase,
+            )
+        finally:
+            self._current_context = previous_context
+
+    @classmethod
+    def _nested_detach(cls, value):
+        detach = getattr(value, "detach", None)
+        if callable(detach):
+            return detach()
+        if isinstance(value, Mapping):
+            return {key: cls._nested_detach(item) for key, item in value.items()}
+        if isinstance(value, tuple):
+            return tuple(cls._nested_detach(item) for item in value)
+        if isinstance(value, list):
+            return [cls._nested_detach(item) for item in value]
+        return value
+
+    @classmethod
+    def _detach_at_path(cls, value, path: tuple[str, ...]):
+        if not path:
+            return cls._nested_detach(value)
+        name, *remaining = path
+        if isinstance(value, Mapping):
+            if name not in value:
+                return value
+            copied = dict(value)
+            copied[name] = cls._detach_at_path(copied[name], tuple(remaining))
+            return copied
+        if isinstance(value, list) and name.isdigit():
+            index = int(name)
+            if not 0 <= index < len(value):
+                return value
+            copied = list(value)
+            copied[index] = cls._detach_at_path(copied[index], tuple(remaining))
+            return copied
+        if isinstance(value, tuple) and name.isdigit():
+            index = int(name)
+            if not 0 <= index < len(value):
+                return value
+            copied = list(value)
+            copied[index] = cls._detach_at_path(copied[index], tuple(remaining))
+            return tuple(copied)
+        return value
+
+    @classmethod
+    def _detach_phase_inputs(cls, inputs, phase: TrainingPhaseSpec):
+        detached = inputs
+        for path in phase.detach_inputs:
+            detached = cls._detach_at_path(detached, tuple(path.split(".")))
+        return detached
+
+    def _freeze_phase_components(self, phase: TrainingPhaseSpec):
+        original_flags = {}
+        for path in phase.frozen_component_paths:
+            component = self._resolve_path(path)
+            if component is None or not hasattr(component, "parameters"):
+                continue
+            try:
+                parameters = component.parameters()
+            except TypeError:
+                continue
+            for parameter in parameters:
+                identity = id(parameter)
+                if identity in original_flags:
+                    continue
+                original_flags[identity] = (
+                    parameter,
+                    bool(getattr(parameter, "requires_grad", False)),
+                )
+                if hasattr(parameter, "requires_grad_"):
+                    parameter.requires_grad_(False)
+                else:
+                    parameter.requires_grad = False
+        return tuple(original_flags.values())
+
+    @staticmethod
+    def _restore_frozen_parameters(parameters) -> None:
+        for parameter, requires_grad in parameters:
+            if hasattr(parameter, "requires_grad_"):
+                parameter.requires_grad_(requires_grad)
+            else:
+                parameter.requires_grad = requires_grad
+
+    @staticmethod
+    def _apply_input_aliases(inputs, phase: TrainingPhaseSpec):
+        for source, target in phase.input_aliases:
+            if source not in inputs:
+                continue
+            if target in inputs and target != source:
+                raise ValueError(
+                    f"Both aliased input {source!r} and backend input "
+                    f"{target!r} were provided.")
+            if target != source:
+                inputs[target] = inputs.pop(source)
+        return inputs
+
+    @staticmethod
+    def _validate_required_inputs(
+        inputs,
+        phase: TrainingPhaseSpec,
+        *,
+        optional_inputs: set[str] | None = None,
+    ) -> None:
+        optional_inputs = optional_inputs or set()
+        missing = tuple(
+            name for name in phase.required_inputs if name not in inputs and name not in optional_inputs)
+        if missing:
+            raise ValueError(f"Training phase {phase.name!r} requires inputs: "
+                             f"{', '.join(missing)}.")
+
+    def _resolve_phase_callable(self, phase: TrainingPhaseSpec):
+        candidate_paths = []
+        if phase.forward_component is not None:
+            candidate_paths.append(phase.forward_component)
+        candidate_paths.extend(phase.component_paths)
+
+        for path in dict.fromkeys(candidate_paths):
+            target = self._resolve_path(path)
+            forward = self._resolve_forward_method(target, phase.forward_method)
+            if callable(forward):
+                return target, forward
+
+        if candidate_paths:
+            attempted = ", ".join(candidate_paths)
+            raise TypeError(
+                f"Training phase {phase.name!r} could not resolve callable "
+                f"{phase.forward_method!r} from its declared path(s): {attempted}.")
+        if phase.kind is not TrainingPhaseKind.OBJECTIVE:
+            raise TypeError(
+                f"Training phase {phase.name!r} is recipe-owned and requires "
+                "a specialized adapter to supply its component and forward pass.")
+        target = self.primary_model
+        forward = self._resolve_forward_method(target, phase.forward_method)
+        if callable(forward):
+            return target, forward
+        attempted = ", ".join(candidate_paths) or self.primary_path or "primary model"
+        raise TypeError(
+            f"Training phase {phase.name!r} could not resolve callable "
+            f"{phase.forward_method!r} from: {attempted}.")
+
+    @classmethod
+    def _resolve_forward_method(cls, target, method_path: str):
+        if target is None:
+            return None
+        if method_path in ("forward", "__call__"):
+            if callable(target):
+                return target
+            return getattr(target, method_path, None)
+        return cls._resolve_from(target, method_path)
+
+    @staticmethod
+    def _invoke_forward(target, forward, inputs, phase):
+        del target, phase
+        return forward(**inputs)
+
+    @staticmethod
+    def _signature(callable_object):
+        candidate = (
+            callable_object.forward if hasattr(callable_object, "forward") and
+            inspect.ismethod(getattr(callable_object, "forward", None)) else callable_object)
+        try:
+            return inspect.signature(candidate)
+        except (TypeError, ValueError):
+            return None
+
+    def _find_labels(self, inputs, phase: TrainingPhaseSpec | None = None):
+        names = phase.label_names if phase is not None else self.spec.label_names
+        for name in names:
             if name in inputs:
                 return inputs[name]
         return None
 
-    def _map_labels_to_signature(self, module, inputs, labels) -> None:
+    @classmethod
+    def _map_labels_to_signature(
+        cls,
+        module,
+        inputs,
+        labels,
+        label_names: tuple[str, ...] | None = None,
+    ) -> None:
         if labels is None:
             return
-        forward = module.forward if hasattr(module, "forward") else module
-        parameters = inspect.signature(forward).parameters
+        label_names = label_names or ("labels", "targets", "target")
+        signature = cls._signature(module)
+        if signature is None:
+            return
+        parameters = signature.parameters
         if any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
             return
-        if any(name in inputs and name in parameters for name in self.spec.label_names):
+        if any(name in inputs and name in parameters for name in label_names):
             return
-        for name in self.spec.label_names:
+        for name in label_names:
             if name in parameters:
                 inputs[name] = labels
                 return
 
-    @staticmethod
-    def _filter_forward_inputs(module, inputs):
-        forward = module.forward if hasattr(module, "forward") else module
-        parameters = inspect.signature(forward).parameters
+    @classmethod
+    def _filter_forward_inputs(cls, module, inputs):
+        signature = cls._signature(module)
+        if signature is None:
+            return inputs
+        parameters = signature.parameters
         if any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
             return inputs
         accepted = set(parameters)
@@ -305,8 +1594,13 @@ class BaseTrainingAdapter:
             return outputs.get(key)
         return getattr(outputs, key, None)
 
-    def _extract_predictions(self, outputs):
-        for key in self.spec.prediction_keys:
+    def _extract_predictions(
+        self,
+        outputs,
+        phase: TrainingPhaseSpec | None = None,
+    ):
+        keys = phase.prediction_keys if phase is not None else self.spec.prediction_keys
+        for key in keys:
             value = self._get_value(outputs, key)
             if value is not None:
                 return value
@@ -318,22 +1612,26 @@ class BaseTrainingAdapter:
             return outputs
         return None
 
-    def _extract_losses(self, outputs) -> dict[str, Any]:
+    def _extract_losses(
+        self,
+        outputs,
+        phase: TrainingPhaseSpec | None = None,
+    ) -> dict[str, Any]:
+        phase = phase or self.current_phase
         losses = {}
         nested = self._get_value(outputs, "losses")
         if nested is None:
             nested = self._get_value(outputs, "loss_dict")
         if isinstance(nested, Mapping):
-            losses.update({str(key): value for key, value in nested.items() if self._is_scalar(value)})
+            for key in phase.loss_keys:
+                value = nested.get(key)
+                if self._is_scalar(value):
+                    losses[key] = value
 
-        for key in self.spec.loss_keys:
+        for key in phase.loss_keys:
             value = self._get_value(outputs, key)
             if self._is_scalar(value):
                 losses.setdefault(key, value)
-        if isinstance(outputs, Mapping):
-            for key, value in outputs.items():
-                if ((key.endswith("_loss") or key.endswith("loss")) and self._is_scalar(value)):
-                    losses.setdefault(str(key), value)
         if isinstance(outputs, (tuple, list)) and outputs:
             if self._is_scalar(outputs[0]):
                 losses.setdefault("loss", outputs[0])
@@ -346,20 +1644,45 @@ class BaseTrainingAdapter:
         return value is not None and (
             isinstance(value, (int, float)) or hasattr(value, "ndim") and value.ndim == 0)
 
-    def _aggregate_losses(self, losses):
+    def _aggregate_losses(
+        self,
+        losses,
+        phase: TrainingPhaseSpec | None = None,
+    ):
         if not losses:
             return None
-        if self.spec.loss_weights:
-            weighted = [losses[name] * weight for name, weight in self.spec.loss_weights if name in losses]
+        phase = phase or self.current_phase
+        weights = phase.loss_weights or self.spec.loss_weights
+        if weights:
+            weighted = [losses[name] * weight for name, weight in weights if name in losses]
             if weighted:
                 return sum(weighted)
         if "loss" in losses:
             return losses["loss"]
         return sum(losses.values())
 
+    def compute_phase_objective(
+        self,
+        predictions,
+        labels,
+        context: TrainingContext,
+    ):
+        """Compute an explicitly configured fallback objective.
+
+        Native losses are always extracted first. A phase without
+        ``fallback_objective`` must return a loss from its backend.
+        Specialized adapters can override this hook for a true
+        architecture-native recipe.
+        """
+        if context.phase.fallback_objective is None:
+            raise ValueError(
+                f"Training phase {context.phase.name!r} returned no native loss. "
+                "This profile deliberately has no generic fallback objective; "
+                "provide backend-native losses or a specialized adapter.")
+        return self.compute_objective(predictions, labels)
+
     def compute_objective(self, predictions, labels):
-        """Compute a family-specific fallback when source output has no
-        loss."""
+        """Compute a family fallback when the phase explicitly enables one."""
         raise NotImplementedError
 
     @staticmethod
@@ -370,7 +1693,7 @@ class BaseTrainingAdapter:
                 "Return a loss from forward() or override the training adapter.")
         if labels is None:
             raise ValueError(
-                "The batch has no target field. Provide one of the profile's "
+                "The batch has no target field. Provide one of the phase's "
                 "label_names or return a native loss from the source model.")
 
     @staticmethod
@@ -406,6 +1729,9 @@ class CausalLMTrainingAdapter(BaseTrainingAdapter):
 
     def compute_objective(self, predictions, labels):
         self._require_predictions_and_labels(predictions, labels)
+        fallback = self.current_phase.fallback_objective
+        if fallback not in ("causal_cross_entropy", "cross_entropy", "ce"):
+            raise ValueError(f"Unsupported causal-LM fallback objective {fallback!r}.")
         return self._cross_entropy(predictions, labels, shift=True)
 
 
@@ -414,13 +1740,22 @@ class Seq2SeqTrainingAdapter(BaseTrainingAdapter):
 
     def compute_objective(self, predictions, labels):
         self._require_predictions_and_labels(predictions, labels)
+        fallback = self.current_phase.fallback_objective
+        if fallback not in ("cross_entropy", "ce"):
+            raise ValueError(f"Unsupported sequence fallback objective {fallback!r}.")
         return self._cross_entropy(predictions, labels, shift=False)
 
 
 class FlowMatchingTrainingAdapter(BaseTrainingAdapter):
-    """Continuous flow/diffusion objective with source-loss preference."""
+    """Continuous flow objective with strict native-loss preference."""
 
     def compute_objective(self, predictions, labels):
+        fallback = self.current_phase.fallback_objective
+        if fallback not in ("mse", "velocity_mse", "flow_mse"):
+            raise ValueError(
+                "A plain regression loss is not a complete native flow-matching "
+                "objective. Return the backend's native flow loss or explicitly "
+                "configure an MSE velocity-target fallback.")
         self._require_predictions_and_labels(predictions, labels)
         torch = import_optional(
             "torch",
@@ -435,26 +1770,49 @@ class AcousticTrainingAdapter(BaseTrainingAdapter):
 
     def compute_objective(self, predictions, labels):
         self._require_predictions_and_labels(predictions, labels)
+        fallback = self.current_phase.fallback_objective
         torch = import_optional(
             "torch",
             model_type="Trainer",
             install_extra="training",
         )
-        if self.spec.regression_loss == "l1":
+        if fallback == "l1":
             return torch.nn.functional.l1_loss(predictions, labels)
-        return torch.nn.functional.mse_loss(predictions, labels)
+        if fallback == "mse":
+            return torch.nn.functional.mse_loss(predictions, labels)
+        raise ValueError(f"Unsupported acoustic fallback objective {fallback!r}.")
 
 
 class CompositeTrainingAdapter(BaseTrainingAdapter):
-    """Multi-component objective that sums native named losses safely."""
+    """Multi-component adapter that prefers phase-specific native losses."""
 
     def compute_objective(self, predictions, labels):
         self._require_predictions_and_labels(predictions, labels)
-        if (predictions.ndim >= 2 and not getattr(labels, "is_floating_point", lambda: True)()):
+        fallback = self.current_phase.fallback_objective
+        if fallback == "causal_cross_entropy":
+            return self._cross_entropy(predictions, labels, shift=True)
+        if fallback in ("cross_entropy", "ce"):
+            return self._cross_entropy(predictions, labels, shift=False)
+        if fallback == "auto" and (predictions.ndim >= 2 and
+                                   not getattr(labels, "is_floating_point", lambda: True)()):
             return self._cross_entropy(predictions, labels, shift=False)
         torch = import_optional(
             "torch",
             model_type="Trainer",
             install_extra="training",
         )
-        return torch.nn.functional.mse_loss(predictions, labels)
+        if fallback in ("auto", "mse"):
+            return torch.nn.functional.mse_loss(predictions, labels)
+        if fallback == "l1":
+            return torch.nn.functional.l1_loss(predictions, labels)
+        raise ValueError(f"Unsupported composite fallback objective {fallback!r}.")
+
+
+class VITSTrainingAdapter(CompositeTrainingAdapter):
+    """Phase-aware VITS/GAN adapter.
+
+    The base phase executor supplies the important adversarial semantics:
+    separately routed optimizers, detached fake inputs, and temporary
+    generator/discriminator freezing. Native recipe losses remain mandatory
+    unless a phase explicitly declares a reconstruction fallback.
+    """

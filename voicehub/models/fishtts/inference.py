@@ -51,6 +51,7 @@ class FishTTSForTextToSpeech(PreTrainedTTSModel):
         self._decode_one_token = None
         self._codec = None
         self._torch = None
+        self._loaded_for_training = False
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     def _load_pretrained_model(self) -> None:
@@ -63,6 +64,7 @@ class FishTTSForTextToSpeech(PreTrainedTTSModel):
             self.config.name_or_path,
             model_type="fishtts",
         )
+        self._model_directory = model_directory
         runtime = import_optional(
             "voicehub.models.fishtts.source.fish_speech.models."
             "text2semantic.inference",
@@ -86,6 +88,7 @@ class FishTTSForTextToSpeech(PreTrainedTTSModel):
                 max_seq_len=model.config.max_seq_len,
                 dtype=next(model.parameters()).dtype,
             )
+        model._cache_setup_done = True
         codec = runtime.load_codec_model(
             model_directory / "codec.pth",
             self.device,
@@ -102,6 +105,111 @@ class FishTTSForTextToSpeech(PreTrainedTTSModel):
         self._codec = codec
         self._torch = torch
         self.model = model
+        self._loaded_for_training = False
+
+    @staticmethod
+    def _clear_semantic_caches(model) -> None:
+        """Release serving-only KV caches without replacing ``model``."""
+        for layer_group_name in ("layers", "fast_layers"):
+            layer_group = getattr(model, layer_group_name, None) or ()
+            for layer in layer_group:
+                attention = getattr(layer, "attention", None)
+                if attention is not None and hasattr(attention, "kv_cache"):
+                    attention.kv_cache = None
+        for name in ("max_batch_size", "max_seq_len"):
+            if hasattr(model, name):
+                setattr(model, name, -1)
+        if hasattr(model, "_cache_setup_done"):
+            model._cache_setup_done = False
+
+    def _prepare_for_training(self) -> None:
+        if self._loaded_for_training:
+            return
+        # Fish compiles only the token decoder, not the semantic module.
+        # Keep the exact semantic object so an existing optimizer remains
+        # attached across generation -> continued-training transitions.
+        self._runtime = None
+        self._decode_one_token = None
+        self._clear_semantic_caches(self.model)
+        if hasattr(self.model, "train"):
+            self.model.train()
+        config = getattr(self.model, "config", None)
+        if config is not None and hasattr(config, "use_cache"):
+            config.use_cache = False
+        self._loaded_for_training = True
+
+    def _prepare_for_inference(self) -> None:
+        if not self._loaded_for_training:
+            return
+
+        torch = self._torch
+        if torch is None:
+            torch = import_optional(
+                "torch",
+                model_type="fishtts",
+                install_extra="fishtts",
+            )
+        runtime = import_optional(
+            "voicehub.models.fishtts.source.fish_speech.models."
+            "text2semantic.inference",
+            model_type="fishtts",
+            install_extra="fishtts",
+        )
+        model_directory = getattr(self, "_model_directory", None)
+        if model_directory is None:
+            model_directory = resolve_model_directory(
+                self.config.name_or_path,
+                model_type="fishtts",
+            )
+
+        semantic_model = self.model
+        codec = self._codec
+        try:
+            dtype = resolve_torch_dtype(
+                torch,
+                self.config.torch_dtype,
+                self.device,
+            )
+            decode_one_token = runtime.prepare_model_for_inference(
+                semantic_model,
+                self.device,
+                compile=self.config.compile,
+            )
+            with torch.device(self.device):
+                semantic_model.setup_caches(
+                    max_batch_size=1,
+                    max_seq_len=semantic_model.config.max_seq_len,
+                    dtype=next(semantic_model.parameters()).dtype,
+                )
+            semantic_model._cache_setup_done = True
+            if codec is None:
+                codec = runtime.load_codec_model(
+                    model_directory / "codec.pth",
+                    self.device,
+                    dtype,
+                )
+            elif callable(getattr(codec, "to", None)):
+                moved_codec = codec.to(device=self.device, dtype=dtype)
+                if moved_codec is not None:
+                    codec = moved_codec
+        except BaseException:
+            self._clear_semantic_caches(semantic_model)
+            if hasattr(semantic_model, "train"):
+                semantic_model.train()
+            raise
+
+        self._model_directory = model_directory
+        self._runtime = runtime
+        self._decode_one_token = decode_one_token
+        self._codec = codec
+        self._torch = torch
+        self.config.sample_rate = int(
+            getattr(
+                getattr(codec, "spec_transform", None),
+                "sample_rate",
+                getattr(codec, "sample_rate", self.sample_rate),
+            ))
+        self._loaded_for_training = False
 
     def _generate(
         self,

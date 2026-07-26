@@ -6,7 +6,11 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset
 
-from common import normalize_audio_path_list
+try:
+    from .common import normalize_audio_path_list
+except ImportError:
+    # Preserve direct execution from the upstream finetuning directory.
+    from common import normalize_audio_path_list
 
 
 USER_MESSAGE_KEYS = (

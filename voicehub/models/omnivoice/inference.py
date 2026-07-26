@@ -18,6 +18,7 @@ class OmniVoiceConfig(VoiceHubConfig):
         self,
         *,
         torch_dtype: str = "float16",
+        training_torch_dtype: str = "float32",
         load_asr: bool = False,
         asr_model_name: str | None = None,
         sample_rate: int = 24000,
@@ -25,6 +26,7 @@ class OmniVoiceConfig(VoiceHubConfig):
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
         self.torch_dtype = torch_dtype
+        self.training_torch_dtype = training_torch_dtype
         self.load_asr = load_asr
         self.asr_model_name = asr_model_name
 
@@ -49,6 +51,7 @@ class OmniVoiceForTextToSpeech(PreTrainedTTSModel):
             model_path=model_path,
             **config_overrides,
         )
+        self._loaded_for_training = False
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     def _load_pretrained_model(self) -> None:
@@ -67,13 +70,82 @@ class OmniVoiceForTextToSpeech(PreTrainedTTSModel):
             device_map=self.device,
             dtype=resolve_torch_dtype(
                 torch,
-                self.config.torch_dtype,
+                (self.config.training_torch_dtype if self.is_training_load else self.config.torch_dtype),
                 self.device,
             ),
             load_asr=self.config.load_asr,
             asr_model_name=self.config.asr_model_name,
+            train=self.is_training_load,
         )
-        self.config.sample_rate = int(self.model.sampling_rate)
+        if self.model.sampling_rate is not None:
+            self.config.sample_rate = int(self.model.sampling_rate)
+        self._loaded_for_training = self.is_training_load
+
+    def _prepare_for_training(self) -> None:
+        if self._loaded_for_training:
+            return
+        torch = import_optional(
+            "torch",
+            model_type="omnivoice",
+            install_extra="omnivoice",
+        )
+        dtype = resolve_torch_dtype(
+            torch,
+            self.config.training_torch_dtype,
+            self.device,
+        )
+        self.model.to(device=self.device, dtype=dtype)
+        for name in (
+                "text_tokenizer",
+                "audio_tokenizer",
+                "feature_extractor",
+                "duration_estimator",
+                "_asr_pipe",
+        ):
+            if hasattr(self.model, name):
+                setattr(self.model, name, None)
+        self._loaded_for_training = True
+
+    def _prepare_for_inference(self) -> None:
+        if not self._loaded_for_training:
+            return
+        # The source uses the same neural module for training and inference;
+        # only tokenizers, feature extraction, duration estimation, and ASR are
+        # omitted in train mode. Keep the exact optimizer-owned module and
+        # borrow those serving auxiliaries from a temporary inference load.
+        trained_model = self.model
+        previous_mode = self._loading_for_training
+        self.model = None
+        self._loading_for_training = False
+        try:
+            self._load_pretrained_model()
+            serving_model = self.model
+            for name in (
+                    "text_tokenizer",
+                    "audio_tokenizer",
+                    "feature_extractor",
+                    "duration_estimator",
+                    "_asr_pipe",
+                    "_asr_model_name",
+                    "_asr_device",
+                    "sampling_rate",
+            ):
+                if hasattr(serving_model, name):
+                    setattr(
+                        trained_model,
+                        name,
+                        getattr(serving_model, name),
+                    )
+            self.model = trained_model
+            self._loaded_for_training = False
+            if hasattr(self.model, "eval"):
+                self.model.eval()
+        except BaseException:
+            self.model = trained_model
+            self._loaded_for_training = True
+            raise
+        finally:
+            self._loading_for_training = previous_mode
 
     def _generate(
         self,
