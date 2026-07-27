@@ -1,4 +1,4 @@
-"""Transformers-style pretrained model lifecycle for text-to-speech."""
+"""Transformers-style pretrained model lifecycle for speech models."""
 
 from __future__ import annotations
 
@@ -21,7 +21,11 @@ from voicehub.processing_utils import VoiceHubProcessor
 from voicehub.trainer_utils import NATIVE_EXPORT_DIR
 
 
-class PreTrainedTTSModel(BaseTTSModel, ABC):
+class PreTrainedSpeechModel(ABC):
+    """Marker base shared by task-specific pretrained speech wrappers."""
+
+
+class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
     """Base lifecycle shared by source-integrated VoiceHub architectures."""
 
     config_class = VoiceHubConfig

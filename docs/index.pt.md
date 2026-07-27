@@ -54,21 +54,21 @@ description: Documentação do VoiceHub para inferência TTS unificada, prepara�
 
 ## O que é o VoiceHub?
 
-O VoiceHub disponibiliza integrações de síntese de voz por meio de APIs
-compartilhadas de configuração, processador, modelo, saída de geração e
-treinador. As implementações permanecem cientes da arquitetura: modelos de
+O VoiceHub disponibiliza modelos de TTS, reconhecimento automático de fala e
+detecção de atividade de voz por meio de APIs compartilhadas de configuração,
+processador, modelo, saída e treinador. As implementações permanecem cientes da arquitetura: modelos de
 linguagem com codec, sistemas de sequência para sequência, modelos de
 flow-matching e difusão, modelos acústicos, sistemas adversariais no estilo
 VITS e pipelines compostos mantêm seus próprios condicionamentos, objetivos,
 regras de propriedade de parâmetros e de exportação.
 
-O registro contém **31 integrações de inferência**. **18 têm uma rota de ajuste
-fino documentada**, incluindo **6 que aceitam registros brutos comuns**. O
-suporte a ajuste fino depende do checkpoint e do ambiente de execução; uma
-integração de inferência não implica que seu artefato atual do VoiceHub seja
-diferenciável. Consulte o [catálogo de modelos](models/index.md) e a
-[matriz de treinamento por checkpoint](models/training-support.md) para
-selecionar uma integração.
+O registro contém **31 integrações TTS**, **9 provedores ASR** e **7 provedores
+VAD**. O suporte a ajuste fino depende do checkpoint e do ambiente de execução;
+uma integração de inferência não implica que seu artefato atual do VoiceHub
+seja diferenciável. Consulte o [catálogo TTS](models/index.md), a
+[matriz de treinamento TTS](models/training-support.md) e a
+[matriz de suporte ASR/VAD](models/asr-vad-support.md) para selecionar uma
+integração.
 
 O código-fonte dos modelos é distribuído com o VoiceHub. Os extras opcionais
 instalam as dependências do ambiente de execução selecionado, enquanto os pesos

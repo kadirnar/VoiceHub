@@ -3,6 +3,7 @@ import io
 import os
 import re
 import tempfile
+import textwrap
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -23,7 +24,10 @@ LOCALIZED_HOME_LOCALES = ("ar", "de", "es", "fr", "ja", "ko", "pt", "ru", "tr", 
 GUIDE_PATHS = (
     DOCS_ROOT / "getting-started" / "quickstart.md",
     DOCS_ROOT / "guides" / "inference.md",
+    DOCS_ROOT / "guides" / "speech-recognition.md",
+    DOCS_ROOT / "guides" / "voice-activity-detection.md",
     DOCS_ROOT / "guides" / "data-preparation.md",
+    DOCS_ROOT / "guides" / "speech-data.md",
     DOCS_ROOT / "guides" / "training.md",
     DOCS_ROOT / "guides" / "notebook.md",
 )
@@ -34,24 +38,35 @@ PROCESS_PAGE_STEPS = (
 )
 NAVIGATION_PATHS = (
     "index.md",
+    "getting-started/installation.md",
     "getting-started/quickstart.md",
     "guides/index.md",
     "guides/inference.md",
+    "guides/speech-recognition.md",
+    "guides/voice-activity-detection.md",
     "guides/data-preparation.md",
+    "guides/speech-data.md",
     "guides/training.md",
     "guides/notebook.md",
     "models/index.md",
+    "models/asr-vad-support.md",
     "models/training-support.md",
     "concepts/architecture.md",
     "concepts/trainer.md",
+    "project/adding-a-model.md",
+    "project/adding-speech-provider.md",
     "project/translations.md",
     "project/model-audit.md",
 )
 PUBLIC_ROUTES = (
     "guides/inference/",
+    "guides/speech-recognition/",
+    "guides/voice-activity-detection/",
     "guides/data-preparation/",
+    "guides/speech-data/",
     "guides/training/",
     "guides/notebook/",
+    "models/asr-vad-support/",
     "models/training-support/",
 )
 MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
@@ -260,15 +275,42 @@ class DocumentationSiteTests(unittest.TestCase):
         )
 
     def test_model_pages_cover_every_registry_entry(self):
-        from voicehub import AutoInferenceModel
+        from voicehub import AutoInferenceModel, list_model_specs
 
         catalog = (DOCS_ROOT / "models" / "index.md").read_text(encoding="utf-8")
+        speech_matrix = (DOCS_ROOT / "models" / "asr-vad-support.md").read_text(encoding="utf-8", )
         training_matrix = (DOCS_ROOT / "models" / "training-support.md").read_text(encoding="utf-8")
 
         for model_spec in AutoInferenceModel.available_models():
             with self.subTest(model_type=model_spec.model_type):
                 self.assertIn(f"| `{model_spec.model_type}` |", catalog)
                 self.assertIn(f"(`{model_spec.model_type}`)", training_matrix)
+
+        for model_spec in list_model_specs(task=None):
+            if model_spec.task.value == "text-to-speech":
+                continue
+            with self.subTest(model_type=model_spec.model_type):
+                self.assertIn(f"| `{model_spec.model_type}` |", speech_matrix)
+                self.assertIn(f"`{model_spec.install_extra}`", speech_matrix)
+
+    def test_every_registry_extra_is_declared_in_package_metadata(self):
+        from voicehub import list_model_specs
+
+        metadata = PYPROJECT_PATH.read_text(encoding="utf-8")
+        optional_dependencies = metadata.split(
+            "[project.optional-dependencies]",
+            1,
+        )[1].split("[tool.setuptools]", 1)[0]
+        declared_extras = set(
+            re.findall(
+                r"^([a-z0-9][a-z0-9-]*) = \[$",
+                optional_dependencies,
+                re.MULTILINE,
+            ))
+
+        for model_spec in list_model_specs(task=None):
+            with self.subTest(model_type=model_spec.model_type):
+                self.assertIn(model_spec.install_extra, declared_extras)
 
     def test_guide_python_examples_compile(self):
         example_count = 0
@@ -279,7 +321,7 @@ class DocumentationSiteTests(unittest.TestCase):
             example_count += len(examples)
             for index, source in enumerate(examples, start=1):
                 ast.parse(
-                    source,
+                    textwrap.dedent(source),
                     filename=f"{guide_path.name}:python-block-{index}",
                 )
 

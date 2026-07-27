@@ -11,7 +11,7 @@ from voicehub.dependencies import import_optional
 
 
 @dataclass(frozen=True)
-class TTSFieldSchema:
+class AudioFieldSchema:
     """Describe the variable-length dimension of one training field.
 
     ``length_field`` and ``mask_field`` are written beside the source
@@ -46,8 +46,8 @@ class TTSFieldSchema:
 
 
 @dataclass
-class DataCollatorForTTSTraining:
-    """Collate heterogeneous TTS examples without guessing model semantics.
+class DataCollatorForAudioTraining:
+    """Collate heterogeneous audio examples without guessing task semantics.
 
     Equal-shaped tensors are stacked. Variable token sequences and
     common time-major/time-last acoustic values retain the historical
@@ -59,7 +59,7 @@ class DataCollatorForTTSTraining:
     label_pad_token_id: int = -100
     return_attention_mask: bool = True
     return_input_lengths: bool = False
-    field_schemas: Mapping[str, TTSFieldSchema | Mapping[str, Any]] | None = None
+    field_schemas: Mapping[str, AudioFieldSchema | Mapping[str, Any]] | None = None
 
     def __post_init__(self) -> None:
         schemas = {}
@@ -67,9 +67,10 @@ class DataCollatorForTTSTraining:
             if not isinstance(path, str) or not path.strip():
                 raise ValueError("field_schemas keys must be non-empty dotted paths.")
             if isinstance(schema, Mapping):
-                schema = TTSFieldSchema(**dict(schema))
-            if not isinstance(schema, TTSFieldSchema):
-                raise TypeError("field_schemas values must be TTSFieldSchema instances or mappings.")
+                schema = AudioFieldSchema(**dict(schema))
+            if not isinstance(schema, AudioFieldSchema):
+                raise TypeError("field_schemas values must be AudioFieldSchema instances "
+                                "or mappings.")
             schemas[path.strip()] = schema
         self.field_schemas = schemas
 
@@ -83,7 +84,7 @@ class DataCollatorForTTSTraining:
             "field_schemas": {
                 path: {
                     field.name: getattr(schema, field.name)
-                    for field in fields(TTSFieldSchema)
+                    for field in fields(AudioFieldSchema)
                 }
                 for path, schema in sorted(self.field_schemas.items())
             },
@@ -110,7 +111,7 @@ class DataCollatorForTTSTraining:
             return dict(value)
         if is_dataclass(value) and not isinstance(value, type):
             return {field.name: getattr(value, field.name) for field in fields(value)}
-        raise TypeError("TTS training samples must be mappings or dataclass instances.")
+        raise TypeError("Audio training samples must be mappings or dataclass instances.")
 
     @staticmethod
     def _import_torch():
@@ -150,7 +151,7 @@ class DataCollatorForTTSTraining:
                 if not schema.allow_missing:
                     raise ValueError(
                         f"Field {'.'.join(current_path)!r} is missing from some samples. "
-                        "Set allow_missing=True in its TTSFieldSchema to pad missing "
+                        "Set allow_missing=True in its AudioFieldSchema to pad missing "
                         "values as zero-length sequences.")
             elif all(isinstance(value, Mapping) or is_dataclass(value) and not isinstance(value, type)
                      for value in values):
@@ -204,13 +205,13 @@ class DataCollatorForTTSTraining:
         prefix = ".".join(path) + "."
         return any(schema_path.startswith(prefix) for schema_path in self.field_schemas)
 
-    def _schema_for(self, path: tuple[str, ...]) -> TTSFieldSchema | None:
+    def _schema_for(self, path: tuple[str, ...]) -> AudioFieldSchema | None:
         dotted = ".".join(path)
         configured = self.field_schemas.get(dotted)
 
         key = path[-1]
         if key == "input_ids":
-            defaults = TTSFieldSchema(
+            defaults = AudioFieldSchema(
                 sequence_dim=0,
                 padding_value=0,
                 length_field=("input_lengths" if self.return_input_lengths else None),
@@ -226,7 +227,7 @@ class DataCollatorForTTSTraining:
         if configured is not None:
             return configured
         if key in ("labels", "label_ids"):
-            return TTSFieldSchema(sequence_dim=0, )
+            return AudioFieldSchema(sequence_dim=0, )
         return None
 
     def _collate_values(self, path, values, schema):
@@ -464,3 +465,17 @@ class DataCollatorForTTSTraining:
             except (TypeError, ValueError):
                 return None
         return None
+
+
+# Backward-compatible TTS spellings. These are exact aliases so existing
+# imports, ``isinstance`` checks, and serialized references retain identical
+# behavior while new speech tasks can use task-neutral public names.
+TTSFieldSchema = AudioFieldSchema
+DataCollatorForTTSTraining = DataCollatorForAudioTraining
+
+__all__ = [
+    "AudioFieldSchema",
+    "DataCollatorForAudioTraining",
+    "DataCollatorForTTSTraining",
+    "TTSFieldSchema",
+]

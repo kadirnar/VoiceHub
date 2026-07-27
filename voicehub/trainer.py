@@ -1,4 +1,4 @@
-"""A Transformers-style Trainer specialized for source-integrated TTS."""
+"""A Transformers-style Trainer for source-integrated speech models."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from typing import Any, Callable
 from voicehub.data_collator import default_data_collator
 from voicehub.dependencies import import_optional
 from voicehub.errors import UnknownModelError
-from voicehub.modeling_utils import PreTrainedTTSModel
+from voicehub.modeling_utils import PreTrainedSpeechModel
 from voicehub.trainer_callback import (
     CallbackHandler,
     DefaultFlowCallback,
@@ -66,8 +66,8 @@ class Trainer:
     """Complete single-process PyTorch train/evaluate/checkpoint loop.
 
     Models can return an object or mapping with a ``loss`` field, or
-    return loss as the first tuple value. Existing TTS architectures can
-    instead supply ``compute_loss_func`` while their source training
+    return loss as the first tuple value. Existing speech architectures
+    can instead supply ``compute_loss_func`` while their source training
     path is adapted.
     """
 
@@ -205,7 +205,7 @@ class Trainer:
             if training_adapter.model is not model:
                 raise ValueError("The training adapter must wrap the model passed to Trainer.")
             return training_adapter
-        if isinstance(model, PreTrainedTTSModel):
+        if isinstance(model, PreTrainedSpeechModel):
             try:
                 return AutoTrainingAdapter.from_model(model)
             except (KeyError, UnknownModelError):
@@ -216,7 +216,7 @@ class Trainer:
         if self.training_adapter is not None:
             self.training_adapter.build_training_graph()
             return
-        if (isinstance(self.model, PreTrainedTTSModel) and not self.model.is_loaded):
+        if (isinstance(self.model, PreTrainedSpeechModel) and not self.model.is_loaded):
             self.model.load()
 
     def _runtime_model(self):
@@ -243,7 +243,7 @@ class Trainer:
             )
         self.model_wrapped = prepared
         self._model_prepared = True
-        if isinstance(self.model, PreTrainedTTSModel):
+        if isinstance(self.model, PreTrainedSpeechModel):
             self.model.device = self.args.device
 
     def _set_model_mode(self, training: bool) -> None:
@@ -538,7 +538,7 @@ class Trainer:
     def _model_forward(self, model, inputs):
         if isinstance(model, BaseTrainingAdapter):
             return model(**inputs)
-        if isinstance(model, PreTrainedTTSModel):
+        if isinstance(model, PreTrainedSpeechModel):
             return model.forward(**inputs)
         return model(**inputs)
 
@@ -567,7 +567,8 @@ class Trainer:
         loss = cls._get_loss(outputs)
         if loss is None:
             raise ValueError(
-                "The model did not return a loss. Return `TTSTrainingOutput(loss=...)`, "
+                "The model did not return a loss. Return "
+                "`SpeechTrainingOutput(loss=...)`, "
                 "a mapping with `loss`, or pass `compute_loss_func`.")
         return loss
 
@@ -1645,7 +1646,7 @@ class Trainer:
         torch = self._import_torch()
         destination = Path(output_dir or self.args.output_dir).expanduser()
         destination.mkdir(parents=True, exist_ok=True)
-        if isinstance(self.model, PreTrainedTTSModel):
+        if isinstance(self.model, PreTrainedSpeechModel):
             self.model.save_pretrained(
                 destination,
                 include_native_export=False,

@@ -2,7 +2,7 @@
 hide:
   - navigation
   - toc
-description: VoiceHub documentation for unified TTS inference, data preparation, and architecture-aware fine-tuning.
+description: VoiceHub documentation for unified TTS, ASR, and VAD inference, data preparation, and architecture-aware fine-tuning.
 ---
 
 <div class="vh-doc-home" markdown>
@@ -11,11 +11,11 @@ description: VoiceHub documentation for unified TTS inference, data preparation,
   <img src="assets/voicehub-mark.svg" alt="">
 </p>
 
-# VoiceHub: Text-to-Speech Inference and Training
+# VoiceHub: One Speech Model Lifecycle
 
 <p class="vh-doc-tagline">
-  A source-integrated Python library for inference, data preparation, and
-  model-specific fine-tuning across modern TTS families.
+  A task-aware Python library for inference, data preparation, and
+  model-specific fine-tuning across modern TTS, ASR, and VAD families.
 </p>
 
 <div class="vh-doc-teaser" role="img" aria-label="Text passes through a VoiceHub model adapter and becomes an audio waveform">
@@ -54,20 +54,21 @@ description: VoiceHub documentation for unified TTS inference, data preparation,
 
 ## What is VoiceHub?
 
-VoiceHub presents text-to-speech integrations through shared configuration,
-processor, model, generation-output, and trainer APIs. Model implementations
-remain architecture-aware: codec language models, sequence-to-sequence
-systems, flow-matching and diffusion models, acoustic models, VITS-style
-adversarial systems, and composite pipelines keep their own conditioning,
-objectives, parameter ownership, and export rules.
+VoiceHub presents text-to-speech, automatic speech recognition, and voice
+activity detection through shared configuration, processor, model, typed
+output, and trainer APIs. Implementations remain architecture-aware: codec
+language models, CTC and transducer ASR, speech encoder-decoders,
+flow-matching and diffusion models, audio/frame classifiers, VITS-style
+adversarial systems, and upstream-native pipelines keep their own
+conditioning, objectives, parameter ownership, and export rules.
 
-The registry contains **31 inference integrations**. **18 have a documented
-fine-tuning route**, including **6 that accept ordinary raw records**.
-Fine-tuning support is checkpoint- and runtime-specific; an inference
-integration does not imply that its current VoiceHub artifact is
-differentiable. Use the [model catalog](models/index.md) and
-[checkpoint-aware training matrix](models/training-support.md) to select an
-integration.
+The registry contains **47 integrations**: **31 TTS backends**, **9 ASR
+providers**, and **7 VAD providers**. Fine-tuning support is checkpoint- and
+runtime-specific; an
+inference integration does not imply that its current VoiceHub artifact is
+differentiable. Use the [TTS catalog](models/index.md),
+[TTS training matrix](models/training-support.md), and
+[ASR/VAD support matrix](models/asr-vad-support.md) to select an integration.
 
 Model source is packaged with VoiceHub. Optional extras install the selected
 runtime dependencies, while checkpoint weights are downloaded lazily or
@@ -95,6 +96,24 @@ separate terms.
 
     [Inference guide](guides/inference.md)
 
+-   **Speech recognition**
+
+    ---
+
+    Transcribe files or in-memory audio through Transformers, optimized
+    Whisper, and native provider runtimes with normalized timestamps.
+
+    [ASR guide](guides/speech-recognition.md)
+
+-   **Voice activity detection**
+
+    ---
+
+    Detect ordered speech regions with Transformers, Silero, WebRTC,
+    pyannote, SpeechBrain, NeMo, or FunASR FSMN.
+
+    [VAD guide](guides/voice-activity-detection.md)
+
 -   **Data preparation**
 
     ---
@@ -117,10 +136,19 @@ separate terms.
 
     ---
 
-    Compare all 31 registry entries, installation extras, default checkpoints,
-    capabilities, source provenance, and constraints.
+    Compare all 31 TTS registry entries, installation extras, default
+    checkpoints, capabilities, source provenance, and constraints.
 
     [Model catalog](models/index.md)
+
+-   **ASR and VAD support**
+
+    ---
+
+    Compare provider families, optional extras, output capabilities, and the
+    exact native, upstream-custom, or inference-only training boundary.
+
+    [Speech-input matrix](models/asr-vad-support.md)
 
 -   **Training support**
 

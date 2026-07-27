@@ -11,7 +11,7 @@ the layers needed by one environment:
 | Layer             | Install target                     | What it provides                                                                              |
 | ----------------- | ---------------------------------- | --------------------------------------------------------------------------------------------- |
 | Base library      | `voicehub`                         | Registry discovery, configuration, Hub access, NumPy, and audio file I/O                      |
-| Model runtime     | `voicehub[<model-extra>]`          | The framework, audio, tokenizer, and other packages required by one TTS integration            |
+| Model runtime     | `voicehub[<model-extra>]`          | The framework, audio, tokenizer, and other packages required by one TTS, ASR, or VAD provider  |
 | Training runtime  | `voicehub[<model-extra>,training]` | The selected model runtime plus VoiceHub's PyTorch and safetensors training dependencies      |
 | Contributor tools | `.[test]` or `.[docs]`             | Tests, pre-commit hooks, notebook validation, or the documentation build                      |
 
@@ -130,9 +130,22 @@ supertonic       vibevoice        voxcpm        vui
 xtts             zonos            zonos2
 ```
 
+ASR and VAD extras are installed independently:
+
+```text
+asr-transformers  faster-whisper  whisperx        openai-whisper
+asr-nemo          asr-speechbrain asr-funasr      asr-espnet
+asr-wenet
+
+vad-transformers  vad-silero      vad-silero-onnx vad-webrtc
+vad-pyannote      vad-speechbrain vad-nemo        vad-funasr
+```
+
 The [model catalog](../models/index.md) maps those keys to model families,
 default checkpoints, capabilities, conditioning requirements, and important
-license constraints.
+license constraints. The
+[ASR/VAD support matrix](../models/asr-vad-support.md) maps speech-input
+providers to runtime families, extras, outputs, and training boundaries.
 
 !!! warning "Extras install Python packages, not checkpoints"
 
@@ -188,8 +201,15 @@ python -m pip install "voicehub[dia,training]"
 
 Replace `dia` with the selected model extra. Installing
 `voicehub[training]` alone is useful for trainer development around an external
-module, but it does not install a TTS backend's processor, codec, or source
-runtime.
+module, but it does not install a TTS, ASR, or VAD backend's processor or
+source runtime.
+
+Transformers ASR experimentation can install its broader data and evaluation
+tooling separately:
+
+```bash
+python -m pip install "voicehub[asr-transformers,asr-training]"
+```
 
 Training support is checkpoint- and backend-aware. A model can be trainable
 upstream while a particular GGUF, ONNX, quantized, fused, or

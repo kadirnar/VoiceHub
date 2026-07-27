@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from importlib import import_module
 from pathlib import Path
 
@@ -9,9 +10,29 @@ from voicehub.dependencies import import_optional
 from voicehub.inference_strategy import InferenceStrategy
 from voicehub.modeling_utils import PreTrainedTTSModel
 from voicehub.registry import MODEL_REGISTRY, ModelSpec, get_model_spec, list_model_specs
+from voicehub.tasks import SpeechTask
+
+
+class _ModelClassNameMapping(Mapping[str, str]):
+    """Live compatibility view over the mutable model registry."""
+
+    def __getitem__(self, model_type: str) -> str:
+        return MODEL_REGISTRY[model_type].class_name
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(MODEL_REGISTRY)
+
+    def __len__(self) -> int:
+        return len(MODEL_REGISTRY)
+
 
 # Kept as a read-only compatibility view for callers that used the old mapping.
-MODEL_TYPE_TO_MODEL_CLASS_NAME = {name: spec.class_name for name, spec in MODEL_REGISTRY.items()}
+MODEL_TYPE_TO_MODEL_CLASS_NAME: Mapping[str, str] = _ModelClassNameMapping()
+
+_TASK_FACTORY_NAMES = {
+    SpeechTask.AUTOMATIC_SPEECH_RECOGNITION: "AutoModelForSpeechRecognition",
+    SpeechTask.VOICE_ACTIVITY_DETECTION: "AutoModelForVoiceActivityDetection",
+}
 
 
 class AutoInferenceModel:
@@ -25,8 +46,8 @@ class AutoInferenceModel:
 
     @classmethod
     def available_models(cls) -> tuple[ModelSpec, ...]:
-        """List supported backends without importing their ML runtimes."""
-        return list_model_specs()
+        """List TTS backends without importing their ML runtimes."""
+        return list_model_specs(task=SpeechTask.TEXT_TO_SPEECH)
 
     @classmethod
     def from_pretrained(
@@ -57,6 +78,12 @@ class AutoInferenceModel:
             OptionalDependencyError: If the selected backend is not installed.
         """
         spec = get_model_spec(model_type)
+        if spec.task is not SpeechTask.TEXT_TO_SPEECH:
+            factory_name = _TASK_FACTORY_NAMES[spec.task]
+            raise ValueError(
+                "AutoInferenceModel is the legacy text-to-speech factory, "
+                f"but {model_type!r} is registered for task "
+                f"{spec.task.value!r}. Use {factory_name} instead.")
         lazy_load = kwargs.pop("lazy_load", True)
         try:
             module = import_module(spec.module)

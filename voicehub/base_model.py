@@ -7,16 +7,18 @@ from pathlib import Path
 from typing import Any
 
 
-class BaseTTSModel(ABC):
-    """Abstract base class for all VoiceHub TTS inference models."""
+class BaseSpeechModel(ABC):
+    """Framework-independent base for every VoiceHub speech model.
+
+    The class deliberately owns only waveform validation and
+    persistence. Task semantics such as synthesis, transcription, and
+    speech detection belong to the corresponding pretrained model
+    subclasses.
+    """
 
     def __init__(self, model_path: str = "", device: str = "cuda"):
         self.model_path = model_path
         self.device = device
-
-    @property
-    def sample_rate(self) -> int:
-        raise NotImplementedError
 
     @abstractmethod
     def __call__(self, *args, **kwargs):
@@ -107,7 +109,7 @@ class BaseTTSModel(ABC):
         if (isinstance(sample_rate, bool) or not isinstance(sample_rate, Integral) or sample_rate <= 0):
             raise ValueError("`sample_rate` must be a positive integer.")
 
-        BaseTTSModel.validate_audio(audio_data)
+        BaseSpeechModel.validate_audio(audio_data)
         np = import_module("numpy")
         if hasattr(audio_data, "detach"):
             audio_data = audio_data.detach().cpu()
@@ -129,3 +131,11 @@ class BaseTTSModel(ABC):
         sf = import_module("soundfile")
         sf.write(str(output_path), audio_data, int(sample_rate))
         return str(output_path)
+
+
+class BaseTTSModel(BaseSpeechModel):
+    """Backward-compatible base class for text-to-speech models."""
+
+    @property
+    def sample_rate(self) -> int:
+        raise NotImplementedError

@@ -54,21 +54,21 @@ description: VoiceHub-Dokumentation für einheitliche TTS-Inferenz, Datenaufbere
 
 ## Was ist VoiceHub?
 
-VoiceHub stellt Text-zu-Sprache-Integrationen über gemeinsame APIs für
-Konfiguration, Verarbeitung, Modelle, Generierungsergebnisse und Training
-bereit. Die Implementierungen berücksichtigen weiterhin ihre jeweilige
+VoiceHub stellt TTS-, Spracherkennungs- und Sprachaktivitätsmodelle über
+gemeinsame APIs für Konfiguration, Verarbeitung, Modelle, Ergebnisse und
+Training bereit. Die Implementierungen berücksichtigen weiterhin ihre jeweilige
 Architektur: Codec-Sprachmodelle, Sequence-to-Sequence-Systeme, Flow-Matching-
 und Diffusionsmodelle, akustische Modelle, adversarielle Systeme im VITS-Stil
 und zusammengesetzte Pipelines behalten ihre eigene Konditionierung, ihre
 Zielgrößen, die Zuständigkeit für Parameter und ihre Exportregeln bei.
 
-Die Registry enthält **31 Inferenzintegrationen**. **18 verfügen über einen
-dokumentierten Fine-Tuning-Pfad**, darunter **6, die gewöhnliche Rohdatensätze
-akzeptieren**. Die Fine-Tuning-Unterstützung hängt vom Checkpoint und von der
+Die Registry enthält **31 TTS-Integrationen**, **9 ASR-Anbieter** und **7
+VAD-Anbieter**. Die Fine-Tuning-Unterstützung hängt vom Checkpoint und von der
 Laufzeitumgebung ab; eine Inferenzintegration bedeutet nicht, dass ihr
 aktuelles VoiceHub-Artefakt differenzierbar ist. Wählen Sie eine Integration
-mithilfe des [Modellkatalogs](models/index.md) und der
-[Checkpoint-spezifischen Trainingsmatrix](models/training-support.md) aus.
+mithilfe des [TTS-Modellkatalogs](models/index.md), der
+[TTS-Trainingsmatrix](models/training-support.md) und der
+[ASR/VAD-Unterstützungsmatrix](models/asr-vad-support.md) aus.
 
 Der Modellquellcode wird mit VoiceHub ausgeliefert. Optionale Extras
 installieren die Abhängigkeiten der ausgewählten Laufzeitumgebung, während

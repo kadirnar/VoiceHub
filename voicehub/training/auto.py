@@ -8,15 +8,22 @@ from typing import Any
 from voicehub.registry import normalize_model_type
 from voicehub.training.adapters import (
     AcousticTrainingAdapter,
+    AudioClassificationTrainingAdapter,
     BaseTrainingAdapter,
     CausalLMTrainingAdapter,
     CompositeTrainingAdapter,
+    CTCTrainingAdapter,
     FlowMatchingTrainingAdapter,
+    FrameClassificationTrainingAdapter,
+    RNNTTrainingAdapter,
     Seq2SeqTrainingAdapter,
+    SpeechSeq2SeqTrainingAdapter,
+    TDTTrainingAdapter,
+    UpstreamNativeTrainingAdapter,
     VITSTrainingAdapter,
 )
 from voicehub.training.recipes import BUILTIN_MODEL_ADAPTERS
-from voicehub.training.specs import MODEL_TRAINING_SPECS, ModelTrainingSpec, TrainingFamily, get_training_spec
+from voicehub.training.specs import ModelTrainingSpec, TrainingFamily, get_training_spec, list_training_specs
 
 AdapterFactory = Callable[[Any, ModelTrainingSpec], BaseTrainingAdapter]
 
@@ -45,6 +52,13 @@ _FAMILY_ADAPTERS: dict[str, AdapterFactory] = {
     TrainingFamily.ACOUSTIC.value: AcousticTrainingAdapter,
     TrainingFamily.VITS.value: VITSTrainingAdapter,
     TrainingFamily.COMPOSITE.value: CompositeTrainingAdapter,
+    TrainingFamily.CTC.value: CTCTrainingAdapter,
+    TrainingFamily.SPEECH_SEQ2SEQ.value: SpeechSeq2SeqTrainingAdapter,
+    TrainingFamily.RNNT.value: RNNTTrainingAdapter,
+    TrainingFamily.TDT.value: TDTTrainingAdapter,
+    TrainingFamily.AUDIO_CLASSIFICATION.value: AudioClassificationTrainingAdapter,
+    TrainingFamily.FRAME_CLASSIFICATION.value: FrameClassificationTrainingAdapter,
+    TrainingFamily.UPSTREAM_NATIVE.value: UpstreamNativeTrainingAdapter,
 }
 
 
@@ -66,11 +80,11 @@ class AutoTrainingAdapter:
         """Create an unloaded adapter without importing PyTorch."""
         if spec is None:
             config = getattr(model, "config", None)
-            model_type = getattr(config, "model_type", None)
-            if not model_type:
+            configured_model_type = getattr(config, "model_type", None)
+            if not configured_model_type:
                 raise ValueError("AutoTrainingAdapter requires a model with "
                                  "`config.model_type`.")
-            spec = get_training_spec(model_type)
+            spec = get_training_spec(configured_model_type)
         if not isinstance(spec, ModelTrainingSpec):
             raise TypeError("spec must be a ModelTrainingSpec.")
 
@@ -188,4 +202,4 @@ class AutoTrainingAdapter:
     @classmethod
     def available_models(cls) -> tuple[str, ...]:
         """Return every model type with a registered training profile."""
-        return tuple(MODEL_TRAINING_SPECS)
+        return tuple(spec.model_type for spec in list_training_specs(task=None))

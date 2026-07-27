@@ -789,6 +789,20 @@ def _csm_adapter(model, spec):
     return CSMTrainingAdapter(model, spec)
 
 
+def _transformers_asr_adapter(model, spec):
+    # Keep Transformers optional until this provider is selected.
+    from voicehub.models.asr_transformers.training_asr_transformers import TransformersASRTrainingAdapter
+
+    return TransformersASRTrainingAdapter(model, spec)
+
+
+def _transformers_vad_adapter(model, spec):
+    # Keep Transformers optional until this provider is selected.
+    from voicehub.models.vad_transformers.training_vad_transformers import TransformersVADTrainingAdapter
+
+    return TransformersVADTrainingAdapter(model, spec)
+
+
 BUILTIN_MODEL_ADAPTERS = {
     "orpheustts": CodecCausalLMTrainingAdapter,
     "dia": DiaTrainingAdapter,
@@ -804,4 +818,6 @@ BUILTIN_MODEL_ADAPTERS = {
     "xtts": XTTSTrainingAdapter,
     "fishtts": _fish_speech_adapter,
     "csm": _csm_adapter,
+    "asr_transformers": _transformers_asr_adapter,
+    "vad_transformers": _transformers_vad_adapter,
 }

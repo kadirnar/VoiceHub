@@ -1,5 +1,5 @@
 site_name: VoiceHub Docs
-site_description: Unified inference, data preparation, and training for modern text-to-speech models.
+site_description: Unified inference, data preparation, and training for modern TTS, ASR, and VAD models.
 site_author: VoiceHub contributors
 site_url: https://kadirnar.github.io/voicehub/
 repo_url: https://github.com/kadirnar/voicehub
@@ -56,19 +56,24 @@ nav:
       - First generation: getting-started/quickstart.md
   - Guides:
       - Overview: guides/index.md
-      - Inference: guides/inference.md
+      - TTS inference: guides/inference.md
+      - Speech recognition: guides/speech-recognition.md
+      - Voice activity detection: guides/voice-activity-detection.md
       - Data preparation: guides/data-preparation.md
+      - ASR and VAD data: guides/speech-data.md
       - Training: guides/training.md
   - Notebooks: guides/notebook.md
   - Models:
-      - Model catalog: models/index.md
-      - Training support: models/training-support.md
+      - TTS model catalog: models/index.md
+      - ASR and VAD support: models/asr-vad-support.md
+      - TTS training support: models/training-support.md
   - Architecture:
       - Library architecture: concepts/architecture.md
       - Trainer architecture: concepts/trainer.md
   - API Reference: reference/api.md
   - Contributing:
-      - Add a model: project/adding-a-model.md
+      - Add a TTS model: project/adding-a-model.md
+      - Add an ASR or VAD provider: project/adding-speech-provider.md
       - Translations: project/translations.md
       - Model audit: project/model-audit.md
 
@@ -95,19 +100,24 @@ plugins:
             First generation: İlk ses üretimi
             Guides: Rehberler
             Overview: Genel Bakış
-            Inference: Çıkarım
+            TTS inference: TTS çıkarımı
+            Speech recognition: Konuşma tanıma
+            Voice activity detection: Ses etkinliği algılama
             Data preparation: Veri hazırlama
+            ASR and VAD data: ASR ve VAD verileri
             Training: Eğitim
             Notebooks: Not Defterleri
             Models: Modeller
-            Model catalog: Model kataloğu
-            Training support: Eğitim desteği
+            TTS model catalog: TTS model kataloğu
+            ASR and VAD support: ASR ve VAD desteği
+            TTS training support: TTS eğitim desteği
             Architecture: Mimari
             Library architecture: Kütüphane mimarisi
             Trainer architecture: Eğitici mimarisi
             API Reference: API Referansı
             Contributing: Katkıda Bulunma
-            Add a model: Model ekleme
+            Add a TTS model: TTS modeli ekleme
+            Add an ASR or VAD provider: ASR veya VAD sağlayıcısı ekleme
             Translations: Çeviriler
             Model audit: Model denetimi
         - locale: es
@@ -120,19 +130,24 @@ plugins:
             First generation: Primera generación
             Guides: Guías
             Overview: Descripción general
-            Inference: Inferencia
+            TTS inference: Inferencia TTS
+            Speech recognition: Reconocimiento de voz
+            Voice activity detection: Detección de actividad de voz
             Data preparation: Preparación de datos
+            ASR and VAD data: Datos de ASR y VAD
             Training: Entrenamiento
             Notebooks: Cuadernos
             Models: Modelos
-            Model catalog: Catálogo de modelos
-            Training support: Compatibilidad de entrenamiento
+            TTS model catalog: Catálogo de modelos TTS
+            ASR and VAD support: Compatibilidad de ASR y VAD
+            TTS training support: Compatibilidad de entrenamiento TTS
             Architecture: Arquitectura
             Library architecture: Arquitectura de la biblioteca
             Trainer architecture: Arquitectura del entrenador
             API Reference: Referencia de API
             Contributing: Contribuir
-            Add a model: Añadir un modelo
+            Add a TTS model: Añadir un modelo TTS
+            Add an ASR or VAD provider: Añadir un proveedor de ASR o VAD
             Translations: Traducciones
             Model audit: Auditoría de modelos
         - locale: fr
@@ -145,19 +160,24 @@ plugins:
             First generation: Première génération
             Guides: Guides
             Overview: Vue d’ensemble
-            Inference: Inférence
+            TTS inference: Inférence TTS
+            Speech recognition: Reconnaissance vocale
+            Voice activity detection: Détection d’activité vocale
             Data preparation: Préparation des données
+            ASR and VAD data: Données ASR et VAD
             Training: Entraînement
             Notebooks: Notebooks
             Models: Modèles
-            Model catalog: Catalogue des modèles
-            Training support: Prise en charge de l’entraînement
+            TTS model catalog: Catalogue des modèles TTS
+            ASR and VAD support: Prise en charge ASR et VAD
+            TTS training support: Prise en charge de l’entraînement TTS
             Architecture: Architecture
             Library architecture: Architecture de la bibliothèque
             Trainer architecture: Architecture de l’entraîneur
             API Reference: Référence API
             Contributing: Contribuer
-            Add a model: Ajouter un modèle
+            Add a TTS model: Ajouter un modèle TTS
+            Add an ASR or VAD provider: Ajouter un fournisseur ASR ou VAD
             Translations: Traductions
             Model audit: Audit des modèles
         - locale: de
@@ -170,19 +190,24 @@ plugins:
             First generation: Erste Generierung
             Guides: Anleitungen
             Overview: Überblick
-            Inference: Inferenz
+            TTS inference: TTS-Inferenz
+            Speech recognition: Spracherkennung
+            Voice activity detection: Sprachaktivitätserkennung
             Data preparation: Datenvorbereitung
+            ASR and VAD data: ASR- und VAD-Daten
             Training: Training
             Notebooks: Notebooks
             Models: Modelle
-            Model catalog: Modellkatalog
-            Training support: Trainingsunterstützung
+            TTS model catalog: TTS-Modellkatalog
+            ASR and VAD support: ASR- und VAD-Unterstützung
+            TTS training support: TTS-Trainingsunterstützung
             Architecture: Architektur
             Library architecture: Bibliotheksarchitektur
             Trainer architecture: Trainerarchitektur
             API Reference: API-Referenz
             Contributing: Mitwirken
-            Add a model: Modell hinzufügen
+            Add a TTS model: TTS-Modell hinzufügen
+            Add an ASR or VAD provider: ASR- oder VAD-Anbieter hinzufügen
             Translations: Übersetzungen
             Model audit: Modell-Audit
         - locale: pt
@@ -195,19 +220,24 @@ plugins:
             First generation: Primeira geração
             Guides: Guias
             Overview: Visão geral
-            Inference: Inferência
+            TTS inference: Inferência TTS
+            Speech recognition: Reconhecimento de fala
+            Voice activity detection: Detecção de atividade de voz
             Data preparation: Preparação de dados
+            ASR and VAD data: Dados de ASR e VAD
             Training: Treinamento
             Notebooks: Notebooks
             Models: Modelos
-            Model catalog: Catálogo de modelos
-            Training support: Suporte ao treinamento
+            TTS model catalog: Catálogo de modelos TTS
+            ASR and VAD support: Suporte a ASR e VAD
+            TTS training support: Suporte ao treinamento TTS
             Architecture: Arquitetura
             Library architecture: Arquitetura da biblioteca
             Trainer architecture: Arquitetura do treinador
             API Reference: Referência da API
             Contributing: Contribuir
-            Add a model: Adicionar um modelo
+            Add a TTS model: Adicionar um modelo TTS
+            Add an ASR or VAD provider: Adicionar um provedor ASR ou VAD
             Translations: Traduções
             Model audit: Auditoria de modelos
         - locale: zh
@@ -220,19 +250,24 @@ plugins:
             First generation: 首次生成
             Guides: 指南
             Overview: 概览
-            Inference: 推理
+            TTS inference: TTS 推理
+            Speech recognition: 语音识别
+            Voice activity detection: 语音活动检测
             Data preparation: 数据准备
+            ASR and VAD data: ASR 与 VAD 数据
             Training: 训练
             Notebooks: 笔记本
             Models: 模型
-            Model catalog: 模型目录
-            Training support: 训练支持
+            TTS model catalog: TTS 模型目录
+            ASR and VAD support: ASR 与 VAD 支持
+            TTS training support: TTS 训练支持
             Architecture: 架构
             Library architecture: 库架构
             Trainer architecture: 训练器架构
             API Reference: API 参考
             Contributing: 参与贡献
-            Add a model: 添加模型
+            Add a TTS model: 添加 TTS 模型
+            Add an ASR or VAD provider: 添加 ASR 或 VAD 提供程序
             Translations: 翻译
             Model audit: 模型审核
         - locale: ja
@@ -245,19 +280,24 @@ plugins:
             First generation: 最初の生成
             Guides: ガイド
             Overview: 概要
-            Inference: 推論
+            TTS inference: TTS 推論
+            Speech recognition: 音声認識
+            Voice activity detection: 音声区間検出
             Data preparation: データ準備
+            ASR and VAD data: ASR と VAD のデータ
             Training: 学習
             Notebooks: ノートブック
             Models: モデル
-            Model catalog: モデルカタログ
-            Training support: 学習サポート
+            TTS model catalog: TTS モデルカタログ
+            ASR and VAD support: ASR と VAD のサポート
+            TTS training support: TTS 学習サポート
             Architecture: アーキテクチャ
             Library architecture: ライブラリアーキテクチャ
             Trainer architecture: トレーナーアーキテクチャ
             API Reference: API リファレンス
             Contributing: コントリビューション
-            Add a model: モデルを追加
+            Add a TTS model: TTS モデルを追加
+            Add an ASR or VAD provider: ASR または VAD プロバイダーを追加
             Translations: 翻訳
             Model audit: モデル監査
         - locale: ko
@@ -270,19 +310,24 @@ plugins:
             First generation: 첫 음성 생성
             Guides: 가이드
             Overview: 개요
-            Inference: 추론
+            TTS inference: TTS 추론
+            Speech recognition: 음성 인식
+            Voice activity detection: 음성 활동 감지
             Data preparation: 데이터 준비
+            ASR and VAD data: ASR 및 VAD 데이터
             Training: 학습
             Notebooks: 노트북
             Models: 모델
-            Model catalog: 모델 카탈로그
-            Training support: 학습 지원
+            TTS model catalog: TTS 모델 카탈로그
+            ASR and VAD support: ASR 및 VAD 지원
+            TTS training support: TTS 학습 지원
             Architecture: 아키텍처
             Library architecture: 라이브러리 아키텍처
             Trainer architecture: 트레이너 아키텍처
             API Reference: API 레퍼런스
             Contributing: 기여하기
-            Add a model: 모델 추가
+            Add a TTS model: TTS 모델 추가
+            Add an ASR or VAD provider: ASR 또는 VAD 공급자 추가
             Translations: 번역
             Model audit: 모델 감사
         - locale: ru
@@ -295,19 +340,24 @@ plugins:
             First generation: Первый синтез
             Guides: Руководства
             Overview: Обзор
-            Inference: Инференс
+            TTS inference: TTS-инференс
+            Speech recognition: Распознавание речи
+            Voice activity detection: Детекция речевой активности
             Data preparation: Подготовка данных
+            ASR and VAD data: Данные ASR и VAD
             Training: Обучение
             Notebooks: Ноутбуки
             Models: Модели
-            Model catalog: Каталог моделей
-            Training support: Поддержка обучения
+            TTS model catalog: Каталог моделей TTS
+            ASR and VAD support: Поддержка ASR и VAD
+            TTS training support: Поддержка обучения TTS
             Architecture: Архитектура
             Library architecture: Архитектура библиотеки
             Trainer architecture: Архитектура тренера
             API Reference: Справочник API
             Contributing: Участие в разработке
-            Add a model: Добавить модель
+            Add a TTS model: Добавить модель TTS
+            Add an ASR or VAD provider: Добавить провайдер ASR или VAD
             Translations: Переводы
             Model audit: Аудит моделей
         - locale: ar
@@ -320,19 +370,24 @@ plugins:
             First generation: أول توليد صوتي
             Guides: الأدلة
             Overview: نظرة عامة
-            Inference: الاستدلال
+            TTS inference: استدلال تحويل النص إلى كلام
+            Speech recognition: التعرّف على الكلام
+            Voice activity detection: اكتشاف النشاط الصوتي
             Data preparation: إعداد البيانات
+            ASR and VAD data: بيانات ASR وVAD
             Training: التدريب
             Notebooks: دفاتر الملاحظات
             Models: النماذج
-            Model catalog: دليل النماذج
-            Training support: دعم التدريب
+            TTS model catalog: دليل نماذج TTS
+            ASR and VAD support: دعم ASR وVAD
+            TTS training support: دعم تدريب TTS
             Architecture: البنية
             Library architecture: بنية المكتبة
             Trainer architecture: بنية المدرّب
             API Reference: مرجع API
             Contributing: المساهمة
-            Add a model: إضافة نموذج
+            Add a TTS model: إضافة نموذج TTS
+            Add an ASR or VAD provider: إضافة موفّر ASR أو VAD
             Translations: الترجمات
             Model audit: تدقيق النماذج
 

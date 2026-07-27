@@ -8,6 +8,10 @@ There is no universal TTS batch. VoiceHub keeps source records simple, then
 delegates semantic target construction to the selected model's dataset,
 processor, collator, or specialized training adapter.
 
+This page covers TTS manifests and targets. For transcript manifests,
+speech-region annotations, CTC/seq2seq/transducer batches, and clip/frame VAD
+labels, use the [ASR and VAD data guide](speech-data.md).
+
 <ol class="vh-process vh-process--six" role="list" aria-label="Data preparation workflow">
   <li>
     <span class="vh-process__number" aria-hidden="true">01</span>

@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from voicehub.dependencies import import_optional
-from voicehub.modeling_outputs import TTSTrainingOutput
-from voicehub.training.collators import DataCollatorForTTSTraining
+from voicehub.modeling_outputs import SpeechTrainingOutput, TTSTrainingOutput
+from voicehub.tasks import SpeechTask
+from voicehub.training.collators import DataCollatorForAudioTraining
 from voicehub.training.contracts import TrainingContext, TrainingPhaseKind, TrainingPhaseSpec, TrainingSupport
 from voicehub.training.specs import ModelTrainingSpec
 
@@ -45,7 +46,7 @@ class BaseTrainingAdapter:
         self._component_by_path: dict[str, Any] = {}
         self._current_context: TrainingContext | None = None
         self._registered_specialization = False
-        self.data_collator = DataCollatorForTTSTraining(field_schemas=self.spec.field_schemas, )
+        self.data_collator = DataCollatorForAudioTraining(field_schemas=self.spec.field_schemas, )
 
     @property
     def model_type(self) -> str:
@@ -212,6 +213,7 @@ class BaseTrainingAdapter:
         return {
             "format_version": 1,
             "model_type": self.model_type,
+            "task": self.spec.task.value,
             "family": self.spec.family_name,
             "support": self.spec.support.value,
             "recipe_id": self.recipe_id,
@@ -327,6 +329,7 @@ class BaseTrainingAdapter:
             "recipe_id": self.recipe_id,
             "recipe_version": self.RECIPE_VERSION,
             "model_type": self.model_type,
+            "task": self.spec.task.value,
             "family": self.spec.family_name,
             "support": self.spec.support.value,
             "recipe_kind": self.spec.recipe_kind.value,
@@ -1141,11 +1144,15 @@ class BaseTrainingAdapter:
         del save_directory
 
     def create_dataset(self, records, **kwargs):
-        """Build a source-native dataset when the recipe provides one."""
-        del records, kwargs
-        raise NotImplementedError(
-            f"{self.model_type!r} does not provide a built-in raw-data "
-            "dataset. Pass a preprocessed dataset and data collator.")
+        """Build a dependency-light dataset for a portable training recipe."""
+        if not self.spec.is_turnkey:
+            raise NotImplementedError(
+                f"{self.model_type!r} requires its source-native dataset "
+                "pipeline. Use the upstream training recipe or register a "
+                "specialized adapter.")
+        from voicehub.training.datasets import SpeechDataset
+
+        return SpeechDataset(records, **kwargs)
 
     def on_training_phase_start(self, context: TrainingContext) -> None:
         """Hook invoked immediately before one phase forward."""
@@ -1153,8 +1160,8 @@ class BaseTrainingAdapter:
     def on_training_phase_end(
         self,
         context: TrainingContext,
-        output: TTSTrainingOutput,
-    ) -> TTSTrainingOutput:
+        output: SpeechTrainingOutput,
+    ) -> SpeechTrainingOutput:
         """Hook invoked after a phase output has been normalized."""
         return output
 
@@ -1165,7 +1172,7 @@ class BaseTrainingAdapter:
         step: int,
         epoch: float | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> tuple[TTSTrainingOutput, ...]:
+    ) -> tuple[SpeechTrainingOutput, ...]:
         """Execute all phases due at ``step`` in declared order."""
         flattened = self.flatten_model_inputs(inputs)
         outputs = []
@@ -1183,7 +1190,7 @@ class BaseTrainingAdapter:
     def compute_step(
         self,
         context: TrainingContext,
-    ) -> TTSTrainingOutput:
+    ) -> SpeechTrainingOutput:
         """Execute one native recipe step.
 
         Specialized adapters normally override
@@ -1193,7 +1200,7 @@ class BaseTrainingAdapter:
         """
         return self.execute_training_phase(context)
 
-    def __call__(self, **inputs) -> TTSTrainingOutput:
+    def __call__(self, **inputs) -> SpeechTrainingOutput:
         """Execute one phase selected by the ``training_phase`` control
         field."""
         self.setup()
@@ -1240,7 +1247,7 @@ class BaseTrainingAdapter:
     def execute_training_phase(
         self,
         context: TrainingContext,
-    ) -> TTSTrainingOutput:
+    ) -> SpeechTrainingOutput:
         """Prepare, invoke, and normalize one backend phase."""
         self.setup()
         if not isinstance(context, TrainingContext):
@@ -1315,7 +1322,9 @@ class BaseTrainingAdapter:
                 "training_phase": phase.name,
                 "optimizer_names": phase.optimizer_names,
             })
-            normalized = TTSTrainingOutput(
+            output_class = (
+                TTSTrainingOutput if self.spec.task is SpeechTask.TEXT_TO_SPEECH else SpeechTrainingOutput)
+            normalized = output_class(
                 loss=loss,
                 logits=predictions,
                 audio_values=self._get_value(outputs, "audio_values"),
@@ -1744,6 +1753,286 @@ class Seq2SeqTrainingAdapter(BaseTrainingAdapter):
         if fallback not in ("cross_entropy", "ce"):
             raise ValueError(f"Unsupported sequence fallback objective {fallback!r}.")
         return self._cross_entropy(predictions, labels, shift=False)
+
+
+class SpeechSeq2SeqTrainingAdapter(Seq2SeqTrainingAdapter):
+    """Speech encoder-decoder adapter with an optional token CE fallback.
+
+    Backend-native losses are still extracted before this fallback is
+    considered. A profile should only enable ``cross_entropy`` when its
+    decoder logits and labels already share the same token timebase.
+    """
+
+
+class UpstreamNativeTrainingAdapter(BaseTrainingAdapter):
+    """Require the integrated source runtime to return its native objective.
+
+    This adapter is the safe extension point for objectives whose
+    alignment, blank handling, topology, or auxiliary terms cannot be
+    inferred from a pair of generic tensors.
+    """
+
+    objective_name = "upstream-native"
+
+    def compute_objective(self, predictions, labels):
+        del predictions, labels
+        raise ValueError(
+            f"{self.objective_name} training requires a backend-native loss. "
+            "The source model must return a scalar loss from forward(), or a "
+            "specialized training adapter must implement the complete native "
+            "objective.")
+
+
+class CTCTrainingAdapter(UpstreamNativeTrainingAdapter):
+    """CTC adapter that preserves backend blank and alignment semantics."""
+
+    objective_name = "CTC"
+
+
+class RNNTTrainingAdapter(UpstreamNativeTrainingAdapter):
+    """RNN-T adapter that requires the backend's transducer objective."""
+
+    objective_name = "RNN-T"
+
+
+class TDTTrainingAdapter(UpstreamNativeTrainingAdapter):
+    """Token-and-duration transducer adapter requiring its native objective."""
+
+    objective_name = "TDT"
+
+
+class AudioClassificationTrainingAdapter(BaseTrainingAdapter):
+    """Audio classifier with explicit CE/BCE-with-logits fallbacks.
+
+    Native losses are preferred by :class:`BaseTrainingAdapter`. The
+    fallback is only used when a profile explicitly declares
+    ``classification``, ``cross_entropy``, or ``binary_cross_entropy``.
+    Class logits must use the final dimension. An optional
+    ``loss_mask``, ``label_mask``, ``labels_mask``, ``frame_mask``, or
+    ``valid_frames`` tensor excludes padded examples or frames from the
+    fallback loss.
+    """
+
+    _MASK_NAMES = (
+        "loss_mask",
+        "label_mask",
+        "labels_mask",
+        "frame_mask",
+        "valid_frames",
+    )
+    _AUTO_OBJECTIVES = ("auto", "classification")
+    _CE_OBJECTIVES = ("ce", "cross_entropy")
+    _BCE_OBJECTIVES = (
+        "bce",
+        "binary_cross_entropy",
+        "binary_cross_entropy_with_logits",
+    )
+
+    def compute_phase_objective(
+        self,
+        predictions,
+        labels,
+        context: TrainingContext,
+    ):
+        if context.phase.fallback_objective is None:
+            return super().compute_phase_objective(
+                predictions,
+                labels,
+                context,
+            )
+        return self._classification_loss(
+            predictions,
+            labels,
+            objective=context.phase.fallback_objective,
+            mask=self._find_explicit_loss_mask(context),
+        )
+
+    def compute_objective(self, predictions, labels):
+        return self._classification_loss(
+            predictions,
+            labels,
+            objective=self.current_phase.fallback_objective,
+            mask=None,
+        )
+
+    @classmethod
+    def _find_explicit_loss_mask(cls, context: TrainingContext):
+        names = list(cls._MASK_NAMES)
+        names.extend(f"{label_name}_mask" for label_name in context.phase.label_names)
+        masks = [(name, context.inputs[name]) for name in dict.fromkeys(names)
+                 if name in context.inputs and context.inputs[name] is not None]
+        if len(masks) > 1:
+            provided = ", ".join(name for name, _ in masks)
+            raise ValueError(
+                "Classification fallback received multiple explicit loss "
+                f"masks ({provided}). Provide exactly one.")
+        return masks[0][1] if masks else None
+
+    def _classification_loss(
+        self,
+        predictions,
+        labels,
+        *,
+        objective,
+        mask,
+    ):
+        self._require_predictions_and_labels(predictions, labels)
+        if not isinstance(objective, str) or not objective:
+            raise ValueError("Classification fallback requires an explicit objective.")
+        objective = objective.strip().lower().replace("-", "_")
+        if objective in self._AUTO_OBJECTIVES:
+            objective = (
+                "binary_cross_entropy" if self._looks_like_binary_or_multilabel(
+                    predictions,
+                    labels,
+                ) else "cross_entropy")
+        if objective in self._CE_OBJECTIVES:
+            return self._classification_cross_entropy(
+                predictions,
+                labels,
+                mask=mask,
+            )
+        if objective in self._BCE_OBJECTIVES:
+            return self._classification_binary_cross_entropy(
+                predictions,
+                labels,
+                mask=mask,
+            )
+        supported = ("classification, cross_entropy, or binary_cross_entropy")
+        raise ValueError(
+            f"Unsupported classification fallback objective {objective!r}. "
+            f"Expected {supported}.")
+
+    @staticmethod
+    def _looks_like_binary_or_multilabel(predictions, labels) -> bool:
+        prediction_shape = tuple(predictions.shape)
+        label_shape = tuple(labels.shape)
+        return (
+            prediction_shape == label_shape or
+            predictions.ndim == labels.ndim + 1 and predictions.shape[-1] == 1)
+
+    @staticmethod
+    def _classification_cross_entropy(predictions, labels, *, mask):
+        torch = import_optional(
+            "torch",
+            model_type="Trainer",
+            install_extra="training",
+        )
+        if predictions.ndim < 2:
+            raise ValueError(
+                "Classification cross entropy requires rank-2+ logits with "
+                "classes on the final dimension.")
+        expected_shape = tuple(predictions.shape[:-1])
+        if tuple(labels.shape) != expected_shape:
+            raise ValueError(
+                "Classification cross entropy requires label shape "
+                f"{expected_shape}, but received {tuple(labels.shape)}. "
+                "Align frame labels to the model output timebase before "
+                "collation.")
+
+        is_floating_point = getattr(labels, "is_floating_point", None)
+        if callable(is_floating_point) and is_floating_point():
+            raise TypeError(
+                "Classification cross entropy requires integer class-index "
+                "labels. Use binary_cross_entropy for floating-point binary "
+                "or multi-label targets.")
+        targets = labels.to(device=predictions.device).long()
+        valid = targets.ne(-100)
+        if mask is not None:
+            valid = valid & AudioClassificationTrainingAdapter._expanded_mask(
+                mask,
+                targets,
+                torch=torch,
+            )
+        if not bool(valid.any().item()):
+            raise ValueError("Classification fallback received no valid labels after "
+                             "masking.")
+        losses = torch.nn.functional.cross_entropy(
+            predictions.reshape(-1, predictions.shape[-1]),
+            targets.reshape(-1),
+            ignore_index=-100,
+            reduction="none",
+        ).reshape(targets.shape)
+        return losses.masked_select(valid).mean()
+
+    @staticmethod
+    def _classification_binary_cross_entropy(
+        predictions,
+        labels,
+        *,
+        mask,
+    ):
+        torch = import_optional(
+            "torch",
+            model_type="Trainer",
+            install_extra="training",
+        )
+        logits = predictions
+        targets = labels
+        if logits.ndim == targets.ndim + 1 and logits.shape[-1] == 1:
+            logits = logits.squeeze(-1)
+        elif targets.ndim == logits.ndim + 1 and targets.shape[-1] == 1:
+            targets = targets.squeeze(-1)
+        if tuple(logits.shape) != tuple(targets.shape):
+            raise ValueError(
+                "Binary or multi-label classification requires logits and "
+                "labels with equal shapes, allowing only a trailing singleton "
+                f"class dimension. Received {tuple(predictions.shape)} and "
+                f"{tuple(labels.shape)}.")
+
+        targets = targets.to(device=logits.device, dtype=logits.dtype)
+        valid = targets.ne(-100)
+        if mask is not None:
+            valid = valid & AudioClassificationTrainingAdapter._expanded_mask(
+                mask,
+                targets,
+                torch=torch,
+            )
+        if not bool(valid.any().item()):
+            raise ValueError("Classification fallback received no valid labels after "
+                             "masking.")
+        safe_targets = torch.where(
+            valid,
+            targets,
+            torch.zeros((), device=targets.device, dtype=targets.dtype),
+        )
+        losses = torch.nn.functional.binary_cross_entropy_with_logits(
+            logits,
+            safe_targets,
+            reduction="none",
+        )
+        valid_targets = targets.masked_select(valid)
+        targets_are_finite = bool(torch.isfinite(valid_targets).all().item())
+        targets_are_bounded = not bool(((valid_targets < 0) | (valid_targets > 1)).any().item())
+        if not targets_are_finite or not targets_are_bounded:
+            raise ValueError(
+                "Binary cross entropy requires finite target values in "
+                "[0, 1] for every unmasked label.")
+        return losses.masked_select(valid).mean()
+
+    @staticmethod
+    def _expanded_mask(mask, target, *, torch):
+        if not isinstance(mask, torch.Tensor):
+            try:
+                mask = torch.as_tensor(mask, device=target.device)
+            except (TypeError, ValueError) as exc:
+                raise TypeError("Classification loss masks must be tensor-like.") from exc
+        else:
+            mask = mask.to(device=target.device)
+        mask = mask.bool()
+        while mask.ndim < target.ndim:
+            mask = mask.unsqueeze(-1)
+        try:
+            return mask.expand(target.shape)
+        except RuntimeError as exc:
+            raise ValueError(
+                f"Classification loss mask shape {tuple(mask.shape)} cannot "
+                f"broadcast to label shape {tuple(target.shape)}.") from exc
+
+
+class FrameClassificationTrainingAdapter(
+        AudioClassificationTrainingAdapter, ):
+    """Frame classifier using the classification fallback and explicit mask."""
 
 
 class FlowMatchingTrainingAdapter(BaseTrainingAdapter):

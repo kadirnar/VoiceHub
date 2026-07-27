@@ -17,6 +17,12 @@ At the current 31-model registry revision:
 Read the [model-by-model matrix](../models/training-support.md) before choosing
 a checkpoint or dataset format.
 
+This page's counts and examples describe TTS integrations. ASR and VAD use the
+same trainer orchestration with additional CTC, speech-seq2seq, RNN-T, TDT,
+audio-classification, frame-classification, and upstream-native adapters. See
+the [ASR/VAD matrix](../models/asr-vad-support.md) and
+[speech data guide](speech-data.md).
+
 ## Understand the support levels
 
 | Level            | Guarantee                                                                                                                |

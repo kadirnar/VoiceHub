@@ -1,4 +1,8 @@
-# Model catalog
+# TTS model catalog
+
+This page covers text-to-speech backends. For automatic speech recognition
+and voice activity detection, see the
+[ASR and VAD support matrix](asr-vad-support.md).
 
 VoiceHub ships the model implementation source inside its own wheel. Extras
 install only general runtimes such as PyTorch, Transformers, phonemizers, and

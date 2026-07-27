@@ -2,15 +2,27 @@
 
 from voicehub.training.adapters import (
     AcousticTrainingAdapter,
+    AudioClassificationTrainingAdapter,
     BaseTrainingAdapter,
     CausalLMTrainingAdapter,
     CompositeTrainingAdapter,
+    CTCTrainingAdapter,
     FlowMatchingTrainingAdapter,
+    FrameClassificationTrainingAdapter,
+    RNNTTrainingAdapter,
     Seq2SeqTrainingAdapter,
+    SpeechSeq2SeqTrainingAdapter,
+    TDTTrainingAdapter,
+    UpstreamNativeTrainingAdapter,
     VITSTrainingAdapter,
 )
 from voicehub.training.auto import AutoTrainingAdapter
-from voicehub.training.collators import DataCollatorForTTSTraining, TTSFieldSchema
+from voicehub.training.collators import (
+    AudioFieldSchema,
+    DataCollatorForAudioTraining,
+    DataCollatorForTTSTraining,
+    TTSFieldSchema,
+)
 from voicehub.training.contracts import (
     TrainingContext,
     TrainingPhaseKind,
@@ -18,8 +30,10 @@ from voicehub.training.contracts import (
     TrainingRecipeKind,
     TrainingSupport,
 )
+from voicehub.training.datasets import SpeechDataset
 from voicehub.training.optimization import OptimizerBundle, SchedulerBundle
 from voicehub.training.specs import (
+    ALL_MODEL_TRAINING_SPECS,
     MODEL_TRAINING_SPECS,
     ModelTrainingSpec,
     TrainingFamily,
@@ -41,17 +55,27 @@ from voicehub.training.strategy import (
 
 __all__ = [
     "AcousticTrainingAdapter",
+    "AudioClassificationTrainingAdapter",
+    "AudioFieldSchema",
+    "ALL_MODEL_TRAINING_SPECS",
     "AutoTrainingAdapter",
     "BaseTrainingAdapter",
     "CausalLMTrainingAdapter",
     "CompositeTrainingAdapter",
+    "CTCTrainingAdapter",
+    "DataCollatorForAudioTraining",
     "DataCollatorForTTSTraining",
     "FlowMatchingTrainingAdapter",
+    "FrameClassificationTrainingAdapter",
     "MODEL_TRAINING_SPECS",
     "ModelTrainingSpec",
     "OptimizerBundle",
+    "RNNTTrainingAdapter",
     "Seq2SeqTrainingAdapter",
     "SchedulerBundle",
+    "SpeechSeq2SeqTrainingAdapter",
+    "SpeechDataset",
+    "TDTTrainingAdapter",
     "TrainingFamily",
     "TrainingContext",
     "TrainingPhaseKind",
@@ -61,6 +85,7 @@ __all__ = [
     "TrainingSupport",
     "TTSFieldSchema",
     "TorchTrainingStrategy",
+    "UpstreamNativeTrainingAdapter",
     "VITSTrainingAdapter",
     "get_training_strategy",
     "get_training_spec",
