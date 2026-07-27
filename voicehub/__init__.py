@@ -1,11 +1,20 @@
 __version__ = "0.3.0"
 
-from voicehub.auto import AutoConfig, AutoModelForTextToSpeech, AutoProcessor
+from voicehub.audio import AudioInput, load_audio
+from voicehub.audio_modeling_utils import PreTrainedASRModel, PreTrainedAudioModel, PreTrainedVADModel
+from voicehub.auto import (
+    AutoConfig,
+    AutoModelForSpeechRecognition,
+    AutoModelForTextToSpeech,
+    AutoModelForVoiceActivityDetection,
+    AutoProcessor,
+)
 from voicehub.automodel import AutoInferenceModel
 from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.data_collator import DefaultDataCollator, default_data_collator
 from voicehub.errors import OptionalDependencyError, SourceLicenseError, UnknownModelError, VoiceHubError
 from voicehub.generation_configuration import TTSGenerationConfig
+from voicehub.inference_configuration import ASRInferenceConfig, SpeechInferenceConfig, VADInferenceConfig
 from voicehub.inference_strategy import (
     EagerInferenceStrategy,
     InferenceStrategy,
@@ -14,11 +23,30 @@ from voicehub.inference_strategy import (
     register_inference_strategy,
     unregister_inference_strategy,
 )
-from voicehub.modeling_outputs import TTSOutput, TTSTrainingOutput
-from voicehub.modeling_utils import PreTrainedTTSModel
+from voicehub.modeling_outputs import (
+    ASROutput,
+    ASRSegment,
+    ASRWord,
+    SpeechSegment,
+    SpeechTrainingOutput,
+    TTSOutput,
+    TTSTrainingOutput,
+    VADOutput,
+    VADSegment,
+)
+from voicehub.modeling_utils import PreTrainedSpeechModel, PreTrainedTTSModel
 from voicehub.policies import ModelLicenseSpec
-from voicehub.processing_utils import BatchFeature, VoiceHubProcessor
-from voicehub.registry import ModelSpec
+from voicehub.processing_utils import AudioProcessor, BatchFeature, VoiceHubProcessor
+from voicehub.registry import (
+    ModelSpec,
+    get_model_spec,
+    list_model_specs,
+    register_model_alias,
+    register_model_spec,
+    unregister_model_alias,
+    unregister_model_spec,
+)
+from voicehub.tasks import SpeechTask
 from voicehub.trainer import Trainer
 from voicehub.trainer_callback import EarlyStoppingCallback, TrainerCallback, TrainerControl, TrainerState
 from voicehub.trainer_utils import (
@@ -31,17 +59,27 @@ from voicehub.trainer_utils import (
     set_seed,
 )
 from voicehub.training import (
+    ALL_MODEL_TRAINING_SPECS,
     AcousticTrainingAdapter,
+    AudioClassificationTrainingAdapter,
+    AudioFieldSchema,
     AutoTrainingAdapter,
     BaseTrainingAdapter,
     CausalLMTrainingAdapter,
     CompositeTrainingAdapter,
+    CTCTrainingAdapter,
+    DataCollatorForAudioTraining,
     DataCollatorForTTSTraining,
     FlowMatchingTrainingAdapter,
+    FrameClassificationTrainingAdapter,
     ModelTrainingSpec,
     OptimizerBundle,
+    RNNTTrainingAdapter,
     SchedulerBundle,
     Seq2SeqTrainingAdapter,
+    SpeechDataset,
+    SpeechSeq2SeqTrainingAdapter,
+    TDTTrainingAdapter,
     TorchTrainingStrategy,
     TrainingContext,
     TrainingFamily,
@@ -51,6 +89,7 @@ from voicehub.training import (
     TrainingStrategy,
     TrainingSupport,
     TTSFieldSchema,
+    UpstreamNativeTrainingAdapter,
     VITSTrainingAdapter,
     get_training_spec,
     get_training_strategy,
@@ -67,21 +106,35 @@ from voicehub.training_args import TrainingArguments
 
 __all__ = [
     "AcousticTrainingAdapter",
+    "ALL_MODEL_TRAINING_SPECS",
+    "ASRInferenceConfig",
+    "ASROutput",
+    "ASRSegment",
+    "ASRWord",
+    "AudioClassificationTrainingAdapter",
+    "AudioFieldSchema",
+    "AudioInput",
+    "AudioProcessor",
     "AutoConfig",
     "AutoInferenceModel",
+    "AutoModelForSpeechRecognition",
     "AutoModelForTextToSpeech",
+    "AutoModelForVoiceActivityDetection",
     "AutoProcessor",
     "AutoTrainingAdapter",
     "BaseTrainingAdapter",
     "BatchFeature",
     "CausalLMTrainingAdapter",
     "CompositeTrainingAdapter",
+    "CTCTrainingAdapter",
+    "DataCollatorForAudioTraining",
     "DataCollatorForTTSTraining",
     "DefaultDataCollator",
     "EarlyStoppingCallback",
     "EagerInferenceStrategy",
     "EvalPrediction",
     "FlowMatchingTrainingAdapter",
+    "FrameClassificationTrainingAdapter",
     "IntervalStrategy",
     "InferenceStrategy",
     "ModelLicenseSpec",
@@ -90,11 +143,23 @@ __all__ = [
     "OptimizerBundle",
     "OptionalDependencyError",
     "PredictionOutput",
+    "PreTrainedASRModel",
+    "PreTrainedAudioModel",
+    "PreTrainedSpeechModel",
     "PreTrainedTTSModel",
+    "PreTrainedVADModel",
+    "RNNTTrainingAdapter",
     "SchedulerType",
     "SchedulerBundle",
     "Seq2SeqTrainingAdapter",
     "SourceLicenseError",
+    "SpeechInferenceConfig",
+    "SpeechSegment",
+    "SpeechSeq2SeqTrainingAdapter",
+    "SpeechDataset",
+    "SpeechTask",
+    "SpeechTrainingOutput",
+    "TDTTrainingAdapter",
     "TTSGenerationConfig",
     "TTSFieldSchema",
     "TTSOutput",
@@ -114,25 +179,36 @@ __all__ = [
     "TrainingSupport",
     "TrainOutput",
     "UnknownModelError",
+    "UpstreamNativeTrainingAdapter",
+    "VADInferenceConfig",
+    "VADOutput",
+    "VADSegment",
     "VoiceHubConfig",
     "VoiceHubError",
     "VoiceHubProcessor",
     "VITSTrainingAdapter",
     "__version__",
     "default_data_collator",
+    "get_model_spec",
     "get_last_checkpoint",
     "get_inference_strategy",
     "get_training_strategy",
     "get_training_spec",
     "list_inference_strategies",
+    "list_model_specs",
     "list_training_specs",
     "list_training_strategies",
+    "load_audio",
     "register_inference_strategy",
+    "register_model_alias",
+    "register_model_spec",
     "register_training_alias",
     "register_training_spec",
     "register_training_strategy",
     "set_seed",
     "unregister_inference_strategy",
+    "unregister_model_alias",
+    "unregister_model_spec",
     "unregister_training_alias",
     "unregister_training_spec",
     "unregister_training_strategy",

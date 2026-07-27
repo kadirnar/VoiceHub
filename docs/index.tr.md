@@ -54,21 +54,20 @@ description: Birleşik TTS çıkarımı, veri hazırlama ve mimariye duyarlı in
 
 ## VoiceHub nedir?
 
-VoiceHub, metinden sese entegrasyonlarını ortak yapılandırma, işlemci, model,
-üretim çıktısı ve trainer API'leri üzerinden sunar. Model uygulamaları
+VoiceHub; TTS, otomatik konuşma tanıma ve ses etkinliği algılama modellerini
+ortak yapılandırma, işlemci, model, çıktı ve trainer API'leri üzerinden sunar. Model uygulamaları
 mimarilerinin gereksinimlerini korur: codec dil modelleri, diziden diziye
 sistemler, flow-matching ve difüzyon modelleri, akustik modeller, VITS tarzı
 çekişmeli sistemler ve bileşik pipeline'lar kendi koşullandırma yöntemlerini,
 amaç fonksiyonlarını, parametre sahipliğini ve dışa aktarma kurallarını korur.
 
-Registry'de **31 çıkarım entegrasyonu** bulunur. Bunların **18'i belgelenmiş
-bir ince ayar yoluna** sahiptir ve **6'sı standart ham kayıtları** doğrudan
-kabul eder. İnce ayar desteği, kontrol noktasına ve çalışma ortamına özeldir;
-bir çıkarım entegrasyonunun bulunması, mevcut VoiceHub model çıktısının
-türevlenebilir olduğu anlamına gelmez. Uygun entegrasyonu seçmek için
-[model kataloğunu](models/index.md) ve
-[kontrol noktasına duyarlı eğitim matrisini](models/training-support.md)
-kullanın.
+Registry **31 TTS entegrasyonu**, **9 ASR sağlayıcısı** ve **7 VAD
+sağlayıcısı** içerir. İnce ayar desteği kontrol noktasına ve çalışma ortamına
+özeldir; bir çıkarım entegrasyonunun bulunması, mevcut VoiceHub model
+çıktısının türevlenebilir olduğu anlamına gelmez. Uygun entegrasyonu seçmek
+için [TTS model kataloğunu](models/index.md),
+[TTS eğitim matrisini](models/training-support.md) ve
+[ASR/VAD destek matrisini](models/asr-vad-support.md) kullanın.
 
 Model kaynak kodu VoiceHub ile birlikte paketlenir. İsteğe bağlı extras,
 seçilen çalışma ortamının bağımlılıklarını kurar; kontrol noktası ağırlıkları

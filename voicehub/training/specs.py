@@ -1,4 +1,4 @@
-"""Declarative, framework-lazy training profiles for TTS architectures."""
+"""Declarative, framework-lazy training profiles for audio architectures."""
 
 from __future__ import annotations
 
@@ -6,11 +6,13 @@ import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from threading import RLock
 from types import MappingProxyType
 from typing import Any
 
 from voicehub.errors import UnknownModelError
 from voicehub.registry import get_model_spec, normalize_model_type
+from voicehub.tasks import SpeechTask
 from voicehub.training.contracts import (
     TrainingContext,
     TrainingPhaseKind,
@@ -34,6 +36,13 @@ class TrainingFamily(str, Enum):
     ACOUSTIC = "acoustic-regression"
     VITS = "vits"
     COMPOSITE = "composite"
+    CTC = "ctc"
+    SPEECH_SEQ2SEQ = "speech-sequence-to-sequence"
+    RNNT = "rnnt"
+    TDT = "tdt"
+    AUDIO_CLASSIFICATION = "audio-classification"
+    FRAME_CLASSIFICATION = "frame-classification"
+    UPSTREAM_NATIVE = "upstream-native"
 
     def __str__(self) -> str:
         return self.value
@@ -111,6 +120,7 @@ class ModelTrainingSpec:
     allow_module_discovery: bool = False
     training_default_model_name_or_path: str | None = None
     field_schemas: Mapping[str, Any] = field(default_factory=dict)
+    task: SpeechTask | str = SpeechTask.TEXT_TO_SPEECH
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_type, str) or not self.model_type.strip():
@@ -119,6 +129,11 @@ class ModelTrainingSpec:
             self,
             "model_type",
             normalize_model_type(self.model_type),
+        )
+        object.__setattr__(
+            self,
+            "task",
+            SpeechTask.coerce(self.task),
         )
 
         family = self.family
@@ -268,14 +283,22 @@ class ModelTrainingSpec:
     def _legacy_fallback_objective(self) -> str | None:
         if self.family is TrainingFamily.CAUSAL_LM:
             return "causal_cross_entropy"
-        if self.family is TrainingFamily.SEQ2SEQ:
+        if self.family in (
+                TrainingFamily.SEQ2SEQ,
+                TrainingFamily.SPEECH_SEQ2SEQ,
+        ):
             return "cross_entropy"
         if self.family is TrainingFamily.ACOUSTIC:
             return self.regression_loss
+        if self.family in (
+                TrainingFamily.AUDIO_CLASSIFICATION,
+                TrainingFamily.FRAME_CLASSIFICATION,
+        ):
+            return "classification"
         if self.family is TrainingFamily.COMPOSITE:
             return "auto"
-        # A velocity/flow target cannot be inferred from an arbitrary label
-        # tensor. Flow profiles must opt into a fallback explicitly.
+        # Flow, CTC, RNN-T, TDT, and source-native objectives cannot be
+        # reconstructed safely from an arbitrary prediction/label pair.
         return None
 
     @property
@@ -364,6 +387,7 @@ def _profile(
     model_type: str,
     family: TrainingFamily,
     *,
+    task: SpeechTask | str = SpeechTask.TEXT_TO_SPEECH,
     module_paths: tuple[str, ...] | None = None,
     component_paths: tuple[str, ...] = (),
     label_names: tuple[str, ...] | None = None,
@@ -388,6 +412,7 @@ def _profile(
     return ModelTrainingSpec(
         model_type=model_type,
         family=family,
+        task=task,
         module_paths=module_paths,
         component_paths=component_paths,
         label_names=label_names or ModelTrainingSpec.label_names,
@@ -1015,22 +1040,218 @@ _BUILTIN_TRAINING_SPECS = (
     ),
 )
 
+_RAW_AUDIO_FIELD_SCHEMAS = {
+    "audio": {
+        "sequence_dim": -1,
+        "padding_value": 0.0,
+        "length_field": "audio_lengths",
+    },
+    "input_values": {
+        "sequence_dim": -1,
+        "padding_value": 0.0,
+        "length_field": "input_lengths",
+        "mask_field": "attention_mask",
+    },
+    "input_features": {
+        "sequence_dim": -1,
+        "padding_value": 0.0,
+        "length_field": "feature_lengths",
+    },
+}
+
+_BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
+    _profile(
+        "asr_transformers",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+        module_paths=("model", ),
+        component_paths=("model", ),
+        label_names=("labels", ),
+        source_entrypoints=(
+            "transformers.AutoModelForCTC",
+            "transformers.AutoModelForSpeechSeq2Seq",
+            "transformers.AutoModelForRNNT",
+            "transformers.AutoModelForTDT",
+        ),
+        native_training=True,
+        support=TrainingSupport.NATIVE,
+        phases=(
+            _phase(
+                "speech_recognition",
+                component_paths=("model", ),
+                optimizer_names=("model", ),
+                label_names=("labels", ),
+                prediction_keys=("logits", ),
+                loss_keys=("loss", ),
+            ), ),
+        default_phase="speech_recognition",
+        field_schemas=_RAW_AUDIO_FIELD_SCHEMAS,
+    ),
+    _profile(
+        "asr_faster_whisper",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+        support=TrainingSupport.INFERENCE_ONLY,
+    ),
+    _profile(
+        "asr_whisperx",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+        support=TrainingSupport.INFERENCE_ONLY,
+    ),
+    _profile(
+        "asr_openai_whisper",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+        support=TrainingSupport.INFERENCE_ONLY,
+    ),
+    _profile(
+        "asr_nemo",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+        source_entrypoints=(
+            "nemo.collections.asr.models.ASRModel",
+            "lightning.pytorch.Trainer",
+        ),
+        native_training=True,
+        support=TrainingSupport.CUSTOM,
+    ),
+    _profile(
+        "asr_speechbrain",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+        source_entrypoints=("speechbrain.Brain", ),
+        native_training=True,
+        support=TrainingSupport.CUSTOM,
+    ),
+    _profile(
+        "asr_funasr",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+        source_entrypoints=("funasr.train", ),
+        native_training=True,
+        support=TrainingSupport.CUSTOM,
+    ),
+    _profile(
+        "asr_espnet",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+        source_entrypoints=("espnet2.tasks.asr.ASRTask", ),
+        native_training=True,
+        support=TrainingSupport.CUSTOM,
+    ),
+    _profile(
+        "asr_wenet",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+        source_entrypoints=("wenet.bin.train", ),
+        native_training=True,
+        support=TrainingSupport.CUSTOM,
+    ),
+    _profile(
+        "vad_transformers",
+        TrainingFamily.AUDIO_CLASSIFICATION,
+        task=SpeechTask.VOICE_ACTIVITY_DETECTION,
+        module_paths=("model", ),
+        component_paths=("model", ),
+        label_names=("labels", ),
+        source_entrypoints=(
+            "transformers.AutoModelForAudioClassification",
+            "transformers.AutoModelForAudioFrameClassification",
+        ),
+        native_training=True,
+        support=TrainingSupport.NATIVE,
+        phases=(
+            _phase(
+                "voice_activity_detection",
+                component_paths=("model", ),
+                optimizer_names=("model", ),
+                label_names=("labels", ),
+                prediction_keys=("logits", ),
+                loss_keys=("loss", ),
+                fallback_objective="classification",
+            ), ),
+        default_phase="voice_activity_detection",
+        field_schemas=_RAW_AUDIO_FIELD_SCHEMAS,
+    ),
+    _profile(
+        "vad_silero",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.VOICE_ACTIVITY_DETECTION,
+        support=TrainingSupport.INFERENCE_ONLY,
+    ),
+    _profile(
+        "vad_webrtc",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.VOICE_ACTIVITY_DETECTION,
+        support=TrainingSupport.INFERENCE_ONLY,
+    ),
+    _profile(
+        "vad_pyannote",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.VOICE_ACTIVITY_DETECTION,
+        source_entrypoints=("pyannote.audio.tasks.Segmentation", ),
+        native_training=True,
+        support=TrainingSupport.CUSTOM,
+    ),
+    _profile(
+        "vad_speechbrain",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.VOICE_ACTIVITY_DETECTION,
+        source_entrypoints=("speechbrain.Brain", ),
+        native_training=True,
+        support=TrainingSupport.CUSTOM,
+    ),
+    _profile(
+        "vad_nemo",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.VOICE_ACTIVITY_DETECTION,
+        source_entrypoints=(
+            "nemo.collections.asr.models.EncDecClassificationModel",
+            "lightning.pytorch.Trainer",
+        ),
+        native_training=True,
+        support=TrainingSupport.CUSTOM,
+    ),
+    _profile(
+        "vad_funasr",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.VOICE_ACTIVITY_DETECTION,
+        source_entrypoints=("funasr.train", ),
+        native_training=True,
+        support=TrainingSupport.CUSTOM,
+    ),
+)
+
+_BUILTIN_TRAINING_SPECS += _BUILTIN_AUDIO_INPUT_TRAINING_SPECS
+
 _TRAINING_SPEC_REGISTRY: dict[str, ModelTrainingSpec] = {
     spec.model_type: spec
     for spec in _BUILTIN_TRAINING_SPECS
 }
+_TTS_TRAINING_SPEC_REGISTRY: dict[str, ModelTrainingSpec] = {
+    model_type: spec
+    for model_type, spec in _TRAINING_SPEC_REGISTRY.items() if spec.task is SpeechTask.TEXT_TO_SPEECH
+}
 _TRAINING_ALIASES: dict[str, str] = {}
-MODEL_TRAINING_SPECS: Mapping[str, ModelTrainingSpec] = MappingProxyType(_TRAINING_SPEC_REGISTRY)
+_TRAINING_REGISTRY_LOCK = RLock()
+# Historical public view: keep this TTS-only even as ASR and VAD profiles are
+# registered. New task-aware callers can use ``ALL_MODEL_TRAINING_SPECS`` or
+# ``list_training_specs(task=None)``.
+MODEL_TRAINING_SPECS: Mapping[str, ModelTrainingSpec] = MappingProxyType(_TTS_TRAINING_SPEC_REGISTRY)
+ALL_MODEL_TRAINING_SPECS: Mapping[str, ModelTrainingSpec] = MappingProxyType(_TRAINING_SPEC_REGISTRY)
 
 
 def _normalize_training_identifier(model_type: str) -> str:
     if not isinstance(model_type, str) or not model_type.strip():
         raise ValueError("Training model identifiers must be non-empty strings.")
     raw = model_type.strip().lower()
-    if raw in _TRAINING_ALIASES:
-        return _TRAINING_ALIASES[raw]
+    with _TRAINING_REGISTRY_LOCK:
+        if raw in _TRAINING_ALIASES:
+            return _TRAINING_ALIASES[raw]
     canonical = normalize_model_type(raw)
-    return _TRAINING_ALIASES.get(canonical, canonical)
+    with _TRAINING_REGISTRY_LOCK:
+        return _TRAINING_ALIASES.get(canonical, canonical)
 
 
 def register_training_spec(
@@ -1047,23 +1268,44 @@ def register_training_spec(
     """
     if not isinstance(spec, ModelTrainingSpec):
         raise TypeError("Training profiles must be ModelTrainingSpec instances.")
-    if spec.model_type in _TRAINING_SPEC_REGISTRY and not exist_ok:
-        raise ValueError(f"A training profile is already registered for {spec.model_type!r}.")
     aliases = tuple(aliases)
     if any(not isinstance(alias, str) for alias in aliases):
         raise TypeError("Training aliases must be strings.")
     normalized_aliases = [alias.strip().lower() for alias in aliases]
     if len(set(normalized_aliases)) != len(normalized_aliases):
         raise ValueError("Training aliases must not contain duplicates.")
-    for alias in aliases:
-        _validate_training_alias(alias, spec.model_type, exist_ok=exist_ok)
-    _TRAINING_SPEC_REGISTRY[spec.model_type] = spec
-    for alias in aliases:
-        register_training_alias(
-            alias,
-            spec.model_type,
-            exist_ok=exist_ok,
-        )
+    try:
+        inference_spec = get_model_spec(spec.model_type)
+    except UnknownModelError:
+        inference_spec = None
+    if inference_spec is not None and inference_spec.task is not spec.task:
+        raise ValueError(
+            f"Training profile {spec.model_type!r} declares task "
+            f"{spec.task.value!r}, but its inference backend is registered "
+            f"for {inference_spec.task.value!r}.")
+
+    with _TRAINING_REGISTRY_LOCK:
+        if spec.model_type in _TRAINING_ALIASES:
+            target = _TRAINING_ALIASES[spec.model_type]
+            raise ValueError(
+                f"Training model type {spec.model_type!r} collides with an "
+                f"alias for {target!r}.")
+        if spec.model_type in _TRAINING_SPEC_REGISTRY and not exist_ok:
+            raise ValueError(f"A training profile is already registered for "
+                             f"{spec.model_type!r}.")
+        validated_aliases = tuple(
+            _validate_training_alias(
+                alias,
+                spec.model_type,
+                exist_ok=exist_ok,
+            ) for alias in aliases)
+        _TRAINING_SPEC_REGISTRY[spec.model_type] = spec
+        if spec.task is SpeechTask.TEXT_TO_SPEECH:
+            _TTS_TRAINING_SPEC_REGISTRY[spec.model_type] = spec
+        else:
+            _TTS_TRAINING_SPEC_REGISTRY.pop(spec.model_type, None)
+        for alias in validated_aliases:
+            _TRAINING_ALIASES[alias] = spec.model_type
 
 
 def _validate_training_alias(
@@ -1075,9 +1317,19 @@ def _validate_training_alias(
     if not isinstance(alias, str) or not alias.strip():
         raise ValueError("Training aliases must be non-empty strings.")
     normalized = alias.strip().lower()
+    if normalized == canonical:
+        raise ValueError(f"Training alias {alias!r} is identical to its canonical model "
+                         "type.")
     inference_target = normalize_model_type(normalized)
     if normalized in _TRAINING_SPEC_REGISTRY:
         raise ValueError(f"Training alias {alias!r} collides with a registered model type.")
+    try:
+        inference_spec = get_model_spec(normalized)
+    except UnknownModelError:
+        inference_spec = None
+    if inference_spec is not None and inference_spec.model_type == normalized:
+        raise ValueError(f"Training alias {alias!r} collides with a registered inference "
+                         "model type.")
     if inference_target != normalized:
         existing_target = _TRAINING_ALIASES.get(normalized, inference_target)
         if existing_target != canonical or not exist_ok:
@@ -1097,15 +1349,16 @@ def register_training_alias(
     exist_ok: bool = False,
 ) -> None:
     """Register a training-only alias for a canonical profile."""
-    canonical = _normalize_training_identifier(model_type)
-    if canonical not in _TRAINING_SPEC_REGISTRY:
-        raise KeyError(f"No training profile is registered for {model_type!r}.")
-    normalized = _validate_training_alias(
-        alias,
-        canonical,
-        exist_ok=exist_ok,
-    )
-    _TRAINING_ALIASES[normalized] = canonical
+    with _TRAINING_REGISTRY_LOCK:
+        canonical = _normalize_training_identifier(model_type)
+        if canonical not in _TRAINING_SPEC_REGISTRY:
+            raise KeyError(f"No training profile is registered for {model_type!r}.")
+        normalized = _validate_training_alias(
+            alias,
+            canonical,
+            exist_ok=exist_ok,
+        )
+        _TRAINING_ALIASES[normalized] = canonical
 
 
 def unregister_training_alias(
@@ -1117,12 +1370,13 @@ def unregister_training_alias(
     if not isinstance(alias, str) or not alias.strip():
         raise ValueError("Training aliases must be non-empty strings.")
     normalized = alias.strip().lower()
-    try:
-        return _TRAINING_ALIASES.pop(normalized)
-    except KeyError:
-        if missing_ok:
-            return None
-        raise KeyError(f"No training alias is registered for {alias!r}.") from None
+    with _TRAINING_REGISTRY_LOCK:
+        try:
+            return _TRAINING_ALIASES.pop(normalized)
+        except KeyError:
+            if missing_ok:
+                return None
+            raise KeyError(f"No training alias is registered for {alias!r}.") from None
 
 
 def unregister_training_spec(
@@ -1131,40 +1385,59 @@ def unregister_training_spec(
     missing_ok: bool = False,
 ) -> ModelTrainingSpec | None:
     """Remove and return a dynamically registered (or built-in) profile."""
-    canonical = _normalize_training_identifier(model_type)
-    try:
-        removed = _TRAINING_SPEC_REGISTRY.pop(canonical)
-    except KeyError:
-        if missing_ok:
-            return None
-        raise KeyError(f"No training profile is registered for {model_type!r}.") from None
-    stale_aliases = [alias for alias, target in _TRAINING_ALIASES.items() if target == canonical]
-    for alias in stale_aliases:
-        del _TRAINING_ALIASES[alias]
-    return removed
+    with _TRAINING_REGISTRY_LOCK:
+        canonical = _normalize_training_identifier(model_type)
+        try:
+            removed = _TRAINING_SPEC_REGISTRY.pop(canonical)
+        except KeyError:
+            if missing_ok:
+                return None
+            raise KeyError(f"No training profile is registered for {model_type!r}.") from None
+        stale_aliases = [alias for alias, target in _TRAINING_ALIASES.items() if target == canonical]
+        for alias in stale_aliases:
+            del _TRAINING_ALIASES[alias]
+        _TTS_TRAINING_SPEC_REGISTRY.pop(canonical, None)
+        return removed
 
 
 def get_training_spec(model_type: str) -> ModelTrainingSpec:
     """Resolve inference aliases and return one registered training profile."""
     canonical = _normalize_training_identifier(model_type)
+    with _TRAINING_REGISTRY_LOCK:
+        spec = _TRAINING_SPEC_REGISTRY.get(canonical)
+    if spec is not None:
+        return spec
+    # Preserve the inference registry's informative error for known public
+    # lookup paths while still permitting training-only future profiles.
     try:
-        return _TRAINING_SPEC_REGISTRY[canonical]
-    except KeyError:
-        # Preserve the inference registry's informative error for known public
-        # lookup paths while still permitting training-only future profiles.
+        canonical = get_model_spec(model_type).model_type
+    except UnknownModelError:
+        raise KeyError(f"No training profile is registered for {model_type!r}.") from None
+    with _TRAINING_REGISTRY_LOCK:
         try:
-            canonical = get_model_spec(model_type).model_type
-        except UnknownModelError:
+            return _TRAINING_SPEC_REGISTRY[canonical]
+        except KeyError:
             raise KeyError(f"No training profile is registered for {model_type!r}.") from None
-        return _TRAINING_SPEC_REGISTRY[canonical]
 
 
 def list_training_specs(
     *,
+    task: SpeechTask | str | None = SpeechTask.TEXT_TO_SPEECH,
     support: TrainingSupport | str | None = None,
 ) -> tuple[ModelTrainingSpec, ...]:
-    """List profiles, optionally filtered by their support boundary."""
-    specs = tuple(_TRAINING_SPEC_REGISTRY.values())
+    """List profiles by task and, optionally, support boundary.
+
+    Omitting ``task`` preserves the historical TTS-only result. Pass
+    ``task=None`` to inspect every registered speech task.
+    """
+    resolved_task = None if task is None else SpeechTask.coerce(task)
+    with _TRAINING_REGISTRY_LOCK:
+        if resolved_task is None:
+            specs = tuple(_TRAINING_SPEC_REGISTRY.values())
+        elif resolved_task is SpeechTask.TEXT_TO_SPEECH:
+            specs = tuple(_TTS_TRAINING_SPEC_REGISTRY.values())
+        else:
+            specs = tuple(spec for spec in _TRAINING_SPEC_REGISTRY.values() if spec.task is resolved_task)
     if support is None:
         return specs
     support = TrainingSupport.coerce(support)

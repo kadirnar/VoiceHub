@@ -18,22 +18,25 @@ python -m pip install "voicehub[dia,training]"
 !!! note "Training support is model and checkpoint specific"
 
     A registered inference backend is not automatically trainable. Inspect the
-    exact [training support boundary](../models/training-support.md) before
-    selecting a checkpoint, backend, or dataset contract.
+    exact [TTS training boundary](../models/training-support.md) or
+    [ASR/VAD support matrix](../models/asr-vad-support.md) before selecting a
+    checkpoint, backend, or dataset contract.
 
 ## Public surface at a glance
 
 | Area | Primary API |
 | --- | --- |
-| Discovery | `AutoInferenceModel.available_models()`, `ModelSpec` |
-| Configuration | `AutoConfig`, `VoiceHubConfig`, `AutoProcessor`, `VoiceHubProcessor` |
-| Inference | `AutoModelForTextToSpeech`, `TTSGenerationConfig`, `TTSOutput` |
+| Discovery | `list_model_specs()`, `SpeechTask`, `AutoInferenceModel.available_models()`, `ModelSpec` |
+| Configuration | `AutoConfig`, `VoiceHubConfig`, `AutoProcessor`, `VoiceHubProcessor`, `AudioProcessor` |
+| TTS inference | `AutoModelForTextToSpeech`, `TTSGenerationConfig`, `TTSOutput` |
+| ASR inference | `AutoModelForSpeechRecognition`, `ASRInferenceConfig`, `ASROutput` |
+| VAD inference | `AutoModelForVoiceActivityDetection`, `VADInferenceConfig`, `VADOutput` |
 | Inference execution | `InferenceStrategy`, `EagerInferenceStrategy` |
 | Training discovery | `get_training_spec()`, `list_training_specs()`, `ModelTrainingSpec` |
 | Training adaptation | `AutoTrainingAdapter`, `BaseTrainingAdapter`, family adapters |
 | Training loop | `TrainingArguments`, `Trainer`, callbacks, trainer outputs |
 | Training execution | `TrainingStrategy`, `TorchTrainingStrategy` |
-| Collation | `default_data_collator`, `DefaultDataCollator`, `DataCollatorForTTSTraining` |
+| Collation | `default_data_collator`, `DefaultDataCollator`, `DataCollatorForTTSTraining`, `DataCollatorForAudioTraining` |
 | Extensions | Inference-strategy, training-spec, adapter, and training-strategy registries |
 
 Unless a different module is shown, names on this page can be imported directly:
@@ -44,14 +47,36 @@ from voicehub import AutoModelForTextToSpeech, Trainer, TrainingArguments
 
 ## Model discovery
 
+### `list_model_specs` and `SpeechTask`
+
+```python
+list_model_specs(
+    *,
+    task: SpeechTask | str | None = None,
+) -> tuple[ModelSpec, ...]
+```
+
+Filter the shared registry by `text-to-speech`,
+`automatic-speech-recognition`, or `voice-activity-detection`. Short aliases
+`tts`, `asr`, `stt`, and `vad` are accepted:
+
+```python
+from voicehub import list_model_specs
+
+for spec in list_model_specs(task="asr"):
+    print(spec.model_type, spec.architecture, spec.install_extra)
+```
+
 ### `AutoInferenceModel.available_models`
 
 ```python
 AutoInferenceModel.available_models() -> tuple[ModelSpec, ...]
 ```
 
-Returns every inference registry entry in stable display order without loading
-model weights or importing the model's ML runtime.
+Returns the legacy TTS-only registry view in stable display order without
+loading model weights or importing a model runtime. Use
+`list_model_specs(task=None)` for all speech tasks, or pass `task="asr"` /
+`task="vad"` for a task-specific view.
 
 ```python
 from voicehub import AutoInferenceModel
@@ -77,6 +102,8 @@ for spec in AutoInferenceModel.available_models():
 | `default_model_path` | Default Hub identifier or local artifact name |
 | `install_extra` | Optional dependency extra for the backend |
 | `capabilities` | Declared inference capabilities |
+| `task` | Canonical `SpeechTask` owned by the provider |
+| `architecture` | Provider/runtime architecture family, when declared |
 | `components` | Shared codecs, vocoders, or other registered components |
 | `license` | `ModelLicenseSpec` when additional model terms are recorded, otherwise `None` |
 | `training` | The model's `ModelTrainingSpec` |
@@ -185,6 +212,21 @@ Architecture-specific processors may perform additional validation or
 conversion. `BatchFeature` is a dictionary whose `.to(device)` method moves
 tensor-like values in place.
 
+Audio-input ASR and VAD models use `AudioProcessor`:
+
+```python
+processor(
+    audio,
+    *,
+    sampling_rate: int | None = None,
+    **inference_options,
+) -> BatchFeature
+```
+
+It validates the dependency-light input envelope. `load_audio()` performs
+decoding, mono downmixing, and optional resampling lazily when inference
+begins.
+
 ## Model factories
 
 ### `AutoModelForTextToSpeech`
@@ -243,6 +285,58 @@ AutoInferenceModel.from_pretrained(
 When `model_path` is `None`, the registry's `default_model_path` is used.
 Prefer `AutoModelForTextToSpeech` in new code because it can infer the model
 type from a saved VoiceHub configuration.
+
+### ASR and VAD factories
+
+`AutoModelForSpeechRecognition` and
+`AutoModelForVoiceActivityDetection` expose the same
+`from_pretrained()` / `from_config()` construction contract while enforcing
+the registry task before a model module is imported:
+
+```python
+from voicehub import (
+    AutoModelForSpeechRecognition,
+    AutoModelForVoiceActivityDetection,
+)
+
+asr = AutoModelForSpeechRecognition.from_pretrained(
+    "openai/whisper-small",
+    model_type="asr_transformers",
+)
+vad = AutoModelForVoiceActivityDetection.from_pretrained(
+    "silero_vad",
+    model_type="vad_silero",
+)
+```
+
+Audio-input pretrained models provide:
+
+| Method | Result |
+| --- | --- |
+| `forward(audio, *, sampling_rate=None, inference_config=None, **kwargs)` | Validate, lazy-load, infer, and enforce the task output type |
+| `transcribe(...)` | ASR alias returning `ASROutput` |
+| `detect(...)` | VAD alias returning `VADOutput` |
+| `stream(*, sampling_rate, **kwargs)` | Create an isolated session; the base session buffers until `flush()` |
+| `load()` / `load_for_training()` | Enter the inference or differentiable lifecycle |
+| `save_pretrained(directory, include_native_export=True)` | Save configuration, inference configuration, processor, and optional native export |
+
+See the [ASR guide](../guides/speech-recognition.md),
+[VAD guide](../guides/voice-activity-detection.md), and
+[provider matrix](../models/asr-vad-support.md).
+
+### ASR and VAD outputs
+
+`ASROutput` contains `text`, `segments`, optional `language`, optional
+`duration`, and `metadata`. An `ASRSegment` may include timestamps,
+confidence, language, speaker, and `ASRWord` values.
+
+`VADOutput` contains ordered, non-overlapping `SpeechSegment` values and
+optional duration, sample rate, frame/window probabilities, and metadata.
+`speech_duration` sums accepted regions and `contains(timestamp)` tests a
+point.
+
+Optional timing and score values remain `None` when the provider did not
+compute them.
 
 ### Common pretrained lifecycle
 
@@ -505,9 +599,14 @@ preprocessed = list_training_specs(
 get_training_spec(model_type: str) -> ModelTrainingSpec
 list_training_specs(
     *,
+    task: SpeechTask | str | None = SpeechTask.TEXT_TO_SPEECH,
     support: TrainingSupport | str | None = None,
 ) -> tuple[ModelTrainingSpec, ...]
 ```
+
+Omitting `task` preserves the historical TTS-only view. Pass `task=None` for
+all registered speech tasks, or `task="asr"` / `task="vad"` for one
+speech-input task.
 
 ### `ModelTrainingSpec`
 
@@ -591,7 +690,7 @@ must map one-to-one to component paths; one name may own all phase components.
 `TrainingPhaseKind` values are `objective`, `generator`, `discriminator`,
 `duration-discriminator`, and `auxiliary`.
 
-### `TrainingContext` and `TTSTrainingOutput`
+### `TrainingContext` and speech training outputs
 
 `TrainingContext` carries:
 
@@ -613,9 +712,10 @@ Adapters normalize a training forward into:
 
 ```python
 @dataclass
-class TTSTrainingOutput:
+class SpeechTrainingOutput:
     loss: Any | None = None
     logits: Any | None = None
+    predictions: Any | None = None
     audio_values: Any | None = None
     hidden_states: Any | None = None
     attentions: Any | None = None
@@ -625,8 +725,10 @@ class TTSTrainingOutput:
     metadata: dict[str, Any] = field(default_factory=dict)
 ```
 
-Like `TTSOutput`, it supports populated-field `keys()`, string/integer access,
-iteration, `to_tuple()`, and `to_dict()`. The `phase` property aliases
+Shared adapters return `TTSTrainingOutput`, a backward-compatible
+`SpeechTrainingOutput` subclass, for TTS and `SpeechTrainingOutput` for ASR or
+VAD. Both support populated-field `keys()`, string/integer access, iteration,
+`to_tuple()`, and `to_dict()`. The `phase` property aliases
 `training_phase`.
 
 ## Training adapter factory
@@ -661,6 +763,13 @@ Built-in family adapters:
 | `acoustic-regression` | `AcousticTrainingAdapter` |
 | `vits` | `VITSTrainingAdapter` |
 | `composite` | `CompositeTrainingAdapter` |
+| `ctc` | `CTCTrainingAdapter` |
+| `speech-sequence-to-sequence` | `SpeechSeq2SeqTrainingAdapter` |
+| `rnnt` | `RNNTTrainingAdapter` |
+| `tdt` | `TDTTrainingAdapter` |
+| `audio-classification` | `AudioClassificationTrainingAdapter` |
+| `frame-classification` | `FrameClassificationTrainingAdapter` |
+| `upstream-native` | `UpstreamNativeTrainingAdapter` |
 
 Important `BaseTrainingAdapter` extension points include:
 
@@ -670,7 +779,7 @@ build_training_graph()
 create_dataset(records, **kwargs)
 prepare_training_inputs(inputs, context)
 prepare_batch(inputs, context)
-execute_training_phase(context) -> TTSTrainingOutput
+execute_training_phase(context) -> SpeechTrainingOutput
 execute_prediction_phase(context)
 create_optimizer(name, parameters, training_args)
 create_scheduler(name, optimizer, num_training_steps, training_args)
@@ -1059,6 +1168,36 @@ collator = DataCollatorForTTSTraining(
 batching. The collator is structural: it does not invent codec delays, flow
 targets, acoustic alignments, or adversarial pairs.
 
+### `SpeechDataset` and `DataCollatorForAudioTraining`
+
+```python
+SpeechDataset(
+    records: Iterable[Mapping[str, Any]],
+    *,
+    required_fields: Iterable[str] = (),
+    transform: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
+)
+
+DataCollatorForAudioTraining(
+    padding_value: float = 0.0,
+    label_pad_token_id: int = -100,
+    return_attention_mask: bool = True,
+    return_input_lengths: bool = False,
+    field_schemas: Mapping[str, AudioFieldSchema | Mapping] | None = None,
+)
+```
+
+`SpeechDataset` validates and copies dependency-light source records without
+decoding audio. Its optional transform runs at item access, and
+`column_names` reports first-seen fields.
+
+`DataCollatorForAudioTraining` uses the same recursive structural rules as the
+TTS collator, with `AudioFieldSchema` declarations for waveform, feature,
+token, or frame time dimensions. It does not infer CTC blanks, transducer
+alignments, decoder prompts, or frame labels. See the
+[ASR and VAD data guide](../guides/speech-data.md#collate-variable-length-audio-fields)
+for a schema-based example.
+
 ## Training strategies
 
 `TrainingStrategy` owns device, precision, backward, optimizer execution,
@@ -1237,14 +1376,19 @@ model.save_pretrained(
 ) -> Path
 ```
 
-The common wrapper writes:
+The common wrapper writes task-specific request metadata:
 
 ```text
 config.json
-generation_config.json
 processor_config.json
+generation_config.json       # TTS
+transcription_config.json    # ASR
+vad_config.json              # VAD
 native_export/             # optional, backend-defined
 ```
+
+Exactly one of the three task configuration files is written by a normal
+task-specific wrapper.
 
 The common method does not itself write a generic `model_state.pt`.
 Backend-specific `_save_pretrained()` hooks may write native artifacts under
@@ -1264,8 +1408,8 @@ Typical output:
 
 ```text
 config.json
-generation_config.json
 processor_config.json
+generation_config.json       # TTS, or the task-specific ASR/VAD file above
 model_state.pt
 training_args.json
 training_recipe.json
@@ -1276,12 +1420,12 @@ native_export/             # optional; semantics declared by the adapter
 recipe manifest records model family, recipe identity, phases, base model, and
 native-export semantics.
 
-Reload through the checkpoint-first factory:
+Reload through the matching checkpoint-first factory:
 
 ```python
-from voicehub import AutoModelForTextToSpeech
+from voicehub import AutoModelForSpeechRecognition
 
-reloaded = AutoModelForTextToSpeech.from_pretrained(
+reloaded = AutoModelForSpeechRecognition.from_pretrained(
     "runs/voicehub/final",
     device="auto",
     lazy_load=True,

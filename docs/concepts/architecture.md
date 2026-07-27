@@ -6,8 +6,11 @@ VoiceHub follows a Transformers-style split:
 AutoConfig
     -> architecture-specific VoiceHubConfig
     -> AutoProcessor
-    -> AutoModelForTextToSpeech
-    -> PreTrainedTTSModel
+    -> task-specific model factory
+       -> AutoModelForTextToSpeech
+       -> AutoModelForSpeechRecognition
+       -> AutoModelForVoiceActivityDetection
+    -> PreTrainedSpeechModel
        -> lazy source import
        -> serialized checkpoint loading / runtime transitions
        -> dependency-free request validation
@@ -15,16 +18,17 @@ AutoConfig
           -> compatibility validation before checkpoint allocation
           -> compile / quantize / wrap serving runtime
           -> restore trainable runtime before fine-tuning
-       -> forward(...) / generate(...)
-       -> TTSOutput(audio, sample_rate, metadata)
+       -> TTS: forward(...) / generate(...) -> TTSOutput
+       -> ASR: forward(...) / transcribe(...) -> ASROutput
+       -> VAD: forward(...) / detect(...) -> VADOutput
 
 TrainingArguments
     -> Trainer
        -> AutoTrainingAdapter
           -> mandatory ModelTrainingSpec
-          -> causal-LM / seq2seq / flow / acoustic / VITS / composite adapter
+          -> TTS, CTC, speech-seq2seq, transducer, and classification adapters
           -> exact source paths, with explicitly enabled bounded discovery
-       -> TTS padding collator / DataLoader
+       -> schema-aware text/audio padding collator / DataLoader
        -> TrainingStrategy
           -> model, adapter, dataloader, and optimization preparation
           -> precision / backward / phase execution / metric gathering
@@ -35,11 +39,13 @@ TrainingArguments
 
 ## Public API contract
 
-Every backend follows the same Transformers-style naming and method contract:
+Every backend follows a task-specific Transformers-style naming contract:
 
 ```text
 <Architecture>Config
 <Architecture>ForTextToSpeech
+<Architecture>ForSpeechRecognition
+<Architecture>ForVoiceActivityDetection
 ```
 
 For example, F5-TTS exports `F5TTSConfig` and
@@ -47,8 +53,9 @@ For example, F5-TTS exports `F5TTSConfig` and
 `DiaForTextToSpeech`. Historical names remain aliases, but the registry and
 serialized `architectures` field always use canonical names.
 
-Concrete models implement two required private hooks and can add a lightweight
-request validator:
+TTS models implement `_generate()`. Audio-input models inherit
+`PreTrainedASRModel` or `PreTrainedVADModel` and implement `_transcribe()` or
+`_detect()`. Every task can add a lightweight request validator:
 
 ```python
 class ExampleForTextToSpeech(PreTrainedTTSModel):
@@ -66,7 +73,7 @@ class ExampleForTextToSpeech(PreTrainedTTSModel):
         ...
 ```
 
-The following public methods are inherited unchanged by all models:
+The following TTS lifecycle methods are inherited unchanged:
 
 ```text
 from_pretrained(...)
@@ -77,6 +84,15 @@ prepare_inputs_for_generation(...)
 forward(text, **kwargs)
 generate(text, generation_config=None, **kwargs)
 __call__(text, generation_config=None, **kwargs)
+```
+
+ASR and VAD wrappers replace the text-generation methods with:
+
+```text
+forward(audio, sampling_rate=None, inference_config=None, **kwargs)
+transcribe(audio, ...)       # ASR
+detect(audio, ...)           # VAD
+stream(sampling_rate=..., **kwargs)
 ```
 
 This prevents individual integrations from inventing incompatible public
@@ -113,8 +129,14 @@ voicehub/
   auto.py                    automatic config/model factories
   configuration_utils.py     serializable config base
   generation_configuration.py generation defaults
+  inference_configuration.py ASR/VAD inference defaults
   inference_strategy.py       pluggable inference optimization boundary
   modeling_utils.py          pretrained model lifecycle
+  audio_modeling_utils.py    ASR/VAD pretrained lifecycle
+  audio.py                   canonical audio input loading
+  streaming.py               request-local buffered stream contract
+  tasks.py                   canonical TTS/ASR/VAD identifiers
+  vad_utils.py               VAD segment post-processing
   modeling_outputs.py        normalized generation output
   processing_utils.py        processor and BatchFeature
   registry.py                lazy architecture registry
@@ -127,7 +149,7 @@ voicehub/
     specs.py                  profile for every registered model
     contracts.py              phase, recipe, and support contracts
     auto.py                   lazy model-to-adapter resolution
-    adapters.py               six built-in objective-family implementations
+    adapters.py               task-aware objective-family implementations
     collators.py              variable token/audio padding
     optimization.py           composite optimizer/scheduler bundles
     strategy.py               pluggable framework execution boundary
@@ -188,9 +210,10 @@ inference exports from component-only weight warm starts.
 
 ## Training families
 
-`TrainingFamily` provides six built-in execution and fallback-objective
-families. It is not a closed enum: a non-empty family string can be paired with
-a factory registered through `AutoTrainingAdapter.register_family()`.
+`TrainingFamily` provides built-in execution and fallback-objective families
+for TTS, ASR, and VAD. It is not a closed enum: a non-empty family string can
+be paired with a factory registered through
+`AutoTrainingAdapter.register_family()`.
 
 | Built-in family | Adapter behavior |
 | --- | --- |
@@ -200,10 +223,17 @@ a factory registered through `AutoTrainingAdapter.register_family()`.
 | `acoustic-regression` | Supports mel, codec, latent, or waveform reconstruction through an explicitly selected L1 or MSE fallback. |
 | `vits` | Extends the composite adapter with generator, discriminator, and duration-discriminator phase semantics, named optimizer routing, detached inputs, and temporary component freezing. |
 | `composite` | Aggregates phase-specific native named losses with declared weights and can use an explicitly configured cross-entropy, L1, MSE, or dtype-based `auto` fallback. |
+| `ctc` | Requires the backend-native CTC objective, including its blank and alignment semantics. |
+| `speech-sequence-to-sequence` | Prefers native teacher-forced speech encoder-decoder loss, with bounded unshifted token CE only when explicitly enabled. |
+| `rnnt` | Requires the backend-native transducer objective. |
+| `tdt` | Requires the backend-native token-and-duration objective. |
+| `audio-classification` | Supports declared clip-level CE/BCE fallbacks and explicit loss masks. |
+| `frame-classification` | Applies classification semantics to time-aligned outputs and requires a padding mask for variable frames. |
+| `upstream-native` | Requires a native scalar objective or complete specialized adapter; it never guesses a provider recipe. |
 
 Native losses are always inspected before a fallback is considered. A phase
 with no `fallback_objective` must return a native scalar loss. Models can return
-a loss-bearing mapping, tuple, or `TTSTrainingOutput`; a custom
+a loss-bearing mapping, tuple, or `SpeechTrainingOutput`; a custom
 `compute_loss_func` remains the escape hatch for an objective outside the
 adapter contract. Capability is recorded independently as `native`,
 `preprocessed`, `custom`, or `inference-only`. Custom recipes require a

@@ -54,16 +54,16 @@ description: VoiceHub 文档：统一的 TTS 推理、数据准备和架构感�
 
 ## VoiceHub 是什么？
 
-VoiceHub 通过统一的配置、处理器、模型、生成输出和训练器 API 提供文本转语音
-集成。模型实现始终遵循各自的架构特性：编解码器语言模型、序列到序列系统、
+VoiceHub 通过统一的配置、处理器、模型、输出和训练器 API 提供 TTS、自动语音识别
+和语音活动检测模型。模型实现始终遵循各自的架构特性：编解码器语言模型、序列到序列系统、
 流匹配和扩散模型、声学模型、VITS 风格的对抗系统以及复合流水线，均保留各自的
 条件机制、训练目标、参数归属和导出规则。
 
-模型注册表包含 **31 个推理集成**，其中 **18 个已提供微调路径文档**，
-包括 **6 个可直接接收常规原始样本的集成**。微调支持取决于具体的 checkpoint
-和运行时；支持推理并不意味着当前的 VoiceHub 工件支持可微分训练。请参考
-[模型目录](models/index.md)和[按 checkpoint 划分的训练矩阵](models/training-support.md)
-来选择合适的集成。
+模型注册表包含 **31 个 TTS 集成**、**9 个 ASR 提供程序**和 **7 个 VAD
+提供程序**。微调支持取决于具体的 checkpoint 和运行时；支持推理并不意味着当前的
+VoiceHub 工件支持可微分训练。请参考 [TTS 模型目录](models/index.md)、
+[TTS 训练矩阵](models/training-support.md)和
+[ASR/VAD 支持矩阵](models/asr-vad-support.md)来选择合适的集成。
 
 模型源码随 VoiceHub 一同分发。可选 extras 会安装所选运行时的依赖项，
 checkpoint 权重则按需下载，也可以通过本地路径提供。Apache-2.0 许可证仅适用于

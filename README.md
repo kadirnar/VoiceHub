@@ -1,19 +1,21 @@
 <div align="center">
   <img width="420" alt="VoiceHub" src="assets/logo.png">
   <h1>VoiceHub</h1>
-  <p>One lazy, discoverable Python interface for open text-to-speech models.</p>
+  <p>One lazy, task-aware Python interface for open TTS, ASR, and VAD models.</p>
 </div>
 
 ## Why VoiceHub
 
-- **One lifecycle:** every architecture uses config, lazy loading, generation, and a normalized output.
+- **One lifecycle:** every architecture uses config, lazy loading, task-specific inference, and a normalized output.
 - **One trainer:** shared arguments, callbacks, evaluation, and resumable checkpoints.
 - **Fast imports:** ML frameworks and model weights are loaded only when the selected backend needs them.
-- **Source included:** VoiceHub never delegates synthesis to a separately installed TTS package.
+- **Task-aware discovery:** TTS, speech-recognition, and voice-activity providers share one registry without cross-task factory mistakes.
+- **Source policy:** TTS source stays integrated; ASR and VAD provider runtimes remain optional and lazy.
 - **Small base install:** model extras contain only general runtime dependencies.
 - **Actionable errors:** missing backends point to the exact installation extra.
-- **31 backends:** classic TTS, voice cloning, multilingual, dialogue,
-  realtime, and prompted-style models.
+- **47 registered integrations:** 31 TTS backends, 9 ASR providers, and 7 VAD
+  providers, each representing a runtime or checkpoint family rather than one
+  fixed weight file.
 
 ## Install
 
@@ -29,6 +31,8 @@ Install only the backend you plan to use:
 python -m pip install "voicehub[parlertts]"
 python -m pip install "voicehub[f5tts]"
 python -m pip install "voicehub[melotts]"
+python -m pip install "voicehub[asr-transformers]"
+python -m pip install "voicehub[vad-silero]"
 ```
 
 Install PyTorch training support independently of any inference backend:
@@ -41,6 +45,9 @@ TTS implementations and their third-party licenses are included in the
 VoiceHub package. Checkpoints remain separate and are downloaded lazily or
 passed as local paths. See the
 [model catalog](https://kadirnar.github.io/voicehub/models/).
+ASR and VAD integrations wrap optional provider runtimes selected by their
+extras; see the
+[speech-input matrix](https://kadirnar.github.io/voicehub/models/asr-vad-support/).
 
 ## Quick start
 
@@ -70,18 +77,73 @@ up before serving traffic.
 The [VoiceHub documentation site](https://kadirnar.github.io/voicehub/)
 provides searchable, task-oriented guides:
 
-- [Inference](https://kadirnar.github.io/voicehub/guides/inference/)
+- [TTS inference](https://kadirnar.github.io/voicehub/guides/inference/)
+- [Speech recognition](https://kadirnar.github.io/voicehub/guides/speech-recognition/)
+- [Voice activity detection](https://kadirnar.github.io/voicehub/guides/voice-activity-detection/)
+- [ASR and VAD data](https://kadirnar.github.io/voicehub/guides/speech-data/)
 - [Data preparation](https://kadirnar.github.io/voicehub/guides/data-preparation/)
 - [Training](https://kadirnar.github.io/voicehub/guides/training/)
 - [End-to-end notebook](https://kadirnar.github.io/voicehub/guides/notebook/)
-- [Model training support](https://kadirnar.github.io/voicehub/models/training-support/)
+- [TTS training support](https://kadirnar.github.io/voicehub/models/training-support/)
+- [ASR and VAD support](https://kadirnar.github.io/voicehub/models/asr-vad-support/)
 
 The runnable
 [Jupyter notebook](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb)
 runs the complete workflow and
 [opens directly in Colab](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb).
 
+## Speech recognition
+
+```python
+from voicehub import AutoModelForSpeechRecognition
+
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "openai/whisper-small",
+    model_type="asr_transformers",
+    device="cuda",
+)
+output = model.transcribe(
+    "meeting.wav",
+    language="en",
+    return_timestamps="word",
+)
+print(output.text)
+```
+
+The Transformers provider covers compatible CTC, speech
+sequence-to-sequence, RNN-T, and TDT checkpoints. Separate providers expose
+faster-whisper, WhisperX, OpenAI Whisper, NeMo, SpeechBrain, FunASR, ESPnet,
+and WeNet while returning the same `ASROutput`.
+
+## Voice activity detection
+
+```python
+from voicehub import AutoModelForVoiceActivityDetection
+
+model = AutoModelForVoiceActivityDetection.from_pretrained(
+    "silero_vad",
+    model_type="vad_silero",
+)
+output = model.detect(
+    "meeting.wav",
+    threshold=0.55,
+    min_speech_duration_ms=250,
+)
+
+for segment in output.segments:
+    print(segment.start, segment.end)
+```
+
+VoiceHub integrates Transformers audio/frame classification, Silero, WebRTC,
+pyannote, SpeechBrain, NeMo, and FunASR FSMN VAD behind normalized
+`VADOutput` speech regions.
+
 ## Supported models
+
+This table lists TTS integrations. See the
+[ASR/VAD provider matrix](https://kadirnar.github.io/voicehub/models/asr-vad-support/)
+for speech-input families, optional extras, outputs, and fine-tuning
+boundaries.
 
 | Model type        | Backend         | Notable capabilities                |
 | ----------------- | --------------- | ----------------------------------- |
@@ -131,6 +193,15 @@ for spec in AutoInferenceModel.available_models():
         print(spec.license.license_id, spec.license.commercial_use)
 ```
 
+For task-aware discovery:
+
+```python
+from voicehub import list_model_specs
+
+for spec in list_model_specs(task="asr"):
+    print(spec.model_type, spec.architecture, spec.install_extra)
+```
+
 ## Common API
 
 The Transformers-style API loads architecture-specific configuration:
@@ -162,10 +233,16 @@ output = model.generate(
 ```
 
 Every synthesis call returns `TTSOutput`, containing `audio`, `sample_rate`,
-`file_path`, and backend metadata. Every registry class is named
+`file_path`, and backend metadata. Every TTS registry class is named
 `<Architecture>ForTextToSpeech`, every config is named
-`<Architecture>Config`, and all models inherit the same `forward` and
+`<Architecture>Config`, and all TTS wrappers inherit the same `forward` and
 `generate` signatures.
+
+ASR uses `AutoModelForSpeechRecognition` and returns `ASROutput`; VAD uses
+`AutoModelForVoiceActivityDetection` and returns `VADOutput`. Both accept file,
+array, tensor, mapping, or `AudioInput` audio. See the
+[ASR guide](https://kadirnar.github.io/voicehub/guides/speech-recognition/)
+and [VAD guide](https://kadirnar.github.io/voicehub/guides/voice-activity-detection/).
 
 See the
 [model catalog](https://kadirnar.github.io/voicehub/models/)
@@ -217,19 +294,30 @@ adversarial targets.
 Use `trainer.train(resume_from_checkpoint=True)` only when `output_dir`
 already contains a complete VoiceHub checkpoint.
 
-Trainable models return `TTSTrainingOutput(loss=..., logits=...)`, a mapping
-with `loss`, or a tuple with loss first. Architecture-specific objectives can
-be connected through `compute_loss_func` for a true single-phase model.
-Declarative recipes cover causal codec LMs, sequence-to-sequence models,
-flow/diffusion models, acoustic regression, VITS, and composite/GAN systems.
-Composite source modules receive separately routed, named optimizer and
-scheduler states. Variable-length token, mel, waveform, and nested
-architecture-specific batches use `DataCollatorForTTSTraining`.
+VoiceHub adapters normalize TTS phases to `TTSTrainingOutput` and ASR/VAD
+phases to `SpeechTrainingOutput`; both put `loss` first. Native forwards may
+instead return a mapping with `loss` or a tuple with loss first.
+Architecture-specific objectives can be connected through `compute_loss_func`
+for a true single-phase model. Declarative recipes cover causal codec LMs,
+sequence-to-sequence models, flow/diffusion models, acoustic regression, VITS,
+composite/GAN systems, CTC, speech sequence-to-sequence, RNN-T, TDT, and audio
+or frame classification. Composite source modules receive separately routed,
+named optimizer and scheduler states. Variable-length TTS batches use
+`DataCollatorForTTSTraining`; ASR and VAD batches use
+`DataCollatorForAudioTraining`.
 
 Support is deliberately variant-aware. Differentiable native and preprocessed
 profiles run directly; custom profiles fail until their specialized adapter is
 registered; ONNX/GGUF, fused, quantized, or inference-pruned variants are
 rejected before loading when they cannot preserve a verified gradient path.
+
+Speech-input training follows the same rule. Compatible unquantized
+Transformers ASR and VAD graphs use the task-neutral trainer families. NeMo,
+SpeechBrain, FunASR ASR and FSMN VAD, ESPnet, WeNet, and pyannote currently
+keep their upstream-custom recipe ownership; faster-whisper, WhisperX, OpenAI
+Whisper, Silero, and WebRTC integrations are inference-only. The exact
+boundary is in the
+[ASR/VAD support matrix](https://kadirnar.github.io/voicehub/models/asr-vad-support/#fine-tuning-boundaries).
 
 The common loop includes gradient accumulation and clipping, AdamW schedules,
 mixed precision, callbacks, evaluation/prediction, best-model selection,

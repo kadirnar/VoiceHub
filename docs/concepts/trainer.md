@@ -1,6 +1,6 @@
 # Trainer
 
-VoiceHub separates TTS training into four layers:
+VoiceHub separates speech-model training into four layers:
 
 ```text
 model integration    loads a differentiable training runtime
@@ -9,10 +9,11 @@ Trainer              runs dataloaders, accumulation, evaluation, and checkpoints
 training strategy    performs device, precision, backward, and optimizer operations
 ```
 
-This separation is deliberate. A language model, a conditional flow model, and
-a VITS generator/discriminator pair do not share one meaningful fallback
-objective. `Trainer` provides common orchestration only after a model integration
-has exposed a valid training graph and objective.
+This separation is deliberate. A language model, CTC or transducer recognizer,
+frame classifier, conditional flow model, and VITS generator/discriminator
+pair do not share one meaningful fallback objective. `Trainer` provides common
+orchestration only after a model integration has exposed a valid training
+graph and objective.
 
 Install the training dependencies only when they are needed:
 
@@ -76,9 +77,11 @@ performs a second check against the loaded module graph, while specialized
 loaders can impose tighter checkpoint-family rules. Safetensors are accepted
 as weight containers only when they reconstruct that differentiable graph.
 
-The audited model-by-model boundary is listed in the
-[training support matrix](../models/training-support.md). Variant and backend
-qualifications in that table are part of the support statement.
+The audited TTS model-by-model boundary is listed in the
+[TTS training support matrix](../models/training-support.md). ASR and VAD
+provider boundaries are listed separately in the
+[speech-input support matrix](../models/asr-vad-support.md). Variant and
+backend qualifications in those tables are part of the support statement.
 
 ## Loading for training
 
@@ -370,15 +373,17 @@ should declare exact source paths and loss keys.
 A training forward may return:
 
 ```python
-TTSTrainingOutput(loss=loss, logits=logits)
+SpeechTrainingOutput(loss=loss, logits=logits)
 {"loss": loss, "logits": logits}
 (loss, logits)
 ```
 
-`TTSTrainingOutput` also carries `training_phase`, `optimizer_names`, individual
-`losses`, and metadata. Adapters first look for the phase's declared native loss
-keys and apply declared weights. A family fallback runs only when the profile
-explicitly permits it.
+Shared adapters normalize TTS phases to the backward-compatible
+`TTSTrainingOutput` subclass and ASR/VAD phases to `SpeechTrainingOutput`.
+Both carry `training_phase`, `optimizer_names`, individual `losses`, and
+metadata. Adapters first look for the phase's declared native loss keys and
+apply declared weights. A family fallback runs only when the profile explicitly
+permits it.
 
 For a genuinely single-phase external `torch.nn.Module`, a custom loss can be
 connected through `compute_loss_func`:

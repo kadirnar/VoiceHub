@@ -4,10 +4,10 @@ description: Choose the VoiceHub workflow for inference, dataset preparation, or
 
 # Workflows
 
-VoiceHub shares one public lifecycle across TTS models while keeping
-architecture-specific semantics explicit. Choose a workflow below, or use the
-[end-to-end Dia notebook](notebook.md)
-to follow all three in sequence.
+VoiceHub shares one public lifecycle across TTS, ASR, and VAD models while
+keeping task- and architecture-specific semantics explicit. Choose a workflow
+below. The [end-to-end Dia notebook](notebook.md) demonstrates the complete
+TTS path; the speech-input guides document ASR and VAD.
 
 <ol class="vh-process vh-process--seven" role="list" aria-label="VoiceHub lifecycle workflow">
   <li>
@@ -49,7 +49,7 @@ to follow all three in sequence.
 
 ## Inference
 
-Use the [inference guide](inference.md) to:
+Use the [TTS inference guide](inference.md) to:
 
 - discover models without importing their ML runtimes;
 - load Hub checkpoints and local artifacts;
@@ -57,6 +57,15 @@ Use the [inference guide](inference.md) to:
 - provide voice, language, style, and reference conditioning;
 - consume the normalized `TTSOutput`; and
 - keep serving optimizations separate from the training graph.
+
+Use the [speech recognition guide](speech-recognition.md) and
+[voice activity detection guide](voice-activity-detection.md) to:
+
+- discover providers through task-filtered registry metadata;
+- load file, array, tensor, mapping, or `AudioInput` audio;
+- consume normalized `ASROutput` and `VADOutput` values;
+- configure timestamps, long-form decoding, thresholds, and segmentation; and
+- distinguish native, optimized, and upstream-managed runtimes.
 
 ## Data preparation
 
@@ -67,6 +76,10 @@ Use the [data preparation guide](data-preparation.md) to:
 - prevent speaker and recording-session leakage;
 - understand raw-data versus preprocessed routes; and
 - inspect model-owned codec, mask, and target layouts before training.
+
+The [ASR and VAD data guide](speech-data.md) adds transcript and speech-region
+manifests, CTC/seq2seq/transducer batch shapes, clip/frame classification, and
+schema-aware variable-length audio collation.
 
 ## Training
 
@@ -82,11 +95,11 @@ Use the [training guide](training.md) to:
 
 !!! warning "Training support is not universal"
 
-    VoiceHub currently exposes a fine-tuning path for 18 of 31 integrations.
-    Six accept ordinary raw records; the remaining supported routes require
-    preprocessed tensors or a qualified specialized recipe. Read the
-    [training support matrix](../models/training-support.md) before choosing a
-    checkpoint or dataset schema.
+    TTS support remains checkpoint-specific; read the
+    [TTS training matrix](../models/training-support.md). ASR and VAD providers
+    separately declare a VoiceHub-native, upstream-custom, or inference-only
+    boundary in the
+    [speech-input support matrix](../models/asr-vad-support.md).
 
 ## Artifact boundaries
 

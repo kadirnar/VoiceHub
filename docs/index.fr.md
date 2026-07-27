@@ -54,23 +54,24 @@ description: Documentation de VoiceHub pour l'inférence TTS unifiée, la prépa
 
 ## Qu'est-ce que VoiceHub ?
 
-VoiceHub présente les intégrations de synthèse vocale au moyen d'API
-communes pour la configuration, le traitement, les modèles, les résultats de
-génération et l'entraînement. Les implémentations restent adaptées à leur
+VoiceHub présente les modèles TTS, de reconnaissance automatique de la parole
+et de détection d'activité vocale au moyen d'API communes pour la
+configuration, le traitement, les modèles, les résultats et l'entraînement.
+Les implémentations restent adaptées à leur
 architecture : les modèles de langage à codec, les systèmes séquence à
 séquence, les modèles de flow matching et de diffusion, les modèles
 acoustiques, les systèmes antagonistes de type VITS et les pipelines composites
 conservent leurs propres conditionnements, objectifs, règles de propriété des
 paramètres et règles d'exportation.
 
-Le registry contient **31 intégrations d'inférence**. **18 disposent d'un
-parcours d'ajustement documenté**, dont **6 acceptent des enregistrements bruts
-ordinaires**. La prise en charge de l'ajustement dépend du checkpoint et de
-l'environnement d'exécution ; une intégration d'inférence ne garantit pas que
-son artefact VoiceHub actuel soit différentiable. Consultez le
-[catalogue des modèles](models/index.md) et la
-[matrice d'entraînement adaptée aux checkpoints](models/training-support.md)
-pour choisir une intégration.
+Le registry contient **31 intégrations TTS**, **9 fournisseurs ASR** et **7
+fournisseurs VAD**. La prise en charge de l'ajustement dépend du checkpoint et
+de l'environnement d'exécution ; une intégration d'inférence ne garantit pas
+que son artefact VoiceHub actuel soit différentiable. Consultez le
+[catalogue TTS](models/index.md), la
+[matrice d'entraînement TTS](models/training-support.md) et la
+[matrice de prise en charge ASR/VAD](models/asr-vad-support.md) pour choisir
+une intégration.
 
 Le code source des modèles est fourni avec VoiceHub. Les extras facultatifs
 installent les dépendances de l'environnement sélectionné, tandis que les poids

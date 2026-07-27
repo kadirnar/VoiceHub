@@ -5,13 +5,21 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "voicehub"
 dynamic = ["version"]
-description = "A unified, source-integrated inference and training interface for text-to-speech models"
+description = "A unified inference and training interface for TTS, ASR, and VAD models"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "kadirnardev", email = "kadir.nar@hotmail.com" }]
-keywords = ["text-to-speech", "tts", "speech", "voice-cloning", "transformers"]
+keywords = [
+  "automatic-speech-recognition",
+  "speech",
+  "text-to-speech",
+  "transformers",
+  "tts",
+  "voice-activity-detection",
+  "voice-cloning",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -411,6 +419,74 @@ inflecttts = [
   "torch",
   "num2words",
   "phonemizer",
+]
+asr-transformers = [
+  "torch>=2.1",
+  "transformers>=4.53",
+  "safetensors>=0.4",
+  "sentencepiece",
+]
+asr-training = [
+  "torch>=2.1",
+  "transformers>=4.53",
+  "safetensors>=0.4",
+  "accelerate",
+  "datasets",
+  "evaluate",
+  "jiwer",
+]
+faster-whisper = [
+  "faster-whisper>=1.1",
+]
+whisperx = [
+  "whisperx",
+]
+openai-whisper = [
+  "openai-whisper",
+]
+asr-nemo = [
+  "nemo-toolkit[asr]",
+]
+asr-speechbrain = [
+  "speechbrain",
+]
+asr-funasr = [
+  "funasr",
+]
+asr-espnet = [
+  "espnet",
+  "espnet-model-zoo",
+]
+asr-wenet = [
+  "wenet",
+]
+vad-transformers = [
+  "torch>=2.1",
+  "transformers>=4.53",
+  "safetensors>=0.4",
+]
+vad-silero = [
+  "silero-vad",
+]
+vad-silero-onnx = [
+  "silero-vad",
+  "onnxruntime",
+]
+vad-webrtc = [
+  "webrtcvad-wheels>=2.0.14",
+]
+vad-pyannote = [
+  "torch>=2.1",
+  "pyannote.audio>=4,<5",
+]
+vad-speechbrain = [
+  "speechbrain",
+]
+vad-nemo = [
+  "nemo-toolkit[asr]",
+]
+vad-funasr = [
+  "funasr",
 ]
 test = [
   "nbformat>=5.10",

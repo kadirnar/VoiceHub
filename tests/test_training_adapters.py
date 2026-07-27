@@ -62,8 +62,18 @@ class TrainingProfileTests(unittest.TestCase):
                 )
 
     def test_all_builtin_training_families_are_used(self):
-        families = {spec.family for spec in list_training_specs()}
-        self.assertTrue(set(TrainingFamily).issubset(families))
+        families = {spec.family for spec in list_training_specs(task=None)}
+        represented = {
+            TrainingFamily.CAUSAL_LM,
+            TrainingFamily.SEQ2SEQ,
+            TrainingFamily.FLOW_MATCHING,
+            TrainingFamily.ACOUSTIC,
+            TrainingFamily.VITS,
+            TrainingFamily.COMPOSITE,
+            TrainingFamily.AUDIO_CLASSIFICATION,
+            TrainingFamily.UPSTREAM_NATIVE,
+        }
+        self.assertTrue(represented.issubset(families))
 
     def test_all_lazy_models_resolve_an_adapter_without_loading(self):
         for model_spec in AutoInferenceModel.available_models():

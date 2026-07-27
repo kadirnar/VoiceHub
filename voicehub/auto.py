@@ -1,4 +1,4 @@
-"""Automatic configuration and text-to-speech model factories."""
+"""Automatic configuration, processor, and task-specific model factories."""
 
 from __future__ import annotations
 
@@ -6,15 +6,42 @@ from importlib import import_module
 from pathlib import Path
 
 from voicehub.configuration_utils import VoiceHubConfig
+from voicehub.errors import UnknownModelError
 from voicehub.hub import read_json_file, resolve_pretrained_file
 from voicehub.inference_strategy import InferenceStrategy
 from voicehub.processing_utils import VoiceHubProcessor
-from voicehub.registry import get_model_spec
+from voicehub.registry import MODEL_REGISTRY, ModelSpec, get_model_spec
+from voicehub.tasks import SpeechTask
 
 
 def _load_class(module_name: str, class_name: str):
     module = import_module(module_name)
     return getattr(module, class_name)
+
+
+_FACTORY_NAME_BY_TASK = {
+    SpeechTask.TEXT_TO_SPEECH: "AutoModelForTextToSpeech",
+    SpeechTask.AUTOMATIC_SPEECH_RECOGNITION: "AutoModelForSpeechRecognition",
+    SpeechTask.VOICE_ACTIVITY_DETECTION: "AutoModelForVoiceActivityDetection",
+}
+
+
+def _get_task_model_spec(
+    model_type: str,
+    *,
+    expected_task: SpeechTask,
+) -> ModelSpec:
+    """Resolve *model_type* and reject cross-task factory usage early."""
+    spec = get_model_spec(model_type)
+    if spec.task is expected_task:
+        return spec
+
+    expected_factory = _FACTORY_NAME_BY_TASK[expected_task]
+    registered_factory = _FACTORY_NAME_BY_TASK[spec.task]
+    raise ValueError(
+        f"Model {model_type!r} is registered for task {spec.task.value!r}, "
+        f"so it cannot be loaded by {expected_factory}. "
+        f"Use {registered_factory} instead.")
 
 
 class AutoConfig:
@@ -62,6 +89,13 @@ class AutoConfig:
             model_type = read_json_file(config_path).get("model_type")
             if not model_type:
                 raise ValueError("config.json does not contain `model_type`; pass model_type explicitly.")
+            normalized_model_type = (
+                model_type.strip().lower() if isinstance(model_type, str) else model_type)
+            if normalized_model_type not in MODEL_REGISTRY:
+                raise UnknownModelError(
+                    f"Checkpoint model type {model_type!r} is not a canonical "
+                    "VoiceHub provider. Select a task-specific auto factory or "
+                    "pass `model_type` explicitly.")
 
         spec = get_model_spec(model_type)
         config_class = _load_class(spec.config_module, spec.config_class)
@@ -74,11 +108,29 @@ class AutoConfig:
         return config
 
 
-class AutoModelForTextToSpeech:
-    """Load a registered source-integrated model from its configuration."""
+class _BaseAutoModel:
+    """Shared implementation for task-constrained speech-model factories."""
+
+    task: SpeechTask
+    default_model_type: str | None = None
 
     def __init__(self):
-        raise OSError("AutoModelForTextToSpeech must be created with from_config/from_pretrained.")
+        raise OSError(f"{self.__class__.__name__} must be created with "
+                      "from_config/from_pretrained.")
+
+    @classmethod
+    def _get_spec(cls, model_type: str) -> ModelSpec:
+        return _get_task_model_spec(
+            model_type,
+            expected_task=cls.task,
+        )
+
+    @classmethod
+    def available_models(cls) -> tuple[ModelSpec, ...]:
+        """List compatible backends without importing their runtimes."""
+        from voicehub.registry import list_model_specs
+
+        return list_model_specs(task=cls.task)
 
     @classmethod
     def from_config(
@@ -88,7 +140,7 @@ class AutoModelForTextToSpeech:
         inference_strategy: str | InferenceStrategy | None = None,
         **kwargs,
     ):
-        spec = get_model_spec(config.model_type)
+        spec = cls._get_spec(config.model_type)
         model_class = _load_class(spec.module, spec.class_name)
         eager_load = kwargs.get("lazy_load", True) is False
         if inference_strategy is not None and eager_load:
@@ -110,26 +162,86 @@ class AutoModelForTextToSpeech:
         inference_strategy: str | InferenceStrategy | None = None,
         **kwargs,
     ):
+        empty_source = (
+            isinstance(pretrained_model_name_or_path, str) and not pretrained_model_name_or_path.strip())
         if config is None:
             if model_type is None:
-                config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
+                if empty_source:
+                    if cls.default_model_type is None:
+                        raise ValueError(
+                            f"{cls.__name__} has no default checkpoint. Pass a "
+                            "model path or `model_type`.")
+                    spec = cls._get_spec(cls.default_model_type)
+                    config_class = _load_class(
+                        spec.config_module,
+                        spec.config_class,
+                    )
+                    config = config_class(name_or_path=spec.default_model_path)
+                else:
+                    try:
+                        config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
+                        spec = cls._get_spec(config.model_type)
+                    except UnknownModelError:
+                        if cls.default_model_type is None:
+                            raise
+                        spec = cls._get_spec(cls.default_model_type)
+                        config_class = _load_class(
+                            spec.config_module,
+                            spec.config_class,
+                        )
+                        config = config_class(name_or_path=pretrained_model_name_or_path)
             else:
-                spec = get_model_spec(model_type)
+                spec = cls._get_spec(model_type)
                 config_class = _load_class(spec.config_module, spec.config_class)
-                config = config_class(name_or_path=pretrained_model_name_or_path)
+                config = config_class(
+                    name_or_path=(spec.default_model_path if empty_source else pretrained_model_name_or_path))
                 config.model_type = spec.model_type
-        spec = get_model_spec(config.model_type if model_type is None else model_type)
+        else:
+            if model_type is not None and config.model_type == "voicehub":
+                spec = cls._get_spec(model_type)
+                config.model_type = spec.model_type
+            else:
+                configured_spec = cls._get_spec(config.model_type)
+                if model_type is None:
+                    spec = configured_spec
+                else:
+                    spec = cls._get_spec(model_type)
+                if spec.model_type != configured_spec.model_type:
+                    raise ValueError(
+                        f"Explicit model_type {model_type!r} resolves to "
+                        f"{spec.model_type!r}, but the supplied config targets "
+                        f"{configured_spec.model_type!r}.")
         model_class = _load_class(spec.module, spec.class_name)
         return model_class.from_pretrained(
-            pretrained_model_name_or_path,
+            "" if empty_source else pretrained_model_name_or_path,
             config=config,
             inference_strategy=inference_strategy,
             **kwargs,
         )
 
 
+class AutoModelForTextToSpeech(_BaseAutoModel):
+    """Load a registered text-to-speech model."""
+
+    task = SpeechTask.TEXT_TO_SPEECH
+
+
+class AutoModelForSpeechRecognition(_BaseAutoModel):
+    """Load a registered automatic speech-recognition model."""
+
+    task = SpeechTask.AUTOMATIC_SPEECH_RECOGNITION
+    default_model_type = "asr_transformers"
+
+
+class AutoModelForVoiceActivityDetection(_BaseAutoModel):
+    """Load a registered voice-activity-detection model."""
+
+    task = SpeechTask.VOICE_ACTIVITY_DETECTION
+    default_model_type = "vad_transformers"
+
+
 class AutoProcessor:
-    """Create the processor paired with a VoiceHub TTS configuration."""
+    """Create the processor paired with a VoiceHub speech configuration."""
 
     def __init__(self):
         raise OSError("AutoProcessor must be created with from_config/from_pretrained.")
