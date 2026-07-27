@@ -8,6 +8,8 @@ There is no universal TTS batch. VoiceHub keeps source records simple, then
 delegates semantic target construction to the selected model's dataset,
 processor, collator, or specialized training adapter.
 
+<div class="vh-flow-diagram" role="region" aria-label="Scrollable data preparation workflow diagram" tabindex="0" markdown>
+
 ```mermaid
 flowchart LR
     A["Raw recordings"] --> B["Auditable manifest"]
@@ -16,6 +18,8 @@ flowchart LR
     D --> E["Model-specific processor"]
     E --> F["Tokens, codes, masks, or flow targets"]
 ```
+
+</div>
 
 ## Start with an auditable manifest
 

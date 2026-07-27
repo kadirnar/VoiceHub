@@ -165,6 +165,7 @@ body {
   border-bottom: 1px solid var(--vh-line);
   background: var(--vh-tabs-surface);
   box-shadow: 0 0.2rem 0.7rem rgba(27, 36, 88, 0.08);
+  color: var(--vh-tabs-text);
   backdrop-filter: blur(0.7rem);
 }
 
@@ -189,25 +190,39 @@ body {
 }
 
 .md-tabs__link {
+  align-items: center;
+  min-height: 2.1rem;
   margin: 0;
-  padding: 0.38rem 0.68rem;
+  padding: 0.42rem 0.72rem;
   border: 1px solid transparent;
   border-radius: 0.5rem;
   color: var(--vh-tabs-text);
-  font-size: 0.66rem;
-  font-weight: 550;
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.35;
   opacity: 1;
   transition:
     border-color 140ms ease,
     background-color 140ms ease,
+    color 140ms ease,
     opacity 140ms ease;
 }
 
-.md-tabs__link--active,
-.md-tabs__link:hover {
+.md-tabs__item--active > .md-tabs__link,
+.md-tabs__link:is(:hover, :focus) {
   border-color: color-mix(in srgb, var(--vh-indigo) 22%, transparent);
   background: var(--vh-tabs-active);
   color: var(--vh-indigo);
+}
+
+.md-tabs__item--active > .md-tabs__link {
+  box-shadow: inset 0 -2px 0 var(--vh-indigo);
+  font-weight: 700;
+}
+
+.md-tabs__link:focus-visible {
+  outline: 2px solid var(--vh-indigo);
+  outline-offset: 2px;
 }
 
 .md-main__inner {
@@ -220,8 +235,12 @@ body {
 
 .md-typeset {
   color: var(--vh-ink);
-  font-size: 0.82rem;
-  line-height: 1.67;
+  font-size: 0.86rem;
+  line-height: 1.7;
+}
+
+.md-typeset > :is(p, ul, ol, blockquote) {
+  max-width: 48rem;
 }
 
 .md-typeset :is(h1, h2, h3, h4) {
@@ -276,6 +295,8 @@ body {
   border-radius: 0.25rem;
   background: var(--vh-surface);
   box-shadow: none;
+  font-size: 0.74rem;
+  line-height: 1.5;
 }
 
 .md-typeset table:not([class]) th {
@@ -291,6 +312,30 @@ body {
   border-color: var(--md-primary-fg-color);
   background: var(--md-primary-fg-color);
   color: #ffffff;
+}
+
+.md-typeset :is(.admonition, details) {
+  font-size: 0.78rem;
+}
+
+.md-content__button {
+  padding: 0.3rem;
+  border-radius: 0.4rem;
+  color: var(--vh-muted);
+}
+
+.md-content__button:is(:hover, :focus-visible) {
+  color: var(--vh-indigo);
+}
+
+.md-nav {
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.md-nav__link .md-typeset {
+  font-size: inherit;
+  line-height: inherit;
 }
 
 .md-nav__link--active {
@@ -324,7 +369,7 @@ body {
 
 .vh-translation-fallback p {
   margin: 0;
-  font-size: 0.72rem;
+  font-size: 0.76rem;
 }
 
 .vh-translation-fallback a {
@@ -401,7 +446,7 @@ body {
 .vh-doc-teaser__model strong,
 .vh-doc-teaser__audio {
   color: var(--vh-ink);
-  font-size: 0.7rem;
+  font-size: 0.76rem;
   font-weight: 750;
   letter-spacing: 0.07em;
 }
@@ -409,7 +454,7 @@ body {
 .vh-doc-teaser__label span,
 .vh-doc-teaser__model span {
   color: var(--vh-muted);
-  font-size: 0.62rem;
+  font-size: 0.7rem;
 }
 
 .vh-doc-teaser__model img {
@@ -483,7 +528,7 @@ body {
   right: 1.2rem;
   bottom: 0.7rem;
   color: var(--vh-muted);
-  font-size: 0.6rem;
+  font-size: 0.68rem;
 }
 
 .vh-badges {
@@ -530,6 +575,38 @@ body {
   outline-offset: 2px;
 }
 
+.vh-flow-diagram {
+  max-width: 100%;
+  margin: 1.25rem 0;
+  padding: 0.8rem;
+  overflow-x: auto;
+  border: 1px solid var(--vh-line);
+  border-radius: 0.45rem;
+  background: var(--vh-surface-soft);
+  overscroll-behavior-inline: contain;
+  scrollbar-color: var(--vh-indigo) var(--vh-surface-soft);
+  scrollbar-width: thin;
+}
+
+.vh-flow-diagram:focus-visible {
+  outline: 2px solid var(--vh-indigo);
+  outline-offset: 2px;
+}
+
+.vh-flow-diagram .mermaid {
+  min-width: 56rem;
+  margin: 0;
+}
+
+.vh-flow-diagram .mermaid svg {
+  display: block;
+  width: auto !important;
+  min-width: 56rem;
+  max-width: none !important;
+  height: auto;
+  margin: 0 auto;
+}
+
 @media screen and (max-width: 44.984375em) {
   .md-main__inner {
     margin-top: 0.7rem;
@@ -549,7 +626,7 @@ body {
   }
 
   .vh-doc-tagline {
-    font-size: 0.82rem;
+    font-size: 0.86rem;
   }
 
   .vh-translation-fallback {
@@ -601,6 +678,11 @@ body {
   .md-typeset table:not([class]) {
     min-width: 36rem;
   }
+
+  .vh-flow-diagram .mermaid,
+  .vh-flow-diagram .mermaid svg {
+    min-width: 44rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -622,6 +704,15 @@ body {
 
   .vh-doc-home a:focus-visible,
   .md-button:focus-visible {
+    outline-color: Highlight;
+  }
+
+  .md-tabs__item--active > .md-tabs__link {
+    border-color: Highlight;
+  }
+
+  .md-tabs__link:focus-visible,
+  .vh-flow-diagram:focus-visible {
     outline-color: Highlight;
   }
 }
