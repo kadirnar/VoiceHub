@@ -58,25 +58,25 @@ theme:
 
 nav:
   - Home: index.md
-  - Get started:
+  - Quick Start:
       - Installation: getting-started/installation.md
-      - Quickstart: getting-started/quickstart.md
-  - Workflows:
+      - First generation: getting-started/quickstart.md
+  - Guides:
       - Overview: guides/index.md
       - Inference: guides/inference.md
       - Data preparation: guides/data-preparation.md
       - Training: guides/training.md
-      - End-to-end notebook: guides/notebook.md
+  - Notebooks: guides/notebook.md
   - Models:
       - Model catalog: models/index.md
       - Training support: models/training-support.md
-  - Concepts:
+  - Architecture:
       - Library architecture: concepts/architecture.md
       - Trainer architecture: concepts/trainer.md
-  - API reference: reference/api.md
-  - Project:
-      - Model audit: project/model-audit.md
+  - API Reference: reference/api.md
+  - Contributing:
       - Add a model: project/adding-a-model.md
+      - Model audit: project/model-audit.md
 
 plugins:
   - search:
