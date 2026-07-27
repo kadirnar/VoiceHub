@@ -207,14 +207,14 @@ package index:
 
 ```bash
 python -m pip install --upgrade \
-  "voicehub[dia] @ git+https://github.com/kadirnar/VoiceHub.git@main"
+  "voicehub[dia] @ git+https://github.com/kadirnar/voicehub.git@main"
 ```
 
 Add the training extra in the same direct reference when needed:
 
 ```bash
 python -m pip install --upgrade \
-  "voicehub[dia,training] @ git+https://github.com/kadirnar/VoiceHub.git@main"
+  "voicehub[dia,training] @ git+https://github.com/kadirnar/voicehub.git@main"
 ```
 
 For a reproducible environment, replace `main` with a release tag or full
@@ -222,7 +222,7 @@ commit SHA:
 
 ```bash
 python -m pip install \
-  "voicehub[dia,training] @ git+https://github.com/kadirnar/VoiceHub.git@<full-commit-sha>"
+  "voicehub[dia,training] @ git+https://github.com/kadirnar/voicehub.git@<full-commit-sha>"
 ```
 
 A Git installation requires the `git` executable. Record the selected VoiceHub
@@ -234,8 +234,8 @@ runs.
 Clone the repository and install it in editable mode:
 
 ```bash
-git clone https://github.com/kadirnar/VoiceHub.git
-cd VoiceHub
+git clone https://github.com/kadirnar/voicehub.git
+cd voicehub
 python -m pip install -e ".[test]"
 ```
 

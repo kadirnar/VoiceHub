@@ -1,9 +1,9 @@
 site_name: VoiceHub Docs
 site_description: Unified inference, data preparation, and training for modern text-to-speech models.
 site_author: VoiceHub contributors
-site_url: https://kadirnar.github.io/VoiceHub/
-repo_url: https://github.com/kadirnar/VoiceHub
-repo_name: kadirnar/VoiceHub
+site_url: https://kadirnar.github.io/voicehub/
+repo_url: https://github.com/kadirnar/voicehub
+repo_name: kadirnar/voicehub
 edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
@@ -39,7 +39,6 @@ theme:
     - content.code.copy
     - content.tabs.link
     - navigation.footer
-    - navigation.instant
     - navigation.sections
     - navigation.tabs
     - navigation.tabs.sticky
@@ -70,11 +69,272 @@ nav:
   - API Reference: reference/api.md
   - Contributing:
       - Add a model: project/adding-a-model.md
+      - Translations: project/translations.md
       - Model audit: project/model-audit.md
 
 plugins:
   - search:
       lang: en
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: tr
+          name: Türkçe
+          build: true
+          nav_translations:
+            Home: Ana Sayfa
+            Quick Start: Hızlı Başlangıç
+            Installation: Kurulum
+            First generation: İlk ses üretimi
+            Guides: Rehberler
+            Overview: Genel Bakış
+            Inference: Çıkarım
+            Data preparation: Veri hazırlama
+            Training: Eğitim
+            Notebooks: Not Defterleri
+            Models: Modeller
+            Model catalog: Model kataloğu
+            Training support: Eğitim desteği
+            Architecture: Mimari
+            Library architecture: Kütüphane mimarisi
+            Trainer architecture: Eğitici mimarisi
+            API Reference: API Referansı
+            Contributing: Katkıda Bulunma
+            Add a model: Model ekleme
+            Translations: Çeviriler
+            Model audit: Model denetimi
+        - locale: es
+          name: Español
+          build: true
+          nav_translations:
+            Home: Inicio
+            Quick Start: Inicio rápido
+            Installation: Instalación
+            First generation: Primera generación
+            Guides: Guías
+            Overview: Descripción general
+            Inference: Inferencia
+            Data preparation: Preparación de datos
+            Training: Entrenamiento
+            Notebooks: Cuadernos
+            Models: Modelos
+            Model catalog: Catálogo de modelos
+            Training support: Compatibilidad de entrenamiento
+            Architecture: Arquitectura
+            Library architecture: Arquitectura de la biblioteca
+            Trainer architecture: Arquitectura del entrenador
+            API Reference: Referencia de API
+            Contributing: Contribuir
+            Add a model: Añadir un modelo
+            Translations: Traducciones
+            Model audit: Auditoría de modelos
+        - locale: fr
+          name: Français
+          build: true
+          nav_translations:
+            Home: Accueil
+            Quick Start: Démarrage rapide
+            Installation: Installation
+            First generation: Première génération
+            Guides: Guides
+            Overview: Vue d’ensemble
+            Inference: Inférence
+            Data preparation: Préparation des données
+            Training: Entraînement
+            Notebooks: Notebooks
+            Models: Modèles
+            Model catalog: Catalogue des modèles
+            Training support: Prise en charge de l’entraînement
+            Architecture: Architecture
+            Library architecture: Architecture de la bibliothèque
+            Trainer architecture: Architecture de l’entraîneur
+            API Reference: Référence API
+            Contributing: Contribuer
+            Add a model: Ajouter un modèle
+            Translations: Traductions
+            Model audit: Audit des modèles
+        - locale: de
+          name: Deutsch
+          build: true
+          nav_translations:
+            Home: Startseite
+            Quick Start: Schnellstart
+            Installation: Installation
+            First generation: Erste Generierung
+            Guides: Anleitungen
+            Overview: Überblick
+            Inference: Inferenz
+            Data preparation: Datenvorbereitung
+            Training: Training
+            Notebooks: Notebooks
+            Models: Modelle
+            Model catalog: Modellkatalog
+            Training support: Trainingsunterstützung
+            Architecture: Architektur
+            Library architecture: Bibliotheksarchitektur
+            Trainer architecture: Trainerarchitektur
+            API Reference: API-Referenz
+            Contributing: Mitwirken
+            Add a model: Modell hinzufügen
+            Translations: Übersetzungen
+            Model audit: Modell-Audit
+        - locale: pt
+          name: Português
+          build: true
+          nav_translations:
+            Home: Início
+            Quick Start: Início rápido
+            Installation: Instalação
+            First generation: Primeira geração
+            Guides: Guias
+            Overview: Visão geral
+            Inference: Inferência
+            Data preparation: Preparação de dados
+            Training: Treinamento
+            Notebooks: Notebooks
+            Models: Modelos
+            Model catalog: Catálogo de modelos
+            Training support: Suporte ao treinamento
+            Architecture: Arquitetura
+            Library architecture: Arquitetura da biblioteca
+            Trainer architecture: Arquitetura do treinador
+            API Reference: Referência da API
+            Contributing: Contribuir
+            Add a model: Adicionar um modelo
+            Translations: Traduções
+            Model audit: Auditoria de modelos
+        - locale: zh
+          name: 简体中文
+          build: true
+          nav_translations:
+            Home: 首页
+            Quick Start: 快速开始
+            Installation: 安装
+            First generation: 首次生成
+            Guides: 指南
+            Overview: 概览
+            Inference: 推理
+            Data preparation: 数据准备
+            Training: 训练
+            Notebooks: 笔记本
+            Models: 模型
+            Model catalog: 模型目录
+            Training support: 训练支持
+            Architecture: 架构
+            Library architecture: 库架构
+            Trainer architecture: 训练器架构
+            API Reference: API 参考
+            Contributing: 参与贡献
+            Add a model: 添加模型
+            Translations: 翻译
+            Model audit: 模型审核
+        - locale: ja
+          name: 日本語
+          build: true
+          nav_translations:
+            Home: ホーム
+            Quick Start: クイックスタート
+            Installation: インストール
+            First generation: 最初の生成
+            Guides: ガイド
+            Overview: 概要
+            Inference: 推論
+            Data preparation: データ準備
+            Training: 学習
+            Notebooks: ノートブック
+            Models: モデル
+            Model catalog: モデルカタログ
+            Training support: 学習サポート
+            Architecture: アーキテクチャ
+            Library architecture: ライブラリアーキテクチャ
+            Trainer architecture: トレーナーアーキテクチャ
+            API Reference: API リファレンス
+            Contributing: コントリビューション
+            Add a model: モデルを追加
+            Translations: 翻訳
+            Model audit: モデル監査
+        - locale: ko
+          name: 한국어
+          build: true
+          nav_translations:
+            Home: 홈
+            Quick Start: 빠른 시작
+            Installation: 설치
+            First generation: 첫 음성 생성
+            Guides: 가이드
+            Overview: 개요
+            Inference: 추론
+            Data preparation: 데이터 준비
+            Training: 학습
+            Notebooks: 노트북
+            Models: 모델
+            Model catalog: 모델 카탈로그
+            Training support: 학습 지원
+            Architecture: 아키텍처
+            Library architecture: 라이브러리 아키텍처
+            Trainer architecture: 트레이너 아키텍처
+            API Reference: API 레퍼런스
+            Contributing: 기여하기
+            Add a model: 모델 추가
+            Translations: 번역
+            Model audit: 모델 감사
+        - locale: ru
+          name: Русский
+          build: true
+          nav_translations:
+            Home: Главная
+            Quick Start: Быстрый старт
+            Installation: Установка
+            First generation: Первый синтез
+            Guides: Руководства
+            Overview: Обзор
+            Inference: Инференс
+            Data preparation: Подготовка данных
+            Training: Обучение
+            Notebooks: Ноутбуки
+            Models: Модели
+            Model catalog: Каталог моделей
+            Training support: Поддержка обучения
+            Architecture: Архитектура
+            Library architecture: Архитектура библиотеки
+            Trainer architecture: Архитектура тренера
+            API Reference: Справочник API
+            Contributing: Участие в разработке
+            Add a model: Добавить модель
+            Translations: Переводы
+            Model audit: Аудит моделей
+        - locale: ar
+          name: العربية
+          build: true
+          nav_translations:
+            Home: الرئيسية
+            Quick Start: البدء السريع
+            Installation: التثبيت
+            First generation: أول توليد صوتي
+            Guides: الأدلة
+            Overview: نظرة عامة
+            Inference: الاستدلال
+            Data preparation: إعداد البيانات
+            Training: التدريب
+            Notebooks: دفاتر الملاحظات
+            Models: النماذج
+            Model catalog: دليل النماذج
+            Training support: دعم التدريب
+            Architecture: البنية
+            Library architecture: بنية المكتبة
+            Trainer architecture: بنية المدرّب
+            API Reference: مرجع API
+            Contributing: المساهمة
+            Add a model: إضافة نموذج
+            Translations: الترجمات
+            Model audit: تدقيق النماذج
 
 markdown_extensions:
   - admonition
@@ -83,6 +343,9 @@ markdown_extensions:
   - md_in_html
   - tables
   - toc:
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
       permalink: true
   - pymdownx.details
   - pymdownx.highlight:
@@ -105,7 +368,7 @@ extra_css:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/kadirnar/VoiceHub
+      link: https://github.com/kadirnar/voicehub
       name: VoiceHub on GitHub
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/voicehub/

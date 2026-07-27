@@ -38,16 +38,16 @@ description: VoiceHub documentation for unified TTS inference, data preparation,
 </div>
 
 <p class="vh-badges">
-  <a href="https://github.com/kadirnar/VoiceHub/actions/workflows/ci.yml">
-    <img src="https://github.com/kadirnar/VoiceHub/actions/workflows/ci.yml/badge.svg?branch=main" alt="VoiceHub continuous integration status">
+  <a href="https://github.com/kadirnar/voicehub/actions/workflows/ci.yml">
+    <img src="https://github.com/kadirnar/voicehub/actions/workflows/ci.yml/badge.svg?branch=main" alt="VoiceHub continuous integration status">
   </a>
-  <a href="https://github.com/kadirnar/VoiceHub/actions/workflows/docs.yml">
-    <img src="https://github.com/kadirnar/VoiceHub/actions/workflows/docs.yml/badge.svg?branch=main" alt="VoiceHub documentation build status">
+  <a href="https://github.com/kadirnar/voicehub/actions/workflows/docs.yml">
+    <img src="https://github.com/kadirnar/voicehub/actions/workflows/docs.yml/badge.svg?branch=main" alt="VoiceHub documentation build status">
   </a>
-  <a href="https://github.com/kadirnar/VoiceHub/blob/main/pyproject.toml">
+  <a href="https://github.com/kadirnar/voicehub/blob/main/pyproject.toml">
     <img src="https://img.shields.io/badge/python-3.10%2B-3776AB" alt="VoiceHub supports Python 3.10 and later">
   </a>
-  <a href="https://github.com/kadirnar/VoiceHub/blob/main/LICENSE">
+  <a href="https://github.com/kadirnar/voicehub/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/VoiceHub%20license-Apache--2.0-4051b5" alt="VoiceHub is licensed under Apache 2.0">
   </a>
 </p>

@@ -16,7 +16,10 @@ SITE_CONFIG_PATH = REPOSITORY_ROOT / "mkdocs.yml"
 NOTEBOOK_PATH = REPOSITORY_ROOT / "notebooks" / "tts_workflow.ipynb"
 README_PATH = REPOSITORY_ROOT / "README.md"
 PYPROJECT_PATH = REPOSITORY_ROOT / "pyproject.toml"
-PUBLIC_SITE_URL = "https://kadirnar.github.io/VoiceHub/"
+THEME_OVERRIDE_PATH = REPOSITORY_ROOT / "overrides" / "main.html"
+STYLESHEET_PATH = DOCS_ROOT / "stylesheets" / "extra.css"
+PUBLIC_SITE_URL = "https://kadirnar.github.io/voicehub/"
+LOCALIZED_HOME_LOCALES = ("ar", "de", "es", "fr", "ja", "ko", "pt", "ru", "tr", "zh")
 GUIDE_PATHS = (
     DOCS_ROOT / "getting-started" / "quickstart.md",
     DOCS_ROOT / "guides" / "inference.md",
@@ -36,6 +39,7 @@ NAVIGATION_PATHS = (
     "models/training-support.md",
     "concepts/architecture.md",
     "concepts/trainer.md",
+    "project/translations.md",
     "project/model-audit.md",
 )
 PUBLIC_ROUTES = (
@@ -154,6 +158,31 @@ class DocumentationSiteTests(unittest.TestCase):
 
         self.assertFalse((DOCS_ROOT / "tts_workflow.md").exists())
 
+    def test_multilingual_homepages_and_configuration_are_complete(self):
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        theme_override = THEME_OVERRIDE_PATH.read_text(encoding="utf-8")
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        self.assertIn("mkdocs-static-i18n==1.3.1", PYPROJECT_PATH.read_text(encoding="utf-8"))
+        self.assertIn("docs_structure: suffix", config)
+        self.assertIn("fallback_to_default: true", config)
+        self.assertIn("reconfigure_material: true", config)
+        self.assertIn("reconfigure_search: true", config)
+        self.assertIn("pymdownx.slugs.slugify", config)
+        self.assertNotIn("navigation.instant", config)
+        self.assertIn("i18n_page_locale != i18n_file_locale", theme_override)
+        self.assertIn('class="vh-translation-fallback"', theme_override)
+        self.assertIn('lang="{{ i18n_file_locale }}" dir="ltr"', theme_override)
+        self.assertIn('[dir="rtl"] .vh-doc-teaser', stylesheet)
+
+        for locale in LOCALIZED_HOME_LOCALES:
+            with self.subTest(locale=locale):
+                self.assertIn(f"- locale: {locale}", config)
+                localized_home = DOCS_ROOT / f"index.{locale}.md"
+                self.assertTrue(localized_home.is_file())
+                localized_source = localized_home.read_text(encoding="utf-8")
+                self.assertIn('<div class="vh-doc-home" markdown>', localized_source)
+                self.assertIn('<div class="grid cards" markdown>', localized_source)
+
     def test_internal_markdown_links_resolve(self):
         for source_path in DOCS_ROOT.rglob("*.md"):
             source = source_path.read_text(encoding="utf-8")
@@ -186,21 +215,21 @@ class DocumentationSiteTests(unittest.TestCase):
                 self.assertIn(f"{PUBLIC_SITE_URL}{route}", public_content)
 
         self.assertIn(
-            "https://github.com/kadirnar/VoiceHub/blob/main/"
+            "https://github.com/kadirnar/voicehub/blob/main/"
             "notebooks/tts_workflow.ipynb",
             readme,
         )
         self.assertIn(
-            "https://colab.research.google.com/github/kadirnar/VoiceHub/blob/main/"
+            "https://colab.research.google.com/github/kadirnar/voicehub/blob/main/"
             "notebooks/tts_workflow.ipynb",
             readme,
         )
         self.assertNotIn(
-            "github.com/kadirnar/VoiceHub/blob/main/docs/",
+            "github.com/kadirnar/voicehub/blob/main/docs/",
             public_content,
         )
         self.assertNotIn(
-            "github.com/kadirnar/VoiceHub/tree/main/docs",
+            "github.com/kadirnar/voicehub/tree/main/docs",
             public_content,
         )
 

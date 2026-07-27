@@ -1,5 +1,55 @@
 {% extends "base.html" %}
 
+{% block content %}
+  {% set fallback_messages = {
+    "tr": "Bu sayfa henüz çevrilmedi. İngilizce kaynak gösteriliyor.",
+    "es": "Esta página aún no está traducida. Se muestra la fuente en inglés.",
+    "fr": "Cette page n’est pas encore traduite. La source anglaise est affichée.",
+    "de": "Diese Seite ist noch nicht übersetzt. Die englische Quelle wird angezeigt.",
+    "pt": "Esta página ainda não foi traduzida. A fonte em inglês é exibida.",
+    "zh": "此页面尚未翻译，当前显示英文原文。",
+    "ja": "このページはまだ翻訳されていません。英語の原文を表示しています。",
+    "ko": "이 페이지는 아직 번역되지 않았습니다. 영어 원문을 표시합니다.",
+    "ru": "Эта страница ещё не переведена. Показан английский оригинал.",
+    "ar": "لم تُترجم هذه الصفحة بعد. يُعرض النص الإنجليزي الأصلي."
+  } %}
+  {% set translation_links = {
+    "tr": "Çeviriye katkıda bulunun",
+    "es": "Ayudar a traducir",
+    "fr": "Contribuer à la traduction",
+    "de": "Bei der Übersetzung helfen",
+    "pt": "Ajudar a traduzir",
+    "zh": "协助翻译",
+    "ja": "翻訳に協力する",
+    "ko": "번역에 참여하기",
+    "ru": "Помочь с переводом",
+    "ar": "المساعدة في الترجمة"
+  } %}
+  {% set is_fallback = (
+    i18n_page_locale and
+    i18n_file_locale and
+    i18n_page_locale != i18n_file_locale
+  ) %}
+  {% if is_fallback %}
+    <aside class="vh-translation-fallback" role="note">
+      <span class="vh-translation-fallback__icon md-icon" aria-hidden="true">
+        {% include ".icons/material/translate.svg" %}
+      </span>
+      <p>
+        {{ fallback_messages.get(i18n_page_locale, "This page is not translated yet. The English source is shown.") }}
+        <a href="{{ 'project/translations/' | url }}">
+          {{ translation_links.get(i18n_page_locale, "Help translate") }}
+        </a>
+      </p>
+    </aside>
+    <div lang="{{ i18n_file_locale }}" dir="ltr">
+      {{ super() }}
+    </div>
+  {% else %}
+    {{ super() }}
+  {% endif %}
+{% endblock %}
+
 {% block extrahead %}
   {{ super() }}
   {% set social_title = page.title if page and page.title else config.site_name %}
