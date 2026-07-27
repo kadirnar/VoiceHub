@@ -46,7 +46,8 @@ Use the [training guide](training.md) to:
 
 - verify whether the exact model variant can be fine-tuned;
 - select the differentiable checkpoint instead of GGUF or serving exports;
-- run native LM, flow, VITS, GAN, and hybrid recipes;
+- run verified native LM and flow recipes, and understand how the trainer
+  represents model-dependent VITS, GAN, and hybrid phases;
 - start with a one-step gradient smoke test;
 - resume complete VoiceHub checkpoints exactly; and
 - distinguish a portable inference artifact from optimizer-bearing state.

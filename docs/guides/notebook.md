@@ -20,7 +20,7 @@ resume and portable artifacts, and reloads the result for comparison.
 | Discovery | Reads inference and training capabilities before allocating model weights |
 | Baseline | Produces a reproducible sample with the original checkpoint |
 | Manifest | Loads JSON Lines records with explicit transcript, speaker, session, and consent metadata |
-| Audio | Normalizes sample rate/channels and rejects missing, empty, clipped, or non-finite inputs |
+| Audio | Provides mono/44.1 kHz normalization and rejects missing, wrong-rate/channel, empty, or non-finite inputs |
 | Splitting | Keeps recording sessions disjoint between training and validation |
 | Dataset | Uses Dia's model-owned raw-data preparation and inspects one collated batch |
 | Training | Runs a one-step gradient smoke test before a longer fine-tune |
@@ -73,11 +73,12 @@ Run the setup, configuration, manifest, audio, and split cells first. After
 their validation output is clean:
 
 1. set `RUN_INFERENCE = True` and generate the baseline;
-2. inspect the prepared training batch;
-3. set `RUN_TRAINING = True` for the one-step smoke run;
-4. review the loss, gradients, memory use, and saved checkpoint;
-5. extend `MAX_STEPS` or epoch settings only after the smoke run succeeds; and
-6. set `RUN_POST_TRAINING_INFERENCE = True` to reload and compare the export.
+2. set `RUN_TRAINING = True` immediately before the dataset-construction cell;
+3. run the dataset and batch-preview cells, then inspect the prepared batch;
+4. run the trainer and one-step smoke cells;
+5. review the loss, gradients, memory use, and saved checkpoint;
+6. extend `MAX_STEPS` or epoch settings only after the smoke run succeeds; and
+7. set `RUN_POST_TRAINING_INFERENCE = True` to reload and compare the export.
 
 `trainer.train(resume_from_checkpoint=True)` is only valid after
 `OUTPUT_DIR` contains a complete VoiceHub checkpoint. A standalone

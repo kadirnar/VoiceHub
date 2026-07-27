@@ -22,7 +22,7 @@ a checkpoint or dataset format.
 | Level            | Guarantee                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `native`         | The integrated runtime exposes a differentiable backend-native loss that VoiceHub can execute.                           |
-| `preprocessed`   | The objective is integrated, but callers must provide backend-shaped tensors or source records.                          |
+| `preprocessed`   | The objective is integrated, but callers must provide backend-shaped tensors. Raw source-record preparation is not included. |
 | `custom`         | A model-specific adapter and orchestration path are required; a family label alone is insufficient.                      |
 | `inference-only` | The current runtime has no verified gradient path, often because it is fused, compiled, quantized, or inference-pruned.  |
 
