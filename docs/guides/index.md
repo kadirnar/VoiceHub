@@ -9,6 +9,8 @@ architecture-specific semantics explicit. Choose a workflow below, or use the
 [end-to-end Dia notebook](notebook.md)
 to follow all three in sequence.
 
+<div class="vh-flow-diagram" role="region" aria-label="Scrollable VoiceHub lifecycle workflow diagram" tabindex="0" markdown>
+
 ```mermaid
 flowchart LR
     A["Discover a model"] --> B["Run baseline inference"]
@@ -18,6 +20,8 @@ flowchart LR
     E --> F["Save a portable artifact"]
     F --> G["Compare post-training inference"]
 ```
+
+</div>
 
 ## Inference
 

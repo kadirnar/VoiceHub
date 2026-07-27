@@ -173,6 +173,9 @@ class DocumentationSiteTests(unittest.TestCase):
         self.assertIn('class="vh-translation-fallback"', theme_override)
         self.assertIn('lang="{{ i18n_file_locale }}" dir="ltr"', theme_override)
         self.assertIn('[dir="rtl"] .vh-doc-teaser', stylesheet)
+        self.assertIn(".md-tabs__item--active > .md-tabs__link", stylesheet)
+        self.assertNotIn(".md-tabs__link--active", stylesheet)
+        self.assertIn(".vh-flow-diagram", stylesheet)
 
         for locale in LOCALIZED_HOME_LOCALES:
             with self.subTest(locale=locale):

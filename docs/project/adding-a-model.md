@@ -44,6 +44,8 @@ A model is ready to merge when all of the following are true:
 
 The integration path is:
 
+<div class="vh-flow-diagram" role="region" aria-label="Scrollable model integration workflow diagram" tabindex="0" markdown>
+
 ```mermaid
 flowchart LR
     A["Audit source, weights, and license"] --> B["Add a lazy config and wrapper"]
@@ -55,6 +57,8 @@ flowchart LR
     F --> H["Test inference, one training step, and artifacts"]
     G --> H
 ```
+
+</div>
 
 ## 1. Audit the upstream project
 
