@@ -21,24 +21,18 @@ theme:
     repo: fontawesome/brands/github
     edit: material/pencil
   palette:
-    - media: "(prefers-color-scheme)"
-      toggle:
-        icon: material/brightness-auto
-        name: Use light mode
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
+    - scheme: default
       primary: custom
       accent: custom
       toggle:
         icon: material/brightness-7
-        name: Use dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
+        name: Switch to dark mode
+    - scheme: slate
       primary: custom
       accent: custom
       toggle:
         icon: material/brightness-4
-        name: Follow system preference
+        name: Switch to light mode
   features:
     - content.action.edit
     - content.code.annotate
