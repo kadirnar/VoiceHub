@@ -40,7 +40,7 @@ python -m pip install "voicehub[training]"
 TTS implementations and their third-party licenses are included in the
 VoiceHub package. Checkpoints remain separate and are downloaded lazily or
 passed as local paths. See the
-[model catalog](https://kadirnar.github.io/VoiceHub/models/).
+[model catalog](https://kadirnar.github.io/voicehub/models/).
 
 ## Quick start
 
@@ -67,19 +67,19 @@ up before serving traffic.
 
 ## Documentation
 
-The [VoiceHub documentation site](https://kadirnar.github.io/VoiceHub/)
+The [VoiceHub documentation site](https://kadirnar.github.io/voicehub/)
 provides searchable, task-oriented guides:
 
-- [Inference](https://kadirnar.github.io/VoiceHub/guides/inference/)
-- [Data preparation](https://kadirnar.github.io/VoiceHub/guides/data-preparation/)
-- [Training](https://kadirnar.github.io/VoiceHub/guides/training/)
-- [End-to-end notebook](https://kadirnar.github.io/VoiceHub/guides/notebook/)
-- [Model training support](https://kadirnar.github.io/VoiceHub/models/training-support/)
+- [Inference](https://kadirnar.github.io/voicehub/guides/inference/)
+- [Data preparation](https://kadirnar.github.io/voicehub/guides/data-preparation/)
+- [Training](https://kadirnar.github.io/voicehub/guides/training/)
+- [End-to-end notebook](https://kadirnar.github.io/voicehub/guides/notebook/)
+- [Model training support](https://kadirnar.github.io/voicehub/models/training-support/)
 
 The runnable
-[Jupyter notebook](https://github.com/kadirnar/VoiceHub/blob/main/notebooks/tts_workflow.ipynb)
+[Jupyter notebook](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb)
 runs the complete workflow and
-[opens directly in Colab](https://colab.research.google.com/github/kadirnar/VoiceHub/blob/main/notebooks/tts_workflow.ipynb).
+[opens directly in Colab](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb).
 
 ## Supported models
 
@@ -168,8 +168,8 @@ Every synthesis call returns `TTSOutput`, containing `audio`, `sample_rate`,
 `generate` signatures.
 
 See the
-[model catalog](https://kadirnar.github.io/VoiceHub/models/)
-and [architecture guide](https://kadirnar.github.io/VoiceHub/concepts/architecture/).
+[model catalog](https://kadirnar.github.io/voicehub/models/)
+and [architecture guide](https://kadirnar.github.io/voicehub/concepts/architecture/).
 
 ## Training
 
@@ -236,9 +236,9 @@ mixed precision, callbacks, evaluation/prediction, best-model selection,
 checkpoint rotation, and atomic resumable model/optimizer/scheduler/RNG state.
 
 See the
-[trainer guide](https://kadirnar.github.io/VoiceHub/concepts/trainer/)
+[trainer guide](https://kadirnar.github.io/voicehub/concepts/trainer/)
 and
-[training model matrix](https://kadirnar.github.io/VoiceHub/models/training-support/)
+[training model matrix](https://kadirnar.github.io/voicehub/models/training-support/)
 for objective families, native upstream recipes, and extension points.
 
 ## Source policy

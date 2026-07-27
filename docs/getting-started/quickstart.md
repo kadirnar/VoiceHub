@@ -14,7 +14,7 @@ The repository version used by these guides can be installed directly:
 
 ```bash
 python -m pip install \
-  "voicehub[parlertts] @ git+https://github.com/kadirnar/VoiceHub.git@6dfb0010fa06176edd6bbc4e92ba97b9372b2814"
+  "voicehub[parlertts] @ git+https://github.com/kadirnar/voicehub.git@6dfb0010fa06176edd6bbc4e92ba97b9372b2814"
 ```
 
 For development from a clone:

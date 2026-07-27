@@ -30,14 +30,15 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/kadirnar/VoiceHub"
-Repository = "https://github.com/kadirnar/VoiceHub"
-Issues = "https://github.com/kadirnar/VoiceHub/issues"
-Documentation = "https://kadirnar.github.io/VoiceHub/"
+Homepage = "https://github.com/kadirnar/voicehub"
+Repository = "https://github.com/kadirnar/voicehub"
+Issues = "https://github.com/kadirnar/voicehub/issues"
+Documentation = "https://kadirnar.github.io/voicehub/"
 
 [project.optional-dependencies]
 docs = [
   "mkdocs-material==9.7.7",
+  "mkdocs-static-i18n==1.3.1",
 ]
 training = [
   "safetensors>=0.4",

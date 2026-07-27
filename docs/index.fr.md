@@ -1,0 +1,183 @@
+---
+hide:
+  - navigation
+  - toc
+description: Documentation de VoiceHub pour l'inférence TTS unifiée, la préparation des données et l'ajustement adapté à chaque architecture.
+---
+
+<div class="vh-doc-home" markdown>
+
+<p class="vh-doc-logo">
+  <img src="assets/voicehub-mark.svg" alt="">
+</p>
+
+# VoiceHub : inférence et entraînement de synthèse vocale
+
+<p class="vh-doc-tagline">
+  Une bibliothèque Python intégrée au code source pour l'inférence, la
+  préparation des données et l'ajustement propre à chaque modèle dans les familles TTS modernes.
+</p>
+
+<div class="vh-doc-teaser" role="img" aria-label="Le texte traverse un adaptateur de modèle VoiceHub et devient une forme d'onde audio">
+  <div class="vh-doc-teaser__label">
+    <strong>TEXTE</strong>
+    <span>« Une voix claire et naturelle. »</span>
+  </div>
+  <span class="vh-doc-teaser__arrow" aria-hidden="true">→</span>
+  <div class="vh-doc-teaser__model">
+    <img src="assets/voicehub-mark.svg" alt="">
+    <strong>VoiceHub</strong>
+    <span>ADAPTATEUR DE MODÈLE</span>
+  </div>
+  <span class="vh-doc-teaser__arrow" aria-hidden="true">→</span>
+  <div class="vh-doc-waveform" aria-hidden="true">
+    <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+    <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+  </div>
+  <span class="vh-doc-teaser__audio">AUDIO</span>
+</div>
+
+<p class="vh-badges">
+  <a href="https://github.com/kadirnar/voicehub/actions/workflows/ci.yml">
+    <img src="https://github.com/kadirnar/voicehub/actions/workflows/ci.yml/badge.svg?branch=main" alt="État de l'intégration continue de VoiceHub">
+  </a>
+  <a href="https://github.com/kadirnar/voicehub/actions/workflows/docs.yml">
+    <img src="https://github.com/kadirnar/voicehub/actions/workflows/docs.yml/badge.svg?branch=main" alt="État de la compilation de la documentation VoiceHub">
+  </a>
+  <a href="https://github.com/kadirnar/voicehub/blob/main/pyproject.toml">
+    <img src="https://img.shields.io/badge/python-3.10%2B-3776AB" alt="VoiceHub prend en charge Python 3.10 et les versions ultérieures">
+  </a>
+  <a href="https://github.com/kadirnar/voicehub/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/VoiceHub%20license-Apache--2.0-4051b5" alt="VoiceHub est distribué sous licence Apache 2.0">
+  </a>
+</p>
+
+## Qu'est-ce que VoiceHub ?
+
+VoiceHub présente les intégrations de synthèse vocale au moyen d'API
+communes pour la configuration, le traitement, les modèles, les résultats de
+génération et l'entraînement. Les implémentations restent adaptées à leur
+architecture : les modèles de langage à codec, les systèmes séquence à
+séquence, les modèles de flow matching et de diffusion, les modèles
+acoustiques, les systèmes antagonistes de type VITS et les pipelines composites
+conservent leurs propres conditionnements, objectifs, règles de propriété des
+paramètres et règles d'exportation.
+
+Le registry contient **31 intégrations d'inférence**. **18 disposent d'un
+parcours d'ajustement documenté**, dont **6 acceptent des enregistrements bruts
+ordinaires**. La prise en charge de l'ajustement dépend du checkpoint et de
+l'environnement d'exécution ; une intégration d'inférence ne garantit pas que
+son artefact VoiceHub actuel soit différentiable. Consultez le
+[catalogue des modèles](models/index.md) et la
+[matrice d'entraînement adaptée aux checkpoints](models/training-support.md)
+pour choisir une intégration.
+
+Le code source des modèles est fourni avec VoiceHub. Les extras facultatifs
+installent les dépendances de l'environnement sélectionné, tandis que les poids
+des checkpoints sont téléchargés à la demande ou fournis sous forme de chemins
+locaux. La licence Apache-2.0 couvre uniquement VoiceHub ; le code intégré, les
+checkpoints, les codecs, les jeux de données et les fichiers audio générés
+peuvent être soumis à des conditions distinctes.
+
+<div class="grid cards" markdown>
+
+-   **Bien démarrer**
+
+    ---
+
+    Installez VoiceHub depuis l'arborescence source actuelle et exécutez votre
+    première requête de génération avec le model factory partagé.
+
+    [Démarrage rapide](getting-started/quickstart.md)
+
+-   **Inférence**
+
+    ---
+
+    Découvrez les intégrations, chargez des checkpoints depuis Hub ou des
+    chemins locaux, configurez une génération reproductible et exploitez un
+    signal audio normalisé.
+
+    [Guide d'inférence](guides/inference.md)
+
+-   **Préparation des données**
+
+    ---
+
+    Créez des manifests auditables, validez le signal audio, empêchez les fuites
+    entre locuteurs ou sessions et générez des entrées d'entraînement propres
+    à chaque modèle.
+
+    [Guide de préparation des données](guides/data-preparation.md)
+
+-   **Entraînement**
+
+    ---
+
+    Validez les limites des checkpoints, exécutez les objectifs natifs, évaluez,
+    reprenez à partir de checkpoints complets et enregistrez des artefacts
+    portables.
+
+    [Guide d'entraînement](guides/training.md)
+
+-   **Modèles**
+
+    ---
+
+    Comparez les 31 entrées du registry, leurs extras d'installation, leurs
+    checkpoints par défaut, leurs capacités, la provenance du code source et
+    leurs contraintes.
+
+    [Catalogue des modèles](models/index.md)
+
+-   **Prise en charge de l'entraînement**
+
+    ---
+
+    Vérifiez précisément, pour chaque intégration, si l'ajustement accepte des
+    données brutes ou prétraitées, requiert un traitement spécialisé ou n'est
+    pas disponible.
+
+    [Matrice d'entraînement](models/training-support.md)
+
+-   **Notebook**
+
+    ---
+
+    Exécutez le workflow Dia depuis l'inférence initiale et la validation des
+    données jusqu'à l'entraînement, l'exportation et le rechargement dans un
+    environnement neuf.
+
+    [Ouvrir le guide du notebook](guides/notebook.md)
+
+-   **Référence de l'API**
+
+    ---
+
+    Consultez les factories, les résultats, les arguments du trainer, les
+    callbacks, les collators, les stratégies, les artefacts et les registries
+    d'extensions.
+
+    [Parcourir l'API](reference/api.md)
+
+-   **Architecture**
+
+    ---
+
+    Comprenez le registry, les model wrappers, les adaptateurs, les stratégies
+    d'exécution, les checkpoints et les limites des artefacts portables.
+
+    [Architecture de la bibliothèque](concepts/architecture.md)
+
+-   **Ajouter un modèle**
+
+    ---
+
+    Implémentez et testez un wrapper lazy, une spécification d'entraînement, un
+    adaptateur spécialisé si nécessaire et un contrat d'exportation.
+
+    [Guide d'intégration d'un modèle](project/adding-a-model.md)
+
+</div>
+
+</div>

@@ -9,8 +9,8 @@ example. It starts from baseline inference, validates raw audio records, creates
 leakage-resistant splits, runs a one-step training smoke test, saves both
 resume and portable artifacts, and reloads the result for comparison.
 
-[Run in Google Colab](https://colab.research.google.com/github/kadirnar/VoiceHub/blob/main/notebooks/tts_workflow.ipynb){ .md-button .md-button--primary target="_blank" rel="noopener" }
-[View the notebook on GitHub](https://github.com/kadirnar/VoiceHub/blob/main/notebooks/tts_workflow.ipynb){ .md-button target="_blank" rel="noopener" }
+[Run in Google Colab](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb){ .md-button .md-button--primary target="_blank" rel="noopener" }
+[View the notebook on GitHub](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb){ .md-button target="_blank" rel="noopener" }
 
 ## What the notebook covers
 
