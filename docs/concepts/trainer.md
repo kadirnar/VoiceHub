@@ -404,6 +404,25 @@ The function receives raw model outputs, labels, and the number of items
 represented by the accumulated batch. It cannot supply missing trainable
 modules or recover gradients from an inference engine.
 
+## Experiment reporting
+
+Reporting is implemented as a callback boundary rather than embedded in model
+adapters or training strategies. Enable the built-in W&B callback with
+`report_to="wandb"` and configure it through the `wandb_*` fields on
+`TrainingArguments`.
+
+The callback initializes lazily on the world-primary process, records
+serializable training and model metadata, namespaces metrics by phase, and
+persists its run ID inside VoiceHub's callback checkpoint state. An existing
+user-managed `wandb.run` is reused but never finished by VoiceHub. Artifact
+upload is deliberately opt-in: `"checkpoint"` uploads only after the atomic
+checkpoint completion marker exists, while `"end"` saves and uploads one
+portable final artifact.
+
+This separation keeps inference imports lightweight and gives future reporting
+backends the same callback lifecycle without coupling them to TTS, ASR, VAD,
+or a specific execution strategy.
+
 ## Training strategy and optimization boundary
 
 Recipes describe **what** to optimize. `TrainingStrategy` describes **how** to

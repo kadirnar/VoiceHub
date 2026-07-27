@@ -9,46 +9,18 @@ speech regions. Transformers classifiers, neural VAD pipelines, and WebRTC's
 fixed-point detector share one factory and output type while retaining their
 own model and post-processing controls.
 
-## Install one provider
+## Install every provider
 
-=== "Silero"
-
-    ```bash
-    python -m pip install "voicehub[vad-silero]"
-    ```
-
-=== "WebRTC"
-
-    ```bash
-    python -m pip install "voicehub[vad-webrtc]"
-    ```
-
-=== "Transformers"
-
-    ```bash
-    python -m pip install "voicehub[vad-transformers]"
-    ```
-
-=== "pyannote"
-
-    ```bash
-    python -m pip install "voicehub[vad-pyannote]"
-    ```
-
-=== "FunASR FSMN"
-
-    ```bash
-    python -m pip install "voicehub[vad-funasr]"
-    ```
-
-Silero ONNX execution is a separate, explicit environment choice:
+The same bundle installs all ASR and VAD runtimes, including both Silero JIT
+and ONNX execution:
 
 ```bash
-python -m pip install "voicehub[vad-silero-onnx]"
+python -m pip install "voicehub[asr-vad]"
 ```
 
 The [support matrix](../models/asr-vad-support.md#vad-providers) lists every
-provider extra and training boundary.
+provider and training boundary. Provider-specific VAD extras are not
+published.
 
 ## Detect speech
 

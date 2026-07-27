@@ -6,6 +6,7 @@ import unittest
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
@@ -900,22 +901,13 @@ class NativeToolkitInferenceTests(unittest.TestCase):
                 }
 
         runtime = Runtime()
-        wenet = ModuleType("wenet")
-        wenet.__path__ = []
-        cli = ModuleType("wenet.cli")
-        cli.__path__ = []
-        model_module = ModuleType("wenet.cli.model")
+        vendored_runtime = ModuleType("voicehub.models.asr_native._wenet", )
 
         def load_model(source, *, device, **kwargs):
             captured["load"] = (source, device, kwargs)
             return runtime
 
-        model_module.load_model = load_model
-        modules = {
-            "wenet": wenet,
-            "wenet.cli": cli,
-            "wenet.cli.model": model_module,
-        }
+        vendored_runtime.load_model = load_model
         model = WeNetASRForSpeechRecognition(
             WeNetASRConfig(
                 name_or_path="english",
@@ -924,12 +916,20 @@ class NativeToolkitInferenceTests(unittest.TestCase):
             device="cpu",
         )
 
-        with _temporary_modules(modules):
+        with patch(
+                "voicehub.models.asr_native.wenet.import_optional",
+                return_value=vendored_runtime,
+        ) as import_runtime:
             output = model.transcribe(
                 np.zeros(16_000, dtype=np.float32),
                 sampling_rate=16_000,
             )
 
+        import_runtime.assert_called_once_with(
+            "voicehub.models.asr_native._wenet",
+            model_type="asr_wenet",
+            install_extra="asr-vad",
+        )
         self.assertEqual(captured["load"][:2], ("english", "cpu"))
         self.assertTrue(captured["exists"])
         self.assertFalse(captured["path"].exists())

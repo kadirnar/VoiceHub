@@ -172,7 +172,7 @@ class SpeechBrainVADForVoiceActivityDetection(PreTrainedVADModel):
         speechbrain_vad = import_optional(
             "speechbrain.inference.VAD",
             model_type=self.config.model_type,
-            install_extra="vad-speechbrain",
+            install_extra="asr-vad",
         )
         vad_class = getattr(speechbrain_vad, "VAD", None)
         loader = getattr(vad_class, "from_hparams", None)

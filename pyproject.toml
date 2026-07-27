@@ -51,6 +51,11 @@ docs = [
 training = [
   "safetensors>=0.4",
   "torch>=2.1",
+  "accelerate",
+  "datasets",
+  "evaluate",
+  "jiwer",
+  "wandb>=0.19",
 ]
 orpheustts = [
   "torch",
@@ -420,73 +425,38 @@ inflecttts = [
   "num2words",
   "phonemizer",
 ]
-asr-transformers = [
+asr-vad = [
   "torch>=2.1",
-  "transformers>=4.53",
+  "torchaudio>=2.1",
+  # Keep WhisperX, NeMo, and ESPnet on their tested, mutually compatible ABI.
+  "transformers~=4.53.0",
   "safetensors>=0.4",
   "sentencepiece",
-]
-asr-training = [
-  "torch>=2.1",
-  "transformers>=4.53",
-  "safetensors>=0.4",
-  "accelerate",
-  "datasets",
-  "evaluate",
-  "jiwer",
-]
-faster-whisper = [
   "faster-whisper>=1.1",
-]
-whisperx = [
-  "whisperx",
-]
-openai-whisper = [
+  "whisperx>=3.8.6,<3.9",
   "openai-whisper",
-]
-asr-nemo = [
-  "nemo-toolkit[asr]",
-]
-asr-speechbrain = [
+  # NeMo's aggregate ASR extra installs W&B and conflicts with modern ESPnet.
+  # Compose its inference surface explicitly so W&B remains training-only.
+  "nemo-toolkit[asr-only,common-only]==2.5.0",
+  "cloudpickle",
+  "fiddle",
+  "hydra-core>1.3,<=1.3.2",
+  "lightning>2.2.1,<=2.4.0",
+  "omegaconf<=2.3",
+  "peft",
+  "torchmetrics>=0.11.0",
+  "webdataset>=0.2.86",
   "speechbrain",
-]
-asr-funasr = [
   "funasr",
-]
-asr-espnet = [
-  "espnet",
-  "espnet-model-zoo",
-]
-asr-wenet = [
-  "wenet",
-]
-vad-transformers = [
-  "torch>=2.1",
-  "transformers>=4.53",
-  "safetensors>=0.4",
-]
-vad-silero = [
-  "silero-vad",
-]
-vad-silero-onnx = [
+  "espnet==202511",
+  "espnet-model-zoo>=0.1.7",
+  "setuptools>=70,<74",
   "silero-vad",
   "onnxruntime",
-]
-vad-webrtc = [
   "webrtcvad-wheels>=2.0.14",
-]
-vad-pyannote = [
-  "torch>=2.1",
   "pyannote.audio>=4,<5",
-]
-vad-speechbrain = [
-  "speechbrain",
-]
-vad-nemo = [
-  "nemo-toolkit[asr]",
-]
-vad-funasr = [
-  "funasr",
+  "requests",
+  "tqdm",
 ]
 test = [
   "nbformat>=5.10",

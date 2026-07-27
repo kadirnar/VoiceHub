@@ -201,7 +201,7 @@ print(json.dumps({name: name in sys.modules for name in optional}))
                 ),
                 self.assertRaisesRegex(
                     OptionalDependencyError,
-                    r'voicehub\[vad-silero\]',
+                    r'voicehub\[asr-vad\]',
                 ),
         ):
             model._load_pretrained_model()

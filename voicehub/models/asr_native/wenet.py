@@ -40,15 +40,16 @@ class WeNetASRForSpeechRecognition(PreTrainedASRModel):
         return resolve_cpu_cuda_device(device, provider="WeNet")
 
     def _load_pretrained_model(self) -> None:
-        wenet_model = import_optional(
-            "wenet.cli.model",
+        wenet_runtime = import_optional(
+            "voicehub.models.asr_native._wenet",
             model_type=self.config.model_type,
-            install_extra="asr-wenet",
+            install_extra="asr-vad",
         )
         source = self.config.name_or_path or self.default_model_name_or_path
-        loader = getattr(wenet_model, "load_model", None)
+        loader = getattr(wenet_runtime, "load_model", None)
         if not callable(loader):
-            raise RuntimeError("The installed WeNet package does not expose load_model().")
+            raise RuntimeError("VoiceHub's vendored WeNet runtime does not expose "
+                               "load_model().")
         self.model = loader(
             source,
             device=self.device,

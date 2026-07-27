@@ -145,8 +145,8 @@ separate terms.
 
     ---
 
-    Compare provider families, optional extras, output capabilities, and the
-    exact native, upstream-custom, or inference-only training boundary.
+    Compare provider families, the shared install bundle, output capabilities,
+    and the exact native, upstream-custom, or inference-only training boundary.
 
     [Speech-input matrix](models/asr-vad-support.md)
 

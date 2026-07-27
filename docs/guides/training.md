@@ -138,6 +138,42 @@ trainer = Trainer(
 )
 ```
 
+## Track the run with Weights & Biases
+
+The `training` extra includes the W&B SDK. Enable it without constructing a
+callback manually:
+
+```python
+arguments = TrainingArguments(
+    output_dir="runs/dia-finetune",
+    report_to="wandb",
+    run_name="dia-speaker-adaptation",
+    wandb_project="voicehub-finetuning",
+    wandb_entity="your-team",
+    wandb_group="dia-ablation",
+    wandb_tags=["tts", "dia", "speaker-adaptation"],
+    wandb_notes="Baseline learning-rate and frozen-codec run.",
+    wandb_mode="online",
+    wandb_log_model="checkpoint",
+)
+```
+
+`logging_steps` controls metric cadence. Training, evaluation, and test
+metrics are grouped under `train/`, `eval/`, and `test/`. The integration:
+
+- imports W&B only when a reported run begins;
+- logs only from `TrainerState.is_world_process_zero`;
+- stores the W&B run ID in exact-resume checkpoint state;
+- reuses a run created explicitly with `wandb.init()` without finishing it;
+- supports `wandb_mode="offline"` for later synchronization; and
+- uploads only complete VoiceHub checkpoints when
+  `wandb_log_model="checkpoint"`, or one portable final model when set to
+  `"end"`.
+
+Authentication stays outside serializable training arguments. Use
+`wandb login` or the `WANDB_API_KEY` environment variable rather than putting
+an API key in source code or a checkpoint.
+
 !!! note "Choose precision from hardware"
 
     `bf16=True` is appropriate only on BF16-capable hardware. Use `fp16=True`

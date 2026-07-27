@@ -270,7 +270,7 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
             raise OptionalDependencyError(
                 f"'asr_transformers' architecture family {family!r} requires "
                 f"a Transformers release exposing `{class_name}`. Upgrade "
-                '`transformers` in `voicehub[asr-transformers]` and retry.')
+                '`transformers` in `voicehub[asr-vad]` and retry.')
         return model_class
 
     def _direct_state_dict(self) -> Mapping[str, Any] | None:
@@ -281,7 +281,7 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
             safetensors = import_optional(
                 "safetensors.torch",
                 model_type=self.config.model_type,
-                install_extra="asr-transformers",
+                install_extra="asr-vad",
             )
             state_dict = safetensors.load_file(
                 str(weight_file),
@@ -291,7 +291,7 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
             torch = import_optional(
                 "torch",
                 model_type=self.config.model_type,
-                install_extra="asr-transformers",
+                install_extra="asr-vad",
             )
             state_dict = torch.load(
                 str(weight_file),
@@ -381,7 +381,7 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
         transformers = import_optional(
             "transformers",
             model_type=self.config.model_type,
-            install_extra="asr-transformers",
+            install_extra="asr-vad",
         )
         self.native_config = transformers.AutoConfig.from_pretrained(
             self._transformers_config_source(),
@@ -392,7 +392,7 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
         if processor_class is None:
             raise OptionalDependencyError(
                 "'asr_transformers' requires a Transformers release exposing "
-                "`AutoProcessor`. Upgrade `voicehub[asr-transformers]` and retry.")
+                "`AutoProcessor`. Upgrade `voicehub[asr-vad]` and retry.")
         processor_options = {
             **self._hub_kwargs(),
             **self.config.processor_kwargs,
@@ -438,7 +438,7 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
         transformers = import_optional(
             "transformers",
             model_type=self.config.model_type,
-            install_extra="asr-transformers",
+            install_extra="asr-vad",
         )
         processor = self.transformers_processor
         if processor is None:

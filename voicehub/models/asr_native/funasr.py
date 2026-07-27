@@ -46,7 +46,7 @@ class FunASRForSpeechRecognition(PreTrainedASRModel):
         funasr = import_optional(
             "funasr",
             model_type=self.config.model_type,
-            install_extra="asr-funasr",
+            install_extra="asr-vad",
         )
         source = self.config.name_or_path or self.default_model_name_or_path
         auto_model = getattr(funasr, "AutoModel", None)

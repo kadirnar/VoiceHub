@@ -25,28 +25,37 @@ VoiceHub requires Python 3.10 or newer.
 python -m pip install voicehub
 ```
 
-Install only the backend you plan to use:
+Install a TTS backend when you need one:
 
 ```bash
 python -m pip install "voicehub[parlertts]"
-python -m pip install "voicehub[f5tts]"
-python -m pip install "voicehub[melotts]"
-python -m pip install "voicehub[asr-transformers]"
-python -m pip install "voicehub[vad-silero]"
 ```
 
-Install PyTorch training support independently of any inference backend:
+ASR and VAD use one consolidated inference bundle instead of one install
+command per provider:
 
 ```bash
-python -m pip install "voicehub[training]"
+python -m pip install "voicehub[asr-vad]"
 ```
+
+Add the separate training bundle for the shared trainer and optional Weights &
+Biases reporting:
+
+```bash
+python -m pip install "voicehub[asr-vad,training]"
+```
+
+The training bundle does not make every inference provider directly
+fine-tunable. VoiceHub-native profiles can use the shared trainer;
+upstream-custom profiles retain their source recipe, and inference-only
+profiles remain non-trainable.
 
 TTS implementations and their third-party licenses are included in the
 VoiceHub package. Checkpoints remain separate and are downloaded lazily or
 passed as local paths. See the
 [model catalog](https://kadirnar.github.io/voicehub/models/).
-ASR and VAD integrations wrap optional provider runtimes selected by their
-extras; see the
+ASR and VAD integrations wrap optional provider runtimes from the unified
+`asr-vad` bundle; see the
 [speech-input matrix](https://kadirnar.github.io/voicehub/models/asr-vad-support/).
 
 ## Quick start
@@ -142,7 +151,7 @@ pyannote, SpeechBrain, NeMo, and FunASR FSMN VAD behind normalized
 
 This table lists TTS integrations. See the
 [ASR/VAD provider matrix](https://kadirnar.github.io/voicehub/models/asr-vad-support/)
-for speech-input families, optional extras, outputs, and fine-tuning
+for speech-input families, the shared install bundle, outputs, and fine-tuning
 boundaries.
 
 | Model type        | Backend         | Notable capabilities                |
@@ -285,6 +294,24 @@ trainer = Trainer(
 )
 trainer.train()
 ```
+
+Enable first-class Weights & Biases reporting through the same training
+arguments:
+
+```python
+arguments = TrainingArguments(
+    output_dir="runs/my-tts-model",
+    report_to="wandb",
+    run_name="parler-baseline",
+    wandb_project="voicehub",
+    wandb_tags=["tts", "fine-tuning"],
+    wandb_log_model="end",
+)
+```
+
+W&B is imported only when training begins, logs only from the world-primary
+process, resumes its run ID with VoiceHub checkpoints, and never finishes a
+run created by user code.
 
 This example assumes that dataset items already contain Parler's
 backend-shaped training tensors. The generic trainer does not silently turn

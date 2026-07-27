@@ -108,7 +108,7 @@ class NeMoVADForVoiceActivityDetection(PreTrainedVADModel):
         nemo_models = import_optional(
             "nemo.collections.asr.models",
             model_type=self.config.model_type,
-            install_extra="vad-nemo",
+            install_extra="asr-vad",
         )
         source, local_source = self._resolve_native_source()
         family = self.config.architecture_family
@@ -164,7 +164,7 @@ class NeMoVADForVoiceActivityDetection(PreTrainedVADModel):
         torch = import_optional(
             "torch",
             model_type=self.config.model_type,
-            install_extra="vad-nemo",
+            install_extra="asr-vad",
         )
         input_signal = torch.as_tensor(waveforms)
         input_length = torch.as_tensor(lengths)
@@ -191,7 +191,7 @@ class NeMoVADForVoiceActivityDetection(PreTrainedVADModel):
         np = import_optional(
             "numpy",
             model_type=self.config.model_type,
-            install_extra="vad-nemo",
+            install_extra="asr-vad",
         )
         windows = []
         for start in range(0, len(waveform), frame_hop):

@@ -134,7 +134,7 @@ class PyannoteVADForVoiceActivityDetection(PreTrainedVADModel):
         pyannote_audio = import_optional(
             "pyannote.audio",
             model_type=self.config.model_type,
-            install_extra="vad-pyannote",
+            install_extra="asr-vad",
         )
         pipeline_class = getattr(pyannote_audio, "Pipeline", None)
         loader = getattr(pipeline_class, "from_pretrained", None)
@@ -186,7 +186,7 @@ class PyannoteVADForVoiceActivityDetection(PreTrainedVADModel):
                 torch = import_optional(
                     "torch",
                     model_type=self.config.model_type,
-                    install_extra="vad-pyannote",
+                    install_extra="asr-vad",
                 )
                 move(torch.device(self.device))
         self.model = pipeline
@@ -222,7 +222,7 @@ class PyannoteVADForVoiceActivityDetection(PreTrainedVADModel):
         torch = import_optional(
             "torch",
             model_type=self.config.model_type,
-            install_extra="vad-pyannote",
+            install_extra="asr-vad",
         )
         waveform = torch.as_tensor(materialized.waveform)
         if getattr(waveform, "ndim", len(getattr(waveform, "shape", ()))) == 1:

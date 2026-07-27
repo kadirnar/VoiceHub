@@ -4,31 +4,39 @@ description: Install VoiceHub in an isolated Python environment for registry dis
 
 # Installation and environments
 
-VoiceHub keeps its base installation small and moves model runtimes, training,
-documentation, and test tools into optional dependency groups. Install only
-the layers needed by one environment:
+VoiceHub keeps its base installation small and separates inference runtimes,
+training, documentation, and contributor tools into explicit dependency
+groups:
 
-| Layer             | Install target                     | What it provides                                                                              |
-| ----------------- | ---------------------------------- | --------------------------------------------------------------------------------------------- |
-| Base library      | `voicehub`                         | Registry discovery, configuration, Hub access, NumPy, and audio file I/O                      |
-| Model runtime     | `voicehub[<model-extra>]`          | The framework, audio, tokenizer, and other packages required by one TTS, ASR, or VAD provider  |
-| Training runtime  | `voicehub[<model-extra>,training]` | The selected model runtime plus VoiceHub's PyTorch and safetensors training dependencies      |
-| Contributor tools | `.[test]` or `.[docs]`             | Tests, pre-commit hooks, notebook validation, or the documentation build                      |
+| Layer                  | Install target                 | What it provides                                                                         |
+| ---------------------- | ------------------------------ | ---------------------------------------------------------------------------------------- |
+| Base library           | `voicehub`                     | Registry discovery, configuration, Hub access, NumPy, and audio file I/O                 |
+| TTS runtime            | `voicehub[<model-extra>]`      | Dependencies required by one TTS family                                                  |
+| All ASR and VAD        | `voicehub[asr-vad]`            | Every registered speech-recognition and voice-activity inference provider                |
+| Training and reporting | `voicehub[training]`           | Trainer dependencies, ASR evaluation tools, and optional Weights & Biases integration    |
+| Contributor tools      | `.[test]` or `.[docs]`         | Tests, pre-commit hooks, notebook validation, or the documentation build                 |
 
 The package requires Python 3.10 or newer. Project metadata explicitly lists
 Python 3.10, 3.11, and 3.12. A later Python release may work, but every selected
 model dependency must also publish a compatible wheel.
 
-!!! tip "Use one environment per backend"
+!!! note "Current WhisperX platform boundary"
 
-    Model families do not all use the same dependency versions. For example,
-    some current extras require Transformers 5.x, while others constrain
-    Transformers to an earlier release. Installing every model extra into one
-    environment can therefore be unsatisfiable or produce a runtime that no
-    integration was tested against.
+    The consolidated bundle resolves on Linux x86-64, Windows x86-64, and
+    Apple Silicon for Python 3.10–3.12. Its pinned WhisperX runtime requires
+    PyTorch 2.8, which does not publish Intel macOS wheels. Use Apple Silicon,
+    Linux, or Windows for the complete bundle.
 
-    Create a separate environment for each backend or compatible group of
-    backends. This also makes upgrades and reproducibility easier.
+!!! tip "Separate incompatible TTS stacks"
+
+    The consolidated `asr-vad` bundle is one tested dependency surface. TTS
+    families do not all use the same dependency versions: some require
+    Transformers 5.x while others constrain Transformers to an earlier
+    release. A literal union of every TTS extra is therefore unsatisfiable.
+
+    Create a separate environment for incompatible TTS backends or compatible
+    TTS groups. This keeps upgrades and reproducibility explicit without
+    forcing ASR/VAD users through provider-by-provider installation.
 
 ## Create an isolated environment
 
@@ -93,7 +101,9 @@ for model_spec in AutoInferenceModel.available_models():
 ```
 
 Use the returned `install_extra` as the package extra for the chosen
-integration.
+integration. Every ASR and VAD registry entry returns the shared `asr-vad`
+bundle; TTS entries retain model-specific extras because some TTS families
+require mutually exclusive framework versions.
 
 ## Add one model runtime
 
@@ -130,16 +140,23 @@ supertonic       vibevoice        voxcpm        vui
 xtts             zonos            zonos2
 ```
 
-ASR and VAD extras are installed independently:
+## Install every ASR and VAD provider
 
-```text
-asr-transformers  faster-whisper  whisperx        openai-whisper
-asr-nemo          asr-speechbrain asr-funasr      asr-espnet
-asr-wenet
+One command installs the complete ASR/VAD inference matrix:
 
-vad-transformers  vad-silero      vad-silero-onnx vad-webrtc
-vad-pyannote      vad-speechbrain vad-nemo        vad-funasr
+```bash
+python -m pip install "voicehub[asr-vad]"
 ```
+
+The bundle covers Transformers ASR/VAD, faster-whisper, WhisperX, OpenAI
+Whisper, NeMo, SpeechBrain, FunASR, ESPnet, WeNet, Silero, WebRTC, pyannote,
+and ONNX execution. VoiceHub vendors the small Apache-licensed WeNet inference
+surface required by its wrapper because the official Python package is not
+published on PyPI. WeNet's full training repository remains upstream-owned.
+
+`asr-vad` is the only public ASR/VAD inference extra. Provider-specific speech
+extras are intentionally not published, so the registry, dependency errors,
+documentation, and package metadata cannot drift into separate install paths.
 
 The [model catalog](../models/index.md) maps those keys to model families,
 default checkpoints, capabilities, conditioning requirements, and important
@@ -187,29 +204,37 @@ environment actually provides.
 
 ## Add training support
 
-The independent `training` extra declares:
+The independent `training` extra declares the shared training and reporting
+stack used by VoiceHub-native profiles:
 
-- `torch>=2.1`; and
-- `safetensors>=0.4`.
+- PyTorch and safetensors;
+- Accelerate, Datasets, Evaluate, and jiwer; and
+- Weights & Biases.
 
-It provides the shared trainer runtime, but it does not replace a model extra.
-Install both for model-specific fine-tuning:
+Install it beside the relevant inference runtime:
 
 ```bash
 python -m pip install "voicehub[dia,training]"
 ```
 
-Replace `dia` with the selected model extra. Installing
-`voicehub[training]` alone is useful for trainer development around an external
-module, but it does not install a TTS, ASR, or VAD backend's processor or
-source runtime.
-
-Transformers ASR experimentation can install its broader data and evaluation
-tooling separately:
+To combine every ASR/VAD inference provider with the shared trainer:
 
 ```bash
-python -m pip install "voicehub[asr-transformers,asr-training]"
+python -m pip install "voicehub[asr-vad,training]"
 ```
+
+This installs training infrastructure, not universal fine-tuning support.
+VoiceHub-native profiles can run directly; upstream-custom profiles still use
+their source recipe, and inference-only profiles remain non-trainable.
+
+Installing `voicehub[training]` alone remains useful for trainer development
+around an external module, but it does not install every source-native
+provider runtime.
+
+Enable W&B in code with `TrainingArguments(report_to="wandb")`. Authenticate
+with `wandb login` or `WANDB_API_KEY`; credentials are never accepted by or
+serialized into VoiceHub training arguments. Use `wandb_mode="offline"` when a
+training machine should write local run data for later synchronization.
 
 Training support is checkpoint- and backend-aware. A model can be trainable
 upstream while a particular GGUF, ONNX, quantized, fused, or

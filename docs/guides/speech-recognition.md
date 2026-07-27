@@ -12,35 +12,19 @@ optimized and source-native runtimes remain separate providers.
 Use the [ASR and VAD support matrix](../models/asr-vad-support.md) to select a
 provider by architecture, timestamps, runtime, and fine-tuning boundary.
 
-## Install one provider
+## Install every provider
 
-=== "Transformers"
+The consolidated inference bundle installs every registered ASR and VAD
+provider:
 
-    ```bash
-    python -m pip install "voicehub[asr-transformers]"
-    ```
-
-=== "faster-whisper"
-
-    ```bash
-    python -m pip install "voicehub[faster-whisper]"
-    ```
-
-=== "WhisperX"
-
-    ```bash
-    python -m pip install "voicehub[whisperx]"
-    ```
-
-=== "NeMo"
-
-    ```bash
-    python -m pip install "voicehub[asr-nemo]"
-    ```
+```bash
+python -m pip install "voicehub[asr-vad]"
+```
 
 The base package does not import these runtimes during registry discovery.
-When a provider dependency is missing, `OptionalDependencyError` identifies
-the exact extra to install.
+When a provider dependency is missing, `OptionalDependencyError` points to
+the same `asr-vad` bundle instead of requiring a provider-by-provider choice.
+Provider-specific ASR extras are not published.
 
 ## Discover ASR providers
 

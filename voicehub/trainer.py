@@ -18,6 +18,7 @@ from typing import Any, Callable
 from voicehub.data_collator import default_data_collator
 from voicehub.dependencies import import_optional
 from voicehub.errors import UnknownModelError
+from voicehub.integrations import get_reporting_integration_callbacks
 from voicehub.modeling_utils import PreTrainedSpeechModel
 from voicehub.trainer_callback import (
     CallbackHandler,
@@ -163,6 +164,7 @@ class Trainer:
         default_callbacks: list[type[TrainerCallback]] = [DefaultFlowCallback]
         if not self.args.disable_tqdm:
             default_callbacks.append(PrinterCallback)
+        default_callbacks.extend(get_reporting_integration_callbacks(self.args.report_to), )
         self.callback_handler = CallbackHandler(
             default_callbacks + list(callbacks or []),
             model=self.model,
@@ -808,6 +810,26 @@ class Trainer:
         self,
         resume_from_checkpoint: str | bool | None = None,
     ) -> TrainOutput:
+        """Train the model and close reporting integrations on failure."""
+        try:
+            return self._train_impl(resume_from_checkpoint)
+        except BaseException as error:
+            self.is_in_train = False
+            try:
+                self.control = self.callback_handler.on_train_error(
+                    self.args,
+                    self.state,
+                    self.control,
+                    error,
+                )
+            except BaseException as cleanup_error:
+                raise error from cleanup_error
+            raise
+
+    def _train_impl(
+        self,
+        resume_from_checkpoint: str | bool | None = None,
+    ) -> TrainOutput:
         """Train the model and return final loss and runtime metrics."""
         set_seed(self.args.seed)
         if self.model_init is not None:
@@ -1090,12 +1112,6 @@ class Trainer:
         self.is_in_train = False
         if (self.args.load_best_model_at_end and self.state.best_model_checkpoint is not None):
             self._load_model(self.state.best_model_checkpoint)
-        self.control = self.callback_handler.on_train_end(
-            self.args,
-            self.state,
-            self.control,
-        )
-
         completed_steps = max(0, self.state.global_step - starting_step)
         training_loss = self._total_loss_scalar / max(
             1,
@@ -1113,6 +1129,22 @@ class Trainer:
             training_loss,
         }
         self.log(metrics)
+        if self.callback_handler.requires_final_model(
+                self.args,
+                self.state,
+        ):
+            final_model_path = self._save_final_model()
+            self.control = self.callback_handler.on_final_model_saved(
+                self.args,
+                self.state,
+                self.control,
+                final_model_path,
+            )
+        self.control = self.callback_handler.on_train_end(
+            self.args,
+            self.state,
+            self.control,
+        )
         return TrainOutput(self.state.global_step, training_loss, metrics)
 
     def _validate_output_dir(
@@ -1128,6 +1160,16 @@ class Trainer:
                 f"Output directory {str(output_dir)!r} already contains "
                 f"{Path(last_checkpoint).name}. Pass `resume_from_checkpoint=True` "
                 "or set `overwrite_output_dir=True`.")
+        final_model = output_dir / "final-model"
+        needs_final_model = self.callback_handler.requires_final_model(
+            self.args,
+            self.state,
+        )
+        final_model_exists = final_model.exists() or final_model.is_symlink()
+        if (needs_final_model and final_model_exists and not self.args.overwrite_output_dir):
+            raise FileExistsError(
+                f"Final model directory already exists: {final_model}. Set "
+                "`overwrite_output_dir=True` to replace this exact artifact.")
 
     def _estimate_train_samples(self, completed_steps: int) -> int:
         return (completed_steps * self.args.train_batch_size * self.args.gradient_accumulation_steps)
@@ -1169,7 +1211,13 @@ class Trainer:
                 self.state,
                 self.control,
             )
-            self._save_checkpoint()
+            checkpoint = self._save_checkpoint()
+            self.control = self.callback_handler.on_checkpoint_saved(
+                self.args,
+                self.state,
+                self.control,
+                checkpoint,
+            )
 
     def get_learning_rate(self) -> float:
         """Return the first optimizer group's current learning rate."""
@@ -1673,6 +1721,49 @@ class Trainer:
         if (self.processing_class is not None and hasattr(self.processing_class, "save_pretrained")):
             self.processing_class.save_pretrained(destination)
         self.args.save_json(destination / TRAINING_ARGS_NAME)
+        return destination
+
+    @staticmethod
+    def _remove_artifact_path(path: Path) -> None:
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.exists():
+            shutil.rmtree(path)
+
+    def _save_final_model(self) -> Path:
+        """Save a fresh final artifact without exposing stale directory
+        data."""
+        destination = Path(self.args.output_dir).expanduser() / "final-model"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = (destination.parent / f".{destination.name}.incomplete-{uuid.uuid4().hex}")
+        backup = destination.parent / f".{destination.name}.backup-{uuid.uuid4().hex}"
+
+        if ((destination.exists() or destination.is_symlink()) and not self.args.overwrite_output_dir):
+            raise FileExistsError(
+                f"Final model directory already exists: {destination}. Set "
+                "`overwrite_output_dir=True` to replace this exact artifact.")
+
+        temporary.mkdir()
+        moved_existing = False
+        try:
+            self.save_model(temporary)
+            if destination.exists() or destination.is_symlink():
+                destination.replace(backup)
+                moved_existing = True
+            try:
+                temporary.replace(destination)
+            except BaseException:
+                if moved_existing and not destination.exists():
+                    backup.replace(destination)
+                    moved_existing = False
+                raise
+            if moved_existing:
+                self._remove_artifact_path(backup)
+        except BaseException:
+            self._remove_artifact_path(temporary)
+            if (moved_existing and not destination.exists() and (backup.exists() or backup.is_symlink())):
+                backup.replace(destination)
+            raise
         return destination
 
     def save_state(self) -> Path:

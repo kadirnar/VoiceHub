@@ -54,7 +54,7 @@ class FasterWhisperForSpeechRecognition(PreTrainedASRModel):
         faster_whisper = import_optional(
             "faster_whisper",
             model_type=self.config.model_type,
-            install_extra="faster-whisper",
+            install_extra="asr-vad",
         )
         source = self.config.name_or_path or self.default_model_name_or_path
         model_class = getattr(faster_whisper, "WhisperModel", None)
