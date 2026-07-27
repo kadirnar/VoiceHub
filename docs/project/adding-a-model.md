@@ -44,21 +44,43 @@ A model is ready to merge when all of the following are true:
 
 The integration path is:
 
-<div class="vh-flow-diagram" role="region" aria-label="Scrollable model integration workflow diagram" tabindex="0" markdown>
-
-```mermaid
-flowchart LR
-    A["Audit source, weights, and license"] --> B["Add a lazy config and wrapper"]
-    B --> C["Register model, aliases, extras, and components"]
-    C --> D["Declare a training profile"]
-    D --> E{"Does the generic family adapter preserve the published recipe?"}
-    E -- "Yes" --> F["Use the declarative adapter"]
-    E -- "No" --> G["Add a source-native specialized adapter"]
-    F --> H["Test inference, one training step, and artifacts"]
-    G --> H
-```
-
-</div>
+<ol class="vh-process vh-process--seven" role="list" aria-label="Model integration workflow">
+  <li>
+    <span class="vh-process__number" aria-hidden="true">01</span>
+    <strong>Audit the source</strong>
+    <span class="vh-process__detail">Verify weights, training entry points, dependencies, and licenses.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">02</span>
+    <strong>Add a lazy wrapper</strong>
+    <span class="vh-process__detail">Implement configuration and generation without eager runtime imports.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">03</span>
+    <strong>Register the integration</strong>
+    <span class="vh-process__detail">Declare aliases, optional extras, components, and public classes.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">04</span>
+    <strong>Declare training support</strong>
+    <span class="vh-process__detail">Describe the exact checkpoint, objective family, and data contract.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">05</span>
+    <strong>Choose the recipe route</strong>
+    <span class="vh-process__detail">Confirm whether a generic family adapter preserves the published recipe.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">06</span>
+    <strong>Build the right adapter</strong>
+    <span class="vh-process__detail">Use declarative training when faithful; otherwise integrate the native recipe.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">07</span>
+    <strong>Test the full lifecycle</strong>
+    <span class="vh-process__detail">Verify inference, one training step, artifacts, and portable reload.</span>
+  </li>
+</ol>
 
 ## 1. Audit the upstream project
 

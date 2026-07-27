@@ -8,18 +8,38 @@ There is no universal TTS batch. VoiceHub keeps source records simple, then
 delegates semantic target construction to the selected model's dataset,
 processor, collator, or specialized training adapter.
 
-<div class="vh-flow-diagram" role="region" aria-label="Scrollable data preparation workflow diagram" tabindex="0" markdown>
-
-```mermaid
-flowchart LR
-    A["Raw recordings"] --> B["Auditable manifest"]
-    B --> C["Validation and normalization"]
-    C --> D["Speaker/session split"]
-    D --> E["Model-specific processor"]
-    E --> F["Tokens, codes, masks, or flow targets"]
-```
-
-</div>
+<ol class="vh-process vh-process--six" role="list" aria-label="Data preparation workflow">
+  <li>
+    <span class="vh-process__number" aria-hidden="true">01</span>
+    <strong>Collect recordings</strong>
+    <span class="vh-process__detail">Keep source audio with consent, license, and provenance records.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">02</span>
+    <strong>Write the manifest</strong>
+    <span class="vh-process__detail">Record exact text, audio paths, speakers, sessions, and languages.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">03</span>
+    <strong>Validate and normalize</strong>
+    <span class="vh-process__detail">Check samples, channels, rates, transcripts, and required metadata.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">04</span>
+    <strong>Split without leakage</strong>
+    <span class="vh-process__detail">Separate speakers and recording sessions across dataset splits.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">05</span>
+    <strong>Run the model processor</strong>
+    <span class="vh-process__detail">Apply the selected tokenizer, codec, mel, or conditioning path.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">06</span>
+    <strong>Produce training targets</strong>
+    <span class="vh-process__detail">Build the tokens, codes, masks, or flow targets used by the recipe.</span>
+  </li>
+</ol>
 
 ## Start with an auditable manifest
 
