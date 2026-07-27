@@ -70,6 +70,10 @@ body {
   box-shadow: none;
 }
 
+.md-content__inner:has(> .vh-home) > .md-content__button {
+  display: none;
+}
+
 .vh-hero {
   position: relative;
   overflow: hidden;
@@ -147,9 +151,21 @@ body {
   border-radius: 0.55rem;
 }
 
+.vh-actions .md-button:not(.md-button--primary) {
+  border-color: var(--vh-line);
+  background: var(--vh-surface-soft);
+  color: var(--vh-ink);
+}
+
+.vh-actions .md-button:not(.md-button--primary):is(:hover, :focus-visible) {
+  border-color: var(--vh-violet);
+  color: var(--vh-violet);
+}
+
 .vh-actions .md-button--primary {
   border-color: var(--vh-violet-deep);
   background: linear-gradient(135deg, var(--vh-violet), var(--vh-violet-deep));
+  color: #fff;
 }
 
 .vh-stats {
