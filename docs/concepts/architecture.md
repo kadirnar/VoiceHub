@@ -1,4 +1,4 @@
-# Source-integrated architecture
+# Library architecture
 
 VoiceHub follows a Transformers-style split:
 

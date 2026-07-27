@@ -17,7 +17,7 @@ has exposed a valid training graph and objective.
 Install the training dependencies only when they are needed:
 
 ```bash
-python -m pip install "voicehub[training]"
+python -m pip install "voicehub[parlertts,training]"
 ```
 
 ## Training support is an explicit contract
@@ -54,8 +54,9 @@ print([phase.name for phase in spec.phases])
 `is_turnkey` and `supports_training` are true only for `native` and
 `preprocessed` profiles. `has_training_recipe` also includes `custom` profiles
 whose source recipe is represented but not generically executable. A `custom`
-profile is deliberately gated before model loading unless
-`AutoTrainingAdapter.register()` has installed a model-specific adapter.
+profile is deliberately gated before model loading unless VoiceHub provides a
+built-in specialized adapter or `AutoTrainingAdapter.register()` has installed
+one.
 
 The profile is the model-type-level boundary. Validate the exact checkpoint,
 variant, quantization settings, and runtime before allocating its weights:
@@ -75,9 +76,9 @@ performs a second check against the loaded module graph, while specialized
 loaders can impose tighter checkpoint-family rules. Safetensors are accepted
 as weight containers only when they reconstruct that differentiable graph.
 
-The audited model-by-model boundary is listed in
-[`training_models.md`](training_models.md). Variant and backend qualifications
-in that table are part of the support statement.
+The audited model-by-model boundary is listed in the
+[training support matrix](../models/training-support.md). Variant and backend
+qualifications in that table are part of the support statement.
 
 ## Loading for training
 
@@ -115,6 +116,10 @@ training runtime.
 
 ## Basic single-phase training
 
+For a runnable raw-data walkthrough from baseline inference through export,
+see the [training workflow](../guides/training.md) and its
+[companion notebook](../guides/notebook.md).
+
 For a `native` or `preprocessed` profile, the public loop follows the familiar
 Transformers vocabulary:
 
@@ -140,10 +145,13 @@ trainer = Trainer(
     args=arguments,
     train_dataset=train_dataset,
     eval_dataset=validation_dataset,
-    processing_class=processor,
+    processing_class=model.processor,
 )
-trainer.train(resume_from_checkpoint=True)
+trainer.train()
 ```
+
+Use `trainer.train(resume_from_checkpoint=True)` only when `output_dir`
+already contains a complete checkpoint.
 
 This example assumes each dataset item already matches the selected model's
 training schema. `processing_class` is retained for saving and interoperability;
