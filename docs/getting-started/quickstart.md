@@ -50,9 +50,10 @@ for model_spec in AutoInferenceModel.available_models():
     )
 ```
 
-Use the [model catalog](../models/index.md) for conditioning requirements and
-the [training matrix](../models/training-support.md) for the current
-fine-tuning boundary.
+Use the [model catalog](../models/index.md) to select a backend and install
+extra, then read its model-specific guide or wrapper contract for conditioning
+fields. The [training matrix](../models/training-support.md) records the
+current fine-tuning boundary.
 
 ## Generate speech
 

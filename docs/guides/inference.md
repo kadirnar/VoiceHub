@@ -10,7 +10,7 @@ VoiceHub gives every model the same lifecycle:
 2. construct a lazy wrapper;
 3. load explicitly or on first generation;
 4. generate a normalized `TTSOutput`; and
-5. release or optimize the runtime through a declared strategy.
+5. prepare or optimize the runtime through a declared strategy.
 
 The input fields still belong to the selected architecture. A dialogue model,
 a description-conditioned model, and a voice-cloning model do not use the
@@ -251,9 +251,10 @@ model = AutoModelForTextToSpeech.from_pretrained(
 An optimization strategy must:
 
 1. validate support before mutating the runtime;
-2. declare whether it can be reversed;
-3. preserve the public output contract; and
-4. restore a trainable representation before a training transition.
+2. preserve the public output contract;
+3. implement `prepare()` for the inference transition; and
+4. restore a trainable representation through `restore_for_training()` or
+   reject an unsupported training transition.
 
 Do not assume that an ONNX, GGUF, TensorRT, vLLM, quantized, or compiled
 serving runtime remains differentiable.
