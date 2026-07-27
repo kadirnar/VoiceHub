@@ -33,9 +33,12 @@ dependencies = [
 Homepage = "https://github.com/kadirnar/VoiceHub"
 Repository = "https://github.com/kadirnar/VoiceHub"
 Issues = "https://github.com/kadirnar/VoiceHub/issues"
-Documentation = "https://github.com/kadirnar/VoiceHub/tree/main/docs"
+Documentation = "https://kadirnar.github.io/VoiceHub/"
 
 [project.optional-dependencies]
+docs = [
+  "mkdocs-material==9.7.7",
+]
 training = [
   "safetensors>=0.4",
   "torch>=2.1",
@@ -409,6 +412,7 @@ inflecttts = [
   "phonemizer",
 ]
 test = [
+  "nbformat>=5.10",
   "pre-commit",
   "pytest",
 ]

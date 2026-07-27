@@ -1,12 +1,56 @@
-# Model guide
+# Model catalog
 
 VoiceHub ships the model implementation source inside its own wheel. Extras
 install only general runtimes such as PyTorch, Transformers, phonemizers, and
 audio I/O libraries. They never install a separate TTS implementation package.
 Model checkpoints are still downloaded lazily or supplied as local paths.
 
+## Choose a model
+
+Start from the capability you need, then inspect the exact checkpoint and
+conditioning contract before loading weights. The optional extra matches the
+registry key.
+
+| Model type | Good fit | Install extra |
+| --- | --- | --- |
+| `orpheustts` | Expressive speech | `voicehub[orpheustts]` |
+| `dia` | Multi-speaker dialogue | `voicehub[dia]` |
+| `vui` | Compact text to speech | `voicehub[vui]` |
+| `chatterbox` | Voice cloning | `voicehub[chatterbox]` |
+| `kokoro` | Lightweight multilingual speech | `voicehub[kokoro]` |
+| `echo` | Reference-conditioned cloning | `voicehub[echo]` |
+| `conversationtts` | Multilingual conversation | `voicehub[conversationtts]` |
+| `llasa` | Multilingual codec-LM cloning | `voicehub[llasa]` |
+| `cosyvoice` | Cloning, multilingual speech, streaming | `voicehub[cosyvoice]` |
+| `f5tts` | Flow-matching voice cloning | `voicehub[f5tts]` |
+| `gptsovits` | Few-shot multilingual cloning | `voicehub[gptsovits]` |
+| `melotts` | Fast multilingual synthesis | `voicehub[melotts]` |
+| `openvoice` | Cross-lingual voice transfer | `voicehub[openvoice]` |
+| `outetts` | Speaker profiles and multiple runtimes | `voicehub[outetts]` |
+| `parlertts` | Natural-language style control | `voicehub[parlertts]` |
+| `styletts2` | Style diffusion and voice cloning | `voicehub[styletts2]` |
+| `mosstts` | Delay, local, and realtime generation | `voicehub[mosstts]` |
+| `qwen3tts` | Custom voices, design, and cloning | `voicehub[qwen3tts]` |
+| `irodoritts` | Reference and caption conditioning | `voicehub[irodoritts]` |
+| `zonos` | Multilingual voice cloning | `voicehub[zonos]` |
+| `zonos2` | Batched mixture-of-experts synthesis | `voicehub[zonos2]` |
+| `voxcpm` | Streaming voice cloning | `voicehub[voxcpm]` |
+| `omnivoice` | Multilingual cloning and voice design | `voicehub[omnivoice]` |
+| `higgstts` | Expressive long-form generation | `voicehub[higgstts]` |
+| `xtts` | Multilingual voice cloning | `voicehub[xtts]` |
+| `vibevoice` | Realtime cached-voice generation | `voicehub[vibevoice]` |
+| `fishtts` | Multilingual semantic-token cloning | `voicehub[fishtts]` |
+| `csm` | Conversational speaker context | `voicehub[csm]` |
+| `neutts` | Compact local and multilingual variants | `voicehub[neutts]` |
+| `supertonic` | Fast multilingual ONNX inference | `voicehub[supertonic]` |
+| `inflecttts` | Compact local synthesis | `voicehub[inflecttts]` |
+
+Training capability is checkpoint-aware. Check the
+[training support matrix](training-support.md) before selecting an artifact or
+designing a dataset.
+
 ```python
-from voicehub import AutoModelForTextToSpeech
+from voicehub import AutoInferenceModel, AutoModelForTextToSpeech
 
 model = AutoModelForTextToSpeech.from_pretrained(
     "parler-tts/parler-tts-mini-v1",
@@ -152,9 +196,9 @@ uses a VoiceHub checkpoint because optimizer, scheduler, RNG, sampler, and
 recipe state are not present in a safetensors weight export.
 
 The exact model-by-model boundary is maintained in the
-[training model matrix](training_models.md).
+[training model matrix](training-support.md).
 
-The [current model research](model_research.md) records the dated Hugging
+The [current model research](../project/model-audit.md) records the dated Hugging
 Face audit, download/trending signals, upstream source, licensing, and
 source-only inclusion decisions.
 

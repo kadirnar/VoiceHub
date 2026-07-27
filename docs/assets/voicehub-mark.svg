@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">VoiceHub waveform</title>
+  <defs>
+    <linearGradient id="voicehub-gradient" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#1fb6c9"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#voicehub-gradient)"/>
+  <path d="M15 32h5m4-10v20m8-28v36m8-25v14m8-9v4h5" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="5"/>
+</svg>

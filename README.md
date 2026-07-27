@@ -40,7 +40,7 @@ python -m pip install "voicehub[training]"
 TTS implementations and their third-party licenses are included in the
 VoiceHub package. Checkpoints remain separate and are downloaded lazily or
 passed as local paths. See the
-[model guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/models.md).
+[model catalog](https://kadirnar.github.io/VoiceHub/models/).
 
 ## Quick start
 
@@ -64,6 +64,22 @@ print(output.sample_rate, output.file_path)
 Construction is intentionally cheap. The checkpoint is downloaded and loaded
 on the first synthesis call. Use `model.load()` when you want to warm a model
 up before serving traffic.
+
+## Documentation
+
+The [VoiceHub documentation site](https://kadirnar.github.io/VoiceHub/)
+provides searchable, task-oriented guides:
+
+- [Inference](https://kadirnar.github.io/VoiceHub/guides/inference/)
+- [Data preparation](https://kadirnar.github.io/VoiceHub/guides/data-preparation/)
+- [Training](https://kadirnar.github.io/VoiceHub/guides/training/)
+- [End-to-end notebook](https://kadirnar.github.io/VoiceHub/guides/notebook/)
+- [Model training support](https://kadirnar.github.io/VoiceHub/models/training-support/)
+
+The runnable
+[Jupyter notebook](https://github.com/kadirnar/VoiceHub/blob/main/notebooks/tts_workflow.ipynb)
+runs the complete workflow and
+[opens directly in Colab](https://colab.research.google.com/github/kadirnar/VoiceHub/blob/main/notebooks/tts_workflow.ipynb).
 
 ## Supported models
 
@@ -152,8 +168,8 @@ Every synthesis call returns `TTSOutput`, containing `audio`, `sample_rate`,
 `generate` signatures.
 
 See the
-[model guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/models.md)
-and [architecture guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/architecture.md).
+[model catalog](https://kadirnar.github.io/VoiceHub/models/)
+and [architecture guide](https://kadirnar.github.io/VoiceHub/concepts/architecture/).
 
 ## Training
 
@@ -190,13 +206,16 @@ trainer = Trainer(
     train_dataset=train_dataset,
     eval_dataset=validation_dataset,
 )
-trainer.train(resume_from_checkpoint=True)
+trainer.train()
 ```
 
 This example assumes that dataset items already contain Parler's
 backend-shaped training tensors. The generic trainer does not silently turn
 raw text/audio into architecture-specific codec, alignment, flow, or
 adversarial targets.
+
+Use `trainer.train(resume_from_checkpoint=True)` only when `output_dir`
+already contains a complete VoiceHub checkpoint.
 
 Trainable models return `TTSTrainingOutput(loss=..., logits=...)`, a mapping
 with `loss`, or a tuple with loss first. Architecture-specific objectives can
@@ -217,9 +236,9 @@ mixed precision, callbacks, evaluation/prediction, best-model selection,
 checkpoint rotation, and atomic resumable model/optimizer/scheduler/RNG state.
 
 See the
-[trainer guide](https://github.com/kadirnar/VoiceHub/blob/main/docs/trainer.md)
+[trainer guide](https://kadirnar.github.io/VoiceHub/concepts/trainer/)
 and
-[training model matrix](https://github.com/kadirnar/VoiceHub/blob/main/docs/training_models.md)
+[training model matrix](https://kadirnar.github.io/VoiceHub/models/training-support/)
 for objective families, native upstream recipes, and extension points.
 
 ## Source policy

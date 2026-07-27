@@ -7,26 +7,34 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.12'
           cache: pip
 
       - name: Build distributions
         run: |
-          python -m pip install --upgrade pip build
+          python -m pip install --upgrade pip build "nbformat>=5.10" pytest
           python -m build
 
       - name: Verify wheel
         run: |
           python -m pip install --force-reinstall dist/*.whl
           python -c "from voicehub import AutoInferenceModel; assert len(AutoInferenceModel.available_models()) == 31"
+
+      - name: Validate workflow documentation
+        run: python -m pytest tests/test_documentation_site.py
