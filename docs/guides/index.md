@@ -9,19 +9,43 @@ architecture-specific semantics explicit. Choose a workflow below, or use the
 [end-to-end Dia notebook](notebook.md)
 to follow all three in sequence.
 
-<div class="vh-flow-diagram" role="region" aria-label="Scrollable VoiceHub lifecycle workflow diagram" tabindex="0" markdown>
-
-```mermaid
-flowchart LR
-    A["Discover a model"] --> B["Run baseline inference"]
-    B --> C["Prepare consented data"]
-    C --> D["Build the model-specific batch"]
-    D --> E["Train and evaluate"]
-    E --> F["Save a portable artifact"]
-    F --> G["Compare post-training inference"]
-```
-
-</div>
+<ol class="vh-process vh-process--seven" role="list" aria-label="VoiceHub lifecycle workflow">
+  <li>
+    <span class="vh-process__number" aria-hidden="true">01</span>
+    <strong>Discover a model</strong>
+    <span class="vh-process__detail">Inspect registry support and select a compatible checkpoint.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">02</span>
+    <strong>Run baseline inference</strong>
+    <span class="vh-process__detail">Generate a reference sample before changing any weights.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">03</span>
+    <strong>Prepare consented data</strong>
+    <span class="vh-process__detail">Validate audio, provenance, transcripts, and split boundaries.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">04</span>
+    <strong>Build the model batch</strong>
+    <span class="vh-process__detail">Create the tokens, codes, masks, or flow targets the model expects.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">05</span>
+    <strong>Train and evaluate</strong>
+    <span class="vh-process__detail">Run the verified recipe and measure held-out behavior.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">06</span>
+    <strong>Save the artifact</strong>
+    <span class="vh-process__detail">Write portable weights, metadata, and any native export.</span>
+  </li>
+  <li>
+    <span class="vh-process__number" aria-hidden="true">07</span>
+    <strong>Compare inference</strong>
+    <span class="vh-process__detail">Reload the result and compare it with the baseline.</span>
+  </li>
+</ol>
 
 ## Inference
 

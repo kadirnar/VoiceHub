@@ -27,6 +27,11 @@ GUIDE_PATHS = (
     DOCS_ROOT / "guides" / "training.md",
     DOCS_ROOT / "guides" / "notebook.md",
 )
+PROCESS_PAGE_STEPS = (
+    (DOCS_ROOT / "guides" / "index.md", 7),
+    (DOCS_ROOT / "guides" / "data-preparation.md", 6),
+    (DOCS_ROOT / "project" / "adding-a-model.md", 7),
+)
 NAVIGATION_PATHS = (
     "index.md",
     "getting-started/quickstart.md",
@@ -175,7 +180,10 @@ class DocumentationSiteTests(unittest.TestCase):
         self.assertIn('[dir="rtl"] .vh-doc-teaser', stylesheet)
         self.assertIn(".md-tabs__item--active > .md-tabs__link", stylesheet)
         self.assertNotIn(".md-tabs__link--active", stylesheet)
-        self.assertIn(".vh-flow-diagram", stylesheet)
+        self.assertIn(".md-typeset .vh-process", stylesheet)
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", stylesheet)
+        self.assertNotIn(".vh-flow-diagram", stylesheet)
+        self.assertNotIn("name: mermaid", config)
 
         for locale in LOCALIZED_HOME_LOCALES:
             with self.subTest(locale=locale):
@@ -185,6 +193,21 @@ class DocumentationSiteTests(unittest.TestCase):
                 localized_source = localized_home.read_text(encoding="utf-8")
                 self.assertIn('<div class="vh-doc-home" markdown>', localized_source)
                 self.assertIn('<div class="grid cards" markdown>', localized_source)
+
+    def test_process_overviews_are_readable_without_horizontal_scrolling(self):
+        for page_path, expected_steps in PROCESS_PAGE_STEPS:
+            with self.subTest(page=page_path):
+                source = page_path.read_text(encoding="utf-8")
+                self.assertIn('<ol class="vh-process ', source)
+                self.assertIn('role="list"', source)
+                self.assertEqual(
+                    source.count('class="vh-process__number"'),
+                    expected_steps,
+                )
+                self.assertIn('class="vh-process__detail"', source)
+                self.assertNotIn("vh-flow-diagram", source)
+                self.assertNotIn("```mermaid", source)
+                self.assertNotIn("tabindex=", source)
 
     def test_internal_markdown_links_resolve(self):
         for source_path in DOCS_ROOT.rglob("*.md"):
