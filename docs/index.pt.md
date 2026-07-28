@@ -62,7 +62,7 @@ flow-matching e difusão, modelos acústicos, sistemas adversariais no estilo
 VITS e pipelines compostos mantêm seus próprios condicionamentos, objetivos,
 regras de propriedade de parâmetros e de exportação.
 
-O registro contém **34 integrações TTS**, **14 provedores ASR** e **11 provedores
+O registro contém **34 integrações TTS**, **23 provedores ASR** e **11 provedores
 VAD**. O suporte a ajuste fino depende do checkpoint e do ambiente de execução;
 uma integração de inferência não implica que seu artefato atual do VoiceHub
 seja diferenciável. Consulte o [catálogo TTS](models/index.md), a

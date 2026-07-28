@@ -64,7 +64,7 @@ acoustiques, les systèmes antagonistes de type VITS et les pipelines composites
 conservent leurs propres conditionnements, objectifs, règles de propriété des
 paramètres et règles d'exportation.
 
-Le registry contient **34 intégrations TTS**, **14 fournisseurs ASR** et **11
+Le registry contient **34 intégrations TTS**, **23 fournisseurs ASR** et **11
 fournisseurs VAD**. La prise en charge de l'ajustement dépend du checkpoint et
 de l'environnement d'exécution ; une intégration d'inférence ne garantit pas
 que son artefact VoiceHub actuel soit différentiable. Consultez le

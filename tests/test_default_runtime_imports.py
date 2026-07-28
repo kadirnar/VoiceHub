@@ -51,6 +51,22 @@ class DefaultRuntimeImportTests(unittest.TestCase):
             with self.subTest(module=module_name):
                 importlib.import_module(module_name)
 
+    def test_recent_transformers_asr_auto_classes_are_available(self):
+        transformers = importlib.import_module("transformers")
+
+        for class_name in (
+                "AutoModelForCTC",
+                "AutoModelForMultimodalLM",
+                "AutoModelForRNNT",
+                "AutoModelForSpeechSeq2Seq",
+                "AutoModelForTDT",
+        ):
+            with self.subTest(class_name=class_name):
+                self.assertTrue(
+                    hasattr(transformers, class_name),
+                    f"Default Transformers runtime is missing {class_name}.",
+                )
+
     def test_device_specific_source_boundaries_are_import_safe(self):
         for module_name in self.SOURCE_RUNTIME_IMPORTS:
             with self.subTest(module=module_name):

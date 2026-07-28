@@ -101,23 +101,26 @@ runs the complete workflow and
 from voicehub import AutoModelForSpeechRecognition
 
 model = AutoModelForSpeechRecognition.from_pretrained(
-    "openai/whisper-small",
-    model_type="asr_transformers",
+    "Qwen/Qwen3-ASR-0.6B-hf",
+    model_type="asr_qwen3",
     device="cuda",
 )
 output = model.transcribe(
     "meeting.wav",
-    language="en",
-    return_timestamps="word",
+    language="English",
+    hotwords=["VoiceHub"],
 )
 print(output.text)
 ```
 
 The Transformers provider covers compatible CTC, speech
-sequence-to-sequence, RNN-T, and TDT checkpoints. Locked presets provide
-ready defaults for Wav2Vec2, HuBERT, WavLM, Moonshine, and SeamlessM4T v2.
-Separate providers expose faster-whisper, WhisperX, OpenAI Whisper, NeMo,
-SpeechBrain, FunASR, ESPnet, and WeNet while returning the same `ASROutput`.
+sequence-to-sequence, RNN-T, and TDT checkpoints. Current, processor-correct
+presets cover Qwen3-ASR (0.6B and 1.7B HF checkpoints), VibeVoice-ASR-HF,
+Granite Speech 4.1, Whisper large-v3 Turbo, Tiron, Parakeet TDT v3, Nemotron
+3.5, Cohere Transcribe (general and Arabic 07-2026), MedASR, Wav2Vec2,
+HuBERT, WavLM, Moonshine, and SeamlessM4T v2. Separate providers expose
+faster-whisper, WhisperX, OpenAI Whisper, NeMo, SpeechBrain, FunASR, ESPnet,
+and WeNet while returning the same `ASROutput`.
 
 ## Voice activity detection
 

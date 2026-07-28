@@ -46,9 +46,9 @@ for spec in list_model_specs(
 ```
 
 Use the canonical `model_type` with
-`AutoModelForSpeechRecognition`. Aliases such as `wav2vec2`,
-`whisper-transformers`, `faster-whisper`, `nemo-asr`, and `funasr` are also
-accepted.
+`AutoModelForSpeechRecognition`. Aliases such as `qwen3-asr`,
+`cohere-transcribe`, `parakeet-tdt`, `wav2vec2`, `faster-whisper`,
+`nemo-asr`, and `funasr` are also accepted.
 
 ## Transcribe with Transformers
 
@@ -100,6 +100,15 @@ family, and training objective instead of automatic architecture detection:
 
 | Model type | Default checkpoint | Objective |
 | --- | --- | --- |
+| `asr_whisper` | `openai/whisper-large-v3-turbo` | Speech sequence-to-sequence |
+| `asr_tiron` | `Trelis/tiron` | Whisper sequence-to-sequence with speaker/time tokens |
+| `asr_qwen3` | `Qwen/Qwen3-ASR-0.6B-hf` | Prompted multimodal sequence-to-sequence |
+| `asr_vibevoice` | `microsoft/VibeVoice-ASR-HF` | Prompted multimodal sequence-to-sequence |
+| `asr_granite_speech` | `ibm-granite/granite-speech-4.1-2b` | Prompted multimodal causal language modeling |
+| `asr_parakeet_tdt` | `nvidia/parakeet-tdt-0.6b-v3` | Token-and-duration transducer |
+| `asr_nemotron` | `nvidia/nemotron-3.5-asr-streaming-0.6b` | RNN-T |
+| `asr_cohere` | `CohereLabs/cohere-transcribe-03-2026` | Speech sequence-to-sequence |
+| `asr_medasr` | `google/medasr` | LASR CTC |
 | `asr_wav2vec2` | `facebook/wav2vec2-base-960h` | CTC |
 | `asr_hubert` | `facebook/hubert-large-ls960-ft` | CTC |
 | `asr_wavlm` | `patrickvonplaten/wavlm-libri-clean-100h-base-plus` | CTC |
@@ -118,6 +127,141 @@ result = model.transcribe("meeting.wav")
 The preset validates the checkpoint's native `model_type` and architecture
 before loading. This catches an accidental CTC/sequence-to-sequence mismatch
 early while preserving the same `ASROutput` and shared trainer lifecycle.
+
+## Use current prompt-aware ASR
+
+Qwen3-ASR, VibeVoice-ASR, and Granite Speech are audio-language models, not ordinary
+`automatic-speech-recognition` pipelines. Their dedicated providers build the
+checkpoint's transcription request, retain the complete multimodal processor
+batch, remove prompt tokens from generated output, and normalize the result:
+
+```python
+from voicehub import AutoModelForSpeechRecognition
+
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "Qwen/Qwen3-ASR-0.6B-hf",
+    model_type="asr_qwen3",
+    device="cuda",
+)
+result = model.transcribe(
+    "meeting.wav",
+    language="English",
+    hotwords=["VoiceHub", "Parakeet"],
+)
+print(result.text, result.language)
+```
+
+Use `Qwen/Qwen3-ASR-1.7B-hf` with the same model type when the larger
+checkpoint is appropriate. Language names and ISO codes are validated against
+the checkpoint's supported set before the prompt is rendered. VibeVoice uses
+the same public lifecycle and normalizes its parsed `Start`, `End`, `Speaker`,
+and `Content` records into speaker-aware `ASRSegment` values:
+
+```python
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "microsoft/VibeVoice-ASR-HF",
+    model_type="asr_vibevoice",
+    device="cuda",
+)
+result = model.transcribe(
+    "panel.wav",
+    hotwords=["VoiceHub"],
+    return_timestamps=True,
+)
+
+for segment in result.segments:
+    print(segment.start, segment.end, segment.speaker, segment.text)
+```
+
+VibeVoice identifies language from the recording and does not expose a
+language-forcing argument. VoiceHub rejects `language` rather than silently
+ignoring it.
+
+Granite Speech uses IBM's tokenizer-rendered instruction and separate audio
+processor contract. Its prompt must contain `<|audio|>`; VoiceHub inserts the
+placeholder for one-off inference prompts and retains the configured prompt in
+portable exports:
+
+```python
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "ibm-granite/granite-speech-4.1-2b",
+    model_type="asr_granite_speech",
+    device="cuda",
+)
+result = model.transcribe(
+    "support-call.wav",
+    prompt="transcribe with proper punctuation and capitalization",
+    hotwords=["VoiceHub", "Granite"],
+)
+print(result.text)
+```
+
+Granite is prompt-conditioned and has no language-ID forcing parameter.
+Express language guidance in the instruction instead of passing `language`.
+Its fine-tuning path implements IBM's published collator: prompt/audio tokens
+are followed by transcript plus EOS tokens, then prompt and target-padding
+labels are masked with `-100`. The model's native causal objective owns the
+one-token shift.
+
+The dedicated providers matter during training too. VibeVoice preserves its
+processor-generated target mask. Qwen renders the native chat template, then
+constructs completion-only causal labels from the assistant vocabulary tokens
+while masking the audio, prompt, and padding positions. This also guards
+against Transformers releases that return multimodal token-type IDs instead
+of vocabulary labels from `output_labels`.
+
+## Use current transducer and domain presets
+
+Parakeet TDT and Nemotron 3.5 must process audio and transcript together
+during fine-tuning. Their processors create decoder inputs and, for Nemotron,
+language prompt and lookahead fields required by the native transducer loss.
+Nemotron's `language="auto"` output is normalized from its emitted locale tag,
+and `return_timestamps="word"` retains its native token timing.
+VoiceHub also installs Nemotron's RNN-T objective explicitly and reconciles
+the released processor/model blank-token IDs. Cohere conditions both
+inference and labels on a language code; its trainer combines the decoder
+prompt and shifted transcript while masking non-target prompt positions.
+MedASR uses the gated LASR CTC processor for medical dictation:
+
+```python
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "nvidia/parakeet-tdt-0.6b-v3",
+    model_type="asr_parakeet_tdt",
+    device="cuda",
+)
+result = model.transcribe("multilingual.wav", return_timestamps=True)
+```
+
+```python
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "CohereLabs/cohere-transcribe-03-2026",
+    model_type="asr_cohere",
+    device="cuda",
+    token=True,
+)
+result = model.transcribe("long-form.wav", language="en")
+```
+
+Use `CohereLabs/cohere-transcribe-arabic-07-2026` with the same
+`asr_cohere` model type for the current Arabic-specialized variant; it shares
+the verified processor, language conditioning, native loss, and export
+contract. Likewise, `Qwen/Qwen3-ASR-1.7B-hf` uses `asr_qwen3`; checkpoint-size
+variants do not need duplicate registry keys.
+
+For Cohere fine-tuning, pre-segment long recordings and pair every segment
+with its own transcript. Its processor can reassemble long audio during
+inference, but it does not split one full transcript into aligned chunk-level
+training labels.
+
+The Cohere and `google/medasr` repositories require accepting their
+checkpoint terms and authenticating at runtime. Credentials are passed to the
+factory and are never serialized in a VoiceHub configuration.
+
+Tiron uses Whisper weights but has a distinct output vocabulary. Its provider
+walks the generated token IDs so speaker markers and 20 ms timestamp tokens
+remain visible in normalized segments. The native checkpoint handles one
+30-second window; whole-meeting cross-window speaker linking remains a
+separate orchestration concern.
 
 ## Use an optimized or native provider
 
@@ -265,9 +409,10 @@ integration exists.
 
 Transformers ASR checkpoints use the common VoiceHub training lifecycle when
 their native model exposes a differentiable loss. The supported objective
-families are CTC, speech sequence-to-sequence, RNN-T, and TDT. CTC, RNN-T, and
-TDT keep their backend-native blank, alignment, and duration semantics; the
-generic trainer does not reconstruct those objectives from arbitrary logits.
+families are CTC, speech sequence-to-sequence, prompted multimodal
+sequence-to-sequence, RNN-T, and TDT. CTC, RNN-T, and TDT keep their
+backend-native blank, alignment, and duration semantics; the generic trainer
+does not reconstruct those objectives from arbitrary logits.
 
 NeMo, SpeechBrain, FunASR, ESPnet, and WeNet currently retain their upstream
 task/configuration runners for fine-tuning. Their inference wrappers do not

@@ -188,7 +188,7 @@ class SpeechInferenceConfigurationTests(unittest.TestCase):
                 "task": "summarize"
             },
             {
-                "return_timestamps": "segment"
+                "return_timestamps": "character"
             },
             {
                 "return_timestamps": 1
@@ -221,6 +221,11 @@ class SpeechInferenceConfigurationTests(unittest.TestCase):
         for values in invalid_vad:
             with self.subTest(values=values), self.assertRaises((TypeError, ValueError)):
                 VADInferenceConfig(**values)
+
+    def test_asr_config_accepts_segment_timestamps(self):
+        config = ASRInferenceConfig(return_timestamps="segment")
+
+        self.assertEqual(config.return_timestamps, "segment")
 
     def test_serializable_speech_options_reject_nested_credentials(self):
         with self.assertRaisesRegex(ValueError, "runtime secrets"):

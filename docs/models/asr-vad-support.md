@@ -23,7 +23,16 @@ Each integration provides:
 
 | Model type | Provider and family coverage | Normalized capability | Runtime setup | Fine-tuning boundary |
 | --- | --- | --- | --- | --- |
-| `asr_transformers` | Transformers CTC, speech seq2seq, RNN-T, and TDT auto-models; covers compatible Whisper, Wav2Vec2/HuBERT/WavLM/MMS, Speech2Text, Parakeet, and future registered architectures | Text, segments, word/segment timestamps when emitted, language | Default install | **VoiceHub native** for a compatible unquantized differentiable checkpoint |
+| `asr_transformers` | Conventional Transformers CTC, speech seq2seq, RNN-T, and TDT auto-models; prompt/chat-template audio-language models use their dedicated providers below | Text, segments, word/segment timestamps when emitted, language | Default install | **VoiceHub native** for a compatible unquantized differentiable checkpoint and processor |
+| `asr_whisper` | Current native Transformers Whisper preset, defaulting to `openai/whisper-large-v3-turbo` | Multilingual transcription, translation, and timestamps | Default install | **VoiceHub native** teacher-forced Whisper fine-tuning |
+| `asr_tiron` | Tiron's Whisper-derived meeting ASR with added speaker and time tokens | Per-window speaker-attributed, timestamped segments for English and Chinese | Default install | **VoiceHub native** Whisper sequence-to-sequence fine-tuning; whole-meeting speaker linking is outside the model graph |
+| `asr_qwen3` | Qwen3-ASR HF checkpoints through their transcription request and multimodal chat template | Multilingual transcription, validated language forcing, language identification, and hotword context; word timing requires the separate Qwen forced aligner | Default install | **VoiceHub native** assistant-completion causal labels with prompt, audio, and padding positions masked |
+| `asr_vibevoice` | Official VibeVoice-ASR-HF Transformers checkpoint | Long-form multilingual text plus parsed speaker/timestamp segments and hotword context; language is inferred rather than forced | Default install | **VoiceHub native** processor-labeled multimodal fine-tuning; BitNet/GGML artifacts are inference-only |
+| `asr_granite_speech` | IBM Granite Speech 4.1 through its native Transformers processor and instruction prompt | Multilingual prompt-conditioned transcription and keyword biasing | Default install | **VoiceHub native** IBM-style prompt/target concatenation with completion-only causal labels; prompt and padding positions are masked |
+| `asr_parakeet_tdt` | NVIDIA Parakeet TDT 0.6B v3 through `AutoModelForTDT` | Multilingual text and native token-duration timestamps | Default install | **VoiceHub native** joint audio/text processing and native TDT loss |
+| `asr_nemotron` | NVIDIA Nemotron 3.5 streaming RNN-T through `AutoModelForRNNT` | Multilingual transcription, automatic language tags, and native token timestamps; common VoiceHub sessions remain buffered | Default install | **VoiceHub native** joint audio/text processing and native RNN-T loss |
+| `asr_cohere` | Cohere Transcribe general and `CohereLabs/cohere-transcribe-arabic-07-2026` checkpoint variants | Language-conditioned multilingual and long-form transcription with native chunk reassembly | Default install plus checkpoint access/token | **VoiceHub native** language-conditioned processor labels and sequence-to-sequence loss |
+| `asr_medasr` | Gated Google MedASR LASR/Conformer CTC checkpoint | English medical and radiology dictation | Default install plus checkpoint terms/token | **VoiceHub native** joint LASR processor labels and CTC loss |
 | `asr_wav2vec2` | Wav2Vec2 CTC checkpoints through the locked Transformers preset | Text and token timestamps when the tokenizer exposes offsets | Default install | **VoiceHub native** CTC fine-tuning |
 | `asr_hubert` | HuBERT CTC speech-recognition checkpoints through the locked Transformers preset | Text and token timestamps when emitted | Default install | **VoiceHub native** CTC fine-tuning |
 | `asr_wavlm` | WavLM CTC speech-recognition checkpoints through the locked Transformers preset | Text and token timestamps when emitted | Default install | **VoiceHub native** CTC fine-tuning |
@@ -40,7 +49,10 @@ Each integration provides:
 
 The `asr_transformers` provider uses `architecture_family="auto"` by default.
 Specify `ctc`, `speech-seq2seq`, `rnnt`, or `tdt` only when checkpoint
-metadata cannot identify its native graph.
+metadata cannot identify its native graph. Qwen3-ASR, VibeVoice-ASR,
+Nemotron 3.5, Cohere Transcribe, Granite Speech, and Voxtral Realtime are
+deliberately rejected by this generic path because they require
+model-specific processor, prompt, or label semantics.
 
 ## VAD providers
 

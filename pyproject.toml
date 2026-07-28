@@ -37,7 +37,9 @@ dependencies = [
   "torch>=2.8,<2.9",
   "torchaudio>=2.8,<2.9",
   "torchvision>=0.23,<0.24",
-  "transformers>=5.3,<6",
+  # Qwen3-ASR, Nemotron 3.5, Parakeet TDT, Cohere ASR, and LASR/MedASR
+  # rely on the native audio auto-model mappings shipped together in 5.14.
+  "transformers>=5.14,<6",
   "accelerate>=1.0",
   "diffusers>=0.33",
   "huggingface-hub>=0.28",
@@ -134,7 +136,7 @@ dependencies = [
   "cloudpickle",
   "faster-whisper>=1.1",
   "fiddle",
-  "funasr",
+  "funasr>=1.3.26",
   "nemo-toolkit[asr-only,common-only]==2.5.0",
   "openai-whisper",
   "protobuf>=5.29.5,<5.30",

@@ -206,6 +206,32 @@ class TransformersASRConfigTests(unittest.TestCase):
 
 class TransformersASRLoadingTests(unittest.TestCase):
 
+    def test_processor_specific_models_require_dedicated_providers(self):
+        cases = (
+            ("cohere_asr", "CohereAsrForConditionalGeneration"),
+            ("qwen3_asr", "Qwen3ASRForConditionalGeneration"),
+            ("vibevoice_asr", "VibeVoiceAsrForConditionalGeneration"),
+            ("nemotron3_5_asr", "Nemotron3_5AsrForRNNT"),
+            ("granite_speech", "GraniteSpeechForConditionalGeneration"),
+            (
+                "voxtral_realtime",
+                "VoxtralRealtimeForConditionalGeneration",
+            ),
+            ("voxtral", "VoxtralForConditionalGeneration"),
+        )
+
+        for model_type, architecture in cases:
+            with self.subTest(model_type=model_type):
+                native_config = SimpleNamespace(
+                    model_type=model_type,
+                    architectures=[architecture],
+                )
+                with self.assertRaisesRegex(
+                        ValueError,
+                        "dedicated VoiceHub provider",
+                ):
+                    TransformersASRForSpeechRecognition._infer_architecture_family(native_config)
+
     def test_known_checkpoint_dispatches_and_keeps_remote_code_disabled(self):
         seq2seq_loader = _loader()
         fake_transformers = _fake_transformers(seq2seq_loader=seq2seq_loader)
@@ -674,6 +700,60 @@ class TransformersASRTrainingTests(unittest.TestCase):
         self.assertEqual(batch["labels"], [[4, 5]])
         self.assertEqual(processor.calls[0][1]["sampling_rate"], 16_000)
         self.assertEqual(processor.tokenizer.calls[0][0], "hello")
+
+    def test_generic_transducer_training_preserves_joint_processor_fields(self):
+
+        class JointTransducerProcessor:
+
+            def __init__(self):
+                self.feature_extractor = SimpleNamespace(sampling_rate=16_000, )
+                self.calls = []
+
+            def __call__(self, *, audio, text, **kwargs):
+                self.calls.append({
+                    "audio": audio,
+                    "text": text,
+                    **kwargs,
+                })
+                return {
+                    "input_features": "features",
+                    "attention_mask": "attention-mask",
+                    "labels": "labels",
+                    "decoder_input_ids": "decoder-inputs",
+                    "native_alignment": "alignment",
+                }
+
+        processor = JointTransducerProcessor()
+        model = TransformersASRForSpeechRecognition(
+            TransformersASRConfig(name_or_path="publisher/future-tdt"),
+            device="cpu",
+        )
+        model.architecture_family = "tdt"
+        model.transformers_processor = processor
+
+        batch = model.prepare_training_inputs(
+            {
+                "audio": np.asarray([0.0, 0.1], dtype=np.float32),
+                "sampling_rate": 16_000,
+                "text": "hello",
+            },
+            phase="asr",
+        )
+
+        self.assertEqual(batch["labels"], "labels")
+        self.assertEqual(
+            batch["decoder_input_ids"],
+            "decoder-inputs",
+        )
+        self.assertEqual(
+            batch["native_alignment"],
+            "alignment",
+        )
+        self.assertEqual(processor.calls[0]["text"], "hello")
+        self.assertEqual(
+            processor.calls[0]["sampling_rate"],
+            16_000,
+        )
 
     def test_padded_audio_batch_uses_lengths_and_vector_sample_rates(self):
         model = TransformersASRForSpeechRecognition(
