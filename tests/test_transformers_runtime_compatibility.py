@@ -47,8 +47,7 @@ class HiggsTransformersCompatibilityTests(unittest.TestCase):
 
         runtime = importlib.import_module(
             "voicehub.models.higgstts.source.boson_multimodal.model."
-            "higgs_audio.modeling_higgs_audio"
-        )
+            "higgs_audio.modeling_higgs_audio")
         config = LlamaConfig(
             hidden_size=16,
             intermediate_size=32,
@@ -71,11 +70,9 @@ class XTTSTransformersCompatibilityTests(unittest.TestCase):
 
     def test_streaming_and_tortoise_modules_import(self):
         stream_runtime = importlib.import_module(
-            "voicehub.models.xtts.source.TTS.tts.layers.xtts.stream_generator"
-        )
+            "voicehub.models.xtts.source.TTS.tts.layers.xtts.stream_generator")
         tortoise_runtime = importlib.import_module(
-            "voicehub.models.xtts.source.TTS.tts.layers.tortoise.arch_utils"
-        )
+            "voicehub.models.xtts.source.TTS.tts.layers.tortoise.arch_utils")
 
         config = stream_runtime.StreamGenerationConfig(do_stream=True)
         self.assertTrue(config.do_stream)
@@ -83,13 +80,10 @@ class XTTSTransformersCompatibilityTests(unittest.TestCase):
 
     def test_legacy_beam_types_are_loaded_only_when_available(self):
         stream_runtime = importlib.import_module(
-            "voicehub.models.xtts.source.TTS.tts.layers.xtts.stream_generator"
-        )
+            "voicehub.models.xtts.source.TTS.tts.layers.xtts.stream_generator")
 
         try:
-            scorer = stream_runtime._load_legacy_generation_symbol(
-                "BeamSearchScorer"
-            )
+            scorer = stream_runtime._load_legacy_generation_symbol("BeamSearchScorer")
         except RuntimeError as error:
             self.assertIn("Use Transformers 4", str(error))
         else:
@@ -99,8 +93,7 @@ class XTTSTransformersCompatibilityTests(unittest.TestCase):
         import torch
 
         tortoise_runtime = importlib.import_module(
-            "voicehub.models.xtts.source.TTS.tts.layers.tortoise.arch_utils"
-        )
+            "voicehub.models.xtts.source.TTS.tts.layers.tortoise.arch_utils")
         warper = tortoise_runtime.TypicalLogitsWarper(mass=0.9)
         input_ids = torch.tensor([[1, 2]])
         scores = torch.tensor([[0.1, 0.2, 0.3, 0.4]])
@@ -119,9 +112,7 @@ class ParlerTransformersCompatibilityTests(unittest.TestCase):
     def test_logits_processor_uses_public_torch_isin_fallback(self):
         import torch
 
-        runtime = importlib.import_module(
-            "voicehub.models.parlertts.source.parler_tts.logits_processors"
-        )
+        runtime = importlib.import_module("voicehub.models.parlertts.source.parler_tts.logits_processors")
         processor = runtime.ParlerTTSLogitsProcessor(
             eos_token_id=3,
             num_codebooks=2,
@@ -144,13 +135,11 @@ class MeloImportCompatibilityTests(unittest.TestCase):
         from transformers import AutoTokenizer
 
         with patch.object(
-            AutoTokenizer,
-            "from_pretrained",
-            side_effect=AssertionError("tokenizer download during import"),
+                AutoTokenizer,
+                "from_pretrained",
+                side_effect=AssertionError("tokenizer download during import"),
         ) as loader:
-            runtime = importlib.import_module(
-                "voicehub.models.melotts.source.melo.text.japanese"
-            )
+            runtime = importlib.import_module("voicehub.models.melotts.source.melo.text.japanese")
             importlib.reload(runtime)
 
         loader.assert_not_called()
@@ -164,9 +153,7 @@ class MeloImportCompatibilityTests(unittest.TestCase):
 class OuteBackendCompatibilityTests(unittest.TestCase):
 
     def test_gguf_dependency_is_checked_only_when_the_backend_is_used(self):
-        runtime = importlib.import_module(
-            "voicehub.models.outetts.source.outetts.models.gguf_model"
-        )
+        runtime = importlib.import_module("voicehub.models.outetts.source.outetts.models.gguf_model")
         if runtime._GGUF_AVAILABLE:
             self.assertTrue(callable(runtime.Llama))
             return

@@ -16,15 +16,15 @@ from voicehub.training.datasets import SpeechDataset
 class VibeVoicePreprocessedCollator:
     """Pad utterances while flattening their source-native speech segments.
 
-    VibeVoice represents text per utterance but acoustic/semantic features per
-    speech segment. A generic tensor stack introduces an invalid extra batch
-    dimension for the segment tensors, so this collator concatenates segments
-    in the same order as their acoustic placeholders.
+    VibeVoice represents text per utterance but acoustic/semantic
+    features per speech segment. A generic tensor stack introduces an
+    invalid extra batch dimension for the segment tensors, so this
+    collator concatenates segments in the same order as their acoustic
+    placeholders.
     """
 
     def __init__(self, *, pad_token_id: int = 0):
-        if (isinstance(pad_token_id, bool) or not isinstance(pad_token_id, int)
-                or pad_token_id < 0):
+        if (isinstance(pad_token_id, bool) or not isinstance(pad_token_id, int) or pad_token_id < 0):
             raise ValueError("VibeVoice `pad_token_id` must be a non-negative integer.")
         self.pad_token_id = pad_token_id
 
@@ -39,9 +39,8 @@ class VibeVoicePreprocessedCollator:
     def _tensor(torch, record, name: str, *, ndim: int):
         value = record.get(name)
         if not torch.is_tensor(value) or value.ndim != ndim:
-            raise ValueError(
-                f"Each VibeVoice record must provide `{name}` with "
-                f"{ndim} dimensions.")
+            raise ValueError(f"Each VibeVoice record must provide `{name}` with "
+                             f"{ndim} dimensions.")
         return value
 
     def __call__(self, features) -> dict[str, object]:
@@ -86,14 +85,9 @@ class VibeVoicePreprocessedCollator:
                 "acoustic_loss_mask",
                 ndim=1,
             )
-            if not (
-                input_ids.shape
-                == attention_mask.shape
-                == acoustic_input_mask.shape
-                == acoustic_loss_mask.shape
-            ):
-                raise ValueError(
-                    f"VibeVoice record {index} token fields must share one shape.")
+            if not (input_ids.shape == attention_mask.shape == acoustic_input_mask.shape ==
+                    acoustic_loss_mask.shape):
+                raise ValueError(f"VibeVoice record {index} token fields must share one shape.")
 
             speech_tensors = self._tensor(
                 torch,
@@ -120,25 +114,18 @@ class VibeVoicePreprocessedCollator:
                 ndim=3,
             )
             segment_count = speech_tensors.shape[0]
-            if (
-                segment_count == 0
-                or speech_masks.shape[0] != segment_count
-                or loss_selection.shape != speech_masks.shape
-                or semantics.shape[:2] != speech_masks.shape
-            ):
-                raise ValueError(
-                    f"VibeVoice record {index} speech segment fields are not aligned.")
+            if (segment_count == 0 or speech_masks.shape[0] != segment_count or
+                    loss_selection.shape != speech_masks.shape or semantics.shape[:2] != speech_masks.shape):
+                raise ValueError(f"VibeVoice record {index} speech segment fields are not aligned.")
             if semantic_size is None:
                 semantic_size = semantics.shape[-1]
             elif semantics.shape[-1] != semantic_size:
-                raise ValueError(
-                    "All VibeVoice semantic tensors must use one feature size.")
+                raise ValueError("All VibeVoice semantic tensors must use one feature size.")
 
             acoustic_count = int(acoustic_input_mask.bool().sum().item())
             latent_count = int(speech_masks.bool().sum().item())
             target_count = int(acoustic_loss_mask.bool().sum().item())
-            selected_count = int(
-                (loss_selection.bool() & speech_masks.bool()).sum().item())
+            selected_count = int((loss_selection.bool() & speech_masks.bool()).sum().item())
             if acoustic_count != latent_count:
                 raise ValueError(
                     f"VibeVoice record {index} has {acoustic_count} acoustic "
@@ -169,47 +156,39 @@ class VibeVoicePreprocessedCollator:
                 value=padding_value,
             )
 
-        input_ids = torch.stack([
-            pad_sequence(record["input_ids"].long(), self.pad_token_id)
-            for record in normalized
-        ])
-        attention_mask = torch.stack([
-            pad_sequence(record["attention_mask"].long(), 0)
-            for record in normalized
-        ])
-        acoustic_input_mask = torch.stack([
-            pad_sequence(record["acoustic_input_mask"].bool(), False)
-            for record in normalized
-        ])
-        acoustic_loss_mask = torch.stack([
-            pad_sequence(record["acoustic_loss_mask"].bool(), False)
-            for record in normalized
-        ])
+        input_ids = torch.stack(
+            [pad_sequence(record["input_ids"].long(), self.pad_token_id) for record in normalized])
+        attention_mask = torch.stack(
+            [pad_sequence(record["attention_mask"].long(), 0) for record in normalized])
+        acoustic_input_mask = torch.stack(
+            [pad_sequence(record["acoustic_input_mask"].bool(), False) for record in normalized])
+        acoustic_loss_mask = torch.stack(
+            [pad_sequence(record["acoustic_loss_mask"].bool(), False) for record in normalized])
 
         speech_tensors = torch.cat([
             functional.pad(
                 record["speech_tensors"],
                 (0, max_samples - record["speech_tensors"].shape[1]),
                 value=0,
-            )
-            for record in normalized
-        ], dim=0)
+            ) for record in normalized
+        ],
+                                   dim=0)
         speech_masks = torch.cat([
             functional.pad(
                 record["speech_masks"].bool(),
                 (0, max_latents - record["speech_masks"].shape[1]),
                 value=False,
-            )
-            for record in normalized
-        ], dim=0)
+            ) for record in normalized
+        ],
+                                 dim=0)
         speeches_loss_input = torch.cat([
             functional.pad(
                 record["speeches_loss_input"].bool(),
                 (0, max_latents - record["speeches_loss_input"].shape[1]),
                 value=False,
-            )
-            for record in normalized
-        ], dim=0)
+            ) for record in normalized
+        ],
+                                        dim=0)
         speech_semantic_tensors = torch.cat([
             functional.pad(
                 record["speech_semantic_tensors"],
@@ -220,9 +199,9 @@ class VibeVoicePreprocessedCollator:
                     max_latents - record["speech_semantic_tensors"].shape[1],
                 ),
                 value=0,
-            )
-            for record in normalized
-        ], dim=0)
+            ) for record in normalized
+        ],
+                                            dim=0)
 
         batch = {
             "input_ids": input_ids,
@@ -237,8 +216,7 @@ class VibeVoicePreprocessedCollator:
         phases = [feature.get("training_phase") for feature in features]
         if any(phase is not None for phase in phases):
             if any(phase != phases[0] for phase in phases):
-                raise ValueError(
-                    "Every VibeVoice record in a batch must use one training phase.")
+                raise ValueError("Every VibeVoice record in a batch must use one training phase.")
             batch["training_phase"] = phases[0]
         return batch
 
@@ -283,14 +261,12 @@ class VibeVoiceTrainingAdapter(CompositeTrainingAdapter):
 
     def __init__(self, model, spec):
         super().__init__(model, spec)
-        pad_token_id = int(
-            getattr(
-                getattr(model, "config", None),
-                "training_pad_token_id",
-                0,
-            ))
-        self.data_collator = VibeVoicePreprocessedCollator(
-            pad_token_id=pad_token_id,)
+        pad_token_id = int(getattr(
+            getattr(model, "config", None),
+            "training_pad_token_id",
+            0,
+        ))
+        self.data_collator = VibeVoicePreprocessedCollator(pad_token_id=pad_token_id, )
 
     def setup(self):
         super().setup()
@@ -312,8 +288,8 @@ class VibeVoiceTrainingAdapter(CompositeTrainingAdapter):
         processor = getattr(self.model, "_processor", None)
         tokenizer = getattr(processor, "tokenizer", None)
         checkpoint_pad_id = getattr(tokenizer, "pad_token_id", None)
-        if (isinstance(checkpoint_pad_id, int) and
-                not isinstance(checkpoint_pad_id, bool) and checkpoint_pad_id >= 0):
+        if (isinstance(checkpoint_pad_id, int) and not isinstance(checkpoint_pad_id, bool) and
+                checkpoint_pad_id >= 0):
             self.data_collator.pad_token_id = checkpoint_pad_id
         return self
 

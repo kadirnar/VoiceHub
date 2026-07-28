@@ -307,9 +307,7 @@ class TransformersASRPresetInferenceAndTrainingTests(unittest.TestCase):
     def test_ctc_boolean_timestamps_map_to_word_timestamps(self):
         model = Wav2Vec2ForSpeechRecognition(device="cpu")
         model.architecture_family = "ctc"
-        model.transformers_processor = SimpleNamespace(
-            tokenizer=SimpleNamespace(),
-        )
+        model.transformers_processor = SimpleNamespace(tokenizer=SimpleNamespace(), )
 
         options = model._pipeline_call_options(
             language=None,
@@ -329,9 +327,7 @@ class TransformersASRPresetInferenceAndTrainingTests(unittest.TestCase):
     def test_ctc_timestamp_mode_rejects_pipeline_incompatible_values(self):
         model = Wav2Vec2ForSpeechRecognition(device="cpu")
         model.architecture_family = "ctc"
-        model.transformers_processor = SimpleNamespace(
-            tokenizer=SimpleNamespace(),
-        )
+        model.transformers_processor = SimpleNamespace(tokenizer=SimpleNamespace(), )
 
         with self.assertRaisesRegex(ValueError, "CTC timestamp mode"):
             model._pipeline_call_options(
