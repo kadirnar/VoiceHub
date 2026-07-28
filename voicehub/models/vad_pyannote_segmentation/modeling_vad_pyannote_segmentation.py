@@ -6,8 +6,8 @@ from inspect import Parameter, signature
 
 from voicehub.dependencies import import_optional
 from voicehub.models.vad_pyannote.modeling_vad_pyannote import PyannoteVADForVoiceActivityDetection
-from voicehub.models.vad_pyannote_segmentation.configuration_vad_pyannote_segmentation import (
-    PyannoteSegmentationVADConfig, )
+
+from .configuration_vad_pyannote_segmentation import PyannoteSegmentationVADConfig
 
 
 def _loader_options(loader, values: dict, *, required: tuple[str, ...]) -> dict:

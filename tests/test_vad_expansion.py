@@ -359,7 +359,7 @@ class SherpaONNXVADRuntimeTests(unittest.TestCase):
         self.assertEqual(captured["resolve_kwargs"]["revision"], "v1")
         self.assertEqual(captured["resolve_kwargs"]["token"], "hub-token")
         self.assertTrue(captured["resolve_kwargs"]["local_files_only"])
-        self.assertEqual(native.model, "/tmp/silero_vad.onnx")
+        self.assertEqual(native.model, str(Path("/tmp/silero_vad.onnx")))
         self.assertEqual(native.threshold, 0.4)
         self.assertEqual(native.neg_threshold, 0.2)
         self.assertEqual(native.min_speech_duration, 0.1)

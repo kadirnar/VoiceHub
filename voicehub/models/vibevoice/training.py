@@ -165,31 +165,34 @@ class VibeVoicePreprocessedCollator:
         acoustic_loss_mask = torch.stack(
             [pad_sequence(record["acoustic_loss_mask"].bool(), False) for record in normalized])
 
-        speech_tensors = torch.cat([
+        padded_speech_tensors = [
             functional.pad(
                 record["speech_tensors"],
                 (0, max_samples - record["speech_tensors"].shape[1]),
                 value=0,
             ) for record in normalized
-        ],
-                                   dim=0)
-        speech_masks = torch.cat([
+        ]
+        speech_tensors = torch.cat(padded_speech_tensors, dim=0)
+
+        padded_speech_masks = [
             functional.pad(
                 record["speech_masks"].bool(),
                 (0, max_latents - record["speech_masks"].shape[1]),
                 value=False,
             ) for record in normalized
-        ],
-                                 dim=0)
-        speeches_loss_input = torch.cat([
+        ]
+        speech_masks = torch.cat(padded_speech_masks, dim=0)
+
+        padded_speeches_loss_input = [
             functional.pad(
                 record["speeches_loss_input"].bool(),
                 (0, max_latents - record["speeches_loss_input"].shape[1]),
                 value=False,
             ) for record in normalized
-        ],
-                                        dim=0)
-        speech_semantic_tensors = torch.cat([
+        ]
+        speeches_loss_input = torch.cat(padded_speeches_loss_input, dim=0)
+
+        padded_speech_semantic_tensors = [
             functional.pad(
                 record["speech_semantic_tensors"],
                 (
@@ -200,8 +203,8 @@ class VibeVoicePreprocessedCollator:
                 ),
                 value=0,
             ) for record in normalized
-        ],
-                                            dim=0)
+        ]
+        speech_semantic_tensors = torch.cat(padded_speech_semantic_tensors, dim=0)
 
         batch = {
             "input_ids": input_ids,
