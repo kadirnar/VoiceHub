@@ -1,6 +1,7 @@
 import importlib.util
 import tempfile
 import unittest
+from unittest.mock import PropertyMock, patch
 
 from voicehub import (
     AutoInferenceModel,
@@ -30,6 +31,7 @@ from voicehub.training.adapters import (
     Seq2SeqTrainingAdapter,
 )
 from voicehub.training.optimization import OptimizerBundle
+from voicehub.training.strategy import TorchTrainingStrategy
 
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 
@@ -49,17 +51,15 @@ class TrainingProfileTests(unittest.TestCase):
         registered = {spec.model_type for spec in AutoInferenceModel.available_models()}
         profiled = {spec.model_type for spec in list_training_specs()}
         self.assertEqual(profiled, registered)
-        self.assertEqual(len(profiled), 31)
+        self.assertEqual(len(profiled), 34)
 
     def test_registry_connects_models_to_training_profiles(self):
         for model_spec in AutoInferenceModel.available_models():
             with self.subTest(model_type=model_spec.model_type):
                 training_spec = model_spec.training
                 self.assertEqual(training_spec.model_type, model_spec.model_type)
-                self.assertEqual(
-                    training_spec.install_extra,
-                    model_spec.install_extra,
-                )
+                self.assertEqual(training_spec.install_extra, "training")
+                self.assertIsNone(model_spec.install_extra)
 
     def test_all_builtin_training_families_are_used(self):
         families = {spec.family for spec in list_training_specs(task=None)}
@@ -268,6 +268,98 @@ class TrainingAdapterLoopTests(unittest.TestCase):
             sequence.training_adapter,
             Seq2SeqTrainingAdapter,
         )
+
+    def test_model_created_tensors_are_prepared_by_the_active_strategy(self):
+        import torch
+
+        class RawBatchModel(self.DummyForTextToSpeech):
+
+            def prepare_training_inputs(self, inputs, *, phase):
+                del phase
+                batch_size = int(inputs["raw_marker"].shape[0])
+                input_ids = torch.tensor(
+                    [[1, 2, 3, 4]],
+                    dtype=torch.long,
+                ).expand(batch_size, -1)
+                return {
+                    "input_ids": input_ids,
+                    "labels": input_ids.clone(),
+                }
+
+        class RecordingStrategy(TorchTrainingStrategy):
+
+            def __init__(self):
+                super().__init__()
+                self.model_created_batches = 0
+                self.requested_devices = []
+
+            def prepare_input(self, value, *, device):
+                self.requested_devices.append(device)
+                if isinstance(value, dict) and "input_ids" in value:
+                    self.model_created_batches += 1
+                    self.assert_cpu_tensors(value)
+                return value
+
+            @staticmethod
+            def assert_cpu_tensors(value):
+                for item in value.values():
+                    if torch.is_tensor(item):
+                        if item.device.type != "cpu":
+                            raise AssertionError("The test processor must create CPU tensors.")
+
+            def prepare_training_adapter(self, adapter, *, device):
+                self.requested_devices.append(device)
+                return adapter
+
+        spec = ModelTrainingSpec(
+            model_type="device-placement-test",
+            family=TrainingFamily.CAUSAL_LM,
+            module_paths=("model", ),
+            component_paths=("model", ),
+            label_names=("labels", ),
+            support=TrainingSupport.PREPROCESSED,
+        )
+        model = RawBatchModel(
+            self._config("device-placement-test"),
+            self._token_model,
+        )
+        adapter = CausalLMTrainingAdapter(model, spec)
+        strategy = RecordingStrategy()
+
+        with tempfile.TemporaryDirectory() as directory:
+            trainer = Trainer(
+                model=model,
+                args=TrainingArguments(
+                    output_dir=directory,
+                    max_steps=1,
+                    per_device_train_batch_size=2,
+                    logging_strategy="no",
+                    save_strategy="no",
+                    use_cpu=False,
+                    dataloader_pin_memory=False,
+                ),
+                train_dataset=[
+                    {
+                        "raw_marker": torch.tensor([1])
+                    },
+                    {
+                        "raw_marker": torch.tensor([2])
+                    },
+                ],
+                training_adapter=adapter,
+                training_strategy=strategy,
+            )
+            with patch.object(
+                    TrainingArguments,
+                    "device",
+                    new_callable=PropertyMock,
+                    return_value="cuda",
+            ):
+                trainer.train()
+
+        self.assertGreaterEqual(strategy.model_created_batches, 1)
+        self.assertTrue(strategy.requested_devices)
+        self.assertEqual(set(strategy.requested_devices), {"cuda"})
 
     def test_adapter_prediction_accepts_unlabeled_batches(self):
         import torch

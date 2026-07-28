@@ -105,7 +105,7 @@ class F5TTSForTextToSpeech(PreTrainedTTSModel):
         api = import_optional(
             "voicehub.models.f5tts.source.f5_tts.api",
             model_type="f5tts",
-            install_extra="f5tts",
+            install_extra=None,
         )
         self.model = api.F5TTS(
             model=self.config.model_name,

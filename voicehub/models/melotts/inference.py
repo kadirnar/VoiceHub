@@ -113,7 +113,7 @@ class MeloTTSForTextToSpeech(PreTrainedTTSModel):
         api = import_optional(
             "voicehub.models.melotts.source.melo.api",
             model_type="melotts",
-            install_extra="melotts",
+            install_extra=None,
         )
         config_path, checkpoint_path = self._resolve_checkpoint_paths()
         self.model = api.TTS(

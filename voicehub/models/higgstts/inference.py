@@ -73,7 +73,7 @@ class HiggsTTSForTextToSpeech(PreTrainedTTSModel):
         return import_optional(
             "voicehub.models.higgstts.source.boson_multimodal.data_types",
             model_type="higgstts",
-            install_extra="higgstts",
+            install_extra=None,
         )
 
     def _load_training_runtime(self) -> None:
@@ -94,13 +94,13 @@ class HiggsTTSForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="higgstts",
-            install_extra="higgstts",
+            install_extra=None,
         )
         runtime = import_optional(
             "voicehub.models.higgstts.source.boson_multimodal.serve."
             "serve_engine",
             model_type="higgstts",
-            install_extra="higgstts",
+            install_extra=None,
         )
         self._types = self._load_data_types()
         self.model = runtime.HiggsAudioServeEngine(

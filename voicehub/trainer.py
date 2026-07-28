@@ -234,6 +234,7 @@ class Trainer:
             return
         runtime = self._runtime_model()
         if self.training_adapter is not None:
+            self.training_adapter.set_runtime_input_preparer(self._prepare_input, )
             prepared = self.training_strategy.prepare_training_adapter(
                 self.training_adapter,
                 device=self.args.device,

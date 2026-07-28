@@ -43,12 +43,12 @@ def _require_transformers_backend() -> tuple[Any, Any, Any]:
     torch = import_optional(
         "torch",
         model_type="csm",
-        install_extra="csm",
+        install_extra="training",
     )
     transformers = import_optional(
         "transformers",
         model_type="csm",
-        install_extra="csm",
+        install_extra="training",
     )
     try:
         model_class = transformers.CsmForConditionalGeneration
@@ -57,7 +57,7 @@ def _require_transformers_backend() -> tuple[Any, Any, Any]:
         raise OptionalDependencyError(
             "CSM fine-tuning requires Transformers >= 4.52.1 with "
             "CsmForConditionalGeneration and CsmProcessor. Upgrade the "
-            "'voicehub[csm]' environment and retry.") from exc
+            "'voicehub[training]' environment and retry.") from exc
     return torch, model_class, processor_class
 
 
@@ -514,7 +514,7 @@ def load_csm_training_backend(
     transformers = import_optional(
         "transformers",
         model_type="csm",
-        install_extra="csm",
+        install_extra="training",
     )
     major_version = _transformers_major_version(transformers)
     dtype = _resolve_dtype(torch, torch_dtype, device)

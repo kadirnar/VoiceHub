@@ -3,9 +3,8 @@
 import re
 import unicodedata
 
-from transformers import AutoTokenizer
-
 from . import punctuation, symbols
+from .tokenizer_utils import get_tokenizer
 
 
 from num2words import num2words
@@ -92,10 +91,9 @@ def distribute_phone(n_phone, n_word):
 # tokenizer = AutoTokenizer.from_pretrained('cl-tohoku/bert-base-japanese-v3')
 
 model_id = 'kykim/bert-kor-base'
-tokenizer = AutoTokenizer.from_pretrained(model_id)
 
 def g2p(norm_text):
-    tokenized = tokenizer.tokenize(norm_text)
+    tokenized = get_tokenizer(model_id).tokenize(norm_text)
     phs = []
     ph_groups = []
     for t in tokenized:

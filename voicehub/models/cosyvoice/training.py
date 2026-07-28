@@ -100,7 +100,7 @@ def _resolve_model_directory(model_name_or_path: str | Path) -> Path:
     modelscope = import_optional(
         "modelscope",
         model_type="cosyvoice",
-        install_extra="cosyvoice",
+        install_extra="training",
     )
     resolved = Path(modelscope.snapshot_download(str(model_name_or_path)))
     if not resolved.is_dir():
@@ -150,7 +150,7 @@ def _load_component_checkpoint(component, checkpoint_path: Path) -> None:
         safetensors = import_optional(
             "safetensors.torch",
             model_type="cosyvoice",
-            install_extra="cosyvoice",
+            install_extra="training",
         )
         state_dict = safetensors.load_file(
             str(checkpoint_path),
@@ -160,7 +160,7 @@ def _load_component_checkpoint(component, checkpoint_path: Path) -> None:
         torch = import_optional(
             "torch",
             model_type="cosyvoice",
-            install_extra="cosyvoice",
+            install_extra="training",
         )
         try:
             state_dict = torch.load(
@@ -198,7 +198,7 @@ def load_cosyvoice_training_backend(
     hyperpyyaml = import_optional(
         "hyperpyyaml",
         model_type="cosyvoice",
-        install_extra="cosyvoice",
+        install_extra="training",
     )
 
     overrides = {name: None for name in ("llm", "flow", "hift", "hifigan") if name != component_name}
@@ -361,7 +361,7 @@ class CosyVoiceTrainingAdapter(CompositeTrainingAdapter):
         torch = import_optional(
             "torch",
             model_type="cosyvoice",
-            install_extra="cosyvoice",
+            install_extra="training",
         )
         optimizer_type = getattr(torch.optim, optimizer_type_name)
         return optimizer_type(
@@ -394,7 +394,7 @@ class CosyVoiceTrainingAdapter(CompositeTrainingAdapter):
         scheduler_module = import_optional(
             "voicehub.models.cosyvoice.source.cosyvoice.utils.scheduler",
             model_type="cosyvoice",
-            install_extra="cosyvoice",
+            install_extra="training",
         )
         if normalized_name == "warmuplr":
             scheduler_type = scheduler_module.WarmupLR
@@ -469,7 +469,7 @@ class CosyVoiceTrainingAdapter(CompositeTrainingAdapter):
         safetensors = import_optional(
             "safetensors.torch",
             model_type="cosyvoice",
-            install_extra="cosyvoice",
+            install_extra="training",
         )
         component_name = ("llm" if self.selected_phase_name == "language_model" else "flow")
         component = getattr(self.model.model.model, component_name)

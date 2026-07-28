@@ -7,7 +7,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchaudio
-from transformers import LogitsWarper
+try:
+    from transformers import LogitsWarper
+except ImportError:
+    # Transformers 5 folded warpers into the common logits-processor API.
+    from transformers.generation.logits_process import LogitsProcessor as LogitsWarper
 
 from voicehub.models.xtts.source.TTS.tts.layers.tortoise.xtransformers import ContinuousTransformerWrapper, RelativePositionBias
 

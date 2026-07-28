@@ -64,7 +64,7 @@ acoustiques, les systèmes antagonistes de type VITS et les pipelines composites
 conservent leurs propres conditionnements, objectifs, règles de propriété des
 paramètres et règles d'exportation.
 
-Le registry contient **31 intégrations TTS**, **9 fournisseurs ASR** et **7
+Le registry contient **34 intégrations TTS**, **14 fournisseurs ASR** et **11
 fournisseurs VAD**. La prise en charge de l'ajustement dépend du checkpoint et
 de l'environnement d'exécution ; une intégration d'inférence ne garantit pas
 que son artefact VoiceHub actuel soit différentiable. Consultez le
@@ -73,12 +73,13 @@ que son artefact VoiceHub actuel soit différentiable. Consultez le
 [matrice de prise en charge ASR/VAD](models/asr-vad-support.md) pour choisir
 une intégration.
 
-Le code source des modèles est fourni avec VoiceHub. Les extras facultatifs
-installent les dépendances de l'environnement sélectionné, tandis que les poids
-des checkpoints sont téléchargés à la demande ou fournis sous forme de chemins
-locaux. La licence Apache-2.0 couvre uniquement VoiceHub ; le code intégré, les
-checkpoints, les codecs, les jeux de données et les fichiers audio générés
-peuvent être soumis à des conditions distinctes.
+Le code source des modèles et tous les environnements d'inférence TTS, ASR et
+VAD intégrés sont installés par défaut avec VoiceHub. Les poids des checkpoints
+sont téléchargés à la demande ou fournis sous forme de chemins locaux. Ajoutez
+uniquement `voicehub[training]` pour l'ajustement et le reporting. La licence
+Apache-2.0 couvre uniquement VoiceHub ; le code intégré, les checkpoints, les
+codecs, les jeux de données et les fichiers audio générés peuvent être soumis
+à des conditions distinctes.
 
 <div class="grid cards" markdown>
 
@@ -125,9 +126,8 @@ peuvent être soumis à des conditions distinctes.
 
     ---
 
-    Comparez les 31 entrées du registry, leurs extras d'installation, leurs
-    checkpoints par défaut, leurs capacités, la provenance du code source et
-    leurs contraintes.
+    Comparez les entrées TTS du registry, leurs checkpoints par défaut, leurs
+    capacités, la provenance du code source et leurs contraintes.
 
     [Catalogue des modèles](models/index.md)
 

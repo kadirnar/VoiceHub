@@ -23,10 +23,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -34,29 +34,96 @@ jobs:
       - name: Update pip
         run: python -m pip install --upgrade pip
 
-      - name: Install package and test tools
-        run: python -m pip install -e ".[test]"
+      - name: Install lightweight contract-test environment
+        run: |
+          python -m pip install --no-deps -e .
+          python -m pip install "nbformat>=5.10" packaging pytest numpy soundfile uv
+
+      - name: Resolve the complete default runtime
+        run: >
+          uv pip compile pyproject.toml
+          --python-version ${{ matrix.python-version }}
+          --torch-backend cpu
+          --output-file voicehub-default.lock
+
+      - name: Resolve the complete training runtime
+        run: >
+          uv pip compile pyproject.toml
+          --extra training
+          --python-version ${{ matrix.python-version }}
+          --torch-backend cpu
+          --output-file voicehub-training.lock
 
       - name: Run tests
-        run: python -m pytest
+        run: python -m pytest -q
+
+  cross-platform-runtime-smoke:
+    runs-on: ${{ matrix.operating-system }}
+    strategy:
+      fail-fast: false
+      matrix:
+        operating-system: [windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install the complete default runtime
+        run: |
+          python -m pip install --upgrade pip uv
+          uv pip install --system --torch-backend cpu -e ".[test]"
+
+      - name: Import every default speech runtime
+        env:
+          VOICEHUB_FULL_RUNTIME_TEST: '1'
+        run: python -m pytest -q tests/test_default_runtime_imports.py
+
+  default-runtime-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install the complete default runtime
+        run: |
+          python -m pip install --upgrade pip uv
+          uv pip install --system --torch-backend cpu -e ".[test]"
+
+      - name: Run all inference, import, and contract tests
+        env:
+          VOICEHUB_FULL_RUNTIME_TEST: '1'
+        run: python -m pytest -q
 
   training-test:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.11'
           cache: pip
 
-      - name: Install package, Torch, and test tools
+      - name: Install package, training runtime, and test tools
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[test,training]"
+          python -m pip install --upgrade pip uv
+          uv pip install --system --torch-backend cpu -e ".[test,training]"
 
       - name: Run gradient and checkpoint tests
         run: |
@@ -68,12 +135,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.12'
           cache: pip

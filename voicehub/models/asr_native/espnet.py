@@ -40,7 +40,7 @@ class ESPnetASRForSpeechRecognition(PreTrainedASRModel):
         inference = import_optional(
             "espnet2.bin.asr_inference",
             model_type=self.config.model_type,
-            install_extra="asr-vad",
+            install_extra=None,
         )
         source = self.config.name_or_path or self.default_model_name_or_path
         speech_to_text = getattr(inference, "Speech2Text", None)

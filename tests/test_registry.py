@@ -165,7 +165,20 @@ class RegistryTests(unittest.TestCase):
                     PreTrainedTTSModel.forward,
                 )
 
-                parameters = tuple(inspect.signature(model_class.__init__).parameters)
+                signature = inspect.signature(model_class.__init__)
+                parameters = tuple(signature.parameters)
+                # Providers may expose authentication as an explicit
+                # runtime-only keyword. It is intentionally absent from the
+                # serializable config while the common constructor contract
+                # remains identical.
+                token_parameter = signature.parameters.get("token")
+                if token_parameter is not None:
+                    self.assertIsNone(token_parameter.default)
+                    self.assertIs(
+                        token_parameter.kind,
+                        inspect.Parameter.KEYWORD_ONLY,
+                    )
+                parameters = tuple(name for name in parameters if name != "token")
                 if constructor_parameters is None:
                     constructor_parameters = parameters
                 self.assertEqual(parameters, constructor_parameters)
@@ -235,12 +248,11 @@ class RegistryTests(unittest.TestCase):
     def test_missing_optional_dependency_has_install_hint(self):
         with self.assertRaisesRegex(
                 OptionalDependencyError,
-                r"voicehub\[f5tts\]",
+                r"pip install --upgrade voicehub",
         ):
             import_optional(
                 "_voicehub_missing_dependency",
                 model_type="f5tts",
-                install_extra="f5tts",
             )
 
     def test_import_does_not_eagerly_load_ml_stack(self):

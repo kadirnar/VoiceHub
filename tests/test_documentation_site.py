@@ -291,9 +291,36 @@ class DocumentationSiteTests(unittest.TestCase):
                 continue
             with self.subTest(model_type=model_spec.model_type):
                 self.assertIn(f"| `{model_spec.model_type}` |", speech_matrix)
-                self.assertIn(f"`{model_spec.install_extra}`", speech_matrix)
 
-    def test_every_registry_extra_is_declared_in_package_metadata(self):
+    def test_homepage_registry_counts_match_the_runtime_catalog(self):
+        from voicehub import list_model_specs
+
+        specs = list_model_specs(task=None)
+        counts = {
+            task: sum(spec.task.value == task for spec in specs)
+            for task in (
+                "text-to-speech",
+                "automatic-speech-recognition",
+                "voice-activity-detection",
+            )
+        }
+        homepage = (DOCS_ROOT / "index.md").read_text(encoding="utf-8")
+
+        self.assertIn(f"**{len(specs)} integrations**", homepage)
+        self.assertIn(
+            f"**{counts['text-to-speech']} TTS backends**",
+            homepage,
+        )
+        self.assertIn(
+            f"**{counts['automatic-speech-recognition']} ASR\nproviders**",
+            homepage,
+        )
+        self.assertIn(
+            f"**{counts['voice-activity-detection']} VAD providers**",
+            homepage,
+        )
+
+    def test_inference_registry_uses_the_default_installation(self):
         from voicehub import list_model_specs
 
         metadata = PYPROJECT_PATH.read_text(encoding="utf-8")
@@ -308,9 +335,10 @@ class DocumentationSiteTests(unittest.TestCase):
                 re.MULTILINE,
             ))
 
+        self.assertEqual(declared_extras, {"docs", "test", "training"})
         for model_spec in list_model_specs(task=None):
             with self.subTest(model_type=model_spec.model_type):
-                self.assertIn(model_spec.install_extra, declared_extras)
+                self.assertIsNone(model_spec.install_extra)
 
     def test_guide_python_examples_compile(self):
         example_count = 0

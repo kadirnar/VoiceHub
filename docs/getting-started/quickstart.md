@@ -5,8 +5,8 @@ description: Install VoiceHub, discover a TTS backend, and generate your first s
 # Quickstart
 
 VoiceHub provides one lazy, discoverable API across open text-to-speech
-architectures. Install the base package for registry discovery, then add only
-the backend you intend to run.
+architectures. The default package includes every built-in TTS, ASR, and VAD
+inference runtime; implementations and checkpoints are still loaded lazily.
 
 ## Install
 
@@ -14,26 +14,26 @@ The repository version used by these guides can be installed directly:
 
 ```bash
 python -m pip install \
-  "voicehub[parlertts] @ git+https://github.com/kadirnar/voicehub.git@6dfb0010fa06176edd6bbc4e92ba97b9372b2814"
+  "voicehub @ git+https://github.com/kadirnar/voicehub.git@main"
 ```
 
 For development from a clone:
 
 ```bash
-python -m pip install -e ".[parlertts,test]"
+python -m pip install -e ".[test]"
 ```
 
-Replace `parlertts` with the selected model extra. Training is an independent
-extra:
+Training is the only separate runtime feature:
 
 ```bash
-python -m pip install -e ".[dia,training]"
+python -m pip install -e ".[training]"
 ```
 
-!!! note "Optional dependencies stay local"
+!!! note "Installed does not mean initialized"
 
-    Installing `voicehub` does not import or install every TTS stack. A missing
-    runtime raises `OptionalDependencyError` with the exact extra to install.
+    Installing `voicehub` supplies every built-in inference dependency, but
+    importing the package does not initialize every framework. A selected
+    model runtime and its checkpoint are loaded only on first use.
 
 ## Discover available models
 
@@ -50,10 +50,10 @@ for model_spec in AutoInferenceModel.available_models():
     )
 ```
 
-Use the [model catalog](../models/index.md) to select a backend and install
-extra, then read its model-specific guide or wrapper contract for conditioning
-fields. The [training matrix](../models/training-support.md) records the
-current fine-tuning boundary.
+Use the [model catalog](../models/index.md) to select a backend, then read its
+model-specific guide or wrapper contract for conditioning fields. The
+[training matrix](../models/training-support.md) records the current
+fine-tuning boundary.
 
 ## Generate speech
 

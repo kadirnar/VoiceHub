@@ -13,7 +13,7 @@ from transformers import (
     HubertModel,
 )
 
-import utils
+from voicehub.models.gptsovits.source.GPT_SoVITS import utils
 import torch.nn as nn
 
 cnhubert_base_path = None

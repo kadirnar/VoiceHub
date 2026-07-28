@@ -69,7 +69,7 @@ class FishSemanticDataset:
         torch = import_optional(
             "torch",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra="training",
         )
         record = self.records[index]
         tokens = record.get("tokens", record.get("inputs"))
@@ -120,7 +120,7 @@ class FishTextDataCollator:
         torch = import_optional(
             "torch",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra="training",
         )
         functional = torch.nn.functional
         normalized = []
@@ -255,18 +255,18 @@ class FishSpeechTrainingAdapter(
         torch = import_optional(
             "torch",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra="training",
         )
         source = import_optional(
             "voicehub.models.fishtts.source.fish_speech.models."
             "text2semantic.llama",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra="training",
         )
         shared = import_optional(
             "voicehub.models._shared",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra="training",
         )
         model_directory = shared.resolve_model_directory(
             model_path,
@@ -290,7 +290,7 @@ class FishSpeechTrainingAdapter(
                 "voicehub.models.fishtts.source.fish_speech.models."
                 "text2semantic.lora",
                 model_type="fishtts",
-                install_extra="fishtts",
+                install_extra="training",
             )
             lora_config = lora_module.LoraConfig(**dict(lora_config))
         semantic_model = source.BaseTransformer.from_pretrained(
@@ -456,7 +456,7 @@ class FishSpeechTrainingAdapter(
         torch = import_optional(
             "torch",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra="training",
         )
         functional = torch.nn.functional
         if semantic_begin_id > semantic_end_id:
@@ -567,7 +567,7 @@ class FishSpeechTrainingAdapter(
         torch = import_optional(
             "torch",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra="training",
         )
         mask = (labels.ne(LABEL_IGNORE_ID) & labels.ne(CODEBOOK_PAD_TOKEN_ID))
         if not mask.any():
@@ -581,7 +581,7 @@ class FishSpeechTrainingAdapter(
         torch = import_optional(
             "torch",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra="training",
         )
         decay_parameters = []
         other_parameters = []
@@ -635,12 +635,12 @@ class FishSpeechTrainingAdapter(
         torch = import_optional(
             "torch",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra="training",
         )
         scheduler = import_optional(
             "voicehub.models.fishtts.source.fish_speech.scheduler",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra="training",
         )
         configured_warmup = getattr(
             self.model.config,
@@ -695,7 +695,7 @@ class FishSpeechTrainingAdapter(
         dataset_module = import_optional(
             "voicehub.models.fishtts.source.fish_speech.datasets.semantic",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra="training",
         )
         allowed = {
             "seed",
@@ -728,7 +728,7 @@ class FishSpeechTrainingAdapter(
         safetensors = import_optional(
             "safetensors.torch",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra="training",
         )
         save_model = getattr(safetensors, "save_model", None)
         model_path = destination / "model.safetensors"
@@ -797,7 +797,7 @@ class FishSpeechTrainingAdapter(
             torch = import_optional(
                 "torch",
                 model_type="fishtts",
-                install_extra="fishtts",
+                install_extra="training",
             )
         codec_state = {name: value.detach().cpu().contiguous() for name, value in codec.state_dict().items()}
         torch.save(codec_state, codec_destination)

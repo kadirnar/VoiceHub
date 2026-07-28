@@ -5,8 +5,8 @@ from typing import List, Optional, Union
 
 import numpy as np
 import torch
-from audiotools import AudioSignal
-from audiotools.ml import BaseModel
+
+from voicehub.components.audio.codecs._compat import BaseModel
 from voicehub.components.audio.codecs.dac.model.base import CodecMixin
 from voicehub.components.audio.codecs.dac.nn.layers import Snake1d, WNConv1d, WNConvTranspose1d
 from torch import Tensor, nn

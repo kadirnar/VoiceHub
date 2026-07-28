@@ -345,13 +345,8 @@ class ModelTrainingSpec:
 
     @property
     def install_extra(self) -> str:
-        """Return the model dependency extra paired with this profile."""
-        try:
-            return get_model_spec(self.model_type).install_extra
-        except UnknownModelError:
-            # Dynamically registered future backends can still use the common
-            # framework extra before joining the inference registry.
-            return "training"
+        """Return the one dependency extra used by every training profile."""
+        return "training"
 
 
 _COMMON_LM_PATHS = (
@@ -486,9 +481,22 @@ _BUILTIN_TRAINING_SPECS = (
     ),
     _profile(
         "vui",
-        TrainingFamily.ACOUSTIC,
-        regression_loss="l1",
-        support=TrainingSupport.INFERENCE_ONLY,
+        TrainingFamily.CAUSAL_LM,
+        module_paths=("model", ),
+        component_paths=("model", ),
+        source_entrypoints=("voicehub.models.vui.training.VuiTrainingAdapter", ),
+        support=TrainingSupport.PREPROCESSED,
+        phases=(
+            _phase(
+                "codec_language_model",
+                component_paths=("model", ),
+                optimizer_names=("model", ),
+                label_names=("audio_codes", ),
+                prediction_keys=("logits", ),
+                loss_keys=("loss", "codec_ce_loss"),
+                required_inputs=("input_ids", "audio_codes"),
+            ), ),
+        default_phase="codec_language_model",
     ),
     _profile(
         "chatterbox",
@@ -522,7 +530,27 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "echo",
         TrainingFamily.FLOW_MATCHING,
-        support=TrainingSupport.INFERENCE_ONLY,
+        module_paths=("model", ),
+        component_paths=("model", ),
+        source_entrypoints=("voicehub.models.echo.training.EchoTrainingAdapter", ),
+        support=TrainingSupport.PREPROCESSED,
+        phases=(
+            _phase(
+                "flow",
+                component_paths=("model", ),
+                optimizer_names=("model", ),
+                label_names=("target_latents", ),
+                prediction_keys=("logits", ),
+                loss_keys=("loss", "flow_loss"),
+                required_inputs=(
+                    "target_latents",
+                    "text_input_ids",
+                    "text_mask",
+                    "speaker_latents",
+                    "speaker_mask",
+                ),
+            ), ),
+        default_phase="flow",
     ),
     _profile(
         "conversationtts",
@@ -862,7 +890,21 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "zonos",
         TrainingFamily.CAUSAL_LM,
-        support=TrainingSupport.INFERENCE_ONLY,
+        module_paths=("model", ),
+        component_paths=("model", ),
+        source_entrypoints=("voicehub.models.zonos.training.ZonosTrainingAdapter", ),
+        support=TrainingSupport.PREPROCESSED,
+        phases=(
+            _phase(
+                "codec_language_model",
+                component_paths=("model", ),
+                optimizer_names=("model", ),
+                label_names=("audio_codes", ),
+                prediction_keys=("logits", ),
+                loss_keys=("loss", "codec_ce_loss"),
+                required_inputs=("prefix_conditioning", "audio_codes"),
+            ), ),
+        default_phase="codec_language_model",
     ),
     _profile(
         "zonos2",
@@ -960,8 +1002,36 @@ _BUILTIN_TRAINING_SPECS = (
     ),
     _profile(
         "vibevoice",
-        TrainingFamily.SEQ2SEQ,
-        support=TrainingSupport.INFERENCE_ONLY,
+        TrainingFamily.COMPOSITE,
+        module_paths=("model", ),
+        component_paths=("model", ),
+        source_entrypoints=(
+            "voicehub.models.vibevoice.training.VibeVoiceTrainingAdapter",
+            "microsoft/VibeVoice/finetuning",
+        ),
+        native_training=True,
+        support=TrainingSupport.PREPROCESSED,
+        training_default_model_name_or_path="microsoft/VibeVoice-1.5B",
+        phases=(
+            _phase(
+                "lm_diffusion",
+                component_paths=("model", ),
+                optimizer_names=("model", ),
+                label_names=("input_ids", "speeches_loss_input"),
+                prediction_keys=("logits", ),
+                loss_keys=("loss", "ce_loss", "diffusion_loss"),
+                required_inputs=(
+                    "input_ids",
+                    "attention_mask",
+                    "speech_tensors",
+                    "speech_masks",
+                    "speeches_loss_input",
+                    "speech_semantic_tensors",
+                    "acoustic_input_mask",
+                    "acoustic_loss_mask",
+                ),
+            ), ),
+        default_phase="lm_diffusion",
     ),
     _profile(
         "fishtts",
@@ -1038,6 +1108,163 @@ _BUILTIN_TRAINING_SPECS = (
             ), ),
         recipe_kind=TrainingRecipeKind.ADVERSARIAL,
     ),
+    _profile(
+        "bark",
+        TrainingFamily.COMPOSITE,
+        module_paths=("training_model.semantic", ),
+        component_paths=(
+            "training_model.semantic",
+            "training_model.coarse",
+            "training_model.fine",
+        ),
+        label_names=("labels", ),
+        source_entrypoints=(
+            "transformers.BarkModel",
+            "transformers.BarkSemanticModel",
+            "transformers.BarkCoarseModel",
+            "transformers.BarkFineModel",
+        ),
+        # Transformers exposes the three Bark submodel logits but rejects
+        # labels. VoiceHub owns the stage-specific cross-entropy objectives,
+        # so this is a verified pre-tokenized route, not a native-loss claim.
+        native_training=False,
+        separate_optimizers=True,
+        support=TrainingSupport.PREPROCESSED,
+        phases=(
+            _phase(
+                "semantic",
+                component_paths=("training_model.semantic", ),
+                optimizer_names=("semantic", ),
+                forward_component="training_model.semantic",
+                label_names=("labels", ),
+                prediction_keys=("logits", ),
+                loss_keys=("loss", ),
+                required_inputs=("input_ids", "labels"),
+            ),
+            _phase(
+                "coarse",
+                component_paths=("training_model.coarse", ),
+                optimizer_names=("coarse", ),
+                forward_component="training_model.coarse",
+                label_names=("labels", ),
+                prediction_keys=("logits", ),
+                loss_keys=("loss", ),
+                required_inputs=("input_ids", "labels"),
+            ),
+            _phase(
+                "fine",
+                component_paths=("training_model.fine", ),
+                optimizer_names=("fine", ),
+                forward_component="training_model.fine",
+                label_names=("labels", ),
+                prediction_keys=("logits", ),
+                loss_keys=("loss", ),
+                required_inputs=("input_ids", "labels", "codebook_idx"),
+            ),
+        ),
+        default_phase="semantic",
+        recipe_kind=TrainingRecipeKind.MULTI_PHASE,
+        field_schemas={
+            "semantic_input_ids": {
+                "sequence_dim": -1,
+                "padding_value": 0,
+            },
+            "semantic_labels": {
+                "sequence_dim": -1,
+                "padding_value": -100,
+            },
+            "coarse_input_ids": {
+                "sequence_dim": -1,
+                "padding_value": 0,
+            },
+            "coarse_labels": {
+                "sequence_dim": -1,
+                "padding_value": -100,
+            },
+            "fine_input_ids": {
+                "sequence_dim": -2,
+                "padding_value": 0,
+            },
+            "fine_labels": {
+                "sequence_dim": -1,
+                "padding_value": -100,
+            },
+        },
+    ),
+    _profile(
+        "speecht5",
+        TrainingFamily.SEQ2SEQ,
+        module_paths=("model", ),
+        component_paths=("model", ),
+        label_names=("labels", ),
+        source_entrypoints=(
+            "transformers.SpeechT5ForTextToSpeech",
+            "transformers.SpeechT5Processor",
+        ),
+        native_training=True,
+        separate_optimizers=False,
+        support=TrainingSupport.NATIVE,
+        phases=(
+            _phase(
+                "spectrogram",
+                component_paths=("model", ),
+                optimizer_names=("model", ),
+                label_names=("labels", ),
+                prediction_keys=("spectrogram", ),
+                loss_keys=("loss", ),
+                required_inputs=("input_ids", "labels"),
+            ), ),
+        default_phase="spectrogram",
+        field_schemas={
+            "labels": {
+                "sequence_dim": -2,
+                "padding_value": -100.0,
+            },
+            "speaker_embeddings": {
+                "sequence_dim": -1,
+                "padding_value": 0.0,
+            },
+        },
+    ),
+    _profile(
+        "vits",
+        TrainingFamily.VITS,
+        module_paths=("training_model", ),
+        component_paths=("training_model", ),
+        label_names=("audio_values", ),
+        source_entrypoints=(
+            "transformers.VitsModel",
+            "transformers.VitsTokenizer",
+            "voicehub.models.vits.training.VitsReconstructionTrainingAdapter",
+        ),
+        # The Transformers VITS forward pass is an inference synthesizer. It
+        # does not expose the source posterior/KL/duration/GAN objectives.
+        # Keep the reconstruction experiment behind a specialized adapter
+        # boundary instead of presenting it as turnkey VITS fine-tuning.
+        native_training=False,
+        separate_optimizers=False,
+        support=TrainingSupport.CUSTOM,
+        phases=(
+            _phase(
+                "waveform_reconstruction",
+                component_paths=("training_model", ),
+                optimizer_names=("model", ),
+                forward_component="training_model",
+                label_names=("audio_values", ),
+                prediction_keys=("waveform", "audio_values"),
+                loss_keys=("loss", "waveform_loss", "spectral_loss"),
+                required_inputs=("input_ids", "audio_values"),
+                kind=TrainingPhaseKind.GENERATOR,
+            ), ),
+        default_phase="waveform_reconstruction",
+        field_schemas={
+            "audio_values": {
+                "sequence_dim": -1,
+                "padding_value": 0.0,
+                "length_field": "audio_lengths",
+            },
+        },
+    ),
 )
 
 _RAW_AUDIO_FIELD_SCHEMAS = {
@@ -1058,6 +1285,37 @@ _RAW_AUDIO_FIELD_SCHEMAS = {
         "length_field": "feature_lengths",
     },
 }
+
+
+def _transformers_asr_preset_profile(
+    model_type: str,
+    family: TrainingFamily,
+    entrypoint: str,
+) -> ModelTrainingSpec:
+    """Create one locked preset around the shared native ASR trainer."""
+    return _profile(
+        model_type,
+        family,
+        task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+        module_paths=("model", ),
+        component_paths=("model", ),
+        label_names=("labels", ),
+        source_entrypoints=(entrypoint, ),
+        native_training=True,
+        support=TrainingSupport.NATIVE,
+        phases=(
+            _phase(
+                "speech_recognition",
+                component_paths=("model", ),
+                optimizer_names=("model", ),
+                label_names=("labels", ),
+                prediction_keys=("logits", ),
+                loss_keys=("loss", ),
+            ), ),
+        default_phase="speech_recognition",
+        field_schemas=_RAW_AUDIO_FIELD_SCHEMAS,
+    )
+
 
 _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
@@ -1086,6 +1344,31 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
             ), ),
         default_phase="speech_recognition",
         field_schemas=_RAW_AUDIO_FIELD_SCHEMAS,
+    ),
+    _transformers_asr_preset_profile(
+        "asr_wav2vec2",
+        TrainingFamily.CTC,
+        "transformers.AutoModelForCTC",
+    ),
+    _transformers_asr_preset_profile(
+        "asr_hubert",
+        TrainingFamily.CTC,
+        "transformers.AutoModelForCTC",
+    ),
+    _transformers_asr_preset_profile(
+        "asr_wavlm",
+        TrainingFamily.CTC,
+        "transformers.AutoModelForCTC",
+    ),
+    _transformers_asr_preset_profile(
+        "asr_moonshine",
+        TrainingFamily.SPEECH_SEQ2SEQ,
+        "transformers.AutoModelForSpeechSeq2Seq",
+    ),
+    _transformers_asr_preset_profile(
+        "asr_seamless_m4t_v2",
+        TrainingFamily.SPEECH_SEQ2SEQ,
+        "transformers.AutoModelForSpeechSeq2Seq",
     ),
     _profile(
         "asr_faster_whisper",
@@ -1218,6 +1501,34 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
         TrainingFamily.UPSTREAM_NATIVE,
         task=SpeechTask.VOICE_ACTIVITY_DETECTION,
         source_entrypoints=("funasr.train", ),
+        native_training=True,
+        support=TrainingSupport.CUSTOM,
+    ),
+    _profile(
+        "vad_auditok",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.VOICE_ACTIVITY_DETECTION,
+        support=TrainingSupport.INFERENCE_ONLY,
+    ),
+    _profile(
+        "vad_sherpa_onnx",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.VOICE_ACTIVITY_DETECTION,
+        support=TrainingSupport.INFERENCE_ONLY,
+    ),
+    _profile(
+        "vad_pyannote_segmentation",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.VOICE_ACTIVITY_DETECTION,
+        source_entrypoints=("pyannote.audio.tasks.Segmentation", ),
+        native_training=True,
+        support=TrainingSupport.CUSTOM,
+    ),
+    _profile(
+        "vad_pyannote_brouhaha",
+        TrainingFamily.UPSTREAM_NATIVE,
+        task=SpeechTask.VOICE_ACTIVITY_DETECTION,
+        source_entrypoints=("brouhaha.task.RegressiveActivityDetectionTask", ),
         native_training=True,
         support=TrainingSupport.CUSTOM,
     ),

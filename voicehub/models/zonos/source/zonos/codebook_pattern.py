@@ -4,7 +4,12 @@ import torch.nn.functional as F
 
 def apply_delay_pattern(codes: torch.Tensor, mask_token: int):
     codes = F.pad(codes, (0, codes.shape[1]), value=mask_token)
-    return torch.stack([codes[:, k].roll(k + 1) for k in range(codes.shape[1])], dim=1)
+    # Roll only the temporal axis. ``Tensor.roll`` without ``dims`` flattens
+    # the batch and time axes, which leaks tokens between examples for B > 1.
+    return torch.stack(
+        [codes[:, k].roll(k + 1, dims=-1) for k in range(codes.shape[1])],
+        dim=1,
+    )
 
 
 def revert_delay_pattern(codes: torch.Tensor):

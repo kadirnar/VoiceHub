@@ -70,7 +70,7 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
             "voicehub.models.xtts.source.TTS.tts.layers.xtts.trainer."
             "dataset",
             model_type="xtts",
-            install_extra="xtts",
+            install_extra="training",
         )
         model_args = SimpleNamespace(
             debug_loading_failures=bool(kwargs.get("debug_loading_failures", False)),
@@ -135,18 +135,18 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
         torch = import_optional(
             "torch",
             model_type="xtts",
-            install_extra="xtts",
+            install_extra="training",
         )
         dvae_module = import_optional(
             "voicehub.models.xtts.source.TTS.tts.layers.xtts.dvae",
             model_type="xtts",
-            install_extra="xtts",
+            install_extra="training",
         )
         mel_module = import_optional(
             "voicehub.models.xtts.source.TTS.tts.layers.tortoise."
             "arch_utils",
             model_type="xtts",
-            install_extra="xtts",
+            install_extra="training",
         )
         model_directory = self.model._model_directory
         dvae_path = Path(
@@ -228,12 +228,12 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
         torch = import_optional(
             "torch",
             model_type="xtts",
-            install_extra="xtts",
+            install_extra="training",
         )
         torchaudio = import_optional(
             "torchaudio",
             model_type="xtts",
-            install_extra="xtts",
+            install_extra="training",
         )
         conditioning = batch["conditioning"]
         batch_size, samples, channels, time = conditioning.size()
@@ -343,7 +343,7 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
         torch = import_optional(
             "torch",
             model_type="xtts",
-            install_extra="xtts",
+            install_extra="training",
         )
         decay = []
         no_decay = []
@@ -382,7 +382,7 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
         torch = import_optional(
             "torch",
             model_type="xtts",
-            install_extra="xtts",
+            install_extra="training",
         )
         milestones = tuple(
             int(value) for value in getattr(
@@ -403,7 +403,7 @@ class XTTSTrainingAdapter(CompositeTrainingAdapter):
         safetensors = import_optional(
             "safetensors.torch",
             model_type="xtts",
-            install_extra="xtts",
+            install_extra="training",
         )
         state = {
             name: value.detach().cpu().contiguous()

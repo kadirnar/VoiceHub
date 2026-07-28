@@ -65,7 +65,7 @@ class FishTTSForTextToSpeech(PreTrainedTTSModel):
             "voicehub.models.fishtts.source.fish_speech.models."
             "text2semantic.inference",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra=None,
         )
 
     @staticmethod
@@ -148,7 +148,7 @@ class FishTTSForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="fishtts",
-            install_extra="fishtts",
+            install_extra=None,
         )
         model_directory = self._resolve_model_directory()
         runtime = self._load_runtime_module()
@@ -220,7 +220,7 @@ class FishTTSForTextToSpeech(PreTrainedTTSModel):
             torch = import_optional(
                 "torch",
                 model_type="fishtts",
-                install_extra="fishtts",
+                install_extra=None,
             )
         runtime = self._load_runtime_module()
         model_directory = self._resolve_model_directory()

@@ -928,7 +928,7 @@ class NativeToolkitInferenceTests(unittest.TestCase):
         import_runtime.assert_called_once_with(
             "voicehub.models.asr_native._wenet",
             model_type="asr_wenet",
-            install_extra="asr-vad",
+            install_extra=None,
         )
         self.assertEqual(captured["load"][:2], ("english", "cpu"))
         self.assertTrue(captured["exists"])

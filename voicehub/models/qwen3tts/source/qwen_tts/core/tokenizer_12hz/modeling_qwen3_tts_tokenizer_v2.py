@@ -49,6 +49,20 @@ from .configuration_qwen3_tts_tokenizer_v2 import (
 logger = logging.get_logger(__name__)
 
 
+def _compatible_check_model_inputs():
+    """Return the model-input decorator across Transformers 4 and 5.
+
+    Transformers 4 exposes ``check_model_inputs`` as a decorator factory,
+    while Transformers 5 accepts the decorated function directly. Keeping
+    the version probe here avoids coupling the tokenizer implementation to a
+    private version string.
+    """
+    try:
+        return check_model_inputs()
+    except TypeError:
+        return check_model_inputs
+
+
 @dataclass
 @auto_docstring
 class Qwen3TTSTokenizerV2EncoderOutput(ModelOutput):
@@ -496,7 +510,7 @@ class Qwen3TTSTokenizerV2DecoderTransformerModel(Qwen3TTSTokenizerV2DecoderPreTr
         # Initialize weights and apply final processing
         self.post_init()
 
-    @check_model_inputs()
+    @_compatible_check_model_inputs()
     @auto_docstring
     def forward(
         self,

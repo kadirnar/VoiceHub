@@ -8,6 +8,8 @@ import torch
 import torchaudio
 from huggingface_hub import hf_hub_download
 
+from voicehub.components.audio.codecs._compat import normalize_loudness
+
 _CODEC_DEFAULT = object()
 
 
@@ -150,25 +152,14 @@ class DACVAECodec:
                 f"or singleton-channel (1, T)/(T, 1), got {tuple(wav.shape)}"
             )
 
-        try:
-            from audiotools import AudioSignal
-        except Exception as exc:
-            raise RuntimeError(
-                "audiotools is required when normalize_db is set. "
-                "Install audiotools or disable normalize_db."
-            ) from exc
-
-        signal = AudioSignal(wav.unsqueeze(0).unsqueeze(0), int(sample_rate))
-        signal.normalize(float(target_db))
-        signal.ensure_max_of_audio()
-        normalized = signal.audio_data
-        if not isinstance(normalized, torch.Tensor):
-            normalized = torch.as_tensor(normalized)
-        normalized = normalized.to(dtype=torch.float32, device=wav_device)
-        normalized = normalized.squeeze()
+        normalized = normalize_loudness(
+            wav,
+            int(sample_rate),
+            float(target_db),
+        ).to(dtype=torch.float32, device=wav_device)
         if normalized.ndim != 1:
             raise RuntimeError(
-                "audiotools normalization returned an unexpected waveform shape "
+                "Loudness normalization returned an unexpected waveform shape "
                 f"{tuple(normalized.shape)}"
             )
         return normalized

@@ -8,11 +8,11 @@ This page documents the public Python surface exported by `voicehub`. VoiceHub
 keeps registry discovery and configuration lightweight; model runtimes and
 PyTorch are imported only when the selected operation needs them.
 
-Install the model extra required by the backend. Add the independent `training`
-extra for fine-tuning:
+The default package installs every built-in inference runtime. Add the
+independent `training` extra for fine-tuning:
 
 ```bash
-python -m pip install "voicehub[dia,training]"
+python -m pip install "voicehub[training]"
 ```
 
 !!! note "Training support is model and checkpoint specific"
@@ -64,7 +64,7 @@ Filter the shared registry by `text-to-speech`,
 from voicehub import list_model_specs
 
 for spec in list_model_specs(task="asr"):
-    print(spec.model_type, spec.architecture, spec.install_extra)
+    print(spec.model_type, spec.architecture, spec.install_extra or "default")
 ```
 
 ### `AutoInferenceModel.available_models`
@@ -85,7 +85,7 @@ for spec in AutoInferenceModel.available_models():
     print(
         spec.model_type,
         spec.default_model_path,
-        spec.install_extra,
+        spec.install_extra or "default",
         spec.training.support.value,
     )
 ```
@@ -100,7 +100,7 @@ for spec in AutoInferenceModel.available_models():
 | `module` / `class_name` | Lazy import target for the model wrapper |
 | `config_module` / `config_class` | Lazy import target for its configuration |
 | `default_model_path` | Default Hub identifier or local artifact name |
-| `install_extra` | Optional dependency extra for the backend |
+| `install_extra` | `None` for built-in inference; optional setup identifier reserved for external/future runtimes |
 | `capabilities` | Declared inference capabilities |
 | `task` | Canonical `SpeechTask` owned by the provider |
 | `architecture` | Provider/runtime architecture family, when declared |
@@ -642,7 +642,7 @@ Useful properties and methods:
 | `requires_custom_adapter` | Whether support is `custom` |
 | `phase_map` | Read-only phase-name mapping |
 | `get_phase(name=None)` | Resolve a phase, defaulting to `default_phase` |
-| `install_extra` | Paired model extra, or `"training"` for a future training-only profile |
+| `install_extra` | `"training"` for built-in trainable profiles; otherwise an optional extension-owned setup identifier |
 
 Built-in `TrainingFamily` values are:
 

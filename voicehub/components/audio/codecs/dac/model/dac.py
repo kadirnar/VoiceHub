@@ -4,9 +4,10 @@ from typing import Union
 
 import numpy as np
 import torch
-from audiotools import AudioSignal
-from audiotools.ml import BaseModel
 from torch import nn
+
+from voicehub.components.audio.codecs._compat import AudioSignal
+from voicehub.components.audio.codecs._compat import BaseModel
 
 from .base import CodecMixin
 from voicehub.components.audio.codecs.dac.nn.layers import Snake1d

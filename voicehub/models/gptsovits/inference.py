@@ -101,7 +101,7 @@ class GPTSoVITSForTextToSpeech(PreTrainedTTSModel):
         runtime = import_optional(
             "voicehub.models.gptsovits.source.GPT_SoVITS.TTS_infer_pack.TTS",
             model_type="gptsovits",
-            install_extra="gptsovits",
+            install_extra=None,
         )
         runtime_config = runtime.TTS_Config(config_source)
         runtime_config.device = self.device
@@ -250,7 +250,7 @@ class GPTSoVITSForTextToSpeech(PreTrainedTTSModel):
         np = import_optional(
             "numpy",
             model_type="gptsovits",
-            install_extra="gptsovits",
+            install_extra=None,
         )
         malformed = [result for result in results if not isinstance(result, tuple) or len(result) != 2]
         if malformed:

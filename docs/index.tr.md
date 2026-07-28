@@ -61,7 +61,7 @@ sistemler, flow-matching ve difüzyon modelleri, akustik modeller, VITS tarzı
 çekişmeli sistemler ve bileşik pipeline'lar kendi koşullandırma yöntemlerini,
 amaç fonksiyonlarını, parametre sahipliğini ve dışa aktarma kurallarını korur.
 
-Registry **31 TTS entegrasyonu**, **9 ASR sağlayıcısı** ve **7 VAD
+Registry **34 TTS entegrasyonu**, **14 ASR sağlayıcısı** ve **11 VAD
 sağlayıcısı** içerir. İnce ayar desteği kontrol noktasına ve çalışma ortamına
 özeldir; bir çıkarım entegrasyonunun bulunması, mevcut VoiceHub model
 çıktısının türevlenebilir olduğu anlamına gelmez. Uygun entegrasyonu seçmek
@@ -69,11 +69,12 @@ için [TTS model kataloğunu](models/index.md),
 [TTS eğitim matrisini](models/training-support.md) ve
 [ASR/VAD destek matrisini](models/asr-vad-support.md) kullanın.
 
-Model kaynak kodu VoiceHub ile birlikte paketlenir. İsteğe bağlı extras,
-seçilen çalışma ortamının bağımlılıklarını kurar; kontrol noktası ağırlıkları
-ise gerektiğinde indirilir veya yerel yollar üzerinden sağlanır. Apache-2.0
-lisansı yalnızca VoiceHub'ı kapsar; entegre kaynak kodu, kontrol noktaları,
-codec'ler, veri kümeleri ve üretilen sesler farklı koşullara tabi olabilir.
+Model kaynak kodu ile yerleşik TTS, ASR ve VAD çıkarım çalışma ortamlarının
+tamamı varsayılan VoiceHub kurulumuna dahildir. Kontrol noktası ağırlıkları
+gerektiğinde indirilir veya yerel yollar üzerinden sağlanır. İnce ayar ve
+raporlama için yalnızca `voicehub[training]` ekleyin. Apache-2.0 lisansı
+yalnızca VoiceHub'ı kapsar; entegre kaynak kodu, kontrol noktaları, codec'ler,
+veri kümeleri ve üretilen sesler farklı koşullara tabi olabilir.
 
 <div class="grid cards" markdown>
 
@@ -118,9 +119,8 @@ codec'ler, veri kümeleri ve üretilen sesler farklı koşullara tabi olabilir.
 
     ---
 
-    Registry'deki 31 kaydın tamamını; kurulum extras seçenekleri, varsayılan
-    kontrol noktaları, yetenekler, kaynak kökeni ve kısıtlarla birlikte
-    karşılaştırın.
+    Registry'deki TTS kayıtlarını; varsayılan kontrol noktaları, yetenekler,
+    kaynak kökeni ve kısıtlarla birlikte karşılaştırın.
 
     [Model kataloğu](models/index.md)
 

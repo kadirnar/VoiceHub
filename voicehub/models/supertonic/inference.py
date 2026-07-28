@@ -93,8 +93,9 @@ class SupertonicForTextToSpeech(PreTrainedTTSModel):
     def _validate_training_runtime(self) -> None:
         raise RuntimeError(
             "The published Supertonic runtime contains ONNX inference "
-            "sessions only and cannot receive gradients. Register a custom "
-            "PyTorch training adapter backed by a trainable checkpoint.")
+            "sessions only and cannot receive gradients. Fine-tuning requires "
+            "the upstream PyTorch generator, text encoder, style encoder, and "
+            "training checkpoint rather than the exported ONNX graphs.")
 
     def _load_pretrained_model(self) -> None:
         model_directory = resolve_model_directory(
@@ -104,7 +105,7 @@ class SupertonicForTextToSpeech(PreTrainedTTSModel):
         runtime = import_optional(
             "voicehub.models.supertonic.source.supertonic.helper",
             model_type="supertonic",
-            install_extra="supertonic",
+            install_extra=None,
         )
         onnx_directory = (
             model_directory / "onnx" if (model_directory / "onnx").is_dir() else model_directory)

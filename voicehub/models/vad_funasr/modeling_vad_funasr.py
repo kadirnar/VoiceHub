@@ -201,7 +201,7 @@ class FunASRVADForVoiceActivityDetection(PreTrainedVADModel):
         funasr = import_optional(
             "funasr",
             model_type=self.config.model_type,
-            install_extra="asr-vad",
+            install_extra=None,
         )
         auto_model = getattr(funasr, "AutoModel", None)
         if not callable(auto_model):

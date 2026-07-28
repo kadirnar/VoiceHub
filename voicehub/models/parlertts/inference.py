@@ -64,17 +64,17 @@ class ParlerTTSForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="parlertts",
-            install_extra="parlertts",
+            install_extra=None,
         )
         source = import_optional(
             "voicehub.models.parlertts.source.parler_tts",
             model_type="parlertts",
-            install_extra="parlertts",
+            install_extra=None,
         )
         transformers = import_optional(
             "transformers",
             model_type="parlertts",
-            install_extra="parlertts",
+            install_extra=None,
         )
         model_options = {}
         if self.config.attention_implementation:

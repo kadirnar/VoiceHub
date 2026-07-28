@@ -286,12 +286,12 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
             soundfile = import_optional(
                 "soundfile",
                 model_type="dia",
-                install_extra="dia",
+                install_extra=None,
             )
             numpy = import_optional(
                 "numpy",
                 model_type="dia",
-                install_extra="dia",
+                install_extra=None,
             )
             audio, source_rate = soundfile.read(
                 str(audio),

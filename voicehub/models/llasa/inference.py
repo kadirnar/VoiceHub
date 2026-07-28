@@ -71,17 +71,17 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="llasa",
-            install_extra="llasa",
+            install_extra=None,
         )
         transformers = import_optional(
             "transformers",
             model_type="llasa",
-            install_extra="llasa",
+            install_extra=None,
         )
         codec_module = import_optional(
             "voicehub.models.llasa.source.xcodec2.modeling_xcodec2",
             model_type="llasa",
-            install_extra="llasa",
+            install_extra=None,
         )
         dtype = resolve_torch_dtype(
             torch,
@@ -175,12 +175,12 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
         np = import_optional(
             "numpy",
             model_type="llasa",
-            install_extra="llasa",
+            install_extra=None,
         )
         sf = import_optional(
             "soundfile",
             model_type="llasa",
-            install_extra="llasa",
+            install_extra=None,
         )
         audio, sample_rate = sf.read(audio_path, always_2d=False)
         if getattr(audio, "size", 0) == 0:
@@ -194,7 +194,7 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
             torchaudio = import_optional(
                 "torchaudio",
                 model_type="llasa",
-                install_extra="llasa",
+                install_extra=None,
             )
             waveform = torchaudio.functional.resample(
                 waveform,

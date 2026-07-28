@@ -33,12 +33,12 @@ class Qwen3TTSSFTDataset:
         soundfile = import_optional(
             "soundfile",
             model_type="qwen3tts",
-            install_extra="qwen3tts",
+            install_extra="training",
         )
         numpy = import_optional(
             "numpy",
             model_type="qwen3tts",
-            install_extra="qwen3tts",
+            install_extra="training",
         )
         audio, sample_rate = soundfile.read(
             path,
@@ -62,13 +62,13 @@ class Qwen3TTSSFTDataset:
         torch = import_optional(
             "torch",
             model_type="qwen3tts",
-            install_extra="qwen3tts",
+            install_extra="training",
         )
         modeling = import_optional(
             "voicehub.models.qwen3tts.source.qwen_tts.core.models."
             "modeling_qwen3_tts",
             model_type="qwen3tts",
-            install_extra="qwen3tts",
+            install_extra="training",
         )
         with torch.inference_mode():
             return modeling.mel_spectrogram(
@@ -86,7 +86,7 @@ class Qwen3TTSSFTDataset:
         torch = import_optional(
             "torch",
             model_type="qwen3tts",
-            install_extra="qwen3tts",
+            install_extra="training",
         )
         record = self.records[index]
         required = ("audio_codes", "text", "ref_audio")
@@ -128,7 +128,7 @@ class Qwen3TTSSFTDataset:
         torch = import_optional(
             "torch",
             model_type="qwen3tts",
-            install_extra="qwen3tts",
+            install_extra="training",
         )
         item_lengths = [item["text_ids"].shape[1] + item["audio_codes"].shape[0] for item in batch]
         max_length = max(item_lengths) + 8

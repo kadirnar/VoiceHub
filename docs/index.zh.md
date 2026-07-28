@@ -59,16 +59,16 @@ VoiceHub 通过统一的配置、处理器、模型、输出和训练器 API 提
 流匹配和扩散模型、声学模型、VITS 风格的对抗系统以及复合流水线，均保留各自的
 条件机制、训练目标、参数归属和导出规则。
 
-模型注册表包含 **31 个 TTS 集成**、**9 个 ASR 提供程序**和 **7 个 VAD
+模型注册表包含 **34 个 TTS 集成**、**14 个 ASR 提供程序**和 **11 个 VAD
 提供程序**。微调支持取决于具体的 checkpoint 和运行时；支持推理并不意味着当前的
 VoiceHub 工件支持可微分训练。请参考 [TTS 模型目录](models/index.md)、
 [TTS 训练矩阵](models/training-support.md)和
 [ASR/VAD 支持矩阵](models/asr-vad-support.md)来选择合适的集成。
 
-模型源码随 VoiceHub 一同分发。可选 extras 会安装所选运行时的依赖项，
-checkpoint 权重则按需下载，也可以通过本地路径提供。Apache-2.0 许可证仅适用于
-VoiceHub 本身；集成的源码、checkpoint、编解码器、数据集和生成的音频可能适用
-其他条款。
+模型源码以及所有内置 TTS、ASR 和 VAD 推理运行时都会随 VoiceHub 默认安装。
+checkpoint 权重仍按需下载，也可以通过本地路径提供。只有在微调和记录实验时才
+需要添加 `voicehub[training]`。Apache-2.0 许可证仅适用于 VoiceHub 本身；
+集成的源码、checkpoint、编解码器、数据集和生成的音频可能适用其他条款。
 
 <div class="grid cards" markdown>
 
@@ -111,8 +111,7 @@ VoiceHub 本身；集成的源码、checkpoint、编解码器、数据集和生�
 
     ---
 
-    对比全部 31 个注册项的安装 extras、默认 checkpoint、功能、源码来源和
-    使用限制。
+    对比 TTS 注册项的默认 checkpoint、功能、源码来源和使用限制。
 
     [模型目录](models/index.md)
 

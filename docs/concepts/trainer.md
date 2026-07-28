@@ -18,8 +18,12 @@ graph and objective.
 Install the training dependencies only when they are needed:
 
 ```bash
-python -m pip install "voicehub[parlertts,training]"
+python -m pip install "voicehub[training]"
 ```
+
+The main package already contains every built-in inference runtime. The
+`training` extra adds only the shared fine-tuning, evaluation, artifact, and
+reporting layer.
 
 ## Training support is an explicit contract
 

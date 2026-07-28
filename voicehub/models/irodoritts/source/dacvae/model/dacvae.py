@@ -7,8 +7,9 @@ from typing import Union
 import numpy as np
 import os
 import torch
-from audiotools.ml import BaseModel
 from torch import nn
+
+from voicehub.components.audio.codecs._compat import BaseModel
 
 from .base import CodecMixin
 from voicehub.models.irodoritts.source.dacvae.nn.layers import MsgProcessor, NormConv1d, NormConvTranspose1d, Snake1d, activation

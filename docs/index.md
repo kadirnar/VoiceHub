@@ -62,19 +62,19 @@ flow-matching and diffusion models, audio/frame classifiers, VITS-style
 adversarial systems, and upstream-native pipelines keep their own
 conditioning, objectives, parameter ownership, and export rules.
 
-The registry contains **47 integrations**: **31 TTS backends**, **9 ASR
-providers**, and **7 VAD providers**. Fine-tuning support is checkpoint- and
+The registry contains **59 integrations**: **34 TTS backends**, **14 ASR
+providers**, and **11 VAD providers**. Fine-tuning support is checkpoint- and
 runtime-specific; an
 inference integration does not imply that its current VoiceHub artifact is
 differentiable. Use the [TTS catalog](models/index.md),
 [TTS training matrix](models/training-support.md), and
 [ASR/VAD support matrix](models/asr-vad-support.md) to select an integration.
 
-Model source is packaged with VoiceHub. Optional extras install the selected
-runtime dependencies, while checkpoint weights are downloaded lazily or
-provided as local paths. The Apache-2.0 license covers VoiceHub itself;
-integrated source, checkpoints, codecs, datasets, and generated audio may have
-separate terms.
+Model source and every built-in TTS, ASR, and VAD inference runtime are
+installed with VoiceHub. Checkpoint weights are downloaded lazily or provided
+as local paths. Add only `voicehub[training]` for fine-tuning and reporting.
+The Apache-2.0 license covers VoiceHub itself; integrated source, checkpoints,
+codecs, datasets, and generated audio may have separate terms.
 
 <div class="grid cards" markdown>
 
@@ -136,8 +136,8 @@ separate terms.
 
     ---
 
-    Compare all 31 TTS registry entries, installation extras, default
-    checkpoints, capabilities, source provenance, and constraints.
+    Compare TTS registry entries, default checkpoints, capabilities, source
+    provenance, and constraints.
 
     [Model catalog](models/index.md)
 
@@ -145,7 +145,7 @@ separate terms.
 
     ---
 
-    Compare provider families, the shared install bundle, output capabilities,
+    Compare provider families, default runtime coverage, output capabilities,
     and the exact native, upstream-custom, or inference-only training boundary.
 
     [Speech-input matrix](models/asr-vad-support.md)

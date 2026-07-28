@@ -59,7 +59,7 @@ class TrainingContractValidationTests(unittest.TestCase):
         self.assertTrue(all(spec.has_training_recipe for spec in custom))
 
     def test_all_builtin_models_still_have_profiles(self):
-        self.assertEqual(len(MODEL_TRAINING_SPECS), 31)
+        self.assertEqual(len(MODEL_TRAINING_SPECS), 34)
         self.assertEqual(get_training_spec("f5-tts").model_type, "f5tts")
         self.assertIn(TrainingFamily.VITS, {spec.family for spec in list_training_specs()})
         self.assertEqual(
@@ -81,7 +81,7 @@ class TrainingContractValidationTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertEqual(completed.stdout.strip(), "31 False False")
+        self.assertEqual(completed.stdout.strip(), "34 False False")
 
     def test_phase_schedule_must_cover_every_recipe_step(self):
         with self.assertRaisesRegex(ValueError, "cover every recipe step"):

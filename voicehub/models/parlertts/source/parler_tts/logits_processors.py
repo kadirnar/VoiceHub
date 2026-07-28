@@ -1,7 +1,17 @@
-from transformers import LogitsProcessor, LogitsProcessorList
-from transformers.pytorch_utils import isin_mps_friendly
 import math
+
 import torch
+from transformers import LogitsProcessor, LogitsProcessorList
+
+try:
+    from transformers.pytorch_utils import isin_mps_friendly
+except ImportError:
+
+    def isin_mps_friendly(elements, test_elements):
+        """Transformers 5 replacement preserving the former MPS workaround."""
+        if elements.device.type == "mps":
+            return (elements.unsqueeze(-1) == test_elements).any(dim=-1)
+        return torch.isin(elements, test_elements)
 
 class ParlerTTSLogitsProcessor(LogitsProcessor):
     r"""This processor ensures that the delayed pattern mask constraints are respected.

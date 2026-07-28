@@ -1,9 +1,10 @@
 import torch
-from transformers import AutoTokenizer, AutoModelForMaskedLM
+from transformers import AutoModelForMaskedLM
 import sys
 
+from .tokenizer_utils import get_tokenizer
+
 model_id = 'dbmdz/bert-base-french-europeana-cased'
-tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = None
 
 def get_bert_feature(text, word2ph, device=None):
@@ -21,7 +22,7 @@ def get_bert_feature(text, word2ph, device=None):
             device
         )
     with torch.no_grad():
-        inputs = tokenizer(text, return_tensors="pt")
+        inputs = get_tokenizer(model_id)(text, return_tensors="pt")
         for i in inputs:
             inputs[i] = inputs[i].to(device)
         res = model(**inputs, output_hidden_states=True)

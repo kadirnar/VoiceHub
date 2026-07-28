@@ -59,7 +59,7 @@ def resume_for_inference(
     torch = import_optional(
         "torch",
         model_type="conversationtts",
-        install_extra="conversationtts",
+        install_extra=None,
     )
     checkpoint_state = _load_checkpoint(torch, checkpoint, device)
     if not isinstance(checkpoint_state, Mapping):

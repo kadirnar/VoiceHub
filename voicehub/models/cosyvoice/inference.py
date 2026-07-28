@@ -162,7 +162,7 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
         runtime = import_optional(
             "voicehub.models.cosyvoice.source.cosyvoice.cli.cosyvoice",
             model_type="cosyvoice",
-            install_extra="cosyvoice",
+            install_extra=None,
         )
         _install_vendored_yaml_loader(runtime)
         model_directory = self._resolve_model_directory(runtime)
@@ -458,7 +458,7 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="cosyvoice",
-            install_extra="cosyvoice",
+            install_extra=None,
         )
         return finish_audio_output(
             torch.cat(chunks),

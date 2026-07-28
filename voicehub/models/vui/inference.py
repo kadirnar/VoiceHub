@@ -58,6 +58,25 @@ class VuiForTextToSpeech(PreTrainedTTSModel):
         self.model.eval()
         self.config.sample_rate = int(self.model.codec.config.sample_rate)
 
+    def _prepare_for_training(self) -> None:
+        """Restore the uncached autoregressive graph used for token
+        training."""
+        decoder = getattr(self.model, "decoder", None)
+        if decoder is not None and hasattr(decoder, "deallocate_kv_cache"):
+            decoder.deallocate_kv_cache()
+        codec = getattr(self.model, "codec", None)
+        if codec is not None:
+            codec.eval()
+            for parameter in codec.parameters():
+                parameter.requires_grad_(False)
+        self.model.train()
+
+    def _prepare_for_inference(self) -> None:
+        decoder = getattr(self.model, "decoder", None)
+        if decoder is not None and hasattr(decoder, "deallocate_kv_cache"):
+            decoder.deallocate_kv_cache()
+        self.model.eval()
+
     def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
         temperature = model_inputs.get("temperature", 0.5)
         if (not isinstance(temperature, (int, float)) or isinstance(temperature, bool) or
@@ -91,7 +110,7 @@ class VuiForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="vui",
-            install_extra="vui",
+            install_extra=None,
         )
         with seeded_inference(
                 seed,

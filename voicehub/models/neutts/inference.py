@@ -88,7 +88,7 @@ class NeuTTSForTextToSpeech(PreTrainedTTSModel):
         runtime = import_optional(
             "voicehub.models.neutts.source.neutts.neutts",
             model_type="neutts",
-            install_extra="neutts",
+            install_extra=None,
         )
         self.model = runtime.NeuTTS(
             backbone_repo=self.config.name_or_path,

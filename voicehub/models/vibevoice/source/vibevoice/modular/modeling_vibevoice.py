@@ -288,8 +288,18 @@ class VibeVoiceForConditionalGeneration(VibeVoicePreTrainedModel):
             with torch.no_grad():
                 if speech_type == "audio":
                     with torch.no_grad():
-                        frames = self.model.acoustic_tokenizer.encode(speech_tensors.unsqueeze(1))[0][0]
-                    audio_tokens = frames.sample(self.model.acoustic_tokenizer.std_dist_type)[0]
+                        encoded = self.model.acoustic_tokenizer.encode(
+                            speech_tensors.unsqueeze(1)
+                        )
+                    if hasattr(encoded, "sample"):
+                        frames = encoded
+                    else:
+                        # Older exported tokenizers returned a nested
+                        # one-element container.
+                        frames = encoded[0][0]
+                    audio_tokens = frames.sample(
+                        self.model.acoustic_tokenizer.std_dist_type
+                    )[0]
 
                 elif speech_type == "vae":
                     # Use config to get vae_dim instead of non-existent self.args
@@ -358,7 +368,12 @@ class VibeVoiceForConditionalGeneration(VibeVoicePreTrainedModel):
         
         x = self.get_input_embeddings()(input_ids)
 
-        semantic_speech_all_connect_features = self.model.semantic_connector(speech_semantic_tensors)
+        semantic_speech_all_connect_features = (
+            self.model.semantic_connector(speech_semantic_tensors)
+            if speech_semantic_tensors is not None
+            else None
+        )
+        speech_len = 0
         if speeches_loss_input is not None:
             # only part audio need diffuse
             speech_all_features, speech_all_connect_features = self.forward_speech_features(
@@ -416,10 +431,29 @@ class VibeVoiceForConditionalGeneration(VibeVoicePreTrainedModel):
         # --- Diffusion Loss Calculation ---
         diffusion_loss = None
         # This block is executed only if we are in a context that involves speech.
-        if speech_tensors is not None and acoustic_loss_mask.sum().item() > 0:
-            condition_features = hidden_states[acoustic_loss_mask]
+        if (
+            speech_tensors is not None
+            and acoustic_loss_mask is not None
+            and acoustic_loss_mask.any()
+        ):
+            # Hidden state at position t predicts token t + 1. Shift the
+            # acoustic target mask left so each diffusion target is paired
+            # with the condition that causally precedes it.
+            condition_mask = torch.zeros_like(
+                acoustic_loss_mask,
+                dtype=torch.bool,
+            )
+            condition_mask[:, :-1] = acoustic_loss_mask[:, 1:]
+            condition_mask[:, 0] = False
+            condition_features = hidden_states[condition_mask]
             
             speech_len, latent_size = speech_features.shape
+            if condition_features.shape[0] != speech_len:
+                raise ValueError(
+                    "VibeVoice diffusion alignment mismatch: "
+                    f"{condition_features.shape[0]} causal conditions for "
+                    f"{speech_len} target latents."
+                )
             
             noise = torch.randn(
                 (speech_len * ddpm_batch_mul, latent_size),
@@ -457,8 +491,13 @@ class VibeVoiceForConditionalGeneration(VibeVoicePreTrainedModel):
                 raise NotImplementedError(f"Prediction type {prediction_type} not implemented")
 
             diffusion_loss = F.mse_loss(model_output.float(), target_for_loss.float(), reduction='sum')
-            if latent_size > 0 and ddpm_batch_mul > 0:
-                diffusion_loss = diffusion_loss / latent_size / ddpm_batch_mul
+            if latent_size > 0 and ddpm_batch_mul > 0 and speech_len > 0:
+                diffusion_loss = (
+                    diffusion_loss
+                    / latent_size
+                    / ddpm_batch_mul
+                    / speech_len
+                )
             else:
                 diffusion_loss = torch.tensor(0.0, device=diffusion_loss.device)
         
@@ -484,7 +523,11 @@ class VibeVoiceForConditionalGeneration(VibeVoicePreTrainedModel):
             attentions=outputs.attentions,
         )
 
-AutoModel.register(VibeVoiceConfig, VibeVoiceModel)
+AutoModel.register(
+    VibeVoiceConfig,
+    VibeVoiceModel,
+    exist_ok=True,
+)
 AutoModelForCausalLM.register(VibeVoiceConfig, VibeVoiceForConditionalGeneration)
 
 __all__ = [

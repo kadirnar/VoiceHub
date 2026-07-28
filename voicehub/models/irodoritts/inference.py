@@ -169,7 +169,7 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
         runtime = import_optional(
             "voicehub.models.irodoritts.source.irodori_tts.inference_runtime",
             model_type="irodoritts",
-            install_extra="irodoritts",
+            install_extra=None,
         )
         model, sample_rate = self._build_runtime(runtime)
         self.model = model

@@ -106,7 +106,7 @@ class SpeechBrainASRForSpeechRecognition(PreTrainedASRModel):
         speechbrain_asr = import_optional(
             "speechbrain.inference.ASR",
             model_type=self.config.model_type,
-            install_extra="asr-vad",
+            install_extra=None,
         )
         source = self.config.name_or_path or self.default_model_name_or_path
         asr_class = getattr(speechbrain_asr, "EncoderDecoderASR", None)

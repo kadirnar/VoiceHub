@@ -8,7 +8,7 @@ from pypinyin import lazy_pinyin, Style
 from .symbols import language_tone_start_map
 from .tone_sandhi import ToneSandhi
 from .english import g2p as g2p_en
-from transformers import AutoTokenizer
+from .tokenizer_utils import get_tokenizer
 
 punctuation = ["!", "?", "…", ",", ".", "'", "-"]
 current_file_path = os.path.dirname(__file__)
@@ -97,7 +97,8 @@ def _get_initials_finals(word):
     return initials, finals
 
 model_id = 'bert-base-multilingual-uncased'
-tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+
 def _g2p(segments):
     phones_list = []
     tones_list = []
@@ -125,7 +126,7 @@ def _g2p(segments):
         #
         for c, v in zip(initials, finals):
             if c == 'EN_WORD':
-                tokenized_en = tokenizer.tokenize(v)
+                tokenized_en = get_tokenizer(model_id).tokenize(v)
                 phones_en, tones_en, word2ph_en = g2p_en(text=None, pad_start_end=False, tokenized=tokenized_en)
                 # apply offset to tones_en
                 tones_en = [t + language_tone_start_map['EN'] for t in tones_en]
@@ -209,15 +210,15 @@ def _g2p_v2(segments):
     for text in segments:
         assert spliter not in text
         # replace all english words
-        text = re.sub('([a-zA-Z\s]+)', lambda x: f'{spliter}{x.group(1)}{spliter}', text)
+        text = re.sub(r'([a-zA-Z\s]+)', lambda x: f'{spliter}{x.group(1)}{spliter}', text)
         texts = text.split(spliter)
         texts = [t for t in texts if len(t) > 0]
 
         
         for text in texts:
-            if re.match('[a-zA-Z\s]+', text):
+            if re.match(r'[a-zA-Z\s]+', text):
                 # english
-                tokenized_en = tokenizer.tokenize(text)
+                tokenized_en = get_tokenizer(model_id).tokenize(text)
                 phones_en, tones_en, word2ph_en = g2p_en(text=None, pad_start_end=False, tokenized=tokenized_en)
                 # apply offset to tones_en
                 tones_en = [t + language_tone_start_map['EN'] for t in tones_en]

@@ -93,12 +93,12 @@ class OrpheusSFTDataset:
                 str(audio_path),
                 sample_rate=24_000,
                 model_type="orpheustts",
-                install_extra="orpheustts",
+                install_extra="training",
             )
             torch = import_optional(
                 "torch",
                 model_type="orpheustts",
-                install_extra="orpheustts",
+                install_extra="training",
             )
             device = next(self.codec.parameters()).device
             with torch.inference_mode():

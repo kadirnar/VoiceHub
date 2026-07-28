@@ -36,12 +36,11 @@ class _HyperPyYamlStub:
 
 class CosyVoicePackagingTests(unittest.TestCase):
 
-    def test_extra_covers_official_yaml_and_eager_matcha_imports(self):
+    def test_default_and_training_installs_cover_cosyvoice_runtime(self):
         pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
-        section_start = pyproject.index("cosyvoice = [")
-        section_end = pyproject.index("\n]", section_start)
-        cosyvoice_extra = pyproject[section_start:section_end]
-        required = {
+        project_dependencies = pyproject.split("dependencies = [", 1)[1].split("\n]", 1)[0]
+        training_dependencies = pyproject.split("training = [", 1)[1].split("\n]", 1)[0]
+        inference_required = {
             "gdown",
             "hydra-core",
             "librosa",
@@ -49,8 +48,6 @@ class CosyVoicePackagingTests(unittest.TestCase):
             "matplotlib",
             "omegaconf",
             "openai-whisper",
-            "pyarrow",
-            "pyworld",
             "regex",
             "rich",
             "safetensors",
@@ -59,10 +56,20 @@ class CosyVoicePackagingTests(unittest.TestCase):
             "tqdm",
             "wget",
         }
+        training_required = {"pyarrow", "pyworld"}
 
-        missing = sorted(dependency for dependency in required if f'"{dependency}"' not in cosyvoice_extra)
-
-        self.assertEqual(missing, [])
+        self.assertEqual(
+            sorted(
+                dependency for dependency in inference_required
+                if f'"{dependency}' not in project_dependencies),
+            [],
+        )
+        self.assertEqual(
+            sorted(
+                dependency for dependency in training_required
+                if f'"{dependency}' not in training_dependencies),
+            [],
+        )
 
 
 @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")

@@ -53,7 +53,7 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
         huggingface_hub = import_optional(
             "huggingface_hub",
             model_type="conversationtts",
-            install_extra="conversationtts",
+            install_extra=None,
         )
         return Path(huggingface_hub.hf_hub_download(
             repo_id=repository_id,
@@ -99,13 +99,13 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="conversationtts",
-            install_extra="conversationtts",
+            install_extra=None,
         )
         model_module = import_optional(
             "voicehub.models.conversationtts.source.conversationtts."
             "models.model_new",
             model_type="conversationtts",
-            install_extra="conversationtts",
+            install_extra=None,
         )
         model = model_module.Model(model_module.ModelArgs(**self.config.model_args))
         dtype = resolve_torch_dtype(
@@ -130,7 +130,7 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
         generator_module = import_optional(
             self._GENERATOR_MODULE,
             model_type="conversationtts",
-            install_extra="conversationtts",
+            install_extra=None,
         )
         was_training = bool(getattr(self.model, "training", False))
         self.model.eval()

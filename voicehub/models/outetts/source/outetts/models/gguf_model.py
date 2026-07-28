@@ -9,14 +9,11 @@ try:
     from llama_cpp import Llama, llama_token_is_eog
     from llama_cpp import __version__ as llama_cpp_version
     _GGUF_AVAILABLE = True
-except:
+except ImportError:
+    Llama = None
+    llama_token_is_eog = None
     llama_cpp_version = "0.0.0"
     _GGUF_AVAILABLE = False
-    raise ImportError(
-        "llama.cpp Python bindings not found. This is required for GGUF model support.\n\n"
-        "To install, please follow our installation guide:\n"
-        "https://github.com/edwko/OuteTTS?tab=readme-ov-file#installation\n\n"
-    )
 
 CURRENT_VERSION = version.parse(llama_cpp_version)
 VERSION_0_3_7 = version.parse("0.3.7")
@@ -32,7 +29,8 @@ class GGUFModel:
 
         if not _GGUF_AVAILABLE:
             raise ImportError(
-                "llama_cpp python module not found."
+                "The GGUF backend requires the `llama-cpp-python` package. "
+                "The default Hugging Face/Safetensors backend does not."
             )
 
         additional_model_config["n_ctx"] = max_seq_length

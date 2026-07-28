@@ -98,7 +98,7 @@ class TextPreprocessor:
             # 解决输入目标文本的空行导致报错的问题
             if len(text.strip()) == 0:
                 continue
-            if not re.sub("\W+", "", text):
+            if not re.sub(r"\W+", "", text):
                 # 检测一下，如果是纯符号，就跳过。
                 continue
             if text[-1] not in splits:

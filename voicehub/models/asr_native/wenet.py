@@ -43,7 +43,7 @@ class WeNetASRForSpeechRecognition(PreTrainedASRModel):
         wenet_runtime = import_optional(
             "voicehub.models.asr_native._wenet",
             model_type=self.config.model_type,
-            install_extra="asr-vad",
+            install_extra=None,
         )
         source = self.config.name_or_path or self.default_model_name_or_path
         loader = getattr(wenet_runtime, "load_model", None)

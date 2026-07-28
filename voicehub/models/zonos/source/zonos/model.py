@@ -100,6 +100,128 @@ class Zonos(nn.Module):
     def apply_heads(self, hidden_states: torch.Tensor) -> torch.Tensor:
         return torch.stack([head(hidden_states) for head in self.heads], dim=1)
 
+    def teacher_forced_logits(
+        self,
+        prefix_conditioning: torch.Tensor,
+        audio_codes: torch.Tensor,
+        audio_code_lengths: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return next-token logits and delayed, endpoint-aware targets.
+
+        ``audio_codes`` uses the native ``[batch, codebook, time]`` layout.
+        The method mirrors :meth:`generate`: a delay pattern is applied, each
+        model position consumes the previous delayed frame, and the prefix is
+        visible to every codec prediction. Each example receives one EOS frame
+        at its true audio length before delaying. This becomes the diagonal EOS
+        cascade used by inference: codebook ``q`` predicts EOS at target
+        position ``audio_code_lengths[b] + q``.
+        """
+        if prefix_conditioning.ndim != 3:
+            raise ValueError(
+                "Zonos prefix_conditioning must have shape "
+                "[batch, prefix_length, hidden_size]."
+            )
+        if audio_codes.ndim != 3:
+            raise ValueError(
+                "Zonos audio_codes must have shape [batch, codebook, time]."
+            )
+        if audio_codes.shape[0] != prefix_conditioning.shape[0]:
+            raise ValueError(
+                "Zonos conditioning and audio code batch sizes must match."
+            )
+        if audio_codes.shape[1] != len(self.embeddings):
+            raise ValueError(
+                f"Zonos expects {len(self.embeddings)} codebooks, received "
+                f"{audio_codes.shape[1]}."
+            )
+        if audio_codes.shape[-1] == 0:
+            raise ValueError("Zonos audio_codes must contain at least one frame.")
+
+        batch_size, num_codebooks, padded_length = audio_codes.shape
+        if audio_code_lengths is None:
+            audio_code_lengths = torch.full(
+                (batch_size,),
+                padded_length,
+                dtype=torch.long,
+                device=audio_codes.device,
+            )
+        elif (
+            not torch.is_tensor(audio_code_lengths)
+            or audio_code_lengths.shape != (batch_size,)
+        ):
+            raise ValueError(
+                "Zonos audio_code_lengths must have shape [batch]."
+            )
+        else:
+            audio_code_lengths = audio_code_lengths.to(
+                device=audio_codes.device,
+                dtype=torch.long,
+            )
+        if bool(
+            (
+                (audio_code_lengths <= 0)
+                | (audio_code_lengths > padded_length)
+            ).any()
+        ):
+            raise ValueError(
+                "Zonos audio_code_lengths must be positive and no larger "
+                "than the padded audio length."
+            )
+
+        valid_audio = (
+            torch.arange(padded_length, device=audio_codes.device)[None, None, :]
+            < audio_code_lengths[:, None, None]
+        ).expand_as(audio_codes)
+        active_codes = audio_codes.masked_select(valid_audio)
+        if bool(((active_codes < 0) | (active_codes >= 1024)).any()):
+            raise ValueError(
+                "Valid Zonos audio_codes must be in the range [0, 1023]."
+            )
+
+        # Padding values can use any dataset sentinel: only frames before each
+        # example's true length are copied into the model sequence.
+        endpoint_codes = torch.full(
+            (batch_size, num_codebooks, padded_length + 1),
+            self.masked_token_id,
+            dtype=torch.long,
+            device=audio_codes.device,
+        )
+        endpoint_codes[..., :padded_length] = torch.where(
+            valid_audio,
+            audio_codes.long(),
+            self.masked_token_id,
+        )
+        eos_positions = audio_code_lengths[:, None, None].expand(
+            -1,
+            num_codebooks,
+            1,
+        )
+        endpoint_codes.scatter_(
+            dim=-1,
+            index=eos_positions,
+            value=self.eos_token_id,
+        )
+
+        delayed = apply_delay_pattern(
+            endpoint_codes,
+            self.masked_token_id,
+        )
+        model_codes = delayed[..., :-1]
+        targets = delayed[..., 1:]
+        hidden_states = torch.cat(
+            [prefix_conditioning, self.embed_codes(model_codes)],
+            dim=1,
+        )
+        training_forward = getattr(self.backbone, "forward_training", None)
+        if callable(training_forward):
+            hidden_states = training_forward(hidden_states)
+        else:
+            # The Mamba backbone natively treats a missing inference cache as
+            # a full-sequence training pass.
+            hidden_states = self.backbone(hidden_states, None)
+        codec_hidden_states = hidden_states[:, prefix_conditioning.shape[1]:]
+        return self.apply_heads(codec_hidden_states).float(), targets
+
     def _compute_logits(
         self, hidden_states: torch.Tensor, inference_params: InferenceParams, cfg_scale: float
     ) -> torch.Tensor:

@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import SpeechTrainingOutput, TTSTrainingOutput
@@ -46,6 +46,7 @@ class BaseTrainingAdapter:
         self._component_by_path: dict[str, Any] = {}
         self._current_context: TrainingContext | None = None
         self._registered_specialization = False
+        self._runtime_input_preparer: Callable[[Any], Any] | None = None
         self.data_collator = DataCollatorForAudioTraining(field_schemas=self.spec.field_schemas, )
 
     @property
@@ -1067,6 +1068,37 @@ class BaseTrainingAdapter:
         """Public batch-preparation boundary used by recipe integrations."""
         return self.prepare_training_inputs(inputs, context)
 
+    def set_runtime_input_preparer(
+        self,
+        preparer: Callable[[Any], Any] | None,
+    ) -> None:
+        """Set the execution-strategy hook for model-created batch values.
+
+        Dataloader tensors are moved before an adapter runs its model-
+        specific preprocessing. Tokenizers, feature extractors, and
+        audio processors can create new CPU tensors during that later
+        step, so the active strategy must prepare the resulting batch
+        once more before forward.
+        """
+        if preparer is not None and not callable(preparer):
+            raise TypeError("Runtime input preparer must be callable or None.")
+        self._runtime_input_preparer = preparer
+
+    def prepare_runtime_inputs(
+        self,
+        inputs: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Move model-created inputs through the active execution strategy."""
+        if not isinstance(inputs, Mapping):
+            raise TypeError("Runtime training inputs must be a mapping.")
+        values = dict(inputs)
+        if self._runtime_input_preparer is None:
+            return values
+        prepared = self._runtime_input_preparer(values)
+        if not isinstance(prepared, Mapping):
+            raise TypeError("The training strategy input preparer must return a mapping.")
+        return dict(prepared)
+
     def optimizer_plan(self) -> dict[str, tuple[str, ...]]:
         """Return declared component routes for each named optimizer."""
         plan: dict[str, list[str]] = {}
@@ -1264,7 +1296,7 @@ class BaseTrainingAdapter:
         )
         if not isinstance(prepared_by_model, Mapping):
             raise TypeError("prepare_batch() must return a mapping.")
-        forward_inputs = dict(prepared_by_model)
+        forward_inputs = self.prepare_runtime_inputs(prepared_by_model)
         forward_inputs = self._detach_phase_inputs(forward_inputs, phase)
         labels = self._find_labels(forward_inputs, phase)
         optional_inputs = (set(phase.label_names) if not context.is_training and labels is None else set())
@@ -1362,6 +1394,7 @@ class BaseTrainingAdapter:
         )
         if not isinstance(prepared_by_model, Mapping):
             raise TypeError("prepare_batch() must return a mapping.")
+        prepared_by_model = self.prepare_runtime_inputs(prepared_by_model)
         forward_inputs = self._detach_phase_inputs(
             dict(prepared_by_model),
             phase,

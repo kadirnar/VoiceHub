@@ -58,14 +58,16 @@ class Zonos2ForTextToSpeech(PreTrainedTTSModel):
     def _validate_training_runtime(self) -> None:
         raise RuntimeError(
             "ZONOS2's vendored TTSLLM is a fused inference engine rather than "
-            "a differentiable nn.Module. Fine-tuning requires a custom "
-            "training adapter built around the unfused training graph.")
+            "a differentiable nn.Module. Its paged KV cache, fused MoE/Triton "
+            "kernels, and serving checkpoint do not expose the author training "
+            "objective. Fine-tuning requires Zyphra's unfused training graph "
+            "and optimizer-format checkpoint.")
 
     def _load_pretrained_model(self) -> None:
         torch = import_optional(
             "torch",
             model_type="zonos2",
-            install_extra="zonos2",
+            install_extra=None,
         )
         if str(self.device).split(":", 1)[0].lower() != "cuda":
             raise RuntimeError(
@@ -74,12 +76,12 @@ class Zonos2ForTextToSpeech(PreTrainedTTSModel):
         runtime = import_optional(
             "voicehub.models.zonos2.source.zonos2.tts",
             model_type="zonos2",
-            install_extra="zonos2",
+            install_extra=None,
         )
         message = import_optional(
             "voicehub.models.zonos2.source.zonos2.message",
             model_type="zonos2",
-            install_extra="zonos2",
+            install_extra=None,
         )
         self.model = runtime.TTSLLM(
             model_path=self.config.name_or_path,
@@ -181,7 +183,7 @@ class Zonos2ForTextToSpeech(PreTrainedTTSModel):
             numpy = import_optional(
                 "numpy",
                 model_type="zonos2",
-                install_extra="zonos2",
+                install_extra=None,
             )
             audio = numpy.frombuffer(audio, dtype=numpy.float32).copy()
         size = getattr(audio, "numel", None)

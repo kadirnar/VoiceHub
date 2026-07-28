@@ -8,14 +8,22 @@ VoiceHub provides shared orchestration only after a model integration exposes
 a valid differentiable graph, native objective, and batch contract. It does
 not pretend that every inference backend can be fine-tuned.
 
-At the current 31-model registry revision:
+Training coverage evolves with each model adapter. Query the registry instead
+of relying on a copied count:
 
-- 18 integrations have some fine-tuning path;
-- 6 accept ordinary raw-data records; and
-- 13 have no verified VoiceHub training path.
+```python
+from collections import Counter
 
-Read the [model-by-model matrix](../models/training-support.md) before choosing
-a checkpoint or dataset format.
+from voicehub.training import list_training_specs
+
+coverage = Counter(spec.support.value for spec in list_training_specs())
+print(coverage)
+```
+
+`native` and `preprocessed` are turnkey trainer routes, `custom` records a
+specialized upstream or multi-phase boundary, and `inference-only` fails
+closed. Read the [model-by-model matrix](../models/training-support.md) before
+choosing a checkpoint or dataset format.
 
 This page's counts and examples describe TTS integrations. ASR and VAD use the
 same trainer orchestration with additional CTC, speech-seq2seq, RNN-T, TDT,
@@ -37,13 +45,14 @@ the selected VoiceHub backend or artifact remains inference-only.
 
 ## Install the training runtime
 
-Install the model extra and training extra together:
+The default package already supplies every built-in inference runtime. Add the
+single training feature extra for fine-tuning, evaluation, and reporting:
 
 ```bash
-python -m pip install "voicehub[dia,training]"
+python -m pip install "voicehub[training]"
 ```
 
-The base installation does not pull PyTorch or every model stack.
+No model-specific or task-specific inference extra is required.
 
 ## Select a differentiable checkpoint
 

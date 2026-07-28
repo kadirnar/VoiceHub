@@ -8,10 +8,10 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 from voicehub.registry import list_model_specs
-from voicehub.tasks import SpeechTask
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-FORBIDDEN_ASR_VAD_EXTRAS = {
+FORBIDDEN_INFERENCE_EXTRAS = {
+    "asr-vad",
     "asr-espnet",
     "asr-funasr",
     "asr-nemo",
@@ -31,43 +31,33 @@ FORBIDDEN_ASR_VAD_EXTRAS = {
     "vad-webrtc",
     "whisperx",
 }
-EXPECTED_ASR_VAD_REQUIREMENTS = (
-    "torch>=2.1",
-    "torchaudio>=2.1",
-    "transformers~=4.53.0",
-    "safetensors>=0.4",
-    "sentencepiece",
+EXPECTED_INFERENCE_ABI_REQUIREMENTS = (
+    "torch>=2.8,<2.9",
+    "torchaudio>=2.8,<2.9",
+    "torchvision>=0.23,<0.24",
+    "transformers>=5.3,<6",
     "faster-whisper>=1.1",
-    "whisperx>=3.8.6,<3.9",
+    "whisperx>=3.8.7rc1,<3.9",
     "openai-whisper",
     "nemo-toolkit[asr-only,common-only]==2.5.0",
-    "cloudpickle",
-    "fiddle",
-    "hydra-core>1.3,<=1.3.2",
-    "lightning>2.2.1,<=2.4.0",
-    "omegaconf<=2.3",
-    "peft",
-    "torchmetrics>=0.11.0",
-    "webdataset>=0.2.86",
-    "speechbrain",
-    "funasr",
     "espnet==202511",
-    "espnet-model-zoo>=0.1.7",
-    "setuptools>=70,<74",
-    "silero-vad",
-    "onnxruntime",
-    "webrtcvad-wheels>=2.0.14",
     "pyannote.audio>=4,<5",
-    "requests",
-    "tqdm",
+    "protobuf>=5.29.5,<5.30",
+    "numba>=0.61",
+    "misaki[en,ja,zh]",
+    "encodec",
+    "local-attention",
+    "split-lang>=2,<3",
+    "auditok>=0.5,<0.6",
+    "sherpa-onnx>=1.13,<1.14",
 )
 EXPECTED_TRAINING_REQUIREMENTS = (
-    "safetensors>=0.4",
-    "torch>=2.1",
-    "accelerate",
+    "ema-pytorch",
     "datasets",
     "evaluate",
     "jiwer",
+    "pyarrow",
+    "pyworld",
     "wandb>=0.19",
 )
 
@@ -118,6 +108,26 @@ def _read_optional_dependencies() -> dict[str, list[str]]:
     return extras
 
 
+def _read_project_dependencies() -> list[str]:
+    source = (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    project = source.split("[project]", 1)[1].split("\n[", 1)[0]
+    array = project.split("dependencies = [", 1)[1].split("\n]", 1)[0]
+    dependencies = []
+    for raw_line in array.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not line.endswith(","):
+            raise AssertionError(
+                "Project dependencies must use a readable multiline array "
+                f"with trailing commas; could not parse: {raw_line!r}")
+        value = ast.literal_eval(line[:-1])
+        if not isinstance(value, str):
+            raise AssertionError(f"Project dependency entries must be strings: {raw_line!r}")
+        dependencies.append(value)
+    return dependencies
+
+
 def _distribution_name(requirement: str) -> str:
     return canonicalize_name(Requirement(requirement).name)
 
@@ -135,33 +145,26 @@ class PackagingMetadataTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.extras = _read_optional_dependencies()
+        cls.dependencies = _read_project_dependencies()
 
-    def test_public_speech_extras_are_strictly_consolidated(self):
-        self.assertTrue({"asr-vad", "training"}.issubset(self.extras))
+    def test_only_training_is_a_public_runtime_extra(self):
+        self.assertEqual(set(self.extras), {"docs", "test", "training"})
         self.assertEqual(
-            FORBIDDEN_ASR_VAD_EXTRAS & self.extras.keys(),
+            FORBIDDEN_INFERENCE_EXTRAS & self.extras.keys(),
             set(),
-            "Speech inference must expose only `asr-vad`; shared trainer "
-            "dependencies must expose only `training`.",
+            "All TTS, ASR, and VAD inference dependencies must ship in the "
+            "default installation; only training has a runtime feature extra.",
         )
 
-    def test_speech_input_models_advertise_one_install_extra(self):
-        speech_input_extras = {
-            spec.install_extra
-            for spec in list_model_specs() if spec.task in {
-                SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
-                SpeechTask.VOICE_ACTIVITY_DETECTION,
-            }
-        }
+    def test_every_inference_model_uses_the_default_installation(self):
+        for spec in list_model_specs(task=None):
+            with self.subTest(model_type=spec.model_type):
+                self.assertIsNone(spec.install_extra)
 
-        self.assertEqual(speech_input_extras, {"asr-vad"})
-
-    def test_asr_vad_extra_has_exact_compatibility_contract(self):
-        self.assertEqual(
-            _normalized_requirements(self.extras["asr-vad"]),
-            _normalized_requirements(EXPECTED_ASR_VAD_REQUIREMENTS),
-        )
-        aggregate_requirements = _requirements_by_distribution(self.extras["asr-vad"])
+    def test_default_install_has_the_supported_inference_abi(self):
+        normalized = _normalized_requirements(self.dependencies)
+        self.assertTrue(_normalized_requirements(EXPECTED_INFERENCE_ABI_REQUIREMENTS) <= normalized, )
+        aggregate_requirements = _requirements_by_distribution(self.dependencies)
         self.assertNotIn(
             "wenet",
             aggregate_requirements,
@@ -183,6 +186,13 @@ class PackagingMetadataTests(unittest.TestCase):
             set(),
             "The W&B-free NeMo split must retain its import-time core dependencies.",
         )
+        self.assertNotIn("descript-audiotools", aggregate_requirements)
+        self.assertNotIn(
+            "torchcodec",
+            aggregate_requirements,
+            "TorchCodec must be resolved transitively at the WhisperX/pyannote "
+            "ABI-compatible version.",
+        )
 
     def test_training_extra_has_exact_shared_trainer_contract(self):
         self.assertEqual(
@@ -191,7 +201,7 @@ class PackagingMetadataTests(unittest.TestCase):
         )
 
     def test_aggregate_extras_are_flat_and_deduplicated(self):
-        for extra in ("asr-vad", "training"):
+        for extra in ("training", "docs", "test"):
             with self.subTest(extra=extra):
                 distributions = [_distribution_name(requirement) for requirement in self.extras[extra]]
                 duplicates = {name for name, count in Counter(distributions).items() if count > 1}
@@ -199,7 +209,7 @@ class PackagingMetadataTests(unittest.TestCase):
                 self.assertNotIn("voicehub", distributions)
 
     def test_wandb_is_training_only(self):
-        inference_distributions = {_distribution_name(requirement) for requirement in self.extras["asr-vad"]}
+        inference_distributions = {_distribution_name(requirement) for requirement in self.dependencies}
         training_distributions = {_distribution_name(requirement) for requirement in self.extras["training"]}
 
         self.assertNotIn("wandb", inference_distributions)

@@ -79,6 +79,24 @@ class TorchZonosBackbone(nn.Module):
             hidden_states = layer(hidden_states, inference_params, freqs_cis)
         return self.norm_f(hidden_states)
 
+    def forward_training(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        """Run a full causal sequence without inference KV-cache mutation."""
+        sequence_length = hidden_states.shape[1]
+        head_dim = self.config.d_model // self.config.attn_cfg["num_heads"]
+        freqs_cis = precompute_freqs_cis(
+            sequence_length,
+            head_dim,
+        ).to(hidden_states.device)
+        freqs_cis = freqs_cis.unsqueeze(0).expand(
+            hidden_states.shape[0],
+            -1,
+            -1,
+            -1,
+        )
+        for layer in self.layers:
+            hidden_states = layer.forward_training(hidden_states, freqs_cis)
+        return self.norm_f(hidden_states)
+
 
 class TransformerBlock(nn.Module):
     def __init__(self, config: BackboneConfig, layer_idx: int) -> None:
@@ -98,6 +116,15 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x: torch.Tensor, inference_params: InferenceParams, freqs_cis: torch.Tensor) -> torch.Tensor:
         x = x + self.mixer(self.norm(x), inference_params, freqs_cis)
+        x = x + self.mlp(self.norm2(x))
+        return x
+
+    def forward_training(
+        self,
+        x: torch.Tensor,
+        freqs_cis: torch.Tensor,
+    ) -> torch.Tensor:
+        x = x + self.mixer.forward_training(self.norm(x), freqs_cis)
         x = x + self.mlp(self.norm2(x))
         return x
 
@@ -139,6 +166,54 @@ class Attention(nn.Module):
 
         y = self.out_proj(y)
         return y
+
+    def forward_training(
+        self,
+        x: torch.Tensor,
+        freqs_cis: torch.Tensor,
+    ) -> torch.Tensor:
+        """Causal attention over a complete teacher-forced sequence."""
+        batch_size, sequence_length, _ = x.shape
+        query_size = self.num_heads * self.head_dim
+        kv_size = self.num_heads_kv * self.head_dim
+        query, key, value = self.in_proj(x).split(
+            [query_size, kv_size, kv_size],
+            dim=-1,
+        )
+        query = query.view(
+            batch_size,
+            sequence_length,
+            self.num_heads,
+            self.head_dim,
+        )
+        key = key.view(
+            batch_size,
+            sequence_length,
+            self.num_heads_kv,
+            self.head_dim,
+        )
+        value = value.view(
+            batch_size,
+            sequence_length,
+            self.num_heads_kv,
+            self.head_dim,
+        )
+        query = apply_rotary_emb(query, freqs_cis).transpose(1, 2)
+        key = apply_rotary_emb(key, freqs_cis).transpose(1, 2)
+        value = value.transpose(1, 2)
+        hidden_states = F.scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            is_causal=True,
+            enable_gqa=True,
+        )
+        hidden_states = hidden_states.transpose(1, 2).contiguous().view(
+            batch_size,
+            sequence_length,
+            query_size,
+        )
+        return self.out_proj(hidden_states)
 
 
 class FeedForward(nn.Module):

@@ -1,14 +1,65 @@
 import functools
+from dataclasses import dataclass
+from importlib import import_module
 from typing import Dict, Optional, Tuple
 
 import torch
-import triton
-import triton.language as tl
-from sgl_kernel import gelu_and_mul, silu_and_mul
-from sgl_kernel import moe_align_block_size as sgl_moe_align_block_size
-from voicehub.models.zonos2.source.zonos2.kernel.moe_impl import fused_moe_kernel_triton
-from voicehub.models.zonos2.source.zonos2.kernel.triton.fused_moe import moe_sum_reduce_triton
+import torch.nn.functional as F
+
 from voicehub.models.zonos2.source.zonos2.layers.moe.fused_moe.topk import select_experts
+
+
+@dataclass(frozen=True)
+class _OptimizedKernels:
+    """Optional CUDA-only kernels used by the released Zonos2 runtime."""
+
+    triton: object
+    triton_language: object
+    gelu_and_mul: object
+    silu_and_mul: object
+    moe_align_block_size: object
+    fused_moe_kernel: object
+    moe_sum_reduce: object
+
+
+_OPTIMIZED_KERNELS_UNSET = object()
+_optimized_kernels: _OptimizedKernels | None | object = (
+    _OPTIMIZED_KERNELS_UNSET
+)
+
+
+def _load_optimized_kernels() -> _OptimizedKernels | None:
+    """Load Triton/SGL kernels only when an accelerated call needs them.
+
+    Triton and ``sgl_kernel`` are not available on the supported macOS and
+    Windows CPU runtimes. Importing them at module scope made the entire
+    Zonos2 model unavailable before a device could be selected.
+    """
+    global _optimized_kernels
+    if _optimized_kernels is not _OPTIMIZED_KERNELS_UNSET:
+        return _optimized_kernels
+    try:
+        triton = import_module("triton")
+        triton_language = import_module("triton.language")
+        sgl_kernel = import_module("sgl_kernel")
+        moe_impl = import_module(
+            "voicehub.models.zonos2.source.zonos2.kernel.moe_impl"
+        )
+        triton_moe = import_module(
+            "voicehub.models.zonos2.source.zonos2.kernel.triton.fused_moe"
+        )
+        _optimized_kernels = _OptimizedKernels(
+            triton=triton,
+            triton_language=triton_language,
+            gelu_and_mul=sgl_kernel.gelu_and_mul,
+            silu_and_mul=sgl_kernel.silu_and_mul,
+            moe_align_block_size=sgl_kernel.moe_align_block_size,
+            fused_moe_kernel=moe_impl.fused_moe_kernel_triton,
+            moe_sum_reduce=triton_moe.moe_sum_reduce_triton,
+        )
+    except (AttributeError, ImportError, OSError, RuntimeError):
+        _optimized_kernels = None
+    return _optimized_kernels
 
 
 def ceil_div(x: int, y: int) -> int:
@@ -26,7 +77,11 @@ def is_cuda():
 
 
 def moe_align_block_size(
-    topk_ids: torch.Tensor, block_size: int, num_experts: int
+    topk_ids: torch.Tensor,
+    block_size: int,
+    num_experts: int,
+    *,
+    kernels: _OptimizedKernels,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Aligns the token distribution across experts to be compatible with block
@@ -67,13 +122,16 @@ def moe_align_block_size(
     """
     max_num_tokens_padded = topk_ids.numel() + (num_experts + 1) * (block_size - 1)
     sorted_ids = torch.empty((max_num_tokens_padded,), dtype=torch.int32, device=topk_ids.device)
-    max_num_m_blocks = triton.cdiv(max_num_tokens_padded, block_size)
+    max_num_m_blocks = kernels.triton.cdiv(
+        max_num_tokens_padded,
+        block_size,
+    )
     expert_ids = torch.empty((max_num_m_blocks,), dtype=torch.int32, device=topk_ids.device)
     num_tokens_post_pad = torch.empty((1), dtype=torch.int32, device=topk_ids.device)
 
     cumsum_buffer = torch.empty((num_experts + 2,), dtype=torch.int32, device=topk_ids.device)
 
-    sgl_moe_align_block_size(
+    kernels.moe_align_block_size(
         topk_ids,
         num_experts + 1,
         block_size,
@@ -125,7 +183,7 @@ def try_get_optimal_moe_config(
     return config
 
 
-def fused_experts_impl(
+def _fused_experts_optimized(
     hidden_states: torch.Tensor,
     w1: torch.Tensor,
     w2: torch.Tensor,
@@ -136,8 +194,13 @@ def fused_experts_impl(
     apply_router_weight_on_input: bool = False,
     no_combine: bool = False,
     routed_scaling_factor: Optional[float] = None,
+    *,
+    kernels: _OptimizedKernels,
 ):
-
+    if no_combine:
+        raise ValueError(
+            "Uncombined expert outputs use the portable PyTorch path."
+        )
     padded_size = 0
     assert hidden_states.shape[1] == w1.shape[2] - padded_size, "Hidden size mismatch"
     assert topk_weights.shape == topk_ids.shape, "topk shape mismatch"
@@ -176,15 +239,12 @@ def fused_experts_impl(
         (M, topk_ids.shape[1], w2.shape[1]),
     )
 
-    compute_type = tl.bfloat16 if hidden_states.dtype == torch.bfloat16 else tl.float16
-    if no_combine:
-        assert not inplace
-        out_hidden_states = torch.empty(
-            (num_tokens, topk_ids.shape[1], w2.shape[1]),
-            device=hidden_states.device,
-            dtype=hidden_states.dtype,
-        )
-    elif inplace:
+    compute_type = (
+        kernels.triton_language.bfloat16
+        if hidden_states.dtype == torch.bfloat16
+        else kernels.triton_language.float16
+    )
+    if inplace:
         out_hidden_states = hidden_states
     else:
         out_hidden_states = torch.empty_like(hidden_states)
@@ -214,10 +274,13 @@ def fused_experts_impl(
         curr_topk_weights = topk_weights[begin_chunk_idx:end_chunk_idx]
 
         sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
-            curr_topk_ids, config["BLOCK_SIZE_M"], E
+            curr_topk_ids,
+            config["BLOCK_SIZE_M"],
+            E,
+            kernels=kernels,
         )
 
-        fused_moe_kernel_triton(
+        kernels.fused_moe_kernel(
             curr_hidden_states,
             w1,
             intermediate_cache1,
@@ -234,21 +297,27 @@ def fused_experts_impl(
 
         if activation == "silu":
 
-            silu_and_mul(intermediate_cache1.view(-1, N), intermediate_cache2)
+            kernels.silu_and_mul(
+                intermediate_cache1.view(-1, N),
+                intermediate_cache2,
+            )
 
         elif activation == "gelu":
 
-            gelu_and_mul(intermediate_cache1.view(-1, N), intermediate_cache2)
+            kernels.gelu_and_mul(
+                intermediate_cache1.view(-1, N),
+                intermediate_cache2,
+            )
 
         else:
             raise ValueError(f"Unsupported activation: {activation=}")
 
-        fused_moe_kernel_triton(
+        kernels.fused_moe_kernel(
             intermediate_cache2,
             w2,
             (
                 intermediate_cache3
-                if not no_combine and topk_ids.shape[1] != 1
+                if topk_ids.shape[1] != 1
                 else out_hidden_states[begin_chunk_idx:end_chunk_idx].unsqueeze(0)
             ),
             curr_topk_weights,
@@ -265,11 +334,13 @@ def fused_experts_impl(
         if routed_scaling_factor is None:
             routed_scaling_factor = 1.0
 
-        if no_combine:
-            pass
-
-        if topk_ids.shape[1] == 1 and routed_scaling_factor == 1.0:
-            pass  # we write directly into out_hidden_states
+        if topk_ids.shape[1] == 1:
+            # GEMM2 writes the single route directly into the output rather
+            # than intermediate_cache3.
+            if routed_scaling_factor != 1.0:
+                out_hidden_states[
+                    begin_chunk_idx:end_chunk_idx
+                ].mul_(routed_scaling_factor)
         elif topk_ids.shape[1] == 2 and routed_scaling_factor == 1.0:
             torch.add(
                 intermediate_cache3[:, 0],
@@ -286,12 +357,237 @@ def fused_experts_impl(
                     routed_scaling_factor,
                 )
             else:
-                moe_sum_reduce_triton(
+                kernels.moe_sum_reduce(
                     intermediate_cache3,
                     out_hidden_states[begin_chunk_idx:end_chunk_idx],
                     routed_scaling_factor,
                 )
     return out_hidden_states
+
+
+def _validate_expert_inputs(
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    *,
+    activation: str,
+    inplace: bool,
+    no_combine: bool,
+) -> None:
+    if hidden_states.ndim != 2:
+        raise ValueError(
+            "MoE hidden states must have shape [tokens, hidden_size]."
+        )
+    if w1.ndim != 3 or w2.ndim != 3:
+        raise ValueError("MoE expert weights must be rank-three tensors.")
+    if w1.shape[0] != w2.shape[0]:
+        raise ValueError("MoE projections must contain the same expert count.")
+    if hidden_states.shape[1] != w1.shape[2]:
+        raise ValueError("MoE input and first-projection hidden sizes differ.")
+    if w1.shape[1] % 2:
+        raise ValueError(
+            "MoE gated first projection must have an even output size."
+        )
+    if w2.shape[2] != w1.shape[1] // 2:
+        raise ValueError(
+            "MoE second-projection input must match the gated intermediate "
+            "size."
+        )
+    if topk_weights.ndim != 2 or topk_ids.ndim != 2:
+        raise ValueError("MoE routes must have shape [tokens, top_k].")
+    if topk_weights.shape != topk_ids.shape:
+        raise ValueError("MoE route weights and expert IDs must have one shape.")
+    if topk_ids.shape[0] != hidden_states.shape[0]:
+        raise ValueError("MoE routes and hidden states must have one token count.")
+    if topk_ids.shape[1] == 0:
+        raise ValueError("MoE routing must select at least one expert.")
+    if topk_ids.shape[1] > w1.shape[0]:
+        raise ValueError(
+            "MoE routing cannot select more routes than there are experts."
+        )
+    if activation not in {"silu", "gelu"}:
+        raise ValueError(f"Unsupported activation: activation={activation!r}")
+    if no_combine and inplace:
+        raise ValueError("`no_combine=True` cannot be used in place.")
+    if inplace and w2.shape[1] != hidden_states.shape[1]:
+        raise ValueError(
+            "In-place MoE requires its output and hidden sizes to match."
+        )
+    devices = {
+        hidden_states.device,
+        w1.device,
+        w2.device,
+        topk_weights.device,
+        topk_ids.device,
+    }
+    if len(devices) != 1:
+        raise ValueError("Every MoE tensor must be on the same device.")
+    if hidden_states.dtype not in {
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+    }:
+        raise TypeError(
+            "MoE hidden states must use float32, float16, or bfloat16."
+        )
+    if w1.dtype != hidden_states.dtype or w2.dtype != hidden_states.dtype:
+        raise TypeError(
+            "MoE projection weights must use the hidden-state dtype."
+        )
+    if not topk_weights.is_floating_point():
+        raise TypeError("MoE route weights must use a floating-point dtype.")
+    if topk_ids.dtype not in {
+        torch.int16,
+        torch.int32,
+        torch.int64,
+    }:
+        raise TypeError("MoE expert IDs must use an integer dtype.")
+    if topk_ids.numel():
+        lowest = int(topk_ids.min().item())
+        highest = int(topk_ids.max().item())
+        if lowest < -1 or highest >= w1.shape[0]:
+            raise ValueError(
+                "MoE expert IDs must be -1 for padding or index an existing "
+                "expert."
+            )
+
+
+def _activate_and_multiply(projected: torch.Tensor, activation: str):
+    gate, values = projected.chunk(2, dim=-1)
+    if activation == "silu":
+        return F.silu(gate) * values
+    return F.gelu(gate, approximate="none") * values
+
+
+def _torch_experts(
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    *,
+    activation: str,
+    apply_router_weight_on_input: bool,
+    no_combine: bool,
+    routed_scaling_factor: Optional[float],
+) -> torch.Tensor:
+    """Portable expert dispatch with the same route weighting as the kernels."""
+    token_count, top_k = topk_ids.shape
+    output_size = w2.shape[1]
+    routed = hidden_states.new_zeros(
+        (token_count, top_k, output_size),
+    )
+
+    for expert_index in range(w1.shape[0]):
+        token_indices, route_indices = torch.where(
+            topk_ids == expert_index
+        )
+        if token_indices.numel() == 0:
+            continue
+        selected = hidden_states.index_select(0, token_indices)
+        first_projection = F.linear(selected, w1[expert_index])
+        route_weights = topk_weights[
+            token_indices,
+            route_indices,
+        ].to(
+            device=first_projection.device,
+            dtype=first_projection.dtype,
+        )
+        if apply_router_weight_on_input:
+            first_projection = first_projection * route_weights.unsqueeze(-1)
+        activated = _activate_and_multiply(
+            first_projection,
+            activation,
+        )
+        expert_output = F.linear(activated, w2[expert_index])
+        if not apply_router_weight_on_input:
+            expert_output = expert_output * route_weights.unsqueeze(-1)
+        routed[token_indices, route_indices] = expert_output
+
+    scale = 1.0 if routed_scaling_factor is None else float(
+        routed_scaling_factor
+    )
+    if no_combine:
+        return routed
+    return routed.sum(dim=1).mul(scale)
+
+
+def _optimized_kernels_for(
+    hidden_states: torch.Tensor,
+) -> _OptimizedKernels | None:
+    if hidden_states.device.type != "cuda" or not torch.version.cuda:
+        return None
+    return _load_optimized_kernels()
+
+
+def fused_experts_impl(
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    inplace: bool = False,
+    activation: str = "silu",
+    apply_router_weight_on_input: bool = False,
+    no_combine: bool = False,
+    routed_scaling_factor: Optional[float] = None,
+):
+    """Dispatch to optional CUDA kernels or a portable PyTorch implementation."""
+    _validate_expert_inputs(
+        hidden_states,
+        w1,
+        w2,
+        topk_weights,
+        topk_ids,
+        activation=activation,
+        inplace=inplace,
+        no_combine=no_combine,
+    )
+    kernels = _optimized_kernels_for(hidden_states)
+    optimized_layout = (
+        hidden_states.shape[0] > 0
+        and hidden_states.is_contiguous()
+        and w1.is_contiguous()
+        and w2.is_contiguous()
+        and topk_weights.is_contiguous()
+        and topk_ids.is_contiguous()
+        and w2.shape[1] == hidden_states.shape[1]
+        and not bool((topk_ids < 0).any().item())
+    )
+    if kernels is not None and not no_combine and optimized_layout:
+        return _fused_experts_optimized(
+            hidden_states,
+            w1,
+            w2,
+            topk_weights,
+            topk_ids,
+            inplace=inplace,
+            activation=activation,
+            apply_router_weight_on_input=(
+                apply_router_weight_on_input
+            ),
+            no_combine=no_combine,
+            routed_scaling_factor=routed_scaling_factor,
+            kernels=kernels,
+        )
+
+    output = _torch_experts(
+        hidden_states,
+        w1,
+        w2,
+        topk_weights,
+        topk_ids,
+        activation=activation,
+        apply_router_weight_on_input=apply_router_weight_on_input,
+        no_combine=no_combine,
+        routed_scaling_factor=routed_scaling_factor,
+    )
+    if inplace:
+        hidden_states.copy_(output)
+        return hidden_states
+    return output
 
 
 def inplace_fused_experts(
@@ -394,6 +690,7 @@ def fused_moe(
     inplace: bool = False,
     activation: str = "silu",
     no_combine: bool = False,
+    apply_router_weight_on_input: bool = False,
 ) -> torch.Tensor:
 
     topk_weights, topk_ids = select_experts(
@@ -410,5 +707,6 @@ def fused_moe(
         topk_ids=topk_ids,
         inplace=inplace,
         activation=activation,
+        apply_router_weight_on_input=apply_router_weight_on_input,
         no_combine=no_combine,
     )

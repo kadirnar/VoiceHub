@@ -68,7 +68,7 @@ class VoxCPMForTextToSpeech(PreTrainedTTSModel):
         runtime = import_optional(
             "voicehub.models.voxcpm.source.voxcpm",
             model_type="voxcpm",
-            install_extra="voxcpm",
+            install_extra=None,
         )
         model = runtime.VoxCPM.from_pretrained(
             self.config.name_or_path,
@@ -172,7 +172,7 @@ class VoxCPMForTextToSpeech(PreTrainedTTSModel):
             denoiser_module = import_optional(
                 "voicehub.models.voxcpm.source.voxcpm.zipenhancer",
                 model_type="voxcpm",
-                install_extra="voxcpm",
+                install_extra=None,
             )
             self.model.denoiser = denoiser_module.ZipEnhancer(self.config.denoiser_name_or_path, )
 

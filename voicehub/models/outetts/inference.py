@@ -302,12 +302,12 @@ class OuteTTSForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="outetts",
-            install_extra="outetts",
+            install_extra=None,
         )
         runtime = import_optional(
             "voicehub.models.outetts.source.outetts",
             model_type="outetts",
-            install_extra="outetts",
+            install_extra=None,
         )
         backend = self._enum_member(
             runtime.Backend,
