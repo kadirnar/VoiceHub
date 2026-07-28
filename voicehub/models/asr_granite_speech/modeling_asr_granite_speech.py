@@ -9,12 +9,11 @@ from numbers import Integral, Real
 from typing import Any
 
 from voicehub.modeling_outputs import ASROutput
+from voicehub.models import asr_transformers_multimodal as multimodal_asr
 from voicehub.models.asr_granite_speech.configuration_asr_granite_speech import GraniteSpeechASRConfig
-from voicehub.models.asr_transformers_multimodal.modeling_asr_transformers_multimodal import (
-    MultimodalTransformersASRForSpeechRecognition, )
 
 
-class GraniteSpeechForSpeechRecognition(MultimodalTransformersASRForSpeechRecognition):
+class GraniteSpeechForSpeechRecognition(multimodal_asr.MultimodalTransformersASRForSpeechRecognition):
     """Granite Speech inference and completion-only supervised fine-tuning.
 
     IBM's processor consumes a rendered text prompt and waveform

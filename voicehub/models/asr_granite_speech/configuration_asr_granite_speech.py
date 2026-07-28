@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from voicehub.models.asr_transformers_multimodal.configuration_asr_transformers_multimodal import (
-    MultimodalTransformersASRConfig, )
+from voicehub.models import asr_transformers_multimodal as multimodal_asr
 
 _DEFAULT_TRANSCRIPTION_PROMPT = ("Please transcribe the following audio to text<|audio|>")
 
 
-class GraniteSpeechASRConfig(MultimodalTransformersASRConfig):
+class GraniteSpeechASRConfig(multimodal_asr.MultimodalTransformersASRConfig):
     """Configure native Transformers Granite Speech inference and training.
 
     Granite Speech uses a tokenizer-rendered instruction followed by
