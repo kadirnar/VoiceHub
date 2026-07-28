@@ -62,7 +62,7 @@ flow-matching and diffusion models, audio/frame classifiers, VITS-style
 adversarial systems, and upstream-native pipelines keep their own
 conditioning, objectives, parameter ownership, and export rules.
 
-The registry contains **59 integrations**: **34 TTS backends**, **14 ASR
+The registry contains **68 integrations**: **34 TTS backends**, **23 ASR
 providers**, and **11 VAD providers**. Fine-tuning support is checkpoint- and
 runtime-specific; an
 inference integration does not imply that its current VoiceHub artifact is

@@ -282,6 +282,44 @@ class TrainingCollatorSchemaTests(unittest.TestCase):
             [[True, True, True], [True, False, False]],
         )
 
+    def test_transformers_asr_time_major_features_pad_the_time_axis(self):
+        import torch
+
+        from voicehub.training.collators import DataCollatorForAudioTraining
+        from voicehub.training.specs import get_training_spec
+
+        collator = DataCollatorForAudioTraining(
+            field_schemas=get_training_spec("asr_parakeet_tdt", ).field_schemas, )
+        batch = collator([
+            {
+                "input_features": torch.tensor([
+                    [1.0, 2.0, 3.0],
+                    [4.0, 5.0, 6.0],
+                    [7.0, 8.0, 9.0],
+                ]),
+            },
+            {
+                "input_features": torch.tensor([
+                    [10.0, 11.0, 12.0],
+                ]),
+            },
+        ])
+
+        self.assertEqual(tuple(batch["input_features"].shape), (2, 3, 3))
+        self.assertEqual(
+            batch["input_features"][1].tolist(),
+            [
+                [10.0, 11.0, 12.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+            ],
+        )
+        self.assertEqual(batch["feature_lengths"].tolist(), [3, 1])
+        self.assertEqual(
+            batch["attention_mask"].tolist(),
+            [[True, True, True], [True, False, False]],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

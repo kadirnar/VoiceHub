@@ -53,20 +53,14 @@ _KNOWN_MODEL_TYPES = {
     "speech-seq2seq":
     frozenset({
         "cohere-asr",
-        "granite-speech",
-        "granite-speech-plus",
         "kyutai-speech-to-text",
         "moonshine",
         "moonshine-streaming",
-        "qwen3-asr",
         "seamless_m4t",
         "seamless_m4t_v2",
         "speech-encoder-decoder",
         "speech_to_text",
         "speecht5",
-        "vibevoice-asr",
-        "voxtral",
-        "voxtral-realtime",
         "whisper",
     }),
 }
@@ -103,6 +97,16 @@ _AUDIO_TEXT_MODEL_TYPE_MARKERS = (
     "audio_flamingo",
     "qwen2_audio",
 )
+_DEDICATED_PROCESSOR_ASR_MODEL_TYPES = frozenset({
+    "cohere_asr",
+    "granite_speech",
+    "granite_speech_plus",
+    "nemotron3_5_asr",
+    "qwen3_asr",
+    "vibevoice_asr",
+    "voxtral",
+    "voxtral_realtime",
+})
 _NON_ASR_ARCHITECTURE_MARKERS = (
     "foraudioframeclassification",
     "foraudioclassification",
@@ -205,6 +209,14 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
 
     @classmethod
     def _infer_architecture_family(cls, native_config: Any) -> str | None:
+        model_type = str(getattr(native_config, "model_type", "")).lower()
+        normalized_model_type = model_type.replace("-", "_")
+        if normalized_model_type in _DEDICATED_PROCESSOR_ASR_MODEL_TYPES:
+            raise ValueError(
+                f"Checkpoint model type {model_type!r} requires its native "
+                "processor contract for inference and label construction. "
+                "Select the dedicated VoiceHub provider for this ASR family.")
+
         architectures = getattr(native_config, "architectures", ()) or ()
         if isinstance(architectures, str):
             architectures = (architectures, )
@@ -243,8 +255,6 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
                     if str(auto_class_name).endswith(expected_name):
                         return family
 
-        model_type = str(getattr(native_config, "model_type", "")).lower()
-        normalized_model_type = model_type.replace("-", "_")
         if any(marker in normalized_model_type for marker in _AUDIO_TEXT_MODEL_TYPE_MARKERS):
             raise ValueError(
                 f"Checkpoint model type {model_type!r} uses the audio-text-to-"
@@ -958,6 +968,38 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
             raise TypeError("The Transformers ASR tokenizer did not return a mapping.")
         return encoded
 
+    def _process_transducer_training_batch(
+        self,
+        audio: Any,
+        text: str | list[str],
+        *,
+        sampling_rate: int,
+    ) -> Mapping[str, Any]:
+        """Keep processor-owned transducer labels and decoder inputs intact."""
+        processor = self.transformers_processor
+        if processor is None:
+            raise RuntimeError("Training input preparation requires load_for_training().")
+        if not self._accepts_keyword(processor, "text"):
+            raise TypeError(
+                "The loaded transducer processor does not expose a joint "
+                "`audio`/`text` training contract. Register a dedicated "
+                "VoiceHub provider for this architecture.")
+        encoded = processor(
+            audio=audio,
+            text=text,
+            sampling_rate=sampling_rate,
+            padding=True,
+            return_tensors="pt",
+        )
+        if not isinstance(encoded, Mapping):
+            raise TypeError("The Transformers transducer processor did not return a mapping.")
+        missing = tuple(name for name in ("labels", "decoder_input_ids") if name not in encoded)
+        if missing:
+            raise TypeError(
+                "The Transformers transducer processor did not return "
+                f"required training field(s): {', '.join(missing)}.")
+        return encoded
+
     def prepare_training_inputs(
         self,
         inputs: dict[str, Any],
@@ -1008,6 +1050,15 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
             ).waveform for value, rate in zip(audio_values, rate_values)
         ]
         processor_audio = waveforms if len(waveforms) > 1 else waveforms[0]
+        label_text = text_values if text_values is not None else text
+        if (self.architecture_family in {"rnnt", "tdt"} and label_text is not None and
+                "labels" not in inputs):
+            return dict(
+                self._process_transducer_training_batch(
+                    processor_audio,
+                    label_text,
+                    sampling_rate=self._processor_sample_rate(),
+                ))
         batch = dict(
             self._process_training_audio(
                 processor_audio,
@@ -1020,7 +1071,6 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
         if text is None:
             return batch
 
-        label_text = text_values if text_values is not None else text
         encoded_labels = self._tokenize_training_labels(label_text)
         if not isinstance(encoded_labels, Mapping) or "input_ids" not in encoded_labels:
             raise TypeError("The Transformers ASR tokenizer did not return `input_ids`.")

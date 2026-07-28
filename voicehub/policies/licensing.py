@@ -42,6 +42,23 @@ _MODEL_LICENSES = (
         "The vendored XCodec2 component is restricted to non-commercial use.",
     ),
     ModelLicenseSpec(
+        "asr_medasr",
+        "health-ai-developer-foundations",
+        None,
+        "https://huggingface.co/google/medasr",
+        "Access requires accepting Google's Health AI Developer Foundations "
+        "terms. Review the healthcare-specific use restrictions before "
+        "fine-tuning or deployment.",
+    ),
+    ModelLicenseSpec(
+        "asr_nemotron",
+        "OpenMDW-1.1",
+        True,
+        "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b",
+        "Use of the checkpoint and derivatives is governed by the "
+        "OpenMDW-1.1 license.",
+    ),
+    ModelLicenseSpec(
         "neutts",
         "NeuTTS-Open-License-1.0",
         None,

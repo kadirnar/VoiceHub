@@ -143,8 +143,9 @@ class ASRInferenceConfig(SpeechInferenceConfig):
         if task not in ("transcribe", "translate"):
             raise ValueError("ASR `task` must be 'transcribe' or 'translate'.")
         timestamps = getattr(self, "return_timestamps", False)
-        if not (isinstance(timestamps, bool) or isinstance(timestamps, str) and timestamps == "word"):
-            raise ValueError("`return_timestamps` must be a boolean or 'word'.")
+        if not (isinstance(timestamps, bool) or
+                isinstance(timestamps, str) and timestamps in {"segment", "word"}):
+            raise ValueError("`return_timestamps` must be a boolean, 'segment', or 'word'.")
         for name in ("chunk_length_s", ):
             value = getattr(self, name, None)
             if value is not None and (isinstance(value, bool) or not isinstance(value, Real) or

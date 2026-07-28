@@ -63,7 +63,7 @@ sistemas adversariales de tipo VITS y los pipelines compuestos mantienen sus
 propios condicionamientos, objetivos, propiedad de parámetros y reglas de
 exportación.
 
-El registry contiene **34 integraciones TTS**, **14 proveedores ASR** y **11
+El registry contiene **34 integraciones TTS**, **23 proveedores ASR** y **11
 proveedores VAD**. La compatibilidad con el ajuste fino depende del checkpoint
 y del entorno de ejecución; disponer de una integración de inferencia no
 implica que su artefacto actual de VoiceHub sea diferenciable. Consulte el

@@ -1286,11 +1286,74 @@ _RAW_AUDIO_FIELD_SCHEMAS = {
     },
 }
 
+_WAVEFORM_ASR_FIELD_SCHEMAS = {
+    "audio": _RAW_AUDIO_FIELD_SCHEMAS["audio"],
+    "input_values": _RAW_AUDIO_FIELD_SCHEMAS["input_values"],
+}
+
+_CHANNEL_FIRST_ASR_FIELD_SCHEMAS = {
+    **_WAVEFORM_ASR_FIELD_SCHEMAS,
+    "input_features": {
+        "sequence_dim": -1,
+        "padding_value": 0.0,
+        "length_field": "feature_lengths",
+        "mask_field": "attention_mask",
+    },
+}
+
+_QWEN3_ASR_FIELD_SCHEMAS = {
+    **_WAVEFORM_ASR_FIELD_SCHEMAS,
+    "input_features": {
+        "sequence_dim": -1,
+        "padding_value": 0.0,
+        "length_field": "feature_lengths",
+        "mask_field": "input_features_mask",
+    },
+}
+
+_TIME_MAJOR_ASR_FIELD_SCHEMAS = {
+    **_WAVEFORM_ASR_FIELD_SCHEMAS,
+    "input_features": {
+        "sequence_dim": -2,
+        "padding_value": 0.0,
+        "length_field": "feature_lengths",
+        "mask_field": "attention_mask",
+    },
+}
+
+_VIBEVOICE_ASR_FIELD_SCHEMAS = {
+    "audio": _RAW_AUDIO_FIELD_SCHEMAS["audio"],
+    "input_values": {
+        "sequence_dim": -1,
+        "padding_value": 0.0,
+        "length_field": "input_lengths",
+        "mask_field": "padding_mask",
+    },
+}
+
+_GRANITE_SPEECH_ASR_FIELD_SCHEMAS = {
+    **_WAVEFORM_ASR_FIELD_SCHEMAS,
+    "input_features": {
+        "sequence_dim": -2,
+        "padding_value": 0.0,
+        "length_field": "feature_lengths",
+    },
+    # Granite's encoder mask is downsampled relative to input_features, so it
+    # must retain its processor-native timebase instead of being regenerated
+    # from the feature tensor's length.
+    "input_features_mask": {
+        "sequence_dim": -1,
+        "padding_value": False,
+    },
+}
+
 
 def _transformers_asr_preset_profile(
     model_type: str,
     family: TrainingFamily,
     entrypoint: str,
+    *,
+    field_schemas: Mapping[str, Any] = _RAW_AUDIO_FIELD_SCHEMAS,
 ) -> ModelTrainingSpec:
     """Create one locked preset around the shared native ASR trainer."""
     return _profile(
@@ -1313,7 +1376,7 @@ def _transformers_asr_preset_profile(
                 loss_keys=("loss", ),
             ), ),
         default_phase="speech_recognition",
-        field_schemas=_RAW_AUDIO_FIELD_SCHEMAS,
+        field_schemas=field_schemas,
     )
 
 
@@ -1346,29 +1409,88 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
         field_schemas=_RAW_AUDIO_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
+        "asr_whisper",
+        TrainingFamily.SPEECH_SEQ2SEQ,
+        "transformers.AutoModelForSpeechSeq2Seq",
+        field_schemas=_CHANNEL_FIRST_ASR_FIELD_SCHEMAS,
+    ),
+    _transformers_asr_preset_profile(
+        "asr_tiron",
+        TrainingFamily.SPEECH_SEQ2SEQ,
+        "transformers.AutoModelForSpeechSeq2Seq",
+        field_schemas=_CHANNEL_FIRST_ASR_FIELD_SCHEMAS,
+    ),
+    _transformers_asr_preset_profile(
+        "asr_qwen3",
+        TrainingFamily.SPEECH_SEQ2SEQ,
+        "transformers.AutoModelForMultimodalLM",
+        field_schemas=_QWEN3_ASR_FIELD_SCHEMAS,
+    ),
+    _transformers_asr_preset_profile(
+        "asr_vibevoice",
+        TrainingFamily.SPEECH_SEQ2SEQ,
+        "transformers.AutoModelForMultimodalLM",
+        field_schemas=_VIBEVOICE_ASR_FIELD_SCHEMAS,
+    ),
+    _transformers_asr_preset_profile(
+        "asr_granite_speech",
+        TrainingFamily.SPEECH_SEQ2SEQ,
+        "transformers.GraniteSpeechForConditionalGeneration",
+        field_schemas=_GRANITE_SPEECH_ASR_FIELD_SCHEMAS,
+    ),
+    _transformers_asr_preset_profile(
+        "asr_parakeet_tdt",
+        TrainingFamily.TDT,
+        "transformers.AutoModelForTDT",
+        field_schemas=_TIME_MAJOR_ASR_FIELD_SCHEMAS,
+    ),
+    _transformers_asr_preset_profile(
+        "asr_nemotron",
+        TrainingFamily.RNNT,
+        "transformers.AutoModelForRNNT",
+        field_schemas=_TIME_MAJOR_ASR_FIELD_SCHEMAS,
+    ),
+    _transformers_asr_preset_profile(
+        "asr_cohere",
+        TrainingFamily.SPEECH_SEQ2SEQ,
+        "transformers.AutoModelForSpeechSeq2Seq",
+        field_schemas=_TIME_MAJOR_ASR_FIELD_SCHEMAS,
+    ),
+    _transformers_asr_preset_profile(
+        "asr_medasr",
+        TrainingFamily.CTC,
+        "transformers.AutoModelForCTC",
+        field_schemas=_TIME_MAJOR_ASR_FIELD_SCHEMAS,
+    ),
+    _transformers_asr_preset_profile(
         "asr_wav2vec2",
         TrainingFamily.CTC,
         "transformers.AutoModelForCTC",
+        field_schemas=_WAVEFORM_ASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
         "asr_hubert",
         TrainingFamily.CTC,
         "transformers.AutoModelForCTC",
+        field_schemas=_WAVEFORM_ASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
         "asr_wavlm",
         TrainingFamily.CTC,
         "transformers.AutoModelForCTC",
+        field_schemas=_WAVEFORM_ASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
         "asr_moonshine",
         TrainingFamily.SPEECH_SEQ2SEQ,
         "transformers.AutoModelForSpeechSeq2Seq",
+        field_schemas=_WAVEFORM_ASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
         "asr_seamless_m4t_v2",
         TrainingFamily.SPEECH_SEQ2SEQ,
         "transformers.AutoModelForSpeechSeq2Seq",
+        field_schemas=_TIME_MAJOR_ASR_FIELD_SCHEMAS,
     ),
     _profile(
         "asr_faster_whisper",

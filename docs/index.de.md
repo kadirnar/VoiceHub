@@ -62,7 +62,7 @@ und Diffusionsmodelle, akustische Modelle, adversarielle Systeme im VITS-Stil
 und zusammengesetzte Pipelines behalten ihre eigene Konditionierung, ihre
 Zielgrößen, die Zuständigkeit für Parameter und ihre Exportregeln bei.
 
-Die Registry enthält **34 TTS-Integrationen**, **14 ASR-Anbieter** und **11
+Die Registry enthält **34 TTS-Integrationen**, **23 ASR-Anbieter** und **11
 VAD-Anbieter**. Die Fine-Tuning-Unterstützung hängt vom Checkpoint und von der
 Laufzeitumgebung ab; eine Inferenzintegration bedeutet nicht, dass ihr
 aktuelles VoiceHub-Artefakt differenzierbar ist. Wählen Sie eine Integration

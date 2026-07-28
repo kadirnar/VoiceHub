@@ -61,7 +61,7 @@ sistemler, flow-matching ve difüzyon modelleri, akustik modeller, VITS tarzı
 çekişmeli sistemler ve bileşik pipeline'lar kendi koşullandırma yöntemlerini,
 amaç fonksiyonlarını, parametre sahipliğini ve dışa aktarma kurallarını korur.
 
-Registry **34 TTS entegrasyonu**, **14 ASR sağlayıcısı** ve **11 VAD
+Registry **34 TTS entegrasyonu**, **23 ASR sağlayıcısı** ve **11 VAD
 sağlayıcısı** içerir. İnce ayar desteği kontrol noktasına ve çalışma ortamına
 özeldir; bir çıkarım entegrasyonunun bulunması, mevcut VoiceHub model
 çıktısının türevlenebilir olduğu anlamına gelmez. Uygun entegrasyonu seçmek
