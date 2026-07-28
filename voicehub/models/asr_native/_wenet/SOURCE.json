@@ -1,0 +1,7 @@
+{
+  "license": "Apache-2.0",
+  "model_type": "asr_wenet",
+  "policy": "Only the nine-module TorchScript inference closure used by the upstream Python CLI is vendored. Pretrained runtime archives and the complete WeNet training stack remain external and retain their upstream licenses.",
+  "revision": "fcf26a428a1d5b206cdbb5cab99633b941a6566e",
+  "upstream": "https://github.com/wenet-e2e/wenet"
+}

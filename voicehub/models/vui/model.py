@@ -129,7 +129,9 @@ class MHA(nn.Module):
             k = repeat_kv(k, self.n_reps)
             v = repeat_kv(v, self.n_reps)
 
-        is_causal = self.causal and self.kv_cache is None
+        # A caller-provided mask owns causality as well as padding. PyTorch's
+        # SDPA rejects/varies across versions when both mechanisms are active.
+        is_causal = (self.causal and self.kv_cache is None and attn_mask is None)
 
         out = F.scaled_dot_product_attention(
             q,
@@ -318,13 +320,21 @@ class Decoder(nn.Module):
 
         self.attn_mask = None
 
-    def forward(self, x: Tensor, input_pos: Tensor):
+    def forward(
+        self,
+        x: Tensor,
+        input_pos: Tensor,
+        attn_mask: Tensor | None = None,
+    ):
         if self.use_rotary_emb:
             freqs_cis = self.freqs_cis[input_pos]
+            if input_pos.ndim == 2:
+                freqs_cis = freqs_cis.unsqueeze(1)
         else:
             freqs_cis = None
 
-        attn_mask = (self.attn_mask[None, None, input_pos] if self.attn_mask is not None else None)
+        if attn_mask is None and self.attn_mask is not None:
+            attn_mask = self.attn_mask[None, None, input_pos]
 
         for block in self.blocks:
             x = block(x, freqs_cis=freqs_cis, input_pos=input_pos, attn_mask=attn_mask)

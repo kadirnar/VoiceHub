@@ -270,7 +270,7 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
             raise OptionalDependencyError(
                 f"'asr_transformers' architecture family {family!r} requires "
                 f"a Transformers release exposing `{class_name}`. Upgrade "
-                '`transformers` in `voicehub[asr-transformers]` and retry.')
+                "`voicehub` and retry.")
         return model_class
 
     def _direct_state_dict(self) -> Mapping[str, Any] | None:
@@ -281,7 +281,7 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
             safetensors = import_optional(
                 "safetensors.torch",
                 model_type=self.config.model_type,
-                install_extra="asr-transformers",
+                install_extra=None,
             )
             state_dict = safetensors.load_file(
                 str(weight_file),
@@ -291,7 +291,7 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
             torch = import_optional(
                 "torch",
                 model_type=self.config.model_type,
-                install_extra="asr-transformers",
+                install_extra=None,
             )
             state_dict = torch.load(
                 str(weight_file),
@@ -381,7 +381,7 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
         transformers = import_optional(
             "transformers",
             model_type=self.config.model_type,
-            install_extra="asr-transformers",
+            install_extra=None,
         )
         self.native_config = transformers.AutoConfig.from_pretrained(
             self._transformers_config_source(),
@@ -392,7 +392,7 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
         if processor_class is None:
             raise OptionalDependencyError(
                 "'asr_transformers' requires a Transformers release exposing "
-                "`AutoProcessor`. Upgrade `voicehub[asr-transformers]` and retry.")
+                "`AutoProcessor`. Upgrade `voicehub` and retry.")
         processor_options = {
             **self._hub_kwargs(),
             **self.config.processor_kwargs,
@@ -438,7 +438,7 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
         transformers = import_optional(
             "transformers",
             model_type=self.config.model_type,
-            install_extra="asr-transformers",
+            install_extra=None,
         )
         processor = self.transformers_processor
         if processor is None:
@@ -559,7 +559,14 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
         if generation_options:
             call_options["generate_kwargs"] = generation_options
         if return_timestamps:
-            call_options["return_timestamps"] = return_timestamps
+            timestamp_mode = return_timestamps
+            if family == "ctc":
+                if timestamp_mode is True:
+                    timestamp_mode = "word"
+                if timestamp_mode not in ("char", "word"):
+                    raise ValueError("CTC timestamp mode must be `True`, `'word'`, "
+                                     "`'char'`, or `False`.")
+            call_options["return_timestamps"] = timestamp_mode
         if chunk_length_s is not None:
             call_options["chunk_length_s"] = chunk_length_s
         if stride_length_s is not None:
@@ -782,7 +789,10 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
         return self._normalize_pipeline_output(
             result,
             duration=materialized.duration,
-            timestamp_mode=return_timestamps,
+            timestamp_mode=options.get(
+                "return_timestamps",
+                return_timestamps,
+            ),
             fallback_language=language,
         )
 
@@ -896,6 +906,58 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
             trimmed.append(audio[:length])
         return trimmed
 
+    def _process_training_audio(
+        self,
+        audio: Any,
+        *,
+        sampling_rate: int,
+    ) -> Mapping[str, Any]:
+        """Run the checkpoint processor without assuming its call signature.
+
+        Most Transformers audio processors expose an ``audio`` keyword.
+        A small number of remote-code processors use ``audios`` or only
+        accept a positional waveform. Keeping this compatibility
+        boundary in one place lets architecture presets customize
+        preprocessing without copying the complete raw-batch preparation
+        lifecycle.
+        """
+        processor = self.transformers_processor
+        if processor is None:
+            raise RuntimeError("Training input preparation requires load_for_training().")
+        options = {
+            "sampling_rate": sampling_rate,
+            "padding": True,
+            "return_tensors": "pt",
+        }
+        if self._accepts_keyword(processor, "audio"):
+            encoded = processor(audio=audio, **options)
+        elif self._accepts_keyword(processor, "audios"):
+            encoded = processor(audios=audio, **options)
+        else:
+            encoded = processor(audio, **options)
+        if not isinstance(encoded, Mapping):
+            raise TypeError("The Transformers ASR processor did not return a mapping.")
+        return encoded
+
+    def _tokenize_training_labels(
+        self,
+        text: str | list[str],
+    ) -> Mapping[str, Any]:
+        """Tokenize transcripts using the checkpoint's native tokenizer."""
+        tokenizer = getattr(
+            self.transformers_processor,
+            "tokenizer",
+            self.transformers_processor,
+        )
+        encoded = tokenizer(
+            text,
+            padding=True,
+            return_tensors="pt",
+        )
+        if not isinstance(encoded, Mapping):
+            raise TypeError("The Transformers ASR tokenizer did not return a mapping.")
+        return encoded
+
     def prepare_training_inputs(
         self,
         inputs: dict[str, Any],
@@ -947,11 +1009,9 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
         ]
         processor_audio = waveforms if len(waveforms) > 1 else waveforms[0]
         batch = dict(
-            self.transformers_processor(
+            self._process_training_audio(
                 processor_audio,
                 sampling_rate=self._processor_sample_rate(),
-                padding=True,
-                return_tensors="pt",
             ))
 
         if "labels" in inputs:
@@ -960,17 +1020,8 @@ class TransformersASRForSpeechRecognition(PreTrainedASRModel):
         if text is None:
             return batch
 
-        tokenizer = getattr(
-            self.transformers_processor,
-            "tokenizer",
-            self.transformers_processor,
-        )
         label_text = text_values if text_values is not None else text
-        encoded_labels = tokenizer(
-            label_text,
-            padding=True,
-            return_tensors="pt",
-        )
+        encoded_labels = self._tokenize_training_labels(label_text)
         if not isinstance(encoded_labels, Mapping) or "input_ids" not in encoded_labels:
             raise TypeError("The Transformers ASR tokenizer did not return `input_ids`.")
         labels = encoded_labels["input_ids"]

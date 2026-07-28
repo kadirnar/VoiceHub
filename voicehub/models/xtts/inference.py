@@ -92,12 +92,12 @@ class XTTSForTextToSpeech(PreTrainedTTSModel):
         config_module = import_optional(
             "voicehub.models.xtts.source.TTS.tts.configs.xtts_config",
             model_type="xtts",
-            install_extra="xtts",
+            install_extra=None,
         )
         model_module = import_optional(
             "voicehub.models.xtts.source.TTS.tts.models.xtts",
             model_type="xtts",
-            install_extra="xtts",
+            install_extra=None,
         )
         xtts_config = config_module.XttsConfig()
         xtts_config.load_json(str(model_directory / "config.json"))

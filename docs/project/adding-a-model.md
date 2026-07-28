@@ -58,7 +58,7 @@ The integration path is:
   <li>
     <span class="vh-process__number" aria-hidden="true">03</span>
     <strong>Register the integration</strong>
-    <span class="vh-process__detail">Declare aliases, optional extras, components, and public classes.</span>
+    <span class="vh-process__detail">Declare aliases, default runtime dependencies, components, and public classes.</span>
   </li>
   <li>
     <span class="vh-process__number" aria-hidden="true">04</span>
@@ -307,7 +307,6 @@ class AuroraTTSForTextToSpeech(PreTrainedTTSModel):
         runtime = import_optional(
             "voicehub.models.auroratts.source.aurora.runtime",
             model_type="auroratts",
-            install_extra="auroratts",
         )
         self.model = runtime.from_pretrained(
             self.config.name_or_path,
@@ -450,13 +449,15 @@ If an inference transformation is destructive, branch inside
 `_load_pretrained_model()` while `self.is_training_load` is true. Do not assume
 it can be reversed later.
 
-## 6. Keep optional dependencies lazy
+## 6. Keep runtime imports lazy
 
-Add a model-specific extra to `pyproject.toml`:
+Add the integration's general-purpose runtime libraries to the existing
+default dependency list in `pyproject.toml`:
 
 ```toml
-[project.optional-dependencies]
-auroratts = [
+[project]
+dependencies = [
+  # Existing VoiceHub inference requirements...
   "torch>=2.1",
   "torchaudio>=2.1",
   "transformers>=4.53",
@@ -464,28 +465,37 @@ auroratts = [
 ]
 ```
 
-Users can then install inference and training dependencies together:
+Users receive the new inference runtime through the same stable command:
 
 ```bash
-python -m pip install "voicehub[auroratts,training]"
+python -m pip install voicehub
 ```
 
-The core import must not pull in `torch`, `transformers`, `soundfile`, or even
-`numpy`. Use `import_optional()` at the operation that needs a dependency:
+Add the only runtime feature extra when fine-tuning is required:
+
+```bash
+python -m pip install "voicehub[training]"
+```
+
+Being installed does not make a dependency eager. The core import must not
+pull in `torch`, `transformers`, `soundfile`, or even `numpy`. Use
+`import_optional()` at the operation that needs a dependency:
 
 ```python
 torch = import_optional(
     "torch",
     model_type="auroratts",
-    install_extra="auroratts",
 )
 ```
 
-This produces an actionable `voicehub[auroratts]` installation hint.
+With no `install_extra`, an incomplete environment produces an actionable
+hint to reinstall the complete default runtime. Built-in inference models use
+`ModelSpec.install_extra=None`; the optional field is reserved for
+separately distributed extensions or future setup surfaces.
 
-Do not add the installable upstream TTS project to the extra and do not import
-its top-level package. VoiceHub's source-integration policy requires the
-executable model implementation to live in its isolated
+Do not add the installable upstream TTS project to the dependency list and do
+not import its top-level package. VoiceHub's source-integration policy requires
+the executable model implementation to live in its isolated
 `voicehub.models.auroratts.source` namespace. General-purpose libraries such
 as PyTorch, Transformers, safetensors, audio I/O, and numerical packages may
 remain external.
@@ -545,7 +555,7 @@ ModelSpec(
     "voicehub.models.auroratts.modeling_auroratts",
     "AuroraTTSForTextToSpeech",
     "publisher/aurora-base",
-    "auroratts",
+    None,
     ("text-to-speech", "voice-cloning", "multilingual"),
     "voicehub.models.auroratts.configuration_auroratts",
     "AuroraTTSConfig",
@@ -1013,7 +1023,9 @@ support every model family without duplicating model integrations.
 ## 14. Add the required tests
 
 Follow the repository's `unittest` style and keep optional runtimes mockable.
-The base CI environment intentionally does not install every model extra.
+Some focused CI lanes intentionally use dependency-light test environments,
+even though the published default installation includes every inference
+runtime.
 
 ### Registry and import contract
 
@@ -1026,7 +1038,7 @@ continue to prove:
   `_load_pretrained_model()` are implemented;
 - no forbidden installable TTS package is imported;
 - the vendored source includes `SOURCE.json` and `THIRD_PARTY_LICENSE`;
-- an optional-dependency failure includes the model extra installation hint;
+- an incomplete-runtime failure points to the complete default installation;
 - importing `voicehub` does not load the ML stack.
 
 ### Inference tests
@@ -1097,8 +1109,8 @@ python -m unittest discover -s tests
 python -m mkdocs build --strict
 ```
 
-Install the model extra for real-runtime smoke tests. Contract tests must still
-pass or skip cleanly without unrelated optional packages.
+Use the default installation for real-runtime smoke tests. Contract tests must
+still pass or skip cleanly in dependency-light contributor environments.
 
 ## Pull request checklist
 
@@ -1108,7 +1120,7 @@ pass or skip cleanly without unrelated optional packages.
 - [ ] Generation validation happens before allocation.
 - [ ] Generation returns a valid `TTSOutput` and restores random state.
 - [ ] Inference and training lifecycle transformations are reversible or separated.
-- [ ] Model extra contains every required general-purpose dependency.
+- [ ] Default package metadata contains every required general-purpose inference dependency.
 - [ ] No external installable TTS runtime is imported.
 - [ ] Source revision and all applicable licenses are recorded.
 - [ ] Shared components are registered once.

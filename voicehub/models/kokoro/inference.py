@@ -71,7 +71,7 @@ class KokoroForTextToSpeech(PreTrainedTTSModel):
         pipeline_module = import_optional(
             "voicehub.models.kokoro.pipeline",
             model_type="kokoro",
-            install_extra="kokoro",
+            install_extra=None,
         )
         self.model = pipeline_module.KPipeline(
             lang_code=self.config.language_code,
@@ -79,6 +79,14 @@ class KokoroForTextToSpeech(PreTrainedTTSModel):
             device=self._runtime_device(),
         )
         self.config.sample_rate = KOKORO_SAMPLE_RATE
+
+    def _validate_training_runtime(self) -> None:
+        raise RuntimeError(
+            "Kokoro's published checkpoint and vendored runtime contain the "
+            "decoder-side inference graph only. The StyleTTS2 training "
+            "topology also needs the unreleased style encoder/diffusion, "
+            "alignment, pitch, and discriminator checkpoints; a Kokoro "
+            "inference checkpoint cannot reconstruct those objectives.")
 
     def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
         language_code = self.config.language_code
@@ -133,7 +141,7 @@ class KokoroForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="kokoro",
-            install_extra="kokoro",
+            install_extra=None,
         )
         return finish_audio_output(
             torch.cat(chunks),

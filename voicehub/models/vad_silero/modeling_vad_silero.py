@@ -61,7 +61,7 @@ class SileroVADForVoiceActivityDetection(PreTrainedVADModel):
         silero = import_optional(
             "silero_vad",
             model_type=self.config.model_type,
-            install_extra="vad-silero",
+            install_extra=None,
         )
         loader = getattr(silero, "load_silero_vad", None)
         timestamps = getattr(silero, "get_speech_timestamps", None)
@@ -121,7 +121,7 @@ class SileroVADForVoiceActivityDetection(PreTrainedVADModel):
         torch = import_optional(
             "torch",
             model_type=self.config.model_type,
-            install_extra="vad-silero",
+            install_extra=None,
         )
         waveform = torch.as_tensor(materialized.waveform)
         if not self.config.use_onnx and hasattr(waveform, "to"):

@@ -223,13 +223,13 @@ class MossTTSForTextToSpeech(PreTrainedTTSModel):
             "voicehub.models.mosstts.source.moss_audio_tokenizer."
             "configuration_moss_audio_tokenizer",
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra=None,
         )
         codec_model = import_optional(
             "voicehub.models.mosstts.source.moss_audio_tokenizer."
             "modeling_moss_audio_tokenizer",
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra=None,
         )
         transformers.AutoConfig.register(
             "moss-audio-tokenizer",
@@ -263,17 +263,17 @@ class MossTTSForTextToSpeech(PreTrainedTTSModel):
         configuration = import_optional(
             self._variant_module_path(package, "configuration_moss_tts"),
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra=None,
         )
         modeling = import_optional(
             self._variant_module_path(package, "modeling_moss_tts"),
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra=None,
         )
         processing = import_optional(
             self._variant_module_path(package, "processing_moss_tts"),
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra=None,
         )
         config_class = getattr(configuration, config_class_name)
         model_class = getattr(modeling, model_class_name)
@@ -309,12 +309,12 @@ class MossTTSForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra=None,
         )
         transformers = import_optional(
             "transformers",
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra=None,
         )
         self._register_vendored_architectures(transformers)
         self._variant = self._resolve_variant()
@@ -338,23 +338,23 @@ class MossTTSForTextToSpeech(PreTrainedTTSModel):
             "voicehub.models.mosstts.source.moss_tts_realtime."
             "mossttsrealtime.modeling_mossttsrealtime",
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra=None,
         )
         inferencer = import_optional(
             "voicehub.models.mosstts.source.moss_tts_realtime.inferencer",
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra=None,
         )
         tokenizer_module = import_optional(
             "transformers",
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra=None,
         )
         codec_module = import_optional(
             "voicehub.models.mosstts.source.moss_audio_tokenizer."
             "modeling_moss_audio_tokenizer",
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra=None,
         )
         tokenizer = tokenizer_module.AutoTokenizer.from_pretrained(self.config.name_or_path)
         codec = (

@@ -51,12 +51,12 @@ class LlasaSFTDataset:
                 str(audio_path),
                 sample_rate=self.sample_rate,
                 model_type="llasa",
-                install_extra="llasa",
+                install_extra="training",
             )
             torch = import_optional(
                 "torch",
                 model_type="llasa",
-                install_extra="llasa",
+                install_extra="training",
             )
             device = next(self.codec.parameters()).device
             with torch.inference_mode():

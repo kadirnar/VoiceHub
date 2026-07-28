@@ -22,10 +22,10 @@ provide raw-data preparation.
 | --- | --- | --- |
 | Orpheus-TTS (`orpheustts`) | **End-to-end / raw data** | Text plus 24 kHz audio, or precomputed SNAC codes, is framed as the author-style causal codec sequence. SNAC remains frozen; train the unquantized language model. |
 | Dia (`dia`) | **End-to-end / raw data** | Uses the official Transformers `DiaForConditionalGeneration` loss and `DiaProcessor` labels from text/audio records. Only the converted `Dia-1.6B-0626`-style Transformers checkpoint is trainable; the original Nari runtime is inference-only. |
-| Vui (`vui`) | **Unavailable** | The integrated generation runtime has no verified current 300M training objective or target schema. |
+| Vui (`vui`) | **Preprocessed recipe** | Implements delayed-codebook, teacher-forced causal cross-entropy for Fluac codec IDs. Callers provide text token IDs, codec codes, and optional sequence masks/lengths; the codec stays frozen. |
 | Chatterbox (`chatterbox`) | **Unavailable** | T3 and S3Gen flow require distinct source-native objectives. The declared custom recipe is gated because the inference graph is not a faithful trainer for either phase. |
 | Kokoro (`kokoro`) | **Unavailable** | The released inference path does not expose the alignment, duration, and acoustic training graph. |
-| Echo-TTS (`echo`) | **Unavailable** | No preserved and verified flow-training graph is integrated; the serving checkpoint path is inference-oriented. |
+| Echo-TTS (`echo`) | **Preprocessed recipe** | Implements the released rectified-flow velocity objective over target/noise latents with text and speaker conditioning. Callers provide source-shaped codec latents and masks; the Fish codec remains frozen. |
 | ConversationTTS (`conversationtts`) | **Preprocessed recipe** | Implements the exact codebook-zero and residual masked cross-entropies. Batches must provide `tokens`, `labels`, and `tokens_mask`. |
 | LLaSA (`llasa`) | **End-to-end / raw data** | Text plus audio, or precomputed XCodec2 codes, is converted to completion-only codec-LM labels. XCodec2 is frozen. |
 | CosyVoice (`cosyvoice`) | **Specialized / partial** | One source-native component is trained per run. LLM and flow objectives are integrated for source-shaped batches; HiFT/HiFi-GAN still requires the upstream training-only generator, discriminator, and mel graph. JIT, TensorRT, and vLLM serving paths are rejected. |
@@ -39,18 +39,30 @@ provide raw-data preparation.
 | MOSS-TTS (`mosstts`) | **Preprocessed recipe** | Delay, Local, and Realtime use their native LM losses. Local v1.5 uses the integrated channel-wise text/audio objective and source dataset, but target `audio_codes` must be prepared first. |
 | Qwen3-TTS (`qwen3tts`) | **Preprocessed recipe** | Implements the official 12 Hz Base single-speaker SFT objective for talker and code predictor. The registered training default is `Qwen/Qwen3-TTS-12Hz-1.7B-Base`, distinct from the inference-oriented default. Records require text, 16-codebook target `audio_codes`, and 24 kHz reference audio. CustomVoice and VoiceDesign are export/inference targets, not SFT starting checkpoints. |
 | Irodori-TTS (`irodoritts`) | **Specialized / partial** | The flow objective is available for model-ready velocity targets and conditioning. Duration-model training is a separate, unimplemented objective. |
-| Zonos 1 (`zonos`) | **Unavailable** | No verified causal multi-codebook training objective, delay layout, and conditioning recipe is integrated. |
+| Zonos 1 (`zonos`) | **Preprocessed recipe** | Implements the released delay pattern and teacher-forced multi-codebook causal cross-entropy. Callers provide prefix conditioning and DAC code tensors; the autoencoder remains frozen. |
 | ZONOS2 (`zonos2`) | **Unavailable** | The fused raw-tensor generation engine is not a differentiable PyTorch training graph. |
 | VoxCPM (`voxcpm`) | **Preprocessed recipe** | The training-safe runtime exposes the source diffusion and stop losses, disables inference optimization, and freezes the AudioVAE according to source policy. Batch construction remains VoxCPM-specific. |
 | OmniVoice (`omnivoice`) | **Preprocessed recipe** | The direct training model supplies its masked text/audio objective. Callers provide codebook-first/time-last inputs and labels; VoiceHub owns their padding schema. |
 | Higgs Audio (`higgstts`) | **Specialized / partial** | ChatML text/audio records use the vendored preparation and collator with a frozen audio tokenizer. VoiceHub implements token-normalized causal text and per-codebook audio losses, but Boson AI has not published an author-verified fine-tuning loop, so this reconstructed recipe is experimental. |
 | XTTS v2 (`xtts`) | **Specialized / partial** | The author-supported GPT fine-tune is integrated from raw XTTS metadata/audio, including frozen DVAE preprocessing, weighted text/mel-code losses, optimizer, and scheduler. DVAE and vocoder/adversarial training are not supported. |
-| VibeVoice (`vibevoice`) | **Unavailable** | The integrated realtime 0.5B runtime raises from training `forward`; the separate non-streaming community recipe is not wired as a verified VoiceHub path. |
+| VibeVoice (`vibevoice`) | **Preprocessed recipe** | The non-streaming `microsoft/VibeVoice-1.5B` checkpoint uses its native masked language-model plus diffusion graph and frozen acoustic/semantic tokenizers. Callers provide the source recipe's token, speech-latent, and acoustic-mask tensors. The default realtime 0.5B checkpoint remains inference-only. |
 | Fish Speech S2 (`fishtts`) | **Preprocessed recipe** | The semantic transformer supports the exact base and residual codebook losses from Fish protobuf data or pretokenized channel-first records. The codec is an offline frozen tokenizer, not a trainable phase. |
 | Sesame CSM (`csm`) | **End-to-end / raw data** | Uses the official Transformers CSM model, processor-generated audio-frame labels, and native backbone/depth-decoder loss from conversation or text/audio records. Mimi is frozen. |
 | NeuTTS (`neutts`) | **End-to-end / raw data** | Text plus audio, or precomputed NeuCodec codes, is converted to completion-only labels for the HF backbone. GGUF backbones are inference-only; an attached frozen ONNX decoder does not block HF-backbone training. |
 | Supertonic (`supertonic`) | **Unavailable** | The published integration is ONNX-only and cannot receive gradients. |
 | Inflect (`inflecttts`) | **Unavailable** | The released artifact is inference-only and omits the posterior/discriminator state required for a complete VITS recipe. |
+| Bark (`bark`) | **Preprocessed recipe** | VoiceHub computes stage-aligned cross-entropy from the semantic, coarse-acoustic, and fine-acoustic Transformers submodel logits. The caller must provide stage-aligned token IDs, labels, masks, and the fine-codebook index; audio tokenization remains an offline dataset step, and this is not end-to-end raw-audio fine-tuning. |
+| SpeechT5 (`speecht5`) | **End-to-end / raw data** | Uses the native Transformers spectrogram and stop-token losses. Text/audio records are processed into labels and an optional speaker embedding; the HiFi-GAN vocoder remains frozen. |
+| VITS / MMS-TTS (`vits`) | **Specialized / partial** | The shared Trainer can run VoiceHub's waveform-only reconstruction experiment when `enable_experimental_reconstruction_training=True`. This explicit opt-in is not full VITS fine-tuning: Transformers does not expose the source posterior, duration, KL, discriminator, feature-matching, or adversarial recipe. |
+| Wav2Vec2 ASR (`asr_wav2vec2`) | **End-to-end / raw data** | Uses the native Transformers CTC graph and processor with correctly padded labels. |
+| HuBERT ASR (`asr_hubert`) | **End-to-end / raw data** | Uses the native Transformers CTC graph and processor with correctly padded labels. |
+| WavLM ASR (`asr_wavlm`) | **End-to-end / raw data** | Uses the native Transformers CTC graph and processor with correctly padded labels. |
+| Moonshine ASR (`asr_moonshine`) | **End-to-end / raw data** | Uses the native teacher-forced speech sequence-to-sequence loss and processor. |
+| SeamlessM4T v2 ASR (`asr_seamless_m4t_v2`) | **End-to-end / raw data** | Uses the native multilingual speech sequence-to-sequence loss, processor, and explicit target-language contract. |
+| Auditok VAD (`vad_auditok`) | **Unavailable** | Deterministic energy detector with no trainable graph. |
+| Sherpa-ONNX VAD (`vad_sherpa_onnx`) | **Unavailable** | Silero and TEN artifacts are loaded as ONNX inference graphs; fine-tune their source checkpoints before export. |
+| pyannote segmentation (`vad_pyannote_segmentation`) | **Specialized / partial** | Inference is normalized by VoiceHub; fine-tuning remains owned by pyannote's task, protocol, data, and trainer stack. |
+| pyannote Brouhaha (`vad_pyannote_brouhaha`) | **Specialized / partial** | The multi-task speech/SNR/C50 objective and data recipe remain owned by pyannote upstream. |
 
 ## Safetensors, GGUF, and resume semantics
 

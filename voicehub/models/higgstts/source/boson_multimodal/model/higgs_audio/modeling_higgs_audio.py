@@ -16,13 +16,18 @@ from transformers import AutoTokenizer
 from transformers.modeling_outputs import BaseModelOutput
 from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
 from transformers.models.llama.modeling_llama import (
+    LlamaAttention,
     LlamaDecoderLayer,
-    LlamaRMSNorm,
-    LlamaRotaryEmbedding,
-    LLAMA_ATTENTION_CLASSES,
     LlamaMLP,
     LlamaRMSNorm,
+    LlamaRotaryEmbedding,
 )
+try:
+    from transformers.models.llama.modeling_llama import LLAMA_ATTENTION_CLASSES
+except ImportError:
+    # Transformers 5 uses one attention module and selects the backend from
+    # config._attn_implementation inside LlamaAttention.forward().
+    LLAMA_ATTENTION_CLASSES = None
 from transformers.modeling_attn_mask_utils import AttentionMaskConverter
 from transformers.cache_utils import Cache, DynamicCache, StaticCache
 from transformers.generation import GenerationMixin, GenerationConfig, LogitsProcessorList, StoppingCriteriaList
@@ -40,6 +45,16 @@ from .cuda_graph_runner import CUDAGraphRunner
 from .audio_head import HiggsAudioDecoderProjector
 
 logger = logging.get_logger(__name__)
+
+
+def _build_llama_attention(config, layer_idx, implementation):
+    """Create a Llama attention layer across Transformers 4 and 5."""
+    attention_class = (
+        LlamaAttention
+        if LLAMA_ATTENTION_CLASSES is None
+        else LLAMA_ATTENTION_CLASSES[implementation]
+    )
+    return attention_class(config=config, layer_idx=layer_idx)
 
 
 class GenerationMode(Enum):
@@ -401,14 +416,16 @@ class HiggsAudioDualFFNDecoderLayer(nn.Module):
         text_config = config.text_config
         self.hidden_size = text_config.hidden_size
         self.layer_idx = layer_idx
-        self.self_attn = LLAMA_ATTENTION_CLASSES[config._attn_implementation](config=text_config, layer_idx=layer_idx)
+        self.self_attn = _build_llama_attention(text_config, layer_idx, config._attn_implementation)
 
         self.mlp = LlamaMLP(text_config)
 
         if not fast_forward:
             if use_audio_attention:
-                self.audio_attn = LLAMA_ATTENTION_CLASSES[config._attn_implementation](
-                    config=text_config, layer_idx=layer_idx + 1
+                self.audio_attn = _build_llama_attention(
+                    text_config,
+                    layer_idx + 1,
+                    config._attn_implementation,
                 )
                 self.audio_post_audio_attn_layer_norm = LlamaRMSNorm(
                     text_config.hidden_size, eps=text_config.rms_norm_eps

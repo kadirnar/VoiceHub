@@ -176,7 +176,7 @@ class ConversationTTSTrainingAdapter(
             "voicehub.models.conversationtts.source.conversationtts."
             "models.model_new",
             model_type="conversationtts",
-            install_extra="conversationtts",
+            install_extra="training",
         )
         labels = prepared["labels"]
         zero_labels = labels[..., 0]
@@ -311,7 +311,7 @@ class F5TTSTrainingAdapter(
         safetensors = import_optional(
             "safetensors.torch",
             model_type="f5tts",
-            install_extra="f5tts",
+            install_extra="training",
         )
         state = self.primary_model.state_dict()
         ema_state = self._ema.state_dict()["shadow"]
@@ -349,7 +349,7 @@ class MossTTSTrainingAdapter(
             "voicehub.models.mosstts.source.moss_tts_local_v1_5."
             "finetuning.dataset",
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra="training",
         )
         return dataset_module.MossTTSLocalV15SFTDataset(
             records,
@@ -364,7 +364,7 @@ class MossTTSTrainingAdapter(
         torch = import_optional(
             "torch",
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra="training",
         )
         decay = []
         no_decay = []
@@ -453,7 +453,7 @@ class MossTTSTrainingAdapter(
         torch = import_optional(
             "torch",
             model_type="mosstts",
-            install_extra="mosstts",
+            install_extra="training",
         )
         functional = torch.nn.functional
         model = self.primary_model
@@ -595,7 +595,7 @@ class Qwen3TTSTrainingAdapter(
         training = import_optional(
             "voicehub.models.qwen3tts.training",
             model_type="qwen3tts",
-            install_extra="qwen3tts",
+            install_extra="training",
         )
         return training.Qwen3TTSSFTDataset(
             records,
@@ -789,6 +789,39 @@ def _csm_adapter(model, spec):
     return CSMTrainingAdapter(model, spec)
 
 
+def _echo_adapter(model, spec):
+    from voicehub.models.echo.training import EchoTrainingAdapter
+
+    return EchoTrainingAdapter(model, spec)
+
+
+def _vui_adapter(model, spec):
+    from voicehub.models.vui.training import VuiTrainingAdapter
+
+    return VuiTrainingAdapter(model, spec)
+
+
+def _zonos_adapter(model, spec):
+    from voicehub.models.zonos.training import ZonosTrainingAdapter
+
+    return ZonosTrainingAdapter(model, spec)
+
+
+def _vibevoice_adapter(model, spec):
+    from voicehub.models.vibevoice.training import VibeVoiceTrainingAdapter
+
+    return VibeVoiceTrainingAdapter(model, spec)
+
+
+def _vits_adapter(model, spec):
+    # Keep the experimental reconstruction recipe model-local. The generic
+    # VITS family adapter must continue to require an architecture-specific
+    # implementation of the complete adversarial objective.
+    from voicehub.models.vits.training import VitsReconstructionTrainingAdapter
+
+    return VitsReconstructionTrainingAdapter(model, spec)
+
+
 def _transformers_asr_adapter(model, spec):
     # Keep Transformers optional until this provider is selected.
     from voicehub.models.asr_transformers.training_asr_transformers import TransformersASRTrainingAdapter
@@ -818,6 +851,16 @@ BUILTIN_MODEL_ADAPTERS = {
     "xtts": XTTSTrainingAdapter,
     "fishtts": _fish_speech_adapter,
     "csm": _csm_adapter,
+    "echo": _echo_adapter,
+    "vui": _vui_adapter,
+    "zonos": _zonos_adapter,
+    "vibevoice": _vibevoice_adapter,
+    "vits": _vits_adapter,
     "asr_transformers": _transformers_asr_adapter,
+    "asr_wav2vec2": _transformers_asr_adapter,
+    "asr_hubert": _transformers_asr_adapter,
+    "asr_wavlm": _transformers_asr_adapter,
+    "asr_moonshine": _transformers_asr_adapter,
+    "asr_seamless_m4t_v2": _transformers_asr_adapter,
     "vad_transformers": _transformers_vad_adapter,
 }

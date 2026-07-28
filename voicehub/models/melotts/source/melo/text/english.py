@@ -9,8 +9,7 @@ from .english_utils.abbreviations import expand_abbreviations
 from .english_utils.time_norm import expand_time_english
 from .english_utils.number_norm import normalize_numbers
 from .japanese import distribute_phone
-
-from transformers import AutoTokenizer
+from .tokenizer_utils import get_tokenizer
 
 current_file_path = os.path.dirname(__file__)
 CMU_DICT_PATH = os.path.join(current_file_path, "cmudict.rep")
@@ -186,9 +185,10 @@ def text_normalize(text):
     return text
 
 model_id = 'bert-base-uncased'
-tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+
 def g2p_old(text):
-    tokenized = tokenizer.tokenize(text)
+    tokenized = get_tokenizer(model_id).tokenize(text)
     # import pdb; pdb.set_trace()
     phones = []
     tones = []
@@ -216,7 +216,7 @@ def g2p_old(text):
 
 def g2p(text, pad_start_end=True, tokenized=None):
     if tokenized is None:
-        tokenized = tokenizer.tokenize(text)
+        tokenized = get_tokenizer(model_id).tokenize(text)
     # import pdb; pdb.set_trace()
     phs = []
     ph_groups = []

@@ -5,7 +5,7 @@ import re
 from . import symbols
 from .fr_phonemizer import cleaner as fr_cleaner
 from .fr_phonemizer import fr_to_ipa
-from transformers import AutoTokenizer
+from .tokenizer_utils import get_tokenizer
 
 
 def distribute_phone(n_phone, n_word):
@@ -21,11 +21,10 @@ def text_normalize(text):
     return text
 
 model_id = 'dbmdz/bert-base-french-europeana-cased'
-tokenizer = AutoTokenizer.from_pretrained(model_id)
 
 def g2p(text, pad_start_end=True, tokenized=None):
     if tokenized is None:
-        tokenized = tokenizer.tokenize(text)
+        tokenized = get_tokenizer(model_id).tokenize(text)
     # import pdb; pdb.set_trace()
     phs = []
     ph_groups = []

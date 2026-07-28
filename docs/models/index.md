@@ -4,50 +4,53 @@ This page covers text-to-speech backends. For automatic speech recognition
 and voice activity detection, see the
 [ASR and VAD support matrix](asr-vad-support.md).
 
-VoiceHub ships the model implementation source inside its own wheel. Extras
-install only general runtimes such as PyTorch, Transformers, phonemizers, and
-audio I/O libraries. They never install a separate TTS implementation package.
-Model checkpoints are still downloaded lazily or supplied as local paths.
+VoiceHub ships model implementation source and every built-in inference
+runtime dependency in its default installation. It never installs a separate
+TTS implementation package. Model checkpoints are still downloaded lazily or
+supplied as local paths.
 
 ## Choose a model
 
 Start from the capability you need, then inspect the exact checkpoint and
-conditioning contract before loading weights. The optional extra matches the
-registry key.
+conditioning contract before loading weights. Every entry below is available
+after `python -m pip install voicehub`.
 
-| Model type | Good fit | Install extra |
-| --- | --- | --- |
-| `orpheustts` | Expressive speech | `voicehub[orpheustts]` |
-| `dia` | Multi-speaker dialogue | `voicehub[dia]` |
-| `vui` | Compact text to speech | `voicehub[vui]` |
-| `chatterbox` | Voice cloning | `voicehub[chatterbox]` |
-| `kokoro` | Lightweight multilingual speech | `voicehub[kokoro]` |
-| `echo` | Reference-conditioned cloning | `voicehub[echo]` |
-| `conversationtts` | Multilingual conversation | `voicehub[conversationtts]` |
-| `llasa` | Multilingual codec-LM cloning | `voicehub[llasa]` |
-| `cosyvoice` | Cloning, multilingual speech, streaming | `voicehub[cosyvoice]` |
-| `f5tts` | Flow-matching voice cloning | `voicehub[f5tts]` |
-| `gptsovits` | Few-shot multilingual cloning | `voicehub[gptsovits]` |
-| `melotts` | Fast multilingual synthesis | `voicehub[melotts]` |
-| `openvoice` | Cross-lingual voice transfer | `voicehub[openvoice]` |
-| `outetts` | Speaker profiles and multiple runtimes | `voicehub[outetts]` |
-| `parlertts` | Natural-language style control | `voicehub[parlertts]` |
-| `styletts2` | Style diffusion and voice cloning | `voicehub[styletts2]` |
-| `mosstts` | Delay, local, and realtime generation | `voicehub[mosstts]` |
-| `qwen3tts` | Custom voices, design, and cloning | `voicehub[qwen3tts]` |
-| `irodoritts` | Reference and caption conditioning | `voicehub[irodoritts]` |
-| `zonos` | Multilingual voice cloning | `voicehub[zonos]` |
-| `zonos2` | Batched mixture-of-experts synthesis | `voicehub[zonos2]` |
-| `voxcpm` | Streaming voice cloning | `voicehub[voxcpm]` |
-| `omnivoice` | Multilingual cloning and voice design | `voicehub[omnivoice]` |
-| `higgstts` | Expressive long-form generation | `voicehub[higgstts]` |
-| `xtts` | Multilingual voice cloning | `voicehub[xtts]` |
-| `vibevoice` | Realtime cached-voice generation | `voicehub[vibevoice]` |
-| `fishtts` | Multilingual semantic-token cloning | `voicehub[fishtts]` |
-| `csm` | Conversational speaker context | `voicehub[csm]` |
-| `neutts` | Compact local and multilingual variants | `voicehub[neutts]` |
-| `supertonic` | Fast multilingual ONNX inference | `voicehub[supertonic]` |
-| `inflecttts` | Compact local synthesis | `voicehub[inflecttts]` |
+| Model type | Good fit |
+| --- | --- |
+| `orpheustts` | Expressive speech |
+| `dia` | Multi-speaker dialogue |
+| `vui` | Compact text to speech |
+| `chatterbox` | Voice cloning |
+| `kokoro` | Lightweight multilingual speech |
+| `echo` | Reference-conditioned cloning |
+| `conversationtts` | Multilingual conversation |
+| `llasa` | Multilingual codec-LM cloning |
+| `cosyvoice` | Cloning, multilingual speech, streaming |
+| `f5tts` | Flow-matching voice cloning |
+| `gptsovits` | Few-shot multilingual cloning |
+| `melotts` | Fast multilingual synthesis |
+| `openvoice` | Cross-lingual voice transfer |
+| `outetts` | Speaker profiles and multiple runtimes |
+| `parlertts` | Natural-language style control |
+| `styletts2` | Style diffusion and voice cloning |
+| `mosstts` | Delay, local, and realtime generation |
+| `qwen3tts` | Custom voices, design, and cloning |
+| `irodoritts` | Reference and caption conditioning |
+| `zonos` | Multilingual voice cloning |
+| `zonos2` | Batched mixture-of-experts synthesis |
+| `voxcpm` | Streaming voice cloning |
+| `omnivoice` | Multilingual cloning and voice design |
+| `higgstts` | Expressive long-form generation |
+| `xtts` | Multilingual voice cloning |
+| `vibevoice` | Realtime cached-voice generation |
+| `fishtts` | Multilingual semantic-token cloning |
+| `csm` | Conversational speaker context |
+| `neutts` | Compact local and multilingual variants |
+| `supertonic` | Fast multilingual ONNX inference |
+| `inflecttts` | Compact local synthesis |
+| `bark` | Expressive prompt- and preset-conditioned generation |
+| `speecht5` | Speaker-embedding-conditioned Transformers synthesis |
+| `vits` | VITS and 1,100+ MMS-TTS language checkpoints |
 
 Training capability is checkpoint-aware. Check the
 [training support matrix](training-support.md) before selecting an artifact or
@@ -107,6 +110,9 @@ call `model.load()` once during service startup to warm the checkpoint.
 | `neutts` | NeuTTS + NeuCodec + Perth | Vendored (custom model license) |
 | `supertonic` | Supertonic 3 ONNX runtime | Vendored |
 | `inflecttts` | Inflect Micro/Nano v2 | Vendored |
+| `bark` | Native Hugging Face Transformers Bark graph | External Transformers checkpoint |
+| `speecht5` | Native Hugging Face Transformers SpeechT5 + HiFi-GAN | External Transformers checkpoints |
+| `vits` | Native Hugging Face Transformers VITS/MMS-TTS graph | External Transformers checkpoint |
 
 Each vendored directory contains `SOURCE.json` and `THIRD_PARTY_LICENSE`.
 `scripts/vendor_tts_sources.py` rebuilds deterministic snapshots from pinned
@@ -127,6 +133,9 @@ The current backends keep checkpoint variants behind one architecture key:
 | `higgstts` | Higgs Audio v2/v2.5 source architecture |
 | `neutts` | Air, Nano, multilingual Nano, and 2E backbones |
 | `inflecttts` | Inflect Micro v2 and Nano v2 |
+| `bark` | Bark small/large checkpoints and semantic, coarse, and fine token stages |
+| `speecht5` | SpeechT5 TTS checkpoints with configurable HiFi-GAN and speaker embeddings |
+| `vits` | VITS-compatible checkpoints, including Meta's multilingual MMS-TTS collection |
 
 Model weights, cached voice prompts, preset speaker embeddings, and ONNX
 graphs are not embedded in the wheel. They are resolved from a checkpoint

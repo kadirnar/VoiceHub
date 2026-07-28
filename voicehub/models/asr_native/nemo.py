@@ -52,7 +52,7 @@ class NeMoASRForSpeechRecognition(PreTrainedASRModel):
         nemo_asr = import_optional(
             "nemo.collections.asr",
             model_type=self.config.model_type,
-            install_extra="asr-nemo",
+            install_extra=None,
         )
         model_class = getattr(nemo_asr.models, self.config.model_class, None)
         if model_class is None:

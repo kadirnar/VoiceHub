@@ -91,6 +91,18 @@ class TrainerCallback:
     def on_train_end(self, args, state, control, **kwargs):
         return control
 
+    def on_train_error(self, args, state, control, **kwargs):
+        """Handle cleanup after an exception escapes the training loop."""
+        return control
+
+    def requires_final_model(self, args, state) -> bool:
+        """Return whether this callback needs a portable final artifact."""
+        return False
+
+    def on_final_model_saved(self, args, state, control, **kwargs):
+        """Run after a fresh portable final artifact has been saved."""
+        return control
+
     def on_epoch_begin(self, args, state, control, **kwargs):
         return control
 
@@ -113,6 +125,10 @@ class TrainerCallback:
         return control
 
     def on_save(self, args, state, control, **kwargs):
+        return control
+
+    def on_checkpoint_saved(self, args, state, control, **kwargs):
+        """Run after an atomic Trainer checkpoint has completed."""
         return control
 
     def on_log(self, args, state, control, **kwargs):
@@ -323,6 +339,28 @@ class CallbackHandler:
     def on_train_end(self, args, state, control):
         return self.call_event("on_train_end", args, state, control)
 
+    def on_train_error(self, args, state, control, error):
+        return self.call_event(
+            "on_train_error",
+            args,
+            state,
+            control,
+            error=error,
+        )
+
+    def requires_final_model(self, args, state) -> bool:
+        """Return whether any callback requested a portable final artifact."""
+        return any(callback.requires_final_model(args, state) for callback in self.callbacks)
+
+    def on_final_model_saved(self, args, state, control, final_model_path):
+        return self.call_event(
+            "on_final_model_saved",
+            args,
+            state,
+            control,
+            final_model_path=final_model_path,
+        )
+
     def on_epoch_begin(self, args, state, control):
         control._new_epoch()
         return self.call_event("on_epoch_begin", args, state, control)
@@ -362,6 +400,15 @@ class CallbackHandler:
     def on_save(self, args, state, control):
         control.should_save = False
         return self.call_event("on_save", args, state, control)
+
+    def on_checkpoint_saved(self, args, state, control, checkpoint_path):
+        return self.call_event(
+            "on_checkpoint_saved",
+            args,
+            state,
+            control,
+            checkpoint_path=checkpoint_path,
+        )
 
     def on_log(self, args, state, control, logs):
         control.should_log = False

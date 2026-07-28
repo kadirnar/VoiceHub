@@ -51,13 +51,22 @@ class InflectTTSForTextToSpeech(PreTrainedTTSModel):
         runtime = import_optional(
             "voicehub.models.inflecttts.source.inflect.inference",
             model_type="inflecttts",
-            install_extra="inflecttts",
+            install_extra=None,
         )
         self.model = runtime.InflectTTS(
             model_directory,
             device=self.device,
         )
         self.config.sample_rate = int(self.model.sample_rate)
+
+    def _validate_training_runtime(self) -> None:
+        raise RuntimeError(
+            "Inflect v2 is published as an inference-first VITS artifact. Its "
+            "configuration sets `inference_only=true`, and the checkpoint "
+            "omits the posterior encoder required by the native VITS "
+            "alignment, KL, and adversarial objectives. Fine-tuning requires "
+            "the author's full generator/discriminator training checkpoint, "
+            "not the deployable model.pth file.")
 
     def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
         speed = model_inputs.get("speed", 1.0)

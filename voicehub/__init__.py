@@ -23,6 +23,7 @@ from voicehub.inference_strategy import (
     register_inference_strategy,
     unregister_inference_strategy,
 )
+from voicehub.integrations import WandbCallback
 from voicehub.modeling_outputs import (
     ASROutput,
     ASRSegment,
@@ -187,6 +188,7 @@ __all__ = [
     "VoiceHubError",
     "VoiceHubProcessor",
     "VITSTrainingAdapter",
+    "WandbCallback",
     "__version__",
     "default_data_collator",
     "get_model_spec",

@@ -42,7 +42,7 @@ class WebRTCVADForVoiceActivityDetection(PreTrainedVADModel):
         webrtcvad = import_optional(
             "webrtcvad",
             model_type=self.config.model_type,
-            install_extra="vad-webrtc",
+            install_extra=None,
         )
         self._vad_class = getattr(webrtcvad, "Vad", None)
         if not callable(self._vad_class):
@@ -89,7 +89,7 @@ class WebRTCVADForVoiceActivityDetection(PreTrainedVADModel):
         np = import_optional(
             "numpy",
             model_type=self.config.model_type,
-            install_extra="vad-webrtc",
+            install_extra=None,
         )
         frame_samples = round(materialized.sampling_rate * self.config.frame_duration_ms / 1000)
         if window_size_samples is not None and window_size_samples != frame_samples:

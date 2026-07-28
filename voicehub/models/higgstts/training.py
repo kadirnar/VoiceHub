@@ -117,13 +117,13 @@ class HiggsTrainingBackend:
         cache_module = import_optional(
             "transformers.cache_utils",
             model_type="higgstts",
-            install_extra="higgstts",
+            install_extra="training",
         )
         serve_module = import_optional(
             "voicehub.models.higgstts.source.boson_multimodal.serve."
             "serve_engine",
             model_type="higgstts",
-            install_extra="higgstts",
+            install_extra="training",
         )
 
         config = self.model.config
@@ -199,30 +199,30 @@ def load_higgs_training_backend(
     torch = import_optional(
         "torch",
         model_type="higgstts",
-        install_extra="higgstts",
+        install_extra="training",
     )
     transformers = import_optional(
         "transformers",
         model_type="higgstts",
-        install_extra="higgstts",
+        install_extra="training",
     )
     model_module = import_optional(
         "voicehub.models.higgstts.source.boson_multimodal.model."
         "higgs_audio",
         model_type="higgstts",
-        install_extra="higgstts",
+        install_extra="training",
     )
     audio_tokenizer_module = import_optional(
         "voicehub.models.higgstts.source.boson_multimodal."
         "audio_processing.higgs_audio_tokenizer",
         model_type="higgstts",
-        install_extra="higgstts",
+        install_extra="training",
     )
     collator_module = import_optional(
         "voicehub.models.higgstts.source.boson_multimodal."
         "data_collator.higgs_audio_collator",
         model_type="higgstts",
-        install_extra="higgstts",
+        install_extra="training",
     )
 
     dtype = _resolve_training_dtype(torch, torch_dtype, device)
@@ -300,13 +300,13 @@ class HiggsSFTDataset:
         torch = import_optional(
             "torch",
             model_type="higgstts",
-            install_extra="higgstts",
+            install_extra="training",
         )
         dataset_module = import_optional(
             "voicehub.models.higgstts.source.boson_multimodal.dataset."
             "chatml_dataset",
             model_type="higgstts",
-            install_extra="higgstts",
+            install_extra="training",
         )
         record = self.records[index]
         if isinstance(record, dataset_module.ChatMLDatasetSample):
@@ -394,7 +394,7 @@ class HiggsSFTDataset:
         librosa = import_optional(
             "librosa",
             model_type="higgstts",
-            install_extra="higgstts",
+            install_extra="training",
         )
         if getattr(content, "raw_audio", None):
             payload = str(content.raw_audio)
@@ -566,7 +566,7 @@ class HiggsTrainingAdapter(CausalLMTrainingAdapter):
         torch = import_optional(
             "torch",
             model_type="higgstts",
-            install_extra="higgstts",
+            install_extra="training",
         )
         functional = torch.nn.functional
         losses: dict[str, Any] = {}

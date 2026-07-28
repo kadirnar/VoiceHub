@@ -3,13 +3,13 @@
 import re
 import unicodedata
 
-from transformers import AutoTokenizer
-
 from . import symbols
+from .tokenizer_utils import get_tokenizer
 punctuation = ["!", "?", "…", ",", ".", "'", "-"]
 
 try:
     import MeCab
+    import unidic_lite
 except ImportError as e:
     raise ImportError("Japanese requires mecab-python3 and unidic-lite.") from e
 from num2words import num2words
@@ -364,32 +364,37 @@ def hira2kata(text: str) -> str:
 
 _SYMBOL_TOKENS = set(list("・、。？！"))
 _NO_YOMI_TOKENS = set(list("「」『』―（）［］[]"))
-_TAGGER = MeCab.Tagger()
+_TAGGER = MeCab.Tagger(
+    f'-r "{unidic_lite.DICDIR}/mecabrc" -d "{unidic_lite.DICDIR}"'
+)
 
 
 def text2kata(text: str) -> str:
     parsed = _TAGGER.parse(text)
     res = []
     for line in parsed.split("\n"):
-        if line == "EOS":
+        if not line or line == "EOS":
             break
         parts = line.split("\t")
+        word = parts[0]
+        reading = ""
+        if len(parts) >= 3:
+            # UniDic emits the kana reading as the first feature column.
+            reading = parts[1]
+        elif len(parts) == 2:
+            # Preserve compatibility with the legacy IPA dictionary format.
+            features = parts[1].split(",")
+            if len(features) > 6 and features[6] != "*":
+                reading = features[6]
 
-        word, yomi = parts[0], parts[1]
-        if yomi:
-            try:
-                res.append(yomi.split(',')[6])
-            except:
-                import pdb; pdb.set_trace()
-        else:
-            if word in _SYMBOL_TOKENS:
-                res.append(word)
-            elif word in ("っ", "ッ"):
-                res.append("ッ")
-            elif word in _NO_YOMI_TOKENS:
-                pass
-            else:
-                res.append(word)
+        if reading:
+            res.append(reading)
+        elif word in _SYMBOL_TOKENS:
+            res.append(word)
+        elif word in ("っ", "ッ"):
+            res.append("ッ")
+        elif word not in _NO_YOMI_TOKENS:
+            res.append(word)
     return hira2kata("".join(res))
 
 
@@ -537,20 +542,19 @@ def replace_punctuation(text):
     return replaced_text
 
 from pykakasi import kakasi
-# Initialize kakasi object
-kakasi = kakasi()
-# Set options for converting Chinese characters to Katakana
-kakasi.setMode("J", "K")  # Chinese to Katakana
-kakasi.setMode("H", "K")  # Hiragana to Katakana
-# Convert Chinese characters to Katakana
-conv = kakasi.getConverter()
+
+_KAKASI = kakasi()
+
+
+def _to_katakana(text):
+    return "".join(item["kana"] for item in _KAKASI.convert(text))
 
 def text_normalize(text):
     res = unicodedata.normalize("NFKC", text)
     res = japanese_convert_numbers_to_words(res)
     res = "".join([i for i in res if is_japanese_character(i)])
     res = replace_punctuation(res)
-    res = conv.do(res)
+    res = _to_katakana(res)
     return res
 
 
@@ -567,10 +571,10 @@ def distribute_phone(n_phone, n_word):
 # tokenizer = AutoTokenizer.from_pretrained('cl-tohoku/bert-base-japanese-v3')
 
 model_id = 'tohoku-nlp/bert-base-japanese-v3'
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-def g2p(norm_text):
 
-    tokenized = tokenizer.tokenize(norm_text)
+
+def g2p(norm_text):
+    tokenized = get_tokenizer(model_id).tokenize(norm_text)
     phs = []
     ph_groups = []
     for t in tokenized:

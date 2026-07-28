@@ -69,6 +69,7 @@ class FusedMoEMethod(nn.Module):
             renormalize=renormalize,
             inplace=inplace,
             activation=activation,
+            apply_router_weight_on_input=apply_router_weight_on_input,
             no_combine=no_combine,
         )
 

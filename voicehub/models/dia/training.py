@@ -57,12 +57,12 @@ def _require_transformers_backend() -> tuple[Any, Any, Any, int | None]:
     torch = import_optional(
         "torch",
         model_type="dia",
-        install_extra="dia",
+        install_extra="training",
     )
     transformers = import_optional(
         "transformers",
         model_type="dia",
-        install_extra="dia",
+        install_extra="training",
     )
     try:
         model_class = transformers.DiaForConditionalGeneration
@@ -71,7 +71,7 @@ def _require_transformers_backend() -> tuple[Any, Any, Any, int | None]:
         raise OptionalDependencyError(
             "Dia fine-tuning requires Transformers >= 4.53 with "
             "DiaForConditionalGeneration and AutoProcessor. Upgrade the "
-            "'voicehub[dia]' environment and use the "
+            "'voicehub[training]' environment and use the "
             "'nari-labs/Dia-1.6B-0626' checkpoint.") from exc
     return (
         torch,
@@ -130,12 +130,12 @@ def _load_audio_path(path: str | PathLike[str], sample_rate: int) -> Any:
     soundfile = import_optional(
         "soundfile",
         model_type="dia",
-        install_extra="dia",
+        install_extra="training",
     )
     numpy = import_optional(
         "numpy",
         model_type="dia",
-        install_extra="dia",
+        install_extra="training",
     )
     audio, source_rate = soundfile.read(
         str(path),

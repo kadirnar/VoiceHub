@@ -5,7 +5,7 @@ import re
 from . import symbols
 from .es_phonemizer import cleaner as es_cleaner
 from .es_phonemizer import es_to_ipa
-from transformers import AutoTokenizer
+from .tokenizer_utils import get_tokenizer
 
 
 def distribute_phone(n_phone, n_word):
@@ -63,11 +63,10 @@ def refine_syllables(syllables):
 
 # model_id = 'bert-base-uncased'
 model_id = 'dccuchile/bert-base-spanish-wwm-uncased'
-tokenizer = AutoTokenizer.from_pretrained(model_id)
 
 def g2p(text, pad_start_end=True, tokenized=None):
     if tokenized is None:
-        tokenized = tokenizer.tokenize(text)
+        tokenized = get_tokenizer(model_id).tokenize(text)
     # import pdb; pdb.set_trace()
     phs = []
     ph_groups = []
@@ -118,5 +117,4 @@ if __name__ == "__main__":
     bert = get_bert_feature(text, word2ph)
     print(phones)
     print(len(phones), tones, sum(word2ph), bert.shape)
-
 

@@ -67,17 +67,17 @@ class OrpheusTTSForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="orpheustts",
-            install_extra="orpheustts",
+            install_extra=None,
         )
         transformers = import_optional(
             "transformers",
             model_type="orpheustts",
-            install_extra="orpheustts",
+            install_extra=None,
         )
         snac = import_optional(
             "voicehub.models.orpheustts.source.snac",
             model_type="orpheustts",
-            install_extra="orpheustts",
+            install_extra=None,
         )
         dtype = resolve_torch_dtype(
             torch,

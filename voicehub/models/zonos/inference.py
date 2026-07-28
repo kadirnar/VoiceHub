@@ -59,12 +59,12 @@ class ZonosForTextToSpeech(PreTrainedTTSModel):
         modeling = import_optional(
             "voicehub.models.zonos.source.zonos.model",
             model_type="zonos",
-            install_extra="zonos",
+            install_extra=None,
         )
         self._conditioning = import_optional(
             "voicehub.models.zonos.source.zonos.conditioning",
             model_type="zonos",
-            install_extra="zonos",
+            install_extra=None,
         )
         source = Path(self.config.name_or_path).expanduser()
         if source.is_dir():
@@ -86,6 +86,25 @@ class ZonosForTextToSpeech(PreTrainedTTSModel):
                 device=runtime_device,
             )
         self.config.sample_rate = int(self.model.autoencoder.sampling_rate)
+
+    def _prepare_for_training(self) -> None:
+        """Keep the codec frozen and expose the unfused token model."""
+        self.model._cg_graph = None
+        self.model._cg_batch_size = None
+        autoencoder = getattr(self.model, "autoencoder", None)
+        if autoencoder is not None:
+            codec = getattr(autoencoder, "dac", autoencoder)
+            if hasattr(codec, "eval"):
+                codec.eval()
+            if hasattr(codec, "parameters"):
+                for parameter in codec.parameters():
+                    parameter.requires_grad_(False)
+        self.model.train()
+
+    def _prepare_for_inference(self) -> None:
+        self.model._cg_graph = None
+        self.model._cg_batch_size = None
+        self.model.eval()
 
     def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
         language = model_inputs.get("language", "en-us")
@@ -143,7 +162,7 @@ class ZonosForTextToSpeech(PreTrainedTTSModel):
         torchaudio = import_optional(
             "torchaudio",
             model_type="zonos",
-            install_extra="zonos",
+            install_extra=None,
         )
         waveform, sample_rate = torchaudio.load(str(Path(speaker_audio_path).expanduser()))
         if waveform.numel() == 0:

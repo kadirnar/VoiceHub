@@ -16,30 +16,18 @@ The input fields still belong to the selected architecture. A dialogue model,
 a description-conditioned model, and a voice-cloning model do not use the
 same prompt schema.
 
-## Install one backend
+## Install the inference runtime
 
-Install only the extra required by the model:
+One command installs every built-in TTS, ASR, and VAD inference dependency:
 
-=== "Parler-TTS"
+```bash
+python -m pip install voicehub
+```
 
-    ```bash
-    python -m pip install "voicehub[parlertts]"
-    ```
-
-=== "Dia"
-
-    ```bash
-    python -m pip install "voicehub[dia]"
-    ```
-
-=== "F5-TTS"
-
-    ```bash
-    python -m pip install "voicehub[f5tts]"
-    ```
-
-The base package remains lightweight. If a selected runtime is absent,
-`OptionalDependencyError` names the installation extra required to continue.
+There are no model-specific inference extras. Runtime imports and checkpoint
+downloads remain lazy, so installing complete coverage does not initialize
+every framework or allocate model weights. If an environment is incomplete,
+`OptionalDependencyError` explains how to reinstall the default runtime.
 
 ## Discover before loading
 
@@ -57,7 +45,7 @@ dia = catalog["dia"]
 print(dia.default_model_path)
 print(dia.capabilities)
 print(dia.components)
-print(dia.install_extra)
+print(dia.install_extra or "default")
 print(dia.training.support.value)
 ```
 
@@ -67,7 +55,7 @@ Useful discovery fields include:
 | -------------------- | ------------------------------------------------------------------ |
 | `model_type`         | Stable registry key                                                |
 | `default_model_path` | Default Hub checkpoint or local asset name                         |
-| `install_extra`      | Optional dependency group                                          |
+| `install_extra`      | `None` for built-in inference; reserved for external/future setups |
 | `capabilities`       | Voice cloning, multilingual synthesis, dialogue, streaming, etc.   |
 | `components`         | Shared codecs, vocoders, and other reusable runtime components     |
 | `license`            | Additional model or checkpoint licensing metadata, when available |
@@ -118,6 +106,38 @@ model = AutoInferenceModel.from_pretrained(
 ```
 
 Prefer `AutoModelForTextToSpeech` in new code.
+
+## Use native Transformers TTS families
+
+VoiceHub includes dedicated wrappers where the Transformers families have
+materially different inputs and training boundaries:
+
+| Model type | Default checkpoint | Conditioning |
+| --- | --- | --- |
+| `bark` | `suno/bark-small` | Bark voice preset or custom semantic/coarse/fine prompt |
+| `speecht5` | `microsoft/speecht5_tts` | Speaker embedding plus a frozen HiFi-GAN vocoder |
+| `vits` | `facebook/mms-tts-eng` | Optional speaker ID and speaking-rate/noise controls |
+
+```python
+model = AutoModelForTextToSpeech.from_pretrained(
+    "facebook/mms-tts-eng",
+    model_type="vits",
+    device="cuda",
+)
+output = model("VoiceHub supports multilingual VITS checkpoints.")
+```
+
+These loaders accept Hub repositories, local Transformers directories, or a
+local `.safetensors`/`.bin` weight file paired with an explicit configuration
+and processor directory. A Hub access token is runtime-only and is never
+written to `config.json`.
+
+Training support remains model-specific: SpeechT5 exposes its native
+supervised spectrogram objective; Bark requires stage-aligned pretokenized
+semantic/coarse/fine batches; Transformers VITS does not expose the complete
+posterior, duration, KL, and adversarial source recipe. See the
+[training matrix](../models/training-support.md) before selecting a
+checkpoint.
 
 ## Configure a reproducible request
 
@@ -277,8 +297,13 @@ Before putting a model behind an API:
 
 ### Optional dependency error
 
-Install the extra named by the exception. Do not install every backend to solve
-one model's missing dependency.
+Built-in inference dependencies belong to the default package. Reinstall it
+through the active interpreter and run `python -m pip check`:
+
+```bash
+python -m pip install --upgrade voicehub
+python -m pip check
+```
 
 ### Local path was not found
 

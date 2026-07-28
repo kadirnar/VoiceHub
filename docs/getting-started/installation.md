@@ -4,31 +4,28 @@ description: Install VoiceHub in an isolated Python environment for registry dis
 
 # Installation and environments
 
-VoiceHub keeps its base installation small and moves model runtimes, training,
-documentation, and test tools into optional dependency groups. Install only
-the layers needed by one environment:
+VoiceHub has one default inference installation and one optional runtime
+feature:
 
-| Layer             | Install target                     | What it provides                                                                              |
-| ----------------- | ---------------------------------- | --------------------------------------------------------------------------------------------- |
-| Base library      | `voicehub`                         | Registry discovery, configuration, Hub access, NumPy, and audio file I/O                      |
-| Model runtime     | `voicehub[<model-extra>]`          | The framework, audio, tokenizer, and other packages required by one TTS, ASR, or VAD provider  |
-| Training runtime  | `voicehub[<model-extra>,training]` | The selected model runtime plus VoiceHub's PyTorch and safetensors training dependencies      |
-| Contributor tools | `.[test]` or `.[docs]`             | Tests, pre-commit hooks, notebook validation, or the documentation build                      |
+| Layer                  | Install target                 | What it provides                                                                         |
+| ---------------------- | ------------------------------ | ---------------------------------------------------------------------------------------- |
+| Complete inference     | `voicehub`                     | Registry, configuration, and every built-in TTS, ASR, and VAD runtime                    |
+| Training and reporting | `voicehub[training]`           | Shared trainers, data/evaluation tools, and Weights & Biases integration                 |
+| Contributor tools      | `.[test]` or `.[docs]`         | Tests, pre-commit hooks, notebook validation, or the documentation build                 |
+
+`training` is the only public runtime feature extra. The `docs` and `test`
+extras are contributor conveniences rather than product runtime choices.
 
 The package requires Python 3.10 or newer. Project metadata explicitly lists
 Python 3.10, 3.11, and 3.12. A later Python release may work, but every selected
 model dependency must also publish a compatible wheel.
 
-!!! tip "Use one environment per backend"
+!!! note "Current WhisperX platform boundary"
 
-    Model families do not all use the same dependency versions. For example,
-    some current extras require Transformers 5.x, while others constrain
-    Transformers to an earlier release. Installing every model extra into one
-    environment can therefore be unsatisfiable or produce a runtime that no
-    integration was tested against.
-
-    Create a separate environment for each backend or compatible group of
-    backends. This also makes upgrades and reproducibility easier.
+    The default runtime resolves on Linux x86-64, Windows x86-64, and Apple
+    Silicon for Python 3.10–3.12. Its pinned WhisperX runtime requires
+    PyTorch 2.8, which does not publish Intel macOS wheels. Use Apple Silicon,
+    Linux, or Windows for the complete default installation.
 
 ## Create an isolated environment
 
@@ -62,23 +59,21 @@ Both commands should point into the active environment. Prefer
 `python -m pip` over a bare `pip` command so installation and execution use the
 same interpreter.
 
-## Install the base library
+## Install every inference runtime
 
-Install the base package when an application only needs registry discovery,
-configuration, or lightweight utilities:
+Install the complete package:
 
 ```bash
 python -m pip install voicehub
 ```
 
-The base dependency set is intentionally limited to:
+This includes the Python runtime dependencies for every built-in TTS, ASR, and
+VAD provider. Checkpoint files are not bundled: they are resolved lazily from a
+model repository or supplied as local artifacts.
 
-- `huggingface-hub>=0.28`;
-- `numpy>=1.23`; and
-- `soundfile>=0.12`.
-
-It does not install PyTorch or any model-specific runtime. Registry discovery
-therefore remains available without importing a tensor framework:
+Installing the dependencies does not make discovery eager. VoiceHub still
+avoids initializing tensor frameworks and does not load model weights while
+you inspect the registry:
 
 ```python
 from voicehub import AutoInferenceModel
@@ -86,68 +81,32 @@ from voicehub import AutoInferenceModel
 for model_spec in AutoInferenceModel.available_models():
     print(
         model_spec.model_type,
-        model_spec.install_extra,
+        model_spec.install_extra or "default",
         model_spec.default_model_path,
         model_spec.capabilities,
     )
 ```
 
-Use the returned `install_extra` as the package extra for the chosen
-integration.
+For built-in inference entries, `ModelSpec.install_extra` is `None`: their
+runtime is part of the default installation. The optional field remains in the
+extension contract so future separately distributed integrations or
+optimization backends can describe their own setup without changing the
+registry schema.
 
-## Add one model runtime
-
-Install a model extra with the base library:
-
-=== "Parler-TTS"
-
-    ```bash
-    python -m pip install "voicehub[parlertts]"
-    ```
-
-=== "Dia"
-
-    ```bash
-    python -m pip install "voicehub[dia]"
-    ```
-
-=== "F5-TTS"
-
-    ```bash
-    python -m pip install "voicehub[f5tts]"
-    ```
-
-Every registered model has a matching extra. The current model extras are:
-
-```text
-chatterbox       conversationtts  cosyvoice     csm
-dia              echo             f5tts         fishtts
-gptsovits        higgstts         inflecttts    irodoritts
-kokoro           llasa            melotts       mosstts
-neutts           omnivoice        openvoice     orpheustts
-outetts          parlertts        qwen3tts      styletts2
-supertonic       vibevoice        voxcpm        vui
-xtts             zonos            zonos2
-```
-
-ASR and VAD extras are installed independently:
-
-```text
-asr-transformers  faster-whisper  whisperx        openai-whisper
-asr-nemo          asr-speechbrain asr-funasr      asr-espnet
-asr-wenet
-
-vad-transformers  vad-silero      vad-silero-onnx vad-webrtc
-vad-pyannote      vad-speechbrain vad-nemo        vad-funasr
-```
+The default installation covers Transformers ASR/VAD, faster-whisper,
+WhisperX, OpenAI
+Whisper, NeMo, SpeechBrain, FunASR, ESPnet, WeNet, Silero, WebRTC, pyannote,
+and ONNX execution. VoiceHub vendors the small Apache-licensed WeNet inference
+surface required by its wrapper because the official Python package is not
+published on PyPI. WeNet's full training repository remains upstream-owned.
 
 The [model catalog](../models/index.md) maps those keys to model families,
 default checkpoints, capabilities, conditioning requirements, and important
 license constraints. The
 [ASR/VAD support matrix](../models/asr-vad-support.md) maps speech-input
-providers to runtime families, extras, outputs, and training boundaries.
+providers to runtime families, outputs, and training boundaries.
 
-!!! warning "Extras install Python packages, not checkpoints"
+!!! warning "Packages install runtimes, not checkpoints"
 
     Model weights remain external. A model integration normally resolves Hub
     weights when its runtime is loaded, or accepts a compatible local path.
@@ -155,61 +114,50 @@ providers to runtime families, extras, outputs, and training boundaries.
     Confirm the checkpoint license, access requirements, disk footprint, and
     runtime requirements before the first load.
 
-### Install more than one compatible extra
-
-Pip can resolve several extras in one environment:
-
-```bash
-python -m pip install "voicehub[parlertts,f5tts]"
-```
-
-Do this only when their dependency constraints are compatible. If resolution
-fails, do not force incompatible package versions. Create separate
-environments instead.
-
 ### Install an accelerator-specific PyTorch build
 
-Most model extras depend on PyTorch, and some declare minimum Torch or
-TorchAudio versions. The default resolver may not select the accelerator build
-required by a particular machine.
+The default runtime depends on PyTorch and TorchAudio. The package resolver may
+not select the accelerator build required by a particular machine.
 
 When CUDA or another platform-specific build is needed:
 
 1. select the compatible PyTorch and TorchAudio build for the operating system,
    driver, and accelerator;
 2. install it into the active environment; and
-3. install the VoiceHub model extra afterward.
+3. install VoiceHub afterward.
 
 Do not copy a CUDA wheel command from a different machine. Driver, toolkit,
-Python, and model-extra constraints all matter. After installation, use the
+Python, and VoiceHub constraints all matter. After installation, use the
 [verification steps](#verify-the-environment) below to inspect what the
 environment actually provides.
 
 ## Add training support
 
-The independent `training` extra declares:
+The independent `training` extra adds the shared training and reporting stack
+used by VoiceHub-native profiles:
 
-- `torch>=2.1`; and
-- `safetensors>=0.4`.
+- training artifact and dataset utilities;
+- evaluation tools such as Evaluate and jiwer; and
+- Weights & Biases.
 
-It provides the shared trainer runtime, but it does not replace a model extra.
-Install both for model-specific fine-tuning:
-
-```bash
-python -m pip install "voicehub[dia,training]"
-```
-
-Replace `dia` with the selected model extra. Installing
-`voicehub[training]` alone is useful for trainer development around an external
-module, but it does not install a TTS, ASR, or VAD backend's processor or
-source runtime.
-
-Transformers ASR experimentation can install its broader data and evaluation
-tooling separately:
+Install it on top of the default inference runtime:
 
 ```bash
-python -m pip install "voicehub[asr-transformers,asr-training]"
+python -m pip install "voicehub[training]"
 ```
+
+This installs training infrastructure, not universal fine-tuning support.
+VoiceHub-native profiles can run directly; upstream-custom profiles still use
+their source recipe, and inference-only profiles remain non-trainable.
+
+Because extras always extend the main package, `voicehub[training]` also
+installs every built-in inference runtime. No model-specific or task-specific
+extra needs to be combined with it.
+
+Enable W&B in code with `TrainingArguments(report_to="wandb")`. Authenticate
+with `wandb login` or `WANDB_API_KEY`; credentials are never accepted by or
+serialized into VoiceHub training arguments. Use `wandb_mode="offline"` when a
+training machine should write local run data for later synchronization.
 
 Training support is checkpoint- and backend-aware. A model can be trainable
 upstream while a particular GGUF, ONNX, quantized, fused, or
@@ -227,14 +175,14 @@ package index:
 
 ```bash
 python -m pip install --upgrade \
-  "voicehub[dia] @ git+https://github.com/kadirnar/voicehub.git@main"
+  "voicehub @ git+https://github.com/kadirnar/voicehub.git@main"
 ```
 
 Add the training extra in the same direct reference when needed:
 
 ```bash
 python -m pip install --upgrade \
-  "voicehub[dia,training] @ git+https://github.com/kadirnar/voicehub.git@main"
+  "voicehub[training] @ git+https://github.com/kadirnar/voicehub.git@main"
 ```
 
 For a reproducible environment, replace `main` with a release tag or full
@@ -242,7 +190,7 @@ commit SHA:
 
 ```bash
 python -m pip install \
-  "voicehub[dia,training] @ git+https://github.com/kadirnar/voicehub.git@<full-commit-sha>"
+  "voicehub[training] @ git+https://github.com/kadirnar/voicehub.git@<full-commit-sha>"
 ```
 
 A Git installation requires the `git` executable. Record the selected VoiceHub
@@ -259,18 +207,18 @@ cd voicehub
 python -m pip install -e ".[test]"
 ```
 
-Add the runtime layers required by the work:
+Add only the contributor or training layers required by the work:
 
 === "Model development"
 
     ```bash
-    python -m pip install -e ".[dia,test]"
+    python -m pip install -e ".[test]"
     ```
 
 === "Training development"
 
     ```bash
-    python -m pip install -e ".[dia,training,test]"
+    python -m pip install -e ".[training,test]"
     ```
 
 === "Documentation development"
@@ -282,13 +230,13 @@ Add the runtime layers required by the work:
 Editable mode makes imports resolve to the checkout, so Python code changes
 take effect without rebuilding the wheel. It does not automatically refresh
 dependencies after `pyproject.toml` changes; rerun the appropriate install
-command when an extra changes.
+command when dependency metadata changes.
 
 ## Match the backend and checkpoint
 
-An install extra selects Python dependencies. A registry key selects the
-VoiceHub integration. A checkpoint selects the weights and, sometimes, a
-specific backend or variant. Those three choices must agree.
+The default installation supplies Python inference dependencies. A registry
+key selects the VoiceHub integration. A checkpoint selects the weights and,
+sometimes, a specific backend or variant. The latter two choices must agree.
 
 Inspect the registry before loading weights:
 
@@ -301,7 +249,7 @@ catalog = {
 }
 
 selected = catalog["dia"]
-print("extra:", selected.install_extra)
+print("runtime layer:", selected.install_extra or "default")
 print("default checkpoint:", selected.default_model_path)
 print("capabilities:", selected.capabilities)
 print("training support:", selected.training.support.value)
@@ -413,9 +361,9 @@ print(f"registered models: {len(specs)}")
 print("first model:", specs[0].model_type)
 ```
 
-### Verify a Torch-backed environment
+### Verify the PyTorch runtime
 
-For a model extra that uses PyTorch:
+PyTorch is part of the default inference environment:
 
 ```python
 import torch
@@ -458,20 +406,21 @@ The final value should be `False`. Call `model.load()` only when the
 checkpoint download, license, device, and memory requirements have been
 reviewed.
 
-## Resolve optional dependency errors
+## Resolve runtime dependency errors
 
-When a backend imports a missing Python module, VoiceHub raises
-`OptionalDependencyError` with the matching installation extra:
+When a built-in inference backend cannot import a required Python module,
+VoiceHub raises `OptionalDependencyError` with guidance for repairing the
+default runtime:
 
 ```text
-'dia' requires optional dependencies that are not installed.
-Install them with `pip install "voicehub[dia]"` and retry.
+'dia' requires dependencies that are not installed.
+Reinstall the complete runtime with `pip install --upgrade voicehub` and retry.
 ```
 
 Run that command through the active interpreter:
 
 ```bash
-python -m pip install "voicehub[dia]"
+python -m pip install --upgrade voicehub
 ```
 
 If the error remains:
@@ -481,14 +430,13 @@ If the error remains:
 2. run `python -m pip show voicehub` and verify the expected installation
    location;
 3. run `python -m pip check` for incompatible or missing requirements;
-4. reinstall the selected extra rather than manually guessing one missing
-   package; and
+4. reinstall VoiceHub rather than manually guessing one missing package; and
 5. inspect the original exception for a required system library, driver, or
    platform runtime that pip cannot provide.
 
-An optional dependency error is different from a checkpoint-access error,
-unsupported model variant, device mismatch, or out-of-memory failure. Changing
-extras will not resolve those conditions.
+A dependency error is different from a checkpoint-access error, unsupported
+model variant, device mismatch, or out-of-memory failure. Reinstalling the
+runtime will not resolve those conditions.
 
 ## Next steps
 

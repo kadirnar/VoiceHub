@@ -68,12 +68,12 @@ class OpenVoiceForTextToSpeech(PreTrainedTTSModel):
         openvoice_api = import_optional(
             "voicehub.models.openvoice.source.openvoice.api",
             model_type="openvoice",
-            install_extra="openvoice",
+            install_extra=None,
         )
         self._se_extractor = import_optional(
             "voicehub.models.openvoice.source.openvoice.se_extractor",
             model_type="openvoice",
-            install_extra="openvoice",
+            install_extra=None,
         )
         converter = openvoice_api.ToneColorConverter(
             str(converter_directory / "config.json"),
@@ -82,12 +82,21 @@ class OpenVoiceForTextToSpeech(PreTrainedTTSModel):
         converter.load_ckpt(str(converter_directory / "checkpoint.pth"))
         self.model = converter
 
+    def _validate_training_runtime(self) -> None:
+        raise RuntimeError(
+            "The public OpenVoice V2 bundle exposes the tone-color converter "
+            "for inference, but does not publish the discriminator, training "
+            "data pipeline, or source objective used to optimize it. A "
+            "converter-only checkpoint is not sufficient for faithful VITS "
+            "fine-tuning; provide an upstream full training checkpoint and "
+            "recipe before registering a custom adapter.")
+
     def _base_model(self, language: str):
         if language not in self._base_models:
             melo_api = import_optional(
                 "voicehub.models.melotts.source.melo.api",
                 model_type="openvoice",
-                install_extra="openvoice",
+                install_extra=None,
             )
             self._base_models[language] = melo_api.TTS(
                 language=language,
@@ -142,7 +151,7 @@ class OpenVoiceForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="openvoice",
-            install_extra="openvoice",
+            install_extra=None,
         )
         return torch.load(
             str(self._source_embedding_path(speaker)),
@@ -206,7 +215,7 @@ class OpenVoiceForTextToSpeech(PreTrainedTTSModel):
             soundfile = import_optional(
                 "soundfile",
                 model_type="openvoice",
-                install_extra="openvoice",
+                install_extra=None,
             )
             audio, sample_rate = soundfile.read(str(output_path))
             if getattr(audio, "size", 0) == 0:

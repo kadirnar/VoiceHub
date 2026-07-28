@@ -8,8 +8,9 @@ from typing import Union
 import numpy as np
 import torch
 import tqdm
-from audiotools import AudioSignal
 from torch import nn
+
+from voicehub.components.audio.codecs._compat import AudioSignal
 
 SUPPORTED_VERSIONS = ["1.0.0"]
 

@@ -1,27 +1,62 @@
 # Adapted from: https://github.com/LowinLi/transformers-stream-generator
 
 import copy
+import importlib
 import inspect
 import random
 import warnings
-from typing import Callable, List, Optional, Union
+from typing import Callable, Iterator, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
 import torch.distributed as dist
 from torch import nn
 from transformers import (
-    BeamSearchScorer,
-    ConstrainedBeamSearchScorer,
-    DisjunctiveConstraint,
     GenerationConfig,
     GenerationMixin,
     LogitsProcessorList,
-    PhrasalConstraint,
     PreTrainedModel,
     StoppingCriteriaList,
 )
-from transformers.generation.utils import GenerateOutput, SampleOutput, logger
+from transformers.generation.utils import GenerateOutput, logger
+
+
+_LEGACY_GENERATION_MODULES = {
+    "BeamSearchScorer": (
+        "transformers.generation.beam_search",
+        "transformers",
+    ),
+    "ConstrainedBeamSearchScorer": (
+        "transformers.generation.beam_search",
+        "transformers",
+    ),
+    "DisjunctiveConstraint": (
+        "transformers.generation.beam_constraints",
+        "transformers",
+    ),
+    "PhrasalConstraint": (
+        "transformers.generation.beam_constraints",
+        "transformers",
+    ),
+}
+
+
+def _load_legacy_generation_symbol(name):
+    """Load a Transformers 4 beam-search type only when its mode is used."""
+    for module_name in _LEGACY_GENERATION_MODULES[name]:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            continue
+        symbol = getattr(module, name, None)
+        if symbol is not None:
+            return symbol
+
+    raise RuntimeError(
+        f"The installed Transformers release does not expose the legacy {name} "
+        "API required by this XTTS generation mode. Use Transformers 4 for "
+        "beam or constrained-beam generation."
+    )
 
 
 def setup_seed(seed):
@@ -433,6 +468,7 @@ class NewGenerationMixin(GenerationMixin):
                 **model_kwargs,
             )
         elif is_beam_gen_mode:
+            beam_search_scorer = _load_legacy_generation_symbol("BeamSearchScorer")
             if generation_config.num_return_sequences > generation_config.num_beams:
                 raise ValueError("`num_return_sequences` has to be smaller or equal to `num_beams`.")
 
@@ -440,7 +476,7 @@ class NewGenerationMixin(GenerationMixin):
                 raise ValueError("`max_length` needs to be a stopping_criteria for now.")
 
             # 11. prepare beam search scorer
-            beam_scorer = BeamSearchScorer(
+            beam_scorer = beam_search_scorer(
                 batch_size=batch_size,
                 num_beams=generation_config.num_beams,
                 device=inputs_tensor.device,
@@ -470,13 +506,14 @@ class NewGenerationMixin(GenerationMixin):
             )
 
         elif is_beam_sample_gen_mode:
+            beam_search_scorer = _load_legacy_generation_symbol("BeamSearchScorer")
             # 11. prepare logits warper
             logits_warper = self._get_logits_warper(generation_config)
 
             if stopping_criteria.max_length is None:
                 raise ValueError("`max_length` needs to be a stopping_criteria for now.")
             # 12. prepare beam search scorer
-            beam_scorer = BeamSearchScorer(
+            beam_scorer = beam_search_scorer(
                 batch_size=batch_size * generation_config.num_return_sequences,
                 num_beams=generation_config.num_beams,
                 device=inputs_tensor.device,
@@ -508,6 +545,7 @@ class NewGenerationMixin(GenerationMixin):
             )
 
         elif is_group_beam_gen_mode:
+            beam_search_scorer = _load_legacy_generation_symbol("BeamSearchScorer")
             if generation_config.num_return_sequences > generation_config.num_beams:
                 raise ValueError("`num_return_sequences` has to be smaller or equal to `num_beams`.")
 
@@ -522,7 +560,7 @@ class NewGenerationMixin(GenerationMixin):
                 raise ValueError("Decoder argument `typical_p` is not supported with beam groups.")
 
             # 11. prepare beam search scorer
-            beam_scorer = BeamSearchScorer(
+            beam_scorer = beam_search_scorer(
                 batch_size=batch_size,
                 num_beams=generation_config.num_beams,
                 max_length=stopping_criteria.max_length,
@@ -554,6 +592,11 @@ class NewGenerationMixin(GenerationMixin):
             )
 
         elif is_constraint_gen_mode:
+            constrained_beam_search_scorer = _load_legacy_generation_symbol(
+                "ConstrainedBeamSearchScorer"
+            )
+            disjunctive_constraint = _load_legacy_generation_symbol("DisjunctiveConstraint")
+            phrasal_constraint = _load_legacy_generation_symbol("PhrasalConstraint")
             if generation_config.num_return_sequences > generation_config.num_beams:
                 raise ValueError("`num_return_sequences` has to be smaller or equal to `num_beams`.")
 
@@ -599,18 +642,18 @@ class NewGenerationMixin(GenerationMixin):
                         ):
                             typeerror()
 
-                        constraint = DisjunctiveConstraint(word_ids)
+                        constraint = disjunctive_constraint(word_ids)
                     else:
                         if not isinstance(word_ids, list) or len(word_ids) == 0:
                             typeerror()
                         if any((not isinstance(token_id, int) or token_id < 0) for token_id in word_ids):
                             typeerror()
 
-                        constraint = PhrasalConstraint(word_ids)
+                        constraint = phrasal_constraint(word_ids)
                     final_constraints.append(constraint)
 
             # 11. prepare beam search scorer
-            constrained_beam_scorer = ConstrainedBeamSearchScorer(
+            constrained_beam_scorer = constrained_beam_search_scorer(
                 constraints=final_constraints,
                 batch_size=batch_size,
                 num_beams=generation_config.num_beams,
@@ -656,7 +699,7 @@ class NewGenerationMixin(GenerationMixin):
         return_dict_in_generate: Optional[bool] = None,
         synced_gpus: Optional[bool] = False,
         **model_kwargs,
-    ) -> Union[SampleOutput, torch.LongTensor]:
+    ) -> Iterator[Tuple[torch.LongTensor, torch.Tensor]]:
         r"""
         Generates sequences of token ids for models with a language modeling head using **multinomial sampling** and
         can be used for text-decoder, text-to-text, speech-to-text, and vision-to-text models.

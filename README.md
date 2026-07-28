@@ -10,12 +10,14 @@
 - **One trainer:** shared arguments, callbacks, evaluation, and resumable checkpoints.
 - **Fast imports:** ML frameworks and model weights are loaded only when the selected backend needs them.
 - **Task-aware discovery:** TTS, speech-recognition, and voice-activity providers share one registry without cross-task factory mistakes.
-- **Source policy:** TTS source stays integrated; ASR and VAD provider runtimes remain optional and lazy.
-- **Small base install:** model extras contain only general runtime dependencies.
-- **Actionable errors:** missing backends point to the exact installation extra.
-- **47 registered integrations:** 31 TTS backends, 9 ASR providers, and 7 VAD
-  providers, each representing a runtime or checkpoint family rather than one
-  fixed weight file.
+- **One inference install:** every built-in TTS, ASR, and VAD runtime is
+  available after the default installation.
+- **Lazy execution:** frameworks and checkpoints are still imported or loaded
+  only when the selected integration needs them.
+- **Actionable errors:** an incomplete environment points back to the complete
+  default runtime or the separate training setup.
+- **Dozens of integrations:** each registry entry represents a runtime or
+  checkpoint family rather than one fixed weight file.
 
 ## Install
 
@@ -25,28 +27,29 @@ VoiceHub requires Python 3.10 or newer.
 python -m pip install voicehub
 ```
 
-Install only the backend you plan to use:
+That one command installs the runtime dependencies for every built-in TTS,
+ASR, and VAD integration. Model implementations remain lazy, so importing
+VoiceHub or browsing the registry does not initialize every framework or
+download checkpoints.
 
-```bash
-python -m pip install "voicehub[parlertts]"
-python -m pip install "voicehub[f5tts]"
-python -m pip install "voicehub[melotts]"
-python -m pip install "voicehub[asr-transformers]"
-python -m pip install "voicehub[vad-silero]"
-```
-
-Install PyTorch training support independently of any inference backend:
+Add the separate training bundle for the shared trainer and optional Weights &
+Biases reporting:
 
 ```bash
 python -m pip install "voicehub[training]"
 ```
 
+The training bundle does not make every inference provider directly
+fine-tunable. VoiceHub-native profiles can use the shared trainer;
+upstream-custom profiles retain their source recipe, and inference-only
+profiles remain non-trainable.
+
 TTS implementations and their third-party licenses are included in the
 VoiceHub package. Checkpoints remain separate and are downloaded lazily or
 passed as local paths. See the
 [model catalog](https://kadirnar.github.io/voicehub/models/).
-ASR and VAD integrations wrap optional provider runtimes selected by their
-extras; see the
+ASR and VAD integrations use provider runtimes from the same default
+installation; see the
 [speech-input matrix](https://kadirnar.github.io/voicehub/models/asr-vad-support/).
 
 ## Quick start
@@ -111,9 +114,10 @@ print(output.text)
 ```
 
 The Transformers provider covers compatible CTC, speech
-sequence-to-sequence, RNN-T, and TDT checkpoints. Separate providers expose
-faster-whisper, WhisperX, OpenAI Whisper, NeMo, SpeechBrain, FunASR, ESPnet,
-and WeNet while returning the same `ASROutput`.
+sequence-to-sequence, RNN-T, and TDT checkpoints. Locked presets provide
+ready defaults for Wav2Vec2, HuBERT, WavLM, Moonshine, and SeamlessM4T v2.
+Separate providers expose faster-whisper, WhisperX, OpenAI Whisper, NeMo,
+SpeechBrain, FunASR, ESPnet, and WeNet while returning the same `ASROutput`.
 
 ## Voice activity detection
 
@@ -135,52 +139,57 @@ for segment in output.segments:
 ```
 
 VoiceHub integrates Transformers audio/frame classification, Silero, WebRTC,
-pyannote, SpeechBrain, NeMo, and FunASR FSMN VAD behind normalized
-`VADOutput` speech regions.
+Auditok, Sherpa-ONNX Silero/TEN, pyannote Pipeline/Segmentation/Brouhaha,
+SpeechBrain, NeMo, and FunASR FSMN VAD behind normalized `VADOutput` speech
+regions.
 
 ## Supported models
 
 This table lists TTS integrations. See the
 [ASR/VAD provider matrix](https://kadirnar.github.io/voicehub/models/asr-vad-support/)
-for speech-input families, optional extras, outputs, and fine-tuning
+for speech-input families, outputs, and fine-tuning
 boundaries.
 
-| Model type        | Backend         | Notable capabilities                |
-| ----------------- | --------------- | ----------------------------------- |
-| `orpheustts`      | Orpheus-TTS     | Expressive speech                   |
-| `dia`             | Dia             | Dialogue                            |
-| `vui`             | Vui             | Text to speech                      |
-| `chatterbox`      | Chatterbox      | Voice cloning                       |
-| `kokoro`          | Kokoro          | Multilingual                        |
-| `echo`            | Echo-TTS        | Voice cloning                       |
-| `conversationtts` | ConversationTTS | CC BY-NC multilingual conversation  |
-| `llasa`           | LLaSA           | Multilingual synthesis and cloning  |
-| `cosyvoice`       | CosyVoice 1/2/3 | Cloning, multilingual, streaming    |
-| `f5tts`           | F5-TTS          | Voice cloning                       |
-| `gptsovits`       | GPT-SoVITS      | Few-shot multilingual cloning       |
-| `melotts`         | MeloTTS         | Fast multilingual synthesis         |
-| `openvoice`       | OpenVoice V2    | Cross-lingual voice cloning         |
-| `outetts`         | OuteTTS         | Speaker profiles, multiple runtimes |
-| `parlertts`       | Parler-TTS      | Natural-language style control      |
-| `styletts2`       | StyleTTS 2      | Style diffusion and voice cloning   |
-| `mosstts`         | MOSS-TTS        | Delay, Local, v1.5, Realtime        |
-| `qwen3tts`        | Qwen3-TTS       | Clone, CustomVoice, VoiceDesign     |
-| `irodoritts`      | Irodori-TTS     | Reference and caption conditioning  |
-| `zonos`           | Zonos 1         | Multilingual voice cloning          |
-| `zonos2`          | ZONOS2          | Batched MoE synthesis and cloning   |
-| `voxcpm`          | VoxCPM 1/2      | Streaming and voice cloning         |
-| `omnivoice`       | OmniVoice       | Multilingual cloning and design     |
-| `higgstts`        | Higgs Audio     | Expressive long-form generation     |
-| `xtts`            | XTTS v2         | Multilingual voice cloning          |
-| `vibevoice`       | VibeVoice       | Realtime cached-voice generation    |
-| `fishtts`         | Fish Speech S2  | Multilingual cloning                |
-| `csm`             | Sesame CSM      | Conversational speaker context      |
-| `neutts`          | NeuTTS          | Air, Nano, multilingual, 2E         |
-| `supertonic`      | Supertonic 3    | Fast multilingual ONNX inference    |
-| `inflecttts`      | Inflect v2      | Compact local synthesis             |
+| Model type        | Backend         | Notable capabilities                 |
+| ----------------- | --------------- | ------------------------------------ |
+| `orpheustts`      | Orpheus-TTS     | Expressive speech                    |
+| `dia`             | Dia             | Dialogue                             |
+| `vui`             | Vui             | Text to speech                       |
+| `chatterbox`      | Chatterbox      | Voice cloning                        |
+| `kokoro`          | Kokoro          | Multilingual                         |
+| `echo`            | Echo-TTS        | Voice cloning                        |
+| `conversationtts` | ConversationTTS | CC BY-NC multilingual conversation   |
+| `llasa`           | LLaSA           | Multilingual synthesis and cloning   |
+| `cosyvoice`       | CosyVoice 1/2/3 | Cloning, multilingual, streaming     |
+| `f5tts`           | F5-TTS          | Voice cloning                        |
+| `gptsovits`       | GPT-SoVITS      | Few-shot multilingual cloning        |
+| `melotts`         | MeloTTS         | Fast multilingual synthesis          |
+| `openvoice`       | OpenVoice V2    | Cross-lingual voice cloning          |
+| `outetts`         | OuteTTS         | Speaker profiles, multiple runtimes  |
+| `parlertts`       | Parler-TTS      | Natural-language style control       |
+| `styletts2`       | StyleTTS 2      | Style diffusion and voice cloning    |
+| `mosstts`         | MOSS-TTS        | Delay, Local, v1.5, Realtime         |
+| `qwen3tts`        | Qwen3-TTS       | Clone, CustomVoice, VoiceDesign      |
+| `irodoritts`      | Irodori-TTS     | Reference and caption conditioning   |
+| `zonos`           | Zonos 1         | Multilingual voice cloning           |
+| `zonos2`          | ZONOS2          | Batched MoE synthesis and cloning    |
+| `voxcpm`          | VoxCPM 1/2      | Streaming and voice cloning          |
+| `omnivoice`       | OmniVoice       | Multilingual cloning and design      |
+| `higgstts`        | Higgs Audio     | Expressive long-form generation      |
+| `xtts`            | XTTS v2         | Multilingual voice cloning           |
+| `vibevoice`       | VibeVoice       | Realtime cached-voice generation     |
+| `fishtts`         | Fish Speech S2  | Multilingual cloning                 |
+| `csm`             | Sesame CSM      | Conversational speaker context       |
+| `neutts`          | NeuTTS          | Air, Nano, multilingual, 2E          |
+| `supertonic`      | Supertonic 3    | Fast multilingual ONNX inference     |
+| `inflecttts`      | Inflect v2      | Compact local synthesis              |
+| `bark`            | Bark            | Expressive prompt-conditioned speech |
+| `speecht5`        | SpeechT5        | Speaker embeddings and native FT     |
+| `vits`            | VITS / MMS-TTS  | 1,100+ language checkpoints          |
 
 Aliases such as `f5-tts`, `gpt-sovits`, `melo-tts`, `parler-tts`, and
-`style-tts2`, `moss-tts`, `qwen3-tts`, and `higgs-tts` are accepted.
+`style-tts2`, `moss-tts`, `qwen3-tts`, `higgs-tts`, `bark-tts`, `speech-t5`,
+and `mms-tts` are accepted.
 
 Discover models without importing their ML stacks:
 
@@ -199,7 +208,8 @@ For task-aware discovery:
 from voicehub import list_model_specs
 
 for spec in list_model_specs(task="asr"):
-    print(spec.model_type, spec.architecture, spec.install_extra)
+    runtime = spec.install_extra or "default"
+    print(spec.model_type, spec.architecture, runtime)
 ```
 
 ## Common API
@@ -250,11 +260,12 @@ and [architecture guide](https://kadirnar.github.io/voicehub/concepts/architectu
 
 ## Training
 
-`Trainer` and `TrainingArguments` follow the Transformers training vocabulary
-without adding Transformers or PyTorch to the base installation. Every
-registered backend has an audited `ModelTrainingSpec`. Directly runnable
-profiles use the built-in family adapters, while source-native recipes that
-need architecture-specific orchestration require a specialized adapter:
+`Trainer` and `TrainingArguments` follow the Transformers training vocabulary.
+Install `voicehub[training]` to add the shared fine-tuning, evaluation, and
+reporting stack to the default inference runtime. Every registered backend has
+an audited `ModelTrainingSpec`. Directly runnable profiles use the built-in
+family adapters, while source-native recipes that need
+architecture-specific orchestration require a specialized adapter:
 
 ```python
 from voicehub import AutoModelForTextToSpeech, Trainer, TrainingArguments
@@ -285,6 +296,24 @@ trainer = Trainer(
 )
 trainer.train()
 ```
+
+Enable first-class Weights & Biases reporting through the same training
+arguments:
+
+```python
+arguments = TrainingArguments(
+    output_dir="runs/my-tts-model",
+    report_to="wandb",
+    run_name="parler-baseline",
+    wandb_project="voicehub",
+    wandb_tags=["tts", "fine-tuning"],
+    wandb_log_model="end",
+)
+```
+
+W&B is imported only when training begins, logs only from the world-primary
+process, resumes its run ID with VoiceHub checkpoints, and never finishes a
+run created by user code.
 
 This example assumes that dataset items already contain Parler's
 backend-shaped training tensors. The generic trainer does not silently turn

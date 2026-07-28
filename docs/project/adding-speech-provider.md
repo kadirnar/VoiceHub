@@ -5,7 +5,7 @@ description: Register a future ASR or VAD provider without hard-coding model fam
 # Add an ASR or VAD provider
 
 Add a provider when a checkpoint family needs a distinct runtime, dependency
-extra, input policy, output normalization, or training recipe. If a checkpoint
+set, input policy, output normalization, or training recipe. If a checkpoint
 already conforms to `asr_transformers`, `vad_transformers`, or another native
 provider, use that existing registry key instead.
 
@@ -20,7 +20,8 @@ The integration must remain lazy, task-safe, and honest about fine-tuning.
 - File, array, tensor, mapping, and `AudioInput` inputs behave consistently.
 - Inference returns exactly one valid `ASROutput` or `VADOutput`.
 - Unsupported options fail before expensive checkpoint work where practical.
-- The provider has one optional extra with an actionable dependency error.
+- Runtime dependencies are added to the default package requirements, and
+  missing-dependency errors point to the complete runtime installation.
 - The training profile states the real native, upstream-custom, or
   inference-only boundary.
 - Tests cover lazy imports, wrong-task factory rejection, normalization, local
@@ -96,7 +97,6 @@ class AcmeASRForSpeechRecognition(PreTrainedASRModel):
         acme = import_optional(
             "acme_speech",
             model_type=self.config.model_type,
-            install_extra="acme-asr",
         )
         self.model = acme.load(
             self.config.name_or_path or self.default_model_name_or_path,
@@ -162,7 +162,7 @@ register_model_spec(
         module="voicehub.models.acme_asr.modeling_acme_asr",
         class_name="AcmeASRForSpeechRecognition",
         default_model_path="acme/asr-base",
-        install_extra="acme-asr",
+        install_extra=None,
         capabilities=("timestamps", "multilingual"),
         config_module="voicehub.models.acme_asr.configuration_acme_asr",
         config_class="AcmeASRConfig",
@@ -178,8 +178,14 @@ importing its model module. Keep `task` and the class suffix correct so an ASR
 provider cannot accidentally load through the VAD or TTS factory.
 
 Runtime registration is useful for external integrations and tests. Built-in
-providers should add the same metadata to VoiceHub's static registry so the
-entry exists in a fresh process.
+providers should add the same metadata to VoiceHub's static registry and add
+their runtime distributions to `project.dependencies` so the entry is
+installable in a fresh process. Do not add a provider-specific ASR or VAD
+extra: `voicehub` is the single public inference dependency surface.
+
+Built-in inference providers set `ModelSpec.install_extra=None`. The field
+remains available to separately distributed extensions that own a distinct
+setup path, but it must not fragment VoiceHub's built-in installation.
 
 ## Declare the training boundary
 

@@ -1,5 +1,5 @@
 ---
-description: Detect and normalize speech regions with Transformers and native Silero, WebRTC, pyannote, SpeechBrain, NeMo, or FunASR VAD providers.
+description: Detect and normalize speech regions with Transformers, Silero, TEN, Auditok, WebRTC, pyannote, SpeechBrain, NeMo, and FunASR VAD providers.
 ---
 
 # Voice activity detection
@@ -9,46 +9,17 @@ speech regions. Transformers classifiers, neural VAD pipelines, and WebRTC's
 fixed-point detector share one factory and output type while retaining their
 own model and post-processing controls.
 
-## Install one provider
+## Install every provider
 
-=== "Silero"
-
-    ```bash
-    python -m pip install "voicehub[vad-silero]"
-    ```
-
-=== "WebRTC"
-
-    ```bash
-    python -m pip install "voicehub[vad-webrtc]"
-    ```
-
-=== "Transformers"
-
-    ```bash
-    python -m pip install "voicehub[vad-transformers]"
-    ```
-
-=== "pyannote"
-
-    ```bash
-    python -m pip install "voicehub[vad-pyannote]"
-    ```
-
-=== "FunASR FSMN"
-
-    ```bash
-    python -m pip install "voicehub[vad-funasr]"
-    ```
-
-Silero ONNX execution is a separate, explicit environment choice:
+The default package installs all TTS, ASR, and VAD runtimes, including both
+Silero JIT and ONNX execution:
 
 ```bash
-python -m pip install "voicehub[vad-silero-onnx]"
+python -m pip install voicehub
 ```
 
 The [support matrix](../models/asr-vad-support.md#vad-providers) lists every
-provider extra and training boundary.
+provider and training boundary. There are no provider-specific VAD extras.
 
 ## Detect speech
 
@@ -82,9 +53,13 @@ array, tensor, mapping, and `AudioInput` values use the same input envelope as
 | Need | Typical choice |
 | --- | --- |
 | Small, accurate local neural VAD | `vad_silero` |
+| Adaptive energy baseline without neural scores | `vad_auditok` |
+| Incremental ONNX Silero or TEN VAD | `vad_sherpa_onnx` |
 | Low-overhead fixed-point frame decisions | `vad_webrtc` |
 | Fine-tunable clip or frame classifier | `vad_transformers` |
 | Segmentation pipeline and pyannote ecosystem | `vad_pyannote` |
+| Direct pyannote powerset segmentation checkpoint | `vad_pyannote_segmentation` |
+| Speech regions with SNR and C50 estimates | `vad_pyannote_brouhaha` |
 | SpeechBrain CRDNN pipeline | `vad_speechbrain` |
 | NeMo MarbleNet window/frame model | `vad_nemo` |
 | FunASR/ModelScope FSMN speech boundaries | `vad_funasr` |
@@ -173,6 +148,51 @@ Silero accepts 8 or 16 kHz input after VoiceHub normalization. The provider
 returns its real speech timestamps; VoiceHub does not fabricate per-frame
 scores when they are unavailable.
 
+### Auditok
+
+Auditok is useful as an explainable signal-processing baseline. It can use a
+fixed energy threshold or calibrate the threshold from each input:
+
+```python
+model = AutoModelForVoiceActivityDetection.from_pretrained(
+    "auditok-energy-vad",
+    model_type="vad_auditok",
+    threshold_method="otsu",
+    calibration_duration_s=3.0,
+)
+result = model.detect("meeting.wav")
+```
+
+Auditok returns speech regions, not calibrated neural probabilities.
+`return_frames=True`, probability thresholds, and hysteresis controls are
+therefore rejected instead of being silently approximated.
+
+### Sherpa-ONNX
+
+Sherpa-ONNX exposes isolated, request-local Silero and TEN detectors. The
+default checkpoint is a small Silero ONNX graph:
+
+```python
+model = AutoModelForVoiceActivityDetection.from_pretrained(
+    "csukuangfj/vad",
+    model_type="vad_sherpa_onnx",
+    model_family="silero",
+    provider="cpu",
+)
+
+with model.stream(sampling_rate=16_000) as session:
+    for chunk in microphone_chunks:
+        for segment in session.push(chunk):
+            print(segment)
+    result = session.flush()
+```
+
+Streaming sessions do not share detector state, `flush()` is idempotent, and
+`reset()` starts a new utterance. TEN VAD requires the Sherpa-compatible
+`ten-vad.onnx` artifact published with Sherpa-ONNX; pass its local path rather
+than the original upstream ONNX graph, whose metadata is incompatible with
+Sherpa.
+
 ### Transformers
 
 ```python
@@ -187,6 +207,15 @@ model = AutoModelForVoiceActivityDetection.from_pretrained(
 ```
 
 Use `speech_class_id` when checkpoint labels do not identify the speech class.
+
+### pyannote presets
+
+Use `vad_pyannote_segmentation` for the direct
+`pyannote/segmentation-3.0` powerset checkpoint. Use
+`vad_pyannote_brouhaha` when downstream quality control also needs
+frame-level signal-to-noise ratio and C50 reverberation estimates. Both
+checkpoints may require a Hugging Face access token accepted only at runtime;
+VoiceHub never serializes it into model configuration.
 `architecture_family` may be `auto`, `audio-classification`, or
 `frame-classification`.
 

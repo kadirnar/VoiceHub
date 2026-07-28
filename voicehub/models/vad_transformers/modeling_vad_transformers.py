@@ -168,7 +168,7 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
         safetensors = import_optional(
             "safetensors.torch",
             model_type=self.config.model_type,
-            install_extra="vad-transformers",
+            install_extra=None,
         )
         state_dict = safetensors.load_file(str(weight_file), device="cpu")
         if not isinstance(state_dict, Mapping):
@@ -185,7 +185,7 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
         transformers = import_optional(
             "transformers",
             model_type=self.config.model_type,
-            install_extra="vad-transformers",
+            install_extra=None,
         )
         self.native_config = transformers.AutoConfig.from_pretrained(
             self._config_source(),
@@ -216,7 +216,7 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
                 raise OptionalDependencyError(
                     "'vad_transformers' requires a Transformers release "
                     "exposing `AutoModelForAudioClassification`. Upgrade "
-                    "`voicehub[vad-transformers]` and retry.")
+                    "`voicehub` and retry.")
 
         model_options = {
             **self._hub_kwargs(),
@@ -237,7 +237,7 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
             raise OptionalDependencyError(
                 "'vad_transformers' requires a Transformers release exposing "
                 "`AutoFeatureExtractor` or `AutoProcessor`. Upgrade "
-                "`voicehub[vad-transformers]` and retry.")
+                "`voicehub` and retry.")
         self.feature_extractor = processor_class.from_pretrained(
             self._processor_source(),
             trust_remote_code=self.config.trust_remote_code,
@@ -332,7 +332,7 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
         torch = import_optional(
             "torch",
             model_type=self.config.model_type,
-            install_extra="vad-transformers",
+            install_extra=None,
         )
         if logits.shape[-1] == 1:
             return torch.sigmoid(logits)
@@ -362,7 +362,7 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
         torch = import_optional(
             "torch",
             model_type=self.config.model_type,
-            install_extra="vad-transformers",
+            install_extra=None,
         )
         context = torch.inference_mode() if hasattr(torch, "inference_mode") else nullcontext()
         if self.architecture_family == "frame-classification":
@@ -395,7 +395,7 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
             np = import_optional(
                 "numpy",
                 model_type=self.config.model_type,
-                install_extra="vad-transformers",
+                install_extra=None,
             )
             for start in range(0, len(materialized.waveform), frame_hop):
                 window = materialized.waveform[start:start + frame_length]

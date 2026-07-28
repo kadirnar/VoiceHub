@@ -103,7 +103,6 @@ def _g2p(segments):
         seg_cut = tone_modifier.pre_merge_for_modify(seg_cut)
         for word, pos in seg_cut:
             if pos == "eng":
-                import pdb; pdb.set_trace()
                 continue
             sub_initials, sub_finals = _get_initials_finals(word)
             sub_finals = tone_modifier.modified_tone(word, pos, sub_finals)

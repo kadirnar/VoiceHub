@@ -62,7 +62,7 @@ und Diffusionsmodelle, akustische Modelle, adversarielle Systeme im VITS-Stil
 und zusammengesetzte Pipelines behalten ihre eigene Konditionierung, ihre
 Zielgrößen, die Zuständigkeit für Parameter und ihre Exportregeln bei.
 
-Die Registry enthält **31 TTS-Integrationen**, **9 ASR-Anbieter** und **7
+Die Registry enthält **34 TTS-Integrationen**, **14 ASR-Anbieter** und **11
 VAD-Anbieter**. Die Fine-Tuning-Unterstützung hängt vom Checkpoint und von der
 Laufzeitumgebung ab; eine Inferenzintegration bedeutet nicht, dass ihr
 aktuelles VoiceHub-Artefakt differenzierbar ist. Wählen Sie eine Integration
@@ -70,11 +70,12 @@ mithilfe des [TTS-Modellkatalogs](models/index.md), der
 [TTS-Trainingsmatrix](models/training-support.md) und der
 [ASR/VAD-Unterstützungsmatrix](models/asr-vad-support.md) aus.
 
-Der Modellquellcode wird mit VoiceHub ausgeliefert. Optionale Extras
-installieren die Abhängigkeiten der ausgewählten Laufzeitumgebung, während
-Checkpoint-Gewichte bei Bedarf heruntergeladen oder über lokale Pfade
-bereitgestellt werden. Die Apache-2.0-Lizenz gilt nur für VoiceHub selbst;
-integrierter Quellcode, Checkpoints, Codecs, Datensätze und erzeugte
+Der Modellquellcode und alle integrierten TTS-, ASR- und
+VAD-Inferenzlaufzeiten werden standardmäßig mit VoiceHub installiert.
+Checkpoint-Gewichte werden weiterhin bei Bedarf heruntergeladen oder über
+lokale Pfade bereitgestellt. Fügen Sie nur `voicehub[training]` für
+Fine-Tuning und Reporting hinzu. Die Apache-2.0-Lizenz gilt nur für VoiceHub
+selbst; integrierter Quellcode, Checkpoints, Codecs, Datensätze und erzeugte
 Audiodateien können anderen Bedingungen unterliegen.
 
 <div class="grid cards" markdown>
@@ -122,9 +123,8 @@ Audiodateien können anderen Bedingungen unterliegen.
 
     ---
 
-    Vergleichen Sie alle 31 Registry-Einträge, Installations-Extras,
-    Standard-Checkpoints, Funktionen, Herkunft des Quellcodes und
-    Einschränkungen.
+    Vergleichen Sie TTS-Registry-Einträge, Standard-Checkpoints, Funktionen,
+    Herkunft des Quellcodes und Einschränkungen.
 
     [Modellkatalog](models/index.md)
 

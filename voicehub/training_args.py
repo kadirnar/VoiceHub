@@ -71,8 +71,15 @@ class TrainingArguments:
     bf16: bool = False
     use_cpu: bool = False
     disable_tqdm: bool = True
-    report_to: list[str] = field(default_factory=list)
+    report_to: list[str] | str = field(default_factory=list)
     run_name: str | None = None
+    wandb_project: str | None = None
+    wandb_entity: str | None = None
+    wandb_group: str | None = None
+    wandb_tags: list[str] = field(default_factory=list)
+    wandb_notes: str | None = None
+    wandb_mode: str | None = None
+    wandb_log_model: str | bool = False
 
     # Compatibility alias retained for recipes written against older
     # Transformers releases.
@@ -92,6 +99,8 @@ class TrainingArguments:
         self.save_strategy = IntervalStrategy(self.save_strategy)
         self.lr_scheduler_type = SchedulerType(self.lr_scheduler_type)
         self.output_dir = str(Path(self.output_dir).expanduser())
+        self.report_to = self._normalize_report_to(self.report_to)
+        self.wandb_log_model = self._normalize_wandb_log_model(self.wandb_log_model, )
 
         positive_values = {
             "per_device_train_batch_size": self.per_device_train_batch_size,
@@ -176,6 +185,27 @@ class TrainingArguments:
                 any(not isinstance(name, str) or not name.strip() for name in self.label_names) or
                 len(set(self.label_names)) != len(self.label_names)):
             raise ValueError("`label_names` must be a non-empty list of unique names.")
+        for name in (
+                "run_name",
+                "wandb_project",
+                "wandb_entity",
+                "wandb_group",
+                "wandb_notes",
+        ):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise ValueError(f"`{name}` must be a non-empty string or None.")
+        if (not isinstance(self.wandb_tags, list) or
+                any(not isinstance(tag, str) or not tag.strip() for tag in self.wandb_tags)):
+            raise ValueError("`wandb_tags` must be a list of non-empty strings.")
+        self.wandb_tags = list(dict.fromkeys(tag.strip() for tag in self.wandb_tags))
+        if self.wandb_mode is not None:
+            if not isinstance(self.wandb_mode, str):
+                raise TypeError("`wandb_mode` must be a string or None.")
+            self.wandb_mode = self.wandb_mode.strip().lower()
+            if self.wandb_mode not in {"online", "offline", "disabled"}:
+                raise ValueError("`wandb_mode` must be 'online', 'offline', 'disabled', "
+                                 "or None.")
 
         if self.load_best_model_at_end:
             if self.eval_strategy is IntervalStrategy.NO:
@@ -192,6 +222,50 @@ class TrainingArguments:
             self.metric_for_best_model = "loss"
         if self.greater_is_better is None and self.metric_for_best_model is not None:
             self.greater_is_better = not self.metric_for_best_model.endswith("loss")
+
+    @staticmethod
+    def _normalize_report_to(value: list[str] | str) -> list[str]:
+        if isinstance(value, str):
+            integrations = [value]
+        elif isinstance(value, list):
+            integrations = value
+        else:
+            raise TypeError("`report_to` must be a string or list of strings.")
+        if any(not isinstance(name, str) or not name.strip() for name in integrations):
+            raise ValueError("`report_to` entries must be non-empty strings.")
+
+        normalized = [name.strip().lower() for name in integrations]
+        if "none" in normalized:
+            if len(normalized) != 1:
+                raise ValueError("`report_to='none'` cannot be combined with integrations.")
+            return []
+        if "all" in normalized:
+            if len(normalized) != 1:
+                raise ValueError("`report_to='all'` cannot be combined with integrations.")
+            normalized = ["wandb"]
+        unsupported = sorted(set(normalized) - {"wandb"})
+        if unsupported:
+            names = ", ".join(unsupported)
+            raise ValueError(
+                f"Unsupported reporting integration(s): {names}. "
+                "Supported integrations: wandb.")
+        return list(dict.fromkeys(normalized))
+
+    @staticmethod
+    def _normalize_wandb_log_model(value: str | bool) -> str:
+        if isinstance(value, bool):
+            return "end" if value else "false"
+        if not isinstance(value, str):
+            raise TypeError("`wandb_log_model` must be a boolean or string.")
+        normalized = value.strip().lower()
+        aliases = {
+            "true": "end",
+            "false": "false",
+        }
+        normalized = aliases.get(normalized, normalized)
+        if normalized not in {"false", "checkpoint", "end"}:
+            raise ValueError("`wandb_log_model` must be false, 'checkpoint', or 'end'.")
+        return normalized
 
     @property
     def train_batch_size(self) -> int:

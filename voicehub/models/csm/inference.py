@@ -77,22 +77,22 @@ class CSMForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="csm",
-            install_extra="csm",
+            install_extra=None,
         )
         torchaudio = import_optional(
             "torchaudio",
             model_type="csm",
-            install_extra="csm",
+            install_extra=None,
         )
         runtime = import_optional(
             "voicehub.models.csm.source.csm.generator",
             model_type="csm",
-            install_extra="csm",
+            install_extra=None,
         )
         models = import_optional(
             "voicehub.models.csm.source.csm.models",
             model_type="csm",
-            install_extra="csm",
+            install_extra=None,
         )
         model = models.Model.from_pretrained(self.config.name_or_path)
         dtype = resolve_torch_dtype(
@@ -244,7 +244,7 @@ class CSMForTextToSpeech(PreTrainedTTSModel):
             torchaudio = import_optional(
                 "torchaudio",
                 model_type="csm",
-                install_extra="csm",
+                install_extra=None,
             )
         audio, sample_rate = torchaudio.load(str(speaker_audio_path))
         if audio.numel() == 0:

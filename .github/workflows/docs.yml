@@ -35,7 +35,9 @@ jobs:
       - name: Install documentation dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[test,docs]"
+          python -m pip install --no-deps -e .
+          python -m pip install "nbformat>=5.10" numpy pytest soundfile \
+            "mkdocs-material==9.7.7" "mkdocs-static-i18n==1.3.1"
 
       - name: Validate documentation sources
         run: python -m pytest tests/test_documentation_site.py

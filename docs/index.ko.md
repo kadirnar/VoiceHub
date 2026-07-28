@@ -60,18 +60,19 @@ VoiceHub는 공통 설정, 프로세서, 모델, 출력, 트레이너 API를 통
 음향 모델, VITS 스타일 적대적 시스템, 복합 파이프라인은 각자의 조건화 방식,
 목적 함수, 파라미터 소유권, 내보내기 규칙을 유지합니다.
 
-레지스트리에는 **31개의 TTS 통합**, **9개의 ASR 제공자**, **7개의 VAD
+레지스트리에는 **34개의 TTS 통합**, **14개의 ASR 제공자**, **11개의 VAD
 제공자**가 있습니다. 미세 조정 지원 여부는 checkpoint와 런타임에 따라
 달라집니다. 추론을 지원한다고 해서 현재 VoiceHub 아티팩트가 미분 가능한 것은
 아닙니다. 통합 기능을 선택할 때는 [TTS 모델 카탈로그](models/index.md),
 [TTS 학습 매트릭스](models/training-support.md),
 [ASR/VAD 지원 매트릭스](models/asr-vad-support.md)를 확인하세요.
 
-모델 소스 코드는 VoiceHub와 함께 패키징됩니다. 선택 사항인 extras는 선택한
-런타임의 종속성을 설치하며, checkpoint 가중치는 필요할 때 다운로드하거나 로컬
-경로로 제공할 수 있습니다. Apache-2.0 라이선스는 VoiceHub 자체에 적용됩니다.
-통합된 소스 코드, checkpoint, 코덱, 데이터 세트, 생성된 오디오에는 별도의 조건이
-적용될 수 있습니다.
+모델 소스 코드와 내장 TTS, ASR, VAD 추론 런타임은 모두 VoiceHub 기본 설치에
+포함됩니다. checkpoint 가중치는 필요할 때 다운로드하거나 로컬 경로로 제공할 수
+있습니다. 미세 조정과 리포팅이 필요할 때만 `voicehub[training]`을 추가하세요.
+Apache-2.0 라이선스는 VoiceHub 자체에 적용됩니다. 통합된 소스 코드,
+checkpoint, 코덱, 데이터 세트, 생성된 오디오에는 별도의 조건이 적용될 수
+있습니다.
 
 <div class="grid cards" markdown>
 
@@ -115,8 +116,8 @@ VoiceHub는 공통 설정, 프로세서, 모델, 출력, 트레이너 API를 통
 
     ---
 
-    레지스트리 항목 31개의 설치용 extras, 기본 checkpoint, 기능, 소스 출처,
-    제약 사항을 비교합니다.
+    TTS 레지스트리 항목의 기본 checkpoint, 기능, 소스 출처, 제약 사항을
+    비교합니다.
 
     [모델 카탈로그](models/index.md)
 

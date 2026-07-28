@@ -28,13 +28,18 @@ jobs:
 
       - name: Build distributions
         run: |
-          python -m pip install --upgrade pip build "nbformat>=5.10" pytest
+          python -m pip install --upgrade pip build "nbformat>=5.10" numpy pytest soundfile
           python -m build
 
       - name: Verify wheel
         run: |
-          python -m pip install --force-reinstall dist/*.whl
-          python -c "from voicehub import AutoInferenceModel; assert len(AutoInferenceModel.available_models()) == 31"
+          python -m pip install --force-reinstall --no-deps dist/*.whl
+          python -c "from voicehub import AutoInferenceModel; assert AutoInferenceModel.available_models()"
+
+      - name: Import every integration from the installed wheel
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -c "import importlib; from voicehub import list_model_specs; [importlib.import_module(name) for spec in list_model_specs(task=None) for name in (spec.config_module, spec.module)]"
 
       - name: Validate workflow documentation
         run: python -m pytest tests/test_documentation_site.py

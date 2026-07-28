@@ -62,7 +62,7 @@ flow-matching e difusão, modelos acústicos, sistemas adversariais no estilo
 VITS e pipelines compostos mantêm seus próprios condicionamentos, objetivos,
 regras de propriedade de parâmetros e de exportação.
 
-O registro contém **31 integrações TTS**, **9 provedores ASR** e **7 provedores
+O registro contém **34 integrações TTS**, **14 provedores ASR** e **11 provedores
 VAD**. O suporte a ajuste fino depende do checkpoint e do ambiente de execução;
 uma integração de inferência não implica que seu artefato atual do VoiceHub
 seja diferenciável. Consulte o [catálogo TTS](models/index.md), a
@@ -70,12 +70,12 @@ seja diferenciável. Consulte o [catálogo TTS](models/index.md), a
 [matriz de suporte ASR/VAD](models/asr-vad-support.md) para selecionar uma
 integração.
 
-O código-fonte dos modelos é distribuído com o VoiceHub. Os extras opcionais
-instalam as dependências do ambiente de execução selecionado, enquanto os pesos
-dos checkpoints são baixados sob demanda ou fornecidos por caminhos locais. A
-licença Apache-2.0 abrange o próprio VoiceHub; código integrado, checkpoints,
-codecs, conjuntos de dados e áudio gerado podem estar sujeitos a termos
-distintos.
+O código-fonte dos modelos e todos os ambientes de inferência TTS, ASR e VAD
+integrados são instalados por padrão com o VoiceHub. Os pesos dos checkpoints
+são baixados sob demanda ou fornecidos por caminhos locais. Adicione apenas
+`voicehub[training]` para ajuste fino e relatórios. A licença Apache-2.0
+abrange o próprio VoiceHub; código integrado, checkpoints, codecs, conjuntos
+de dados e áudio gerado podem estar sujeitos a termos distintos.
 
 <div class="grid cards" markdown>
 
@@ -119,8 +119,8 @@ distintos.
 
     ---
 
-    Compare as 31 entradas do registro, extras de instalação, checkpoints
-    padrão, recursos, procedência do código-fonte e restrições.
+    Compare as entradas TTS do registro, checkpoints padrão, recursos,
+    procedência do código-fonte e restrições.
 
     [Catálogo de modelos](models/index.md)
 

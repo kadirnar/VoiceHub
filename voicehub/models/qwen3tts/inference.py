@@ -271,12 +271,12 @@ class Qwen3TTSForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="qwen3tts",
-            install_extra="qwen3tts",
+            install_extra=None,
         )
         runtime = import_optional(
             "voicehub.models.qwen3tts.source.qwen_tts",
             model_type="qwen3tts",
-            install_extra="qwen3tts",
+            install_extra=None,
         )
         kwargs = {
             "device_map": self.device,

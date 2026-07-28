@@ -152,7 +152,6 @@ def seeded_inference(
     import_optional(
         "torch",
         model_type=model_type,
-        install_extra=model_type,
     )
 
     with preserve_inference_state(
@@ -234,7 +233,7 @@ def resolve_model_directory(
     hub = import_optional(
         "huggingface_hub",
         model_type=model_type,
-        install_extra=install_extra or model_type,
+        install_extra=install_extra,
     )
     snapshot = Path(
         hub.snapshot_download(

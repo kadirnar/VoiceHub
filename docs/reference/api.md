@@ -8,11 +8,11 @@ This page documents the public Python surface exported by `voicehub`. VoiceHub
 keeps registry discovery and configuration lightweight; model runtimes and
 PyTorch are imported only when the selected operation needs them.
 
-Install the model extra required by the backend. Add the independent `training`
-extra for fine-tuning:
+The default package installs every built-in inference runtime. Add the
+independent `training` extra for fine-tuning:
 
 ```bash
-python -m pip install "voicehub[dia,training]"
+python -m pip install "voicehub[training]"
 ```
 
 !!! note "Training support is model and checkpoint specific"
@@ -64,7 +64,7 @@ Filter the shared registry by `text-to-speech`,
 from voicehub import list_model_specs
 
 for spec in list_model_specs(task="asr"):
-    print(spec.model_type, spec.architecture, spec.install_extra)
+    print(spec.model_type, spec.architecture, spec.install_extra or "default")
 ```
 
 ### `AutoInferenceModel.available_models`
@@ -85,7 +85,7 @@ for spec in AutoInferenceModel.available_models():
     print(
         spec.model_type,
         spec.default_model_path,
-        spec.install_extra,
+        spec.install_extra or "default",
         spec.training.support.value,
     )
 ```
@@ -100,7 +100,7 @@ for spec in AutoInferenceModel.available_models():
 | `module` / `class_name` | Lazy import target for the model wrapper |
 | `config_module` / `config_class` | Lazy import target for its configuration |
 | `default_model_path` | Default Hub identifier or local artifact name |
-| `install_extra` | Optional dependency extra for the backend |
+| `install_extra` | `None` for built-in inference; optional setup identifier reserved for external/future runtimes |
 | `capabilities` | Declared inference capabilities |
 | `task` | Canonical `SpeechTask` owned by the provider |
 | `architecture` | Provider/runtime architecture family, when declared |
@@ -642,7 +642,7 @@ Useful properties and methods:
 | `requires_custom_adapter` | Whether support is `custom` |
 | `phase_map` | Read-only phase-name mapping |
 | `get_phase(name=None)` | Resolve a phase, defaulting to `default_phase` |
-| `install_extra` | Paired model extra, or `"training"` for a future training-only profile |
+| `install_extra` | `"training"` for built-in trainable profiles; otherwise an optional extension-owned setup identifier |
 
 Built-in `TrainingFamily` values are:
 
@@ -902,14 +902,22 @@ built-in execution strategy is single-process PyTorch.
 | `bf16` | `False` | bfloat16 autocast on a supported CPU or CUDA runtime |
 | `use_cpu` | `False` | Force the trainer device to CPU |
 | `disable_tqdm` | `True` | Compatibility flag; `False` enables the built-in printing callback |
-| `report_to` | `[]` | Serialized compatibility metadata; no built-in reporting integrations |
-| `run_name` | `None` | Serialized run metadata |
+| `report_to` | `[]` | Reporting backend name or names; supports `"wandb"`, `"all"`, and `"none"` |
+| `run_name` | `None` | Human-readable reporting run name |
+| `wandb_project` | `None` | W&B project; falls back to `WANDB_PROJECT`, then `"voicehub"` |
+| `wandb_entity` | `None` | Optional W&B user or team |
+| `wandb_group` | `None` | Optional W&B run group |
+| `wandb_tags` | `[]` | Deduplicated W&B tags |
+| `wandb_notes` | `None` | Optional W&B run notes |
+| `wandb_mode` | `None` | `online`, `offline`, or `disabled`; `None` defers to the SDK/environment |
+| `wandb_log_model` | `False` | `false`, `checkpoint`, or `end`; booleans normalize to `false`/`end` |
 
 Important validation rules:
 
 - batch sizes and gradient accumulation must be positive integers;
 - `max_steps` is `-1` or a positive integer;
 - `fp16` and `bf16` are mutually exclusive, and `fp16` training requires CUDA;
+- reporting names and W&B modes/artifact policies are validated before a run;
 - `load_best_model_at_end=True` requires matching non-`no` save/evaluation
   strategies; with step strategies, `save_steps` must be a multiple of
   `eval_steps`; and
@@ -1036,6 +1044,12 @@ print(result.global_step, result.training_loss)
 | `get_learning_rates()` | `list[float]` | Every optimizer-group learning rate |
 | `get_num_trainable_parameters()` | `int` | Count parameters with gradients enabled |
 
+When `report_to="wandb"`, Trainer adds `WandbCallback` automatically. The
+integration remains lazy and runs only on the world-primary process.
+`wandb_log_model="checkpoint"` uploads after an atomic checkpoint has
+completed; `"end"` writes `output_dir/final-model` and uploads that portable
+artifact before a VoiceHub-owned W&B run is finished.
+
 `TrainOutput` is `(global_step, training_loss, metrics)`.
 `PredictionOutput` is `(predictions, label_ids, metrics)`.
 `EvalPrediction` passed to `compute_metrics` contains `predictions`,
@@ -1057,6 +1071,9 @@ class TrainerCallback:
     def on_init_end(self, args, state, control, **kwargs): ...
     def on_train_begin(self, args, state, control, **kwargs): ...
     def on_train_end(self, args, state, control, **kwargs): ...
+    def on_train_error(self, args, state, control, **kwargs): ...
+    def requires_final_model(self, args, state): ...
+    def on_final_model_saved(self, args, state, control, **kwargs): ...
     def on_epoch_begin(self, args, state, control, **kwargs): ...
     def on_epoch_end(self, args, state, control, **kwargs): ...
     def on_step_begin(self, args, state, control, **kwargs): ...
@@ -1065,6 +1082,7 @@ class TrainerCallback:
     def on_evaluate(self, args, state, control, **kwargs): ...
     def on_predict(self, args, state, control, **kwargs): ...
     def on_save(self, args, state, control, **kwargs): ...
+    def on_checkpoint_saved(self, args, state, control, **kwargs): ...
     def on_log(self, args, state, control, **kwargs): ...
     def on_prediction_step(self, args, state, control, **kwargs): ...
 ```
@@ -1088,6 +1106,11 @@ EarlyStoppingCallback(
 
 It requires `load_best_model_at_end=True` and a
 `metric_for_best_model`.
+
+`WandbCallback` is also public and is normally registered through
+`TrainingArguments(report_to="wandb")`. It lazily initializes or reuses a W&B
+run, logs phase-namespaced metrics, stores its run ID in callback state,
+optionally uploads complete model artifacts, and closes only runs it owns.
 
 `TrainerState` exposes serializable progress including `epoch`, `global_step`,
 `max_steps`, interval values, `log_history`, best metric/checkpoint, and exact

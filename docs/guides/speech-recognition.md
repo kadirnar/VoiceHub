@@ -12,35 +12,19 @@ optimized and source-native runtimes remain separate providers.
 Use the [ASR and VAD support matrix](../models/asr-vad-support.md) to select a
 provider by architecture, timestamps, runtime, and fine-tuning boundary.
 
-## Install one provider
+## Install every provider
 
-=== "Transformers"
+The default VoiceHub installation includes every registered TTS, ASR, and VAD
+provider:
 
-    ```bash
-    python -m pip install "voicehub[asr-transformers]"
-    ```
+```bash
+python -m pip install voicehub
+```
 
-=== "faster-whisper"
-
-    ```bash
-    python -m pip install "voicehub[faster-whisper]"
-    ```
-
-=== "WhisperX"
-
-    ```bash
-    python -m pip install "voicehub[whisperx]"
-    ```
-
-=== "NeMo"
-
-    ```bash
-    python -m pip install "voicehub[asr-nemo]"
-    ```
-
-The base package does not import these runtimes during registry discovery.
-When a provider dependency is missing, `OptionalDependencyError` identifies
-the exact extra to install.
+VoiceHub does not import these runtimes during registry discovery. When a
+provider dependency is missing, `OptionalDependencyError` points back to the
+complete default installation. Provider-specific ASR extras are not
+published.
 
 ## Discover ASR providers
 
@@ -56,7 +40,7 @@ for spec in list_model_specs(
         spec.model_type,
         spec.architecture,
         spec.default_model_path,
-        spec.install_extra,
+        spec.install_extra or "default",
         spec.capabilities,
     )
 ```
@@ -108,6 +92,32 @@ Set `architecture_family` only when automatic detection is ambiguous:
 The native Transformers module remains the model's trainable object. The
 high-level transcription pipeline is an inference view and is discarded
 before `load_for_training()`.
+
+## Use a locked Transformers preset
+
+Choose a preset when you want a reviewed checkpoint, processor, architecture
+family, and training objective instead of automatic architecture detection:
+
+| Model type | Default checkpoint | Objective |
+| --- | --- | --- |
+| `asr_wav2vec2` | `facebook/wav2vec2-base-960h` | CTC |
+| `asr_hubert` | `facebook/hubert-large-ls960-ft` | CTC |
+| `asr_wavlm` | `patrickvonplaten/wavlm-libri-clean-100h-base-plus` | CTC |
+| `asr_moonshine` | `UsefulSensors/moonshine-tiny` | Speech sequence-to-sequence |
+| `asr_seamless_m4t_v2` | `facebook/seamless-m4t-v2-large` | Multilingual speech sequence-to-sequence |
+
+```python
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "UsefulSensors/moonshine-tiny",
+    model_type="asr_moonshine",
+    device="cuda",
+)
+result = model.transcribe("meeting.wav")
+```
+
+The preset validates the checkpoint's native `model_type` and architecture
+before loading. This catches an accidental CTC/sequence-to-sequence mismatch
+early while preserving the same `ASROutput` and shared trainer lifecycle.
 
 ## Use an optimized or native provider
 
@@ -209,7 +219,7 @@ that it cannot implement rather than silently ignoring them.
 | --- | --- |
 | `language` | Optional provider language or locale identifier |
 | `task` | `transcribe` or, when supported, `translate` |
-| `return_timestamps` | `False`, `True`, or `"word"` |
+| `return_timestamps` | `False`, `True`, `"word"`, or provider-specific modes such as CTC `"char"`; CTC `True` means word timestamps |
 | `chunk_length_s` | Positive chunk duration for long-form decoding |
 | `stride_length_s` | Non-negative overlap, as one value or left/right pair |
 | `batch_size` | Positive decoding batch size |

@@ -97,12 +97,12 @@ class OmniVoiceForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="omnivoice",
-            install_extra="omnivoice",
+            install_extra=None,
         )
         runtime = import_optional(
             "voicehub.models.omnivoice.source.omnivoice",
             model_type="omnivoice",
-            install_extra="omnivoice",
+            install_extra=None,
         )
         model = runtime.OmniVoice.from_pretrained(
             self.config.name_or_path,
@@ -146,7 +146,7 @@ class OmniVoiceForTextToSpeech(PreTrainedTTSModel):
         torch = import_optional(
             "torch",
             model_type="omnivoice",
-            install_extra="omnivoice",
+            install_extra=None,
         )
         dtype = resolve_torch_dtype(
             torch,

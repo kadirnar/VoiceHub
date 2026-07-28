@@ -39,7 +39,7 @@ class OpenAIWhisperForSpeechRecognition(PreTrainedASRModel):
         whisper = import_optional(
             "whisper",
             model_type=self.config.model_type,
-            install_extra="openai-whisper",
+            install_extra=None,
         )
         source = self.config.name_or_path or self.default_model_name_or_path
         loader = getattr(whisper, "load_model", None)
