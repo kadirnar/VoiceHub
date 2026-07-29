@@ -352,6 +352,31 @@ families retain their explicitly documented raw or preprocessed data
 contracts—the generic trainer never invents alignment, flow, or adversarial
 targets.
 
+For models with integrated source preparation, load and validate a manifest
+through the model contract:
+
+```python
+from voicehub import TTSDataset, get_tts_dataset_spec
+
+contract = get_tts_dataset_spec("dia")
+records = TTSDataset.from_manifest(
+    "data/train.jsonl",
+    model_type="dia",
+    validate_files=True,
+)
+train_records, validation_records = records.train_test_split(
+    # Grouped splitting requires this field on every source record.
+    group_by="speaker_id",
+    seed=42,
+)
+```
+
+Contracts distinguish `integrated-raw`, `preprocessed`, `custom`, and
+`unavailable` data readiness. Strict public helpers also cover multi-codebook
+cross-entropy, diffusion/flow target construction, masked regression, and
+VITS adversarial, feature-matching, and KL math; a complete model adapter must
+still expose the architecture's actual training graph and checkpoint state.
+
 Use `trainer.train(resume_from_checkpoint=True)` only when `output_dir`
 already contains a complete VoiceHub checkpoint.
 

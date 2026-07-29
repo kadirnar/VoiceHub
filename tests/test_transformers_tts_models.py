@@ -337,6 +337,106 @@ class TransformersTTSInferenceTests(unittest.TestCase):
         )
         self.assertTrue(wrapper.model.kwargs["return_output_lengths"])
 
+    def test_speecht5_training_materializes_manifest_audio_paths(self):
+        from voicehub.audio import AudioInput
+
+        wrapper = SpeechT5ForTextToSpeech(device="cpu")
+        loaded = AudioInput(
+            waveform=np.array([0.1, 0.2], dtype=np.float32),
+            sampling_rate=16_000,
+        )
+        with patch(
+                "voicehub.models.speecht5.inference.load_audio",
+                return_value=loaded,
+        ) as loader:
+            waveform, sampling_rate, batch_size = wrapper._training_audio_batch(
+                "/dataset/wavs/sample.wav",
+                None,
+            )
+
+        loader.assert_called_once_with(
+            "/dataset/wavs/sample.wav",
+            target_sampling_rate=16_000,
+        )
+        np.testing.assert_allclose(waveform, loaded.waveform)
+        self.assertEqual(sampling_rate, 16_000)
+        self.assertEqual(batch_size, 1)
+
+    def test_speecht5_training_resamples_materialized_audio_inputs(self):
+        from voicehub.audio import AudioInput
+
+        wrapper = SpeechT5ForTextToSpeech(device="cpu")
+        source = AudioInput(
+            waveform=np.array([0.1, 0.2, 0.3], dtype=np.float32),
+            sampling_rate=22_050,
+        )
+        loaded = AudioInput(
+            waveform=np.array([0.1, 0.25], dtype=np.float32),
+            sampling_rate=16_000,
+        )
+        with patch(
+                "voicehub.models.speecht5.inference.load_audio",
+                return_value=loaded,
+        ) as loader:
+            waveform, sampling_rate, batch_size = wrapper._training_audio_batch(
+                source,
+                None,
+            )
+
+        loader.assert_called_once_with(
+            source,
+            target_sampling_rate=16_000,
+        )
+        np.testing.assert_allclose(waveform, loaded.waveform)
+        self.assertEqual(sampling_rate, 16_000)
+        self.assertEqual(batch_size, 1)
+
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is required for batched audio")
+    def test_speecht5_training_resamples_collated_waveform_mappings(self):
+        import torch
+
+        from voicehub.audio import AudioInput
+
+        wrapper = SpeechT5ForTextToSpeech(device="cpu")
+        batch = torch.tensor([
+            [0.1, 0.2, 0.3],
+            [0.4, 0.5, 0.6],
+        ])
+        loaded = [
+            AudioInput(
+                waveform=np.array([0.1, 0.25], dtype=np.float32),
+                sampling_rate=16_000,
+            ),
+            AudioInput(
+                waveform=np.array([0.4, 0.55], dtype=np.float32),
+                sampling_rate=16_000,
+            ),
+        ]
+        with patch(
+                "voicehub.models.speecht5.inference.load_audio",
+                side_effect=loaded,
+        ) as loader:
+            waveforms, sampling_rate, batch_size = wrapper._training_audio_batch(
+                {
+                    "array": batch,
+                    "sampling_rate": torch.tensor([22_050, 22_050]),
+                },
+                None,
+            )
+
+        self.assertEqual(loader.call_count, 2)
+        for index, call in enumerate(loader.call_args_list):
+            torch.testing.assert_close(call.args[0], batch[index])
+            self.assertEqual(call.kwargs["sampling_rate"], 22_050)
+            self.assertEqual(
+                call.kwargs["target_sampling_rate"],
+                16_000,
+            )
+        self.assertEqual(sampling_rate, 16_000)
+        np.testing.assert_allclose(waveforms[0], loaded[0].waveform)
+        np.testing.assert_allclose(waveforms[1], loaded[1].waveform)
+        self.assertEqual(batch_size, 2)
+
     @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is required for native VITS")
     def test_vits_uses_request_local_sampling_and_sequence_length(self):
         import torch

@@ -7,9 +7,10 @@ from types import SimpleNamespace
 
 from voicehub.models.cosyvoice.training import CosyVoiceTrainingAdapter
 from voicehub.models.higgstts.training import HiggsTrainingAdapter
+from voicehub.models.orpheustts.training import OrpheusSFTDataset
 from voicehub.models.xtts.training import XTTSTrainingAdapter
 from voicehub.trainer import Trainer
-from voicehub.training.recipes import Qwen3TTSTrainingAdapter
+from voicehub.training.recipes import F5TTSTrainingAdapter, Qwen3TTSTrainingAdapter
 from voicehub.training.specs import get_training_spec
 from voicehub.training_args import TrainingArguments
 
@@ -18,6 +19,87 @@ TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 
 @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")
 class SourceTrainingRecipeTests(unittest.TestCase):
+
+    def test_f5_source_mel_layout_is_converted_to_time_major(self):
+        import torch
+
+        adapter = F5TTSTrainingAdapter(
+            object(),
+            get_training_spec("f5tts"),
+        )
+        prepared = adapter.prepare_training_inputs(
+            {
+                "mel": torch.randn(2, 100, 31),
+                "mel_lengths": torch.tensor([31, 24]),
+                "text": ["one", "two"],
+            },
+            None,
+        )
+        self.assertEqual(tuple(prepared["inp"].shape), (2, 31, 100))
+        self.assertEqual(prepared["lens"].tolist(), [31, 24])
+
+    def test_orpheus_keeps_provenance_source_out_of_spoken_text(self):
+
+        class Tokenizer:
+
+            def __init__(self):
+                self.texts = []
+
+            def encode(self, text, *, add_special_tokens):
+                self.texts.append((text, add_special_tokens))
+                return [7]
+
+        tokenizer = Tokenizer()
+        dataset = OrpheusSFTDataset(
+            [{
+                "text": "Hello",
+                "source": "studio-corpus",
+                "voice": "narrator",
+                "audio_codes": ([0], [0, 0], [0, 0, 0, 0]),
+            }],
+            tokenizer=tokenizer,
+            codec=None,
+        )
+
+        dataset[0]
+
+        self.assertEqual(tokenizer.texts, [("narrator: Hello", True)])
+        self.assertNotIn("studio-corpus", tokenizer.texts[0][0])
+
+    def test_xtts_native_adapter_requires_preencoded_gpt_inputs(self):
+        adapter = XTTSTrainingAdapter(object(), get_training_spec("xtts"))
+        batch = {
+            "text_inputs": [[1, 2, 3]],
+            "text_lengths": [3],
+            "audio_codes": [[4, 5]],
+            "wav_lengths": [44_100],
+            "cond_latents": [[[0.1, 0.2]]],
+            "metadata": {
+                "source": "fixture"
+            },
+        }
+
+        prepared = adapter.prepare_training_inputs(batch, None)
+
+        self.assertEqual(
+            set(prepared),
+            {
+                "text_inputs",
+                "text_lengths",
+                "audio_codes",
+                "wav_lengths",
+                "cond_latents",
+            },
+        )
+        with self.assertRaisesRegex(ValueError, "precomputed text/audio tokens"):
+            adapter.prepare_training_inputs(
+                {
+                    "text": ["hello"],
+                    "audio": ["clips/example.wav"],
+                    "language": ["en"],
+                },
+                None,
+            )
 
     def test_qwen_residual_codebook_loss_uses_aligned_labels(self):
         source_path = (

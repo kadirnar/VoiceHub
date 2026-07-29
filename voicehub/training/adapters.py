@@ -34,6 +34,14 @@ class BaseTrainingAdapter:
     supports_quantized_training = False
     supports_compiled_training = False
     native_export_semantics = "component-weight-warm-start"
+    SOURCE_METADATA_FIELDS = frozenset({
+        "consent",
+        "id",
+        "license",
+        "metadata",
+        "session_id",
+        "source",
+    })
 
     def __init__(self, model, spec: ModelTrainingSpec):
         if not isinstance(spec, ModelTrainingSpec):
@@ -325,6 +333,8 @@ class BaseTrainingAdapter:
                 list(phase.detach_inputs),
                 "frozen_component_paths":
                 list(phase.frozen_component_paths, ),
+                "optimizer_step_after_phase":
+                phase.optimizer_step_after_phase,
             })
         return {
             "recipe_id": self.recipe_id,
@@ -1184,6 +1194,8 @@ class BaseTrainingAdapter:
                 "specialized adapter.")
         from voicehub.training.datasets import SpeechDataset
 
+        if isinstance(records, SpeechDataset) and not kwargs:
+            return records
         return SpeechDataset(records, **kwargs)
 
     def on_training_phase_start(self, context: TrainingContext) -> None:
@@ -1678,14 +1690,15 @@ class BaseTrainingAdapter:
 
     @classmethod
     def _filter_forward_inputs(cls, module, inputs):
+        model_inputs = {key: value for key, value in inputs.items() if key not in cls.SOURCE_METADATA_FIELDS}
         signature = cls._signature(module)
         if signature is None:
-            return inputs
+            return model_inputs
         parameters = signature.parameters
         if any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
-            return inputs
+            return model_inputs
         accepted = set(parameters)
-        return {key: value for key, value in inputs.items() if key in accepted}
+        return {key: value for key, value in model_inputs.items() if key in accepted}
 
     @staticmethod
     def _get_value(outputs, key):
@@ -1804,23 +1817,192 @@ class BaseTrainingAdapter:
         )
         if predictions.ndim < 2:
             raise ValueError("Cross-entropy training requires rank-2+ logits.")
+        expected_shape = tuple(predictions.shape[:-1])
+        if tuple(labels.shape) != expected_shape:
+            raise ValueError(
+                "Token cross entropy requires labels to match every logits "
+                "dimension except the final vocabulary dimension. Expected "
+                f"{expected_shape}, but received {tuple(labels.shape)}. "
+                "Align or pack tokens explicitly in the model's dataset "
+                "preprocessor; VoiceHub will not silently truncate them.")
+        is_floating_point = getattr(labels, "is_floating_point", None)
+        if callable(is_floating_point) and is_floating_point():
+            raise TypeError("Token cross entropy requires integer class-index labels.")
         logits = predictions
-        targets = labels
-        if logits.ndim >= 3 and targets.ndim >= 2:
-            common_length = min(logits.shape[-2], targets.shape[-1])
-            if shift:
-                if common_length < 2:
-                    raise ValueError("Causal token training requires at least two aligned tokens.")
-                logits = logits[..., :common_length - 1, :].contiguous()
-                targets = targets[..., 1:common_length].contiguous()
-            else:
-                logits = logits[..., :common_length, :].contiguous()
-                targets = targets[..., :common_length].contiguous()
-        return torch.nn.functional.cross_entropy(
+        targets = labels.to(device=logits.device)
+        if shift:
+            if logits.ndim < 3:
+                raise ValueError(
+                    "Causal token training requires batched sequence logits "
+                    "with shape (..., sequence, vocabulary).")
+            if logits.shape[-2] < 2:
+                raise ValueError("Causal token training requires at least two aligned tokens.")
+            logits = logits[..., :-1, :].contiguous()
+            targets = targets[..., 1:].contiguous()
+        valid = targets.ne(-100)
+        if not bool(valid.any().item()):
+            raise ValueError("Token cross entropy received no supervised labels.")
+        logits = torch.where(
+            valid.unsqueeze(-1),
+            logits,
+            torch.zeros((), device=logits.device, dtype=logits.dtype),
+        )
+        targets = torch.where(
+            valid,
+            targets,
+            torch.zeros((), device=targets.device, dtype=targets.dtype),
+        )
+        per_token = torch.nn.functional.cross_entropy(
             logits.reshape(-1, logits.shape[-1]),
             targets.reshape(-1).long(),
-            ignore_index=-100,
+            reduction="none",
+        ).reshape(targets.shape)
+        return per_token.masked_select(valid, ).mean()
+
+    _REGRESSION_MASK_NAMES = (
+        "loss_mask",
+        "label_mask",
+        "labels_mask",
+        "target_mask",
+        "mel_mask",
+        "spectrogram_mask",
+        "audio_mask",
+        "velocity_mask",
+        "latent_mask",
+    )
+
+    @classmethod
+    def _find_explicit_regression_mask(
+        cls,
+        context: TrainingContext,
+    ):
+        names = list(cls._REGRESSION_MASK_NAMES)
+        names.extend(f"{label_name}_mask" for label_name in context.phase.label_names)
+        masks = [(name, context.inputs[name]) for name in dict.fromkeys(names)
+                 if name in context.inputs and context.inputs[name] is not None]
+        if len(masks) > 1:
+            provided = ", ".join(name for name, _ in masks)
+            raise ValueError(
+                "Regression fallback received multiple explicit loss masks "
+                f"({provided}). Provide exactly one target-aligned mask.")
+        return masks[0][1] if masks else None
+
+    @staticmethod
+    def _regression_loss(
+        predictions,
+        labels,
+        *,
+        objective: str,
+        mask=None,
+    ):
+        torch = import_optional(
+            "torch",
+            model_type="Trainer",
+            install_extra="training",
         )
+        if tuple(predictions.shape) != tuple(labels.shape):
+            raise ValueError(
+                "Regression fallbacks require predictions and labels with "
+                "identical shapes; implicit broadcasting can train the wrong "
+                f"timebase. Received {tuple(predictions.shape)} and "
+                f"{tuple(labels.shape)}.")
+        targets = labels.to(
+            device=predictions.device,
+            dtype=predictions.dtype,
+        )
+        normalized = objective.strip().lower().replace("-", "_")
+        if normalized in ("mse", "velocity_mse", "flow_mse"):
+            loss_function = torch.nn.functional.mse_loss
+        elif normalized == "l1":
+            loss_function = torch.nn.functional.l1_loss
+        else:
+            raise ValueError(f"Unsupported regression fallback objective {objective!r}.")
+        if mask is None:
+            return loss_function(predictions, targets)
+
+        valid = BaseTrainingAdapter._expand_regression_mask(
+            mask,
+            targets,
+            torch=torch,
+        )
+        if not bool(valid.any().item()):
+            raise ValueError("Regression fallback received no valid target elements after "
+                             "masking.")
+        safe_predictions = torch.where(
+            valid,
+            predictions,
+            torch.zeros(
+                (),
+                device=predictions.device,
+                dtype=predictions.dtype,
+            ),
+        )
+        safe_targets = torch.where(
+            valid,
+            targets,
+            torch.zeros(
+                (),
+                device=targets.device,
+                dtype=targets.dtype,
+            ),
+        )
+        losses = loss_function(
+            safe_predictions,
+            safe_targets,
+            reduction="none",
+        )
+        return losses.masked_select(valid).mean()
+
+    @staticmethod
+    def _expand_regression_mask(mask, target, *, torch):
+        if not isinstance(mask, torch.Tensor):
+            try:
+                mask = torch.as_tensor(mask, device=target.device)
+            except (TypeError, ValueError) as exc:
+                raise TypeError("Regression loss masks must be tensor-like.") from exc
+        else:
+            mask = mask.to(device=target.device)
+        mask = mask.bool()
+        if mask.ndim > target.ndim:
+            raise ValueError(f"Regression loss mask rank {mask.ndim} exceeds target rank "
+                             f"{target.ndim}.")
+        if tuple(mask.shape) == tuple(target.shape):
+            return mask
+
+        candidates = []
+        if tuple(target.shape[:mask.ndim]) == tuple(mask.shape):
+            candidate = mask
+            while candidate.ndim < target.ndim:
+                candidate = candidate.unsqueeze(-1)
+            candidates.append(candidate)
+        if (mask.ndim >= 2 and target.ndim > mask.ndim and mask.shape[0] == target.shape[0] and
+                tuple(mask.shape[1:]) == tuple(target.shape[-(mask.ndim - 1):])):
+            candidate = mask
+            for _ in range(target.ndim - mask.ndim):
+                candidate = candidate.unsqueeze(1)
+            candidates.append(candidate)
+        if not candidates:
+            raise ValueError(
+                f"Regression loss mask shape {tuple(mask.shape)} is not "
+                f"aligned with target shape {tuple(target.shape)}. Expected a "
+                "full element mask, a prefix mask such as (batch, time), or "
+                "a batch-plus-trailing-time mask.")
+        expanded = []
+        for candidate in candidates:
+            try:
+                expanded.append(candidate.expand(target.shape))
+            except RuntimeError:
+                continue
+        if not expanded:
+            raise ValueError(
+                f"Regression loss mask shape {tuple(mask.shape)} cannot "
+                f"expand to target shape {tuple(target.shape)}.")
+        if len(expanded) > 1 and not torch.equal(expanded[0], expanded[1]):
+            raise ValueError(
+                f"Regression loss mask shape {tuple(mask.shape)} is ambiguous "
+                f"for target shape {tuple(target.shape)}. Provide an "
+                "element-wise mask.")
+        return expanded[0]
 
 
 class CausalLMTrainingAdapter(BaseTrainingAdapter):
@@ -2128,46 +2310,140 @@ class FrameClassificationTrainingAdapter(
 class FlowMatchingTrainingAdapter(BaseTrainingAdapter):
     """Continuous flow objective with strict native-loss preference."""
 
+    def compute_phase_objective(
+        self,
+        predictions,
+        labels,
+        context: TrainingContext,
+    ):
+        if context.phase.fallback_objective is None:
+            return super().compute_phase_objective(
+                predictions,
+                labels,
+                context,
+            )
+        return self._flow_regression_loss(
+            predictions,
+            labels,
+            objective=context.phase.fallback_objective,
+            mask=self._find_explicit_regression_mask(context),
+        )
+
     def compute_objective(self, predictions, labels):
-        fallback = self.current_phase.fallback_objective
-        if fallback not in ("mse", "velocity_mse", "flow_mse"):
+        return self._flow_regression_loss(
+            predictions,
+            labels,
+            objective=self.current_phase.fallback_objective,
+        )
+
+    def _flow_regression_loss(
+        self,
+        predictions,
+        labels,
+        *,
+        objective,
+        mask=None,
+    ):
+        if objective not in ("mse", "velocity_mse", "flow_mse"):
             raise ValueError(
                 "A plain regression loss is not a complete native flow-matching "
                 "objective. Return the backend's native flow loss or explicitly "
                 "configure an MSE velocity-target fallback.")
         self._require_predictions_and_labels(predictions, labels)
-        torch = import_optional(
-            "torch",
-            model_type="Trainer",
-            install_extra="training",
+        return self._regression_loss(
+            predictions,
+            labels,
+            objective=objective,
+            mask=mask,
         )
-        return torch.nn.functional.mse_loss(predictions, labels)
 
 
 class AcousticTrainingAdapter(BaseTrainingAdapter):
     """Mel, codec, or waveform reconstruction objective."""
 
-    def compute_objective(self, predictions, labels):
-        self._require_predictions_and_labels(predictions, labels)
-        fallback = self.current_phase.fallback_objective
-        torch = import_optional(
-            "torch",
-            model_type="Trainer",
-            install_extra="training",
+    def compute_phase_objective(
+        self,
+        predictions,
+        labels,
+        context: TrainingContext,
+    ):
+        if context.phase.fallback_objective is None:
+            return super().compute_phase_objective(
+                predictions,
+                labels,
+                context,
+            )
+        return self._acoustic_regression_loss(
+            predictions,
+            labels,
+            objective=context.phase.fallback_objective,
+            mask=self._find_explicit_regression_mask(context),
         )
-        if fallback == "l1":
-            return torch.nn.functional.l1_loss(predictions, labels)
-        if fallback == "mse":
-            return torch.nn.functional.mse_loss(predictions, labels)
-        raise ValueError(f"Unsupported acoustic fallback objective {fallback!r}.")
+
+    def compute_objective(self, predictions, labels):
+        return self._acoustic_regression_loss(
+            predictions,
+            labels,
+            objective=self.current_phase.fallback_objective,
+        )
+
+    def _acoustic_regression_loss(
+        self,
+        predictions,
+        labels,
+        *,
+        objective,
+        mask=None,
+    ):
+        self._require_predictions_and_labels(predictions, labels)
+        if objective not in ("l1", "mse"):
+            raise ValueError(f"Unsupported acoustic fallback objective {objective!r}.")
+        return self._regression_loss(
+            predictions,
+            labels,
+            objective=objective,
+            mask=mask,
+        )
 
 
 class CompositeTrainingAdapter(BaseTrainingAdapter):
     """Multi-component adapter that prefers phase-specific native losses."""
 
+    def compute_phase_objective(
+        self,
+        predictions,
+        labels,
+        context: TrainingContext,
+    ):
+        if context.phase.fallback_objective is None:
+            return super().compute_phase_objective(
+                predictions,
+                labels,
+                context,
+            )
+        return self._composite_objective(
+            predictions,
+            labels,
+            fallback=context.phase.fallback_objective,
+            mask=self._find_explicit_regression_mask(context),
+        )
+
     def compute_objective(self, predictions, labels):
+        return self._composite_objective(
+            predictions,
+            labels,
+            fallback=self.current_phase.fallback_objective,
+        )
+
+    def _composite_objective(
+        self,
+        predictions,
+        labels,
+        *,
+        fallback,
+        mask=None,
+    ):
         self._require_predictions_and_labels(predictions, labels)
-        fallback = self.current_phase.fallback_objective
         if fallback == "causal_cross_entropy":
             return self._cross_entropy(predictions, labels, shift=True)
         if fallback in ("cross_entropy", "ce"):
@@ -2175,15 +2451,20 @@ class CompositeTrainingAdapter(BaseTrainingAdapter):
         if fallback == "auto" and (predictions.ndim >= 2 and
                                    not getattr(labels, "is_floating_point", lambda: True)()):
             return self._cross_entropy(predictions, labels, shift=False)
-        torch = import_optional(
-            "torch",
-            model_type="Trainer",
-            install_extra="training",
-        )
         if fallback in ("auto", "mse"):
-            return torch.nn.functional.mse_loss(predictions, labels)
+            return self._regression_loss(
+                predictions,
+                labels,
+                objective="mse",
+                mask=mask,
+            )
         if fallback == "l1":
-            return torch.nn.functional.l1_loss(predictions, labels)
+            return self._regression_loss(
+                predictions,
+                labels,
+                objective="l1",
+                mask=mask,
+            )
         raise ValueError(f"Unsupported composite fallback objective {fallback!r}.")
 
 

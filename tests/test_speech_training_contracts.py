@@ -313,6 +313,28 @@ class SpeechTrainingContractTests(unittest.TestCase):
         copied["text"] = "changed"
         self.assertEqual(dataset[0]["text"], "hello")
 
+    def test_speech_dataset_copies_nested_metadata_and_rejects_empty_required_values(self):
+        source = [{
+            "text": "hello",
+            "metadata": {
+                "speaker": "one",
+                "tags": ["clean"],
+            },
+        }]
+        dataset = SpeechDataset(source, required_fields=("text", ))
+        source[0]["metadata"]["tags"].append("changed")
+        materialized = dataset[0]
+        materialized["metadata"]["tags"].append("also-changed")
+
+        self.assertEqual(dataset[0]["metadata"]["tags"], ["clean"])
+        with self.assertRaisesRegex(ValueError, "missing required"):
+            SpeechDataset(
+                [{
+                    "text": "   "
+                }],
+                required_fields=("text", ),
+            )
+
 
 @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")
 class SpeechTrainingTorchContractTests(unittest.TestCase):

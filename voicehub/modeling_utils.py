@@ -586,8 +586,31 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         """Build this architecture's source-native fine-tuning dataset.
 
         The returned dataset exposes ``collate_fn`` when its token or
-        acoustic layout needs model-specific batching.
+        acoustic layout needs model-specific batching. ``records`` may
+        also be a JSON/JSONL/CSV/TSV manifest path. Manifest audio paths
+        are resolved relative to the manifest before the selected model
+        adapter constructs tokens, codec codes, or acoustic targets.
         """
+        from voicehub.training.datasets import TTSDataset
+
+        data_root = kwargs.pop("data_root", None)
+        data_aliases = kwargs.pop("data_aliases", None)
+        validate_records = kwargs.pop("validate_records", None)
+        validate_audio_files = kwargs.pop("validate_audio_files", False)
+        should_coerce = isinstance(records, (str, Path, TTSDataset))
+        should_coerce = should_coerce or validate_records is not None
+        should_coerce = should_coerce or data_root is not None
+        should_coerce = should_coerce or data_aliases is not None
+        should_coerce = should_coerce or bool(validate_audio_files)
+        if should_coerce:
+            records = TTSDataset.coerce(
+                records,
+                model_type=self.config.model_type,
+                root=data_root,
+                aliases=data_aliases,
+                validate=(True if validate_records is None else bool(validate_records)),
+                validate_files=bool(validate_audio_files),
+            )
         return self.get_training_adapter().create_dataset(records, **kwargs)
 
     def prepare_training_inputs(

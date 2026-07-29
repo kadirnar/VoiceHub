@@ -320,7 +320,10 @@ class F5TTSTrainingAdapter(
         }
         for source, target in aliases.items():
             if source in prepared and target not in prepared:
-                prepared[target] = prepared.pop(source)
+                value = prepared.pop(source)
+                if (source in ("mel", "mel_spec") and getattr(value, "ndim", None) == 3):
+                    value = value.permute(0, 2, 1)
+                prepared[target] = value
         allowed = ("inp", "text", "lens", "noise_scheduler")
         return {name: prepared[name] for name in allowed if name in prepared}
 

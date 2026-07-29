@@ -590,9 +590,12 @@ Exact resume validates:
 - callback, sampler, and random state; and
 - multi-phase optimizer topology.
 
-Dia's dataset fingerprint describes its collator but does not hash record
-contents. Keep immutable manifests and record their content hash with every
-run.
+`TTSDataset.resume_fingerprint()` hashes normalized record content and order.
+If the dataset uses a lazy `transform`, supply a stable
+`transform_fingerprint` when constructing it; exact-resume fingerprinting
+rejects an unversioned transform.
+Model-owned datasets may expose a narrower fingerprint; keep immutable source
+manifests and persist their content hash with every run.
 
 Generic exact mid-epoch resume requires:
 
@@ -696,6 +699,88 @@ optimizer over every reachable parameter.
 For exact qualifications—such as CosyVoice component training, XTTS GPT-only
 fine-tuning, or experimental Higgs Audio reconstruction—read the
 [training support matrix](../models/training-support.md).
+
+## Build specialized TTS objectives explicitly
+
+VoiceHub exposes strict, model-agnostic objective primitives for source
+adapters. They import PyTorch lazily and reject ambiguous shapes.
+
+For codec/LLM TTS, use exact multi-codebook alignment rather than flattening
+unknown axes:
+
+```python
+from voicehub import multi_codebook_cross_entropy
+
+loss = multi_codebook_cross_entropy(
+    logits,                 # labels.shape + (vocabulary_size,)
+    labels,
+    loss_mask=codec_mask,
+    causal_shift=True,
+    sequence_dim=2,
+    codebook_dim=1,
+    codebook_weights=weights,
+)
+```
+
+For diffusion or flow matching, sample randomness during training instead of
+storing it in the manifest:
+
+```python
+from voicehub import (
+    build_flow_matching_training_pair,
+    masked_diffusion_regression_loss,
+)
+
+pair = build_flow_matching_training_pair(
+    clean_latents,
+    generator=generator,
+    prediction_type="velocity",
+)
+prediction = model(
+    pair.noisy_inputs,
+    timesteps=pair.timesteps,
+    conditioning=conditioning,
+)
+loss = masked_diffusion_regression_loss(
+    prediction,
+    pair.targets,
+    mask=latent_mask,
+)
+```
+
+`build_diffusion_training_pair()` accepts an explicit coefficient function for
+the recipe's alpha/sigma schedule and supports epsilon, velocity, or clean
+sample prediction. The caller still owns the model's scheduler, conditioning,
+codec/latent extractor, SNR weighting policy, and EMA configuration.
+
+For a VITS-family source adapter, the shared primitives cover least-squares
+discriminator and generator loss, discriminator feature matching, and masked
+diagonal-Gaussian KL:
+
+```python
+from voicehub import (
+    vits_discriminator_loss,
+    vits_feature_matching_loss,
+    vits_generator_adversarial_loss,
+    vits_kl_loss,
+)
+```
+
+These functions do not turn an inference synthesizer into a full VITS graph.
+The model integration must still expose the posterior encoder, monotonic
+alignment/duration path, generator, waveform/duration discriminators, mel and
+duration losses, and compatible checkpoint state.
+For discriminator updates, detach generated audio before its discriminator
+forward; do not detach the resulting fake score, because that would remove the
+discriminator's fake-branch gradient.
+
+An adversarial `TrainingPhaseSpec` may set
+`optimizer_step_after_phase=True`. With separate named optimizers, the trainer
+then steps that phase immediately before running the next phase. This supports
+the source-faithful sequence “discriminator forward/backward/step, then
+recomputed generator forward/backward/step.” Every scheduled phase in that
+scheduled recipe must use the policy consistently. Exact phase boundaries
+currently require `gradient_accumulation_steps=1`.
 
 ## Training strategies
 

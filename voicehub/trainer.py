@@ -163,6 +163,7 @@ class Trainer:
             training_adapter,
         )
         self._uses_default_data_collator = data_collator is None
+        self._explicit_data_collator = data_collator
         dataset_collator = getattr(train_dataset, "collate_fn", None)
         self._dataset_data_collator = (dataset_collator if callable(dataset_collator) else None)
         self.data_collator = (
@@ -190,6 +191,7 @@ class Trainer:
         self._current_gradient_accumulation_steps = (self.args.gradient_accumulation_steps)
         self._active_optimizer_names: set[str] = set()
         self._optimizer_microstep_counts: dict[str, int] = {}
+        self._phase_recipe_did_step: bool | None = None
         self._train_sampler = None
         self._train_dataloader_generator = None
         self._model_prepared = False
@@ -506,7 +508,7 @@ class Trainer:
             batch_size=self.args.train_batch_size,
             shuffle=False,
             sampler=self._train_sampler,
-            collate_fn=self.data_collator,
+            collate_fn=self._data_collator_for(self.train_dataset),
             drop_last=self.args.dataloader_drop_last,
             num_workers=self.args.dataloader_num_workers,
             pin_memory=(self.args.dataloader_pin_memory and self.args.device.startswith("cuda")),
@@ -529,7 +531,7 @@ class Trainer:
             dataset,
             batch_size=self.args.eval_batch_size,
             shuffle=False,
-            collate_fn=self.data_collator,
+            collate_fn=self._data_collator_for(dataset),
             drop_last=self.args.dataloader_drop_last,
             num_workers=self.args.dataloader_num_workers,
             pin_memory=(self.args.dataloader_pin_memory and self.args.device.startswith("cuda")),
@@ -543,6 +545,24 @@ class Trainer:
     def get_test_dataloader(self, test_dataset):
         """Return a deterministic prediction DataLoader."""
         return self.get_eval_dataloader(test_dataset)
+
+    def _data_collator_for(self, dataset):
+        """Resolve a collator for one dataset without leaking train policy.
+
+        An explicitly supplied Trainer collator remains authoritative.
+        When none is supplied, a train, evaluation, or prediction
+        dataset may each expose its own ``collate_fn``. The model
+        adapter's structural collator is the final speech-aware
+        fallback.
+        """
+        if self._explicit_data_collator is not None:
+            return self._explicit_data_collator
+        dataset_collator = getattr(dataset, "collate_fn", None)
+        if callable(dataset_collator):
+            return dataset_collator
+        if self.training_adapter is not None:
+            return self.training_adapter.data_collator
+        return default_data_collator
 
     def create_optimizer(self):
         """Create AdamW parameter groups unless an optimizer was supplied."""
@@ -752,10 +772,13 @@ class Trainer:
             phase for phase in self.training_adapter.spec.phases if optimizer_name in phase.optimizer_names)
         if not phases:
             return num_training_steps
-        return max(
-            1,
-            sum(any(phase.is_scheduled(step) for phase in phases) for step in range(num_training_steps)),
-        )
+        optimizer_steps = 0
+        for step in range(num_training_steps):
+            scheduled = tuple(phase for phase in phases if phase.is_scheduled(step))
+            boundary_count = sum(phase.optimizer_step_after_phase for phase in scheduled)
+            unbounded = any(not phase.optimizer_step_after_phase for phase in scheduled)
+            optimizer_steps += boundary_count + int(unbounded)
+        return max(1, optimizer_steps)
 
     def _prepare_input(self, value):
         return self.training_strategy.prepare_input(
@@ -803,6 +826,32 @@ class Trainer:
                 "The model did not return a loss. Return "
                 "`SpeechTrainingOutput(loss=...)`, "
                 "a mapping with `loss`, or pass `compute_loss_func`.")
+        return loss
+
+    @staticmethod
+    def _validate_training_loss(loss):
+        """Reject objectives that cannot produce a trustworthy backward
+        pass."""
+        torch = import_optional(
+            "torch",
+            model_type="Trainer",
+            install_extra="training",
+        )
+        if not isinstance(loss, torch.Tensor):
+            raise TypeError("Training loss must be a PyTorch tensor, received "
+                            f"{type(loss).__name__}.")
+        if loss.ndim != 0:
+            raise ValueError(
+                "Training loss must be a scalar tensor, received shape "
+                f"{tuple(loss.shape)}.")
+        if not bool(torch.isfinite(loss.detach()).item()):
+            raise FloatingPointError(
+                "Training loss is NaN or infinite. Inspect the current batch "
+                "and architecture-specific objective before continuing.")
+        if not loss.requires_grad:
+            raise ValueError(
+                "Training loss is detached from the trainable graph. Return a "
+                "differentiable scalar computed from model parameters.")
         return loss
 
     def compute_loss(
@@ -876,6 +925,7 @@ class Trainer:
                     self.training_adapter,
                     inputs,
                     num_items_in_batch=num_items_in_batch,
+                    sync_gradients=sync_gradients,
                 )
             with self._autocast_context():
                 loss, outputs = self.compute_loss(
@@ -887,6 +937,7 @@ class Trainer:
 
             optimizer_names = self._get_output_optimizer_names(outputs)
             self._record_optimizer_activity(optimizer_names)
+            loss = self._validate_training_loss(loss)
             self.training_strategy.backward(
                 loss,
                 scaler=self._scaler,
@@ -908,14 +959,38 @@ class Trainer:
         inputs: dict[str, Any],
         *,
         num_items_in_batch: int | None,
+        sync_gradients: bool,
     ):
         phases = adapter.plan_training_phases(self.state.global_step)
         if not phases:
             raise RuntimeError(
                 f"Training recipe for {adapter.model_type!r} scheduled no "
                 f"phase at step {self.state.global_step}.")
+        boundary_phases = tuple(phase for phase in phases if phase.optimizer_step_after_phase)
+        if boundary_phases:
+            unbounded_phases = tuple(phase.name for phase in phases if not phase.optimizer_step_after_phase)
+            if unbounded_phases:
+                names = ", ".join(unbounded_phases)
+                raise ValueError(
+                    "A sequential recipe must route every scheduled phase "
+                    "through the same explicit optimizer boundary policy. "
+                    f"Missing optimizer_step_after_phase on: {names}.")
+            if not self._uses_named_optimizers:
+                raise ValueError(
+                    "optimizer_step_after_phase requires a recipe with "
+                    "separate named optimizers.")
+            if self._current_gradient_accumulation_steps != 1:
+                raise ValueError(
+                    "Sequential phase optimizer boundaries currently require "
+                    "gradient_accumulation_steps=1. Increase the physical "
+                    "batch size or let every phase step at the recipe boundary.")
+            if not sync_gradients:
+                raise RuntimeError(
+                    "Sequential phase optimizer boundaries cannot execute "
+                    "inside a no-sync microstep.")
 
         detached_loss = None
+        boundary_step_succeeded = False
         micro_optimizer_names: set[str] = set()
         flattened_inputs = adapter.flatten_model_inputs(inputs)
         for phase in phases:
@@ -933,15 +1008,36 @@ class Trainer:
                     context,
                 )
             loss = self._extract_loss(output)
+            loss = self._validate_training_loss(loss)
             optimizer_names = self._get_output_optimizer_names(output)
-            micro_optimizer_names.update(optimizer_names)
+            if phase.optimizer_step_after_phase:
+                if not optimizer_names:
+                    raise RuntimeError(
+                        f"Training phase {phase.name!r} requested an optimizer "
+                        "step boundary but returned no optimizer routing.")
+                self._record_optimizer_activity(optimizer_names)
+            else:
+                micro_optimizer_names.update(optimizer_names)
             self.training_strategy.backward(
                 loss,
                 scaler=self._scaler,
             )
+            if phase.optimizer_step_after_phase:
+                did_step = self._perform_optimizer_step(
+                    tuple(dict.fromkeys(optimizer_names)),
+                    clear_all=False,
+                )
+                boundary_step_succeeded = boundary_step_succeeded or did_step
             current = loss.detach()
             detached_loss = current if detached_loss is None else detached_loss + current
-        self._record_optimizer_activity(tuple(micro_optimizer_names), )
+        if micro_optimizer_names:
+            self._record_optimizer_activity(tuple(micro_optimizer_names))
+        elif boundary_phases:
+            # A partial mixed-precision or strategy skip cannot roll back an
+            # earlier phase update. Advance the global step whenever any
+            # named optimizer changed so that update is never repeated under
+            # the same schedule position.
+            self._phase_recipe_did_step = boundary_step_succeeded
         return detached_loss
 
     def _record_optimizer_activity(
@@ -974,10 +1070,31 @@ class Trainer:
         return tuple(str(name) for name in names)
 
     def _optimizer_step(self) -> bool:
-        runtime = self._runtime_model()
+        if self._phase_recipe_did_step is not None:
+            did_step = self._phase_recipe_did_step
+            self._phase_recipe_did_step = None
+            self.training_strategy.zero_grad(
+                self.optimizer,
+                optimizer_names=None,
+            )
+            self._active_optimizer_names.clear()
+            self._optimizer_microstep_counts.clear()
+            return did_step
         optimizer_names = (
             tuple(sorted(self._active_optimizer_names))
             if self._uses_named_optimizers and self._active_optimizer_names else None)
+        return self._perform_optimizer_step(
+            optimizer_names,
+            clear_all=True,
+        )
+
+    def _perform_optimizer_step(
+        self,
+        optimizer_names: tuple[str, ...] | None,
+        *,
+        clear_all: bool,
+    ) -> bool:
+        runtime = self._runtime_model()
         next_step = self.state.global_step + 1
         self.training_strategy.normalize_gradients(
             self.optimizer,
@@ -1019,10 +1136,15 @@ class Trainer:
             )
         self.training_strategy.zero_grad(
             self.optimizer,
-            optimizer_names=None,
+            optimizer_names=(None if clear_all else optimizer_names),
         )
-        self._active_optimizer_names.clear()
-        self._optimizer_microstep_counts.clear()
+        if clear_all:
+            self._active_optimizer_names.clear()
+            self._optimizer_microstep_counts.clear()
+        else:
+            for name in optimizer_names or ():
+                self._active_optimizer_names.discard(name)
+                self._optimizer_microstep_counts.pop(name, None)
         return did_step
 
     def _initialize_state(
@@ -1171,6 +1293,7 @@ class Trainer:
         self.training_strategy.zero_grad(self.optimizer)
         self._active_optimizer_names.clear()
         self._optimizer_microstep_counts.clear()
+        self._phase_recipe_did_step = None
         self.control._new_training()
         self.control = self.callback_handler.on_train_begin(
             self.args,

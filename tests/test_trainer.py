@@ -237,6 +237,41 @@ class TrainerApiTests(unittest.TestCase):
         self.assertEqual(batch["text"], ["one", "two"])
         self.assertEqual(batch["labels"].tolist(), [1.0, 2.0])
 
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")
+    def test_each_dataset_can_supply_its_own_collator(self):
+        import torch
+
+        class Dataset(list):
+
+            def __init__(self, name):
+                super().__init__([{"value": torch.tensor([1.0])}])
+                self.name = name
+
+            def collate_fn(self, features):
+                return {
+                    "dataset": self.name,
+                    "value": torch.stack([feature["value"] for feature in features]),
+                }
+
+        train_dataset = Dataset("train")
+        eval_dataset = Dataset("eval")
+        trainer = Trainer(
+            model=torch.nn.Linear(1, 1),
+            args=TrainingArguments(
+                per_device_train_batch_size=1,
+                per_device_eval_batch_size=1,
+                use_cpu=True,
+            ),
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+        )
+
+        train_batch = next(iter(trainer.get_train_dataloader()))
+        eval_batch = next(iter(trainer.get_eval_dataloader()))
+
+        self.assertEqual(train_batch["dataset"], "train")
+        self.assertEqual(eval_batch["dataset"], "eval")
+
 
 @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")
 class TrainerLoopTests(unittest.TestCase):
@@ -269,6 +304,24 @@ class TrainerLoopTests(unittest.TestCase):
             "labels": torch.tensor([float(index * 2)]),
             "metadata": f"sample-{index}",
         } for index in range(8)]
+
+    def test_training_loss_validation_rejects_invalid_graphs(self):
+        import torch
+
+        parameter = torch.nn.Parameter(torch.tensor(1.0))
+        valid_loss = parameter.square()
+        self.assertIs(
+            Trainer._validate_training_loss(valid_loss),
+            valid_loss,
+        )
+        with self.assertRaisesRegex(TypeError, "PyTorch tensor"):
+            Trainer._validate_training_loss(1.0)
+        with self.assertRaisesRegex(ValueError, "scalar tensor"):
+            Trainer._validate_training_loss(parameter.expand(2))
+        with self.assertRaisesRegex(ValueError, "detached"):
+            Trainer._validate_training_loss(torch.tensor(1.0))
+        with self.assertRaisesRegex(FloatingPointError, "NaN or infinite"):
+            Trainer._validate_training_loss(parameter * torch.tensor(float("nan")))
 
     def test_train_evaluate_predict_callbacks_and_checkpoints(self):
         recorder = EventRecorder()

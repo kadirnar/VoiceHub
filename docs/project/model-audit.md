@@ -32,6 +32,43 @@ existing architecture instead of creating duplicate VoiceHub backends.
 The audit also covered Irodori-TTS, Zonos v0.1, ZONOS2, and the complete MOSS
 and Qwen3 checkpoint families requested for this release.
 
+## Training and data audit
+
+Training paths were audited separately on 2026-07-29 across all 34 registered
+TTS model types. Registry presence was checked against the actual loaded
+training graph, objective, data boundary, optimizer topology, and export
+semantics.
+
+| Registry support | Count | Practical meaning |
+| --- | ---: | --- |
+| `native` | 8 | A backend-native differentiable objective exists; raw-data preparation may still be external |
+| `preprocessed` | 15 | A verified objective accepts source-shaped tensors or tokens |
+| `custom` | 6 | Source-specific graph or orchestration is required |
+| `inference-only` | 5 | The integrated artifact has no verified gradient path |
+
+The principal findings were:
+
+- full end-to-end VITS training was not present; the Transformers VITS route
+  is an explicit waveform-reconstruction experiment, while MeloTTS,
+  GPT-SoVITS, and StyleTTS2 require source-owned trainable graphs;
+- diffusion/flow objectives existed model by model without one strict shared
+  noise/timestep/target API;
+- codec/LLM TTS was the strongest family, but codebook layout, codec
+  preprocessing, and raw-data support varied by model;
+- broad family schemas could incorrectly imply that a model accepted raw
+  text/audio when it required prepared tensors; and
+- the trainer accumulated all adversarial phase losses before one optimizer
+  boundary, so it could not represent discriminator-step followed by a fresh
+  generator forward.
+
+The shared layer now addresses those cross-cutting boundaries with
+model-specific dataset readiness, manifest loading and content fingerprints,
+strict multi-codebook/diffusion/VITS objective primitives, exact masked losses,
+and opt-in sequential named-optimizer phase steps. Model support remains
+fail-closed: the shared math does not relabel an inference-only or incomplete
+source integration as trainable. The current per-model result is maintained in
+the [TTS training support matrix](../models/training-support.md).
+
 ## Source and license decisions
 
 | Family | Upstream source | Source/license result |

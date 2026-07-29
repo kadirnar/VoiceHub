@@ -4,9 +4,20 @@ import subprocess
 import sys
 import unittest
 
-from voicehub.training.adapters import BaseTrainingAdapter, FlowMatchingTrainingAdapter, VITSTrainingAdapter
+from voicehub.training.adapters import (
+    BaseTrainingAdapter,
+    CausalLMTrainingAdapter,
+    FlowMatchingTrainingAdapter,
+    VITSTrainingAdapter,
+)
 from voicehub.training.auto import AutoTrainingAdapter
-from voicehub.training.contracts import TrainingPhaseKind, TrainingPhaseSpec, TrainingRecipeKind, TrainingSupport
+from voicehub.training.contracts import (
+    TrainingContext,
+    TrainingPhaseKind,
+    TrainingPhaseSpec,
+    TrainingRecipeKind,
+    TrainingSupport,
+)
 from voicehub.training.specs import (
     MODEL_TRAINING_SPECS,
     ModelTrainingSpec,
@@ -43,6 +54,11 @@ class TrainingContractValidationTests(unittest.TestCase):
                 name="bad-routing",
                 component_paths=("model.a", ),
                 optimizer_names=("a", "b"),
+            )
+        with self.assertRaisesRegex(ValueError, "must declare optimizer_names"):
+            TrainingPhaseSpec(
+                name="unrouted-boundary",
+                optimizer_step_after_phase=True,
             )
 
     def test_support_introspection_and_filtering(self):
@@ -94,6 +110,57 @@ class TrainingContractValidationTests(unittest.TestCase):
                     offset=0,
                 ), ),
             )
+
+    def test_source_audit_metadata_is_never_forwarded_as_model_kwargs(self):
+
+        class Runtime:
+
+            def forward(self, values, **kwargs):
+                del values, kwargs
+
+        filtered = BaseTrainingAdapter._filter_forward_inputs(
+            Runtime().forward,
+            {
+                "values": [1.0],
+                "language": "en",
+                "speaker_id": "speaker-1",
+                "id": "utterance-1",
+                "session_id": "session-1",
+                "consent": True,
+                "license": "owned",
+                "source": "studio",
+                "metadata": {
+                    "microphone": "one"
+                },
+            },
+        )
+        self.assertEqual(
+            filtered,
+            {
+                "values": [1.0],
+                "language": "en",
+                "speaker_id": "speaker-1",
+            },
+        )
+
+    def test_sequential_optimizer_boundary_is_part_of_resume_signature(self):
+        phase = TrainingPhaseSpec(
+            name="generator",
+            kind=TrainingPhaseKind.GENERATOR,
+            component_paths=("model.generator", ),
+            optimizer_names=("generator", ),
+            optimizer_step_after_phase=True,
+        )
+        spec = ModelTrainingSpec(
+            model_type="dummy-resume-boundary",
+            family=TrainingFamily.VITS,
+            component_paths=("model.generator", ),
+            phases=(phase, ),
+        )
+
+        signature = BaseTrainingAdapter(object(), spec).resume_signature()
+
+        self.assertTrue(signature["phases"][0]["optimizer_step_after_phase"], )
 
 
 class DynamicTrainingRegistryTests(unittest.TestCase):
@@ -775,6 +842,75 @@ class SupportAndObjectiveBoundaryTests(unittest.TestCase):
             velocity_target=torch.zeros(2, 1),
         )
         self.assertGreater(output.loss.item(), 0)
+
+    def test_token_cross_entropy_never_silently_truncates_timebases(self):
+        import torch
+
+        spec = ModelTrainingSpec(
+            model_type="dummy-causal",
+            family=TrainingFamily.CAUSAL_LM,
+            fallback_objective="causal_cross_entropy",
+        )
+        adapter = CausalLMTrainingAdapter(object(), spec)
+        with self.assertRaisesRegex(ValueError, "will not silently truncate"):
+            adapter.compute_objective(
+                torch.randn(2, 5, 11),
+                torch.ones(2, 4, dtype=torch.long),
+            )
+
+    def test_regression_fallback_rejects_implicit_broadcasting(self):
+        import torch
+
+        spec = ModelTrainingSpec(
+            model_type="dummy-flow-shapes",
+            family=TrainingFamily.FLOW_MATCHING,
+            fallback_objective="velocity_mse",
+        )
+        adapter = FlowMatchingTrainingAdapter(object(), spec)
+        with self.assertRaisesRegex(ValueError, "implicit broadcasting"):
+            adapter.compute_objective(
+                torch.randn(2, 4, 1),
+                torch.randn(2, 4),
+            )
+
+    def test_flow_mask_excludes_padded_target_frames(self):
+        import torch
+
+        phase = TrainingPhaseSpec(
+            name="flow",
+            label_names=("velocity_target", ),
+            fallback_objective="velocity_mse",
+        )
+        spec = ModelTrainingSpec(
+            model_type="dummy-flow-mask",
+            family=TrainingFamily.FLOW_MATCHING,
+            phases=(phase, ),
+        )
+        adapter = FlowMatchingTrainingAdapter(object(), spec)
+        predictions = torch.tensor([
+            [[1.0, 1.0], [2.0, 2.0], [100.0, 100.0]],
+            [[3.0, 3.0], [100.0, 100.0], [100.0, 100.0]],
+        ])
+        targets = torch.zeros_like(predictions)
+        mask = torch.tensor([
+            [True, True, False],
+            [True, False, False],
+        ])
+        context = TrainingContext(
+            phase=phase,
+            inputs={
+                "velocity_target": targets,
+                "velocity_target_mask": mask,
+            },
+        )
+
+        actual = adapter.compute_phase_objective(
+            predictions,
+            targets,
+            context,
+        )
+        expected = torch.tensor((1.0 + 1.0 + 4.0 + 4.0 + 9.0 + 9.0) / 6)
+        self.assertTrue(torch.allclose(actual, expected))
 
     def test_module_discovery_requires_an_explicit_opt_in(self):
         import torch

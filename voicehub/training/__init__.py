@@ -30,7 +30,16 @@ from voicehub.training.contracts import (
     TrainingRecipeKind,
     TrainingSupport,
 )
-from voicehub.training.datasets import SpeechDataset
+from voicehub.training.datasets import (
+    SpeechDataset,
+    TTSDataArchitecture,
+    TTSDataReadiness,
+    TTSDataset,
+    TTSDatasetSpec,
+    TTSRecordVariant,
+    get_tts_dataset_spec,
+    list_tts_dataset_specs,
+)
 from voicehub.training.optimization import OptimizerBundle, SchedulerBundle
 from voicehub.training.specs import (
     ALL_MODEL_TRAINING_SPECS,
@@ -52,6 +61,18 @@ from voicehub.training.strategy import (
     register_training_strategy,
     unregister_training_strategy,
 )
+from voicehub.training.tts_objectives import (
+    DiffusionTrainingPair,
+    VITSDiscriminatorLoss,
+    build_diffusion_training_pair,
+    build_flow_matching_training_pair,
+    masked_diffusion_regression_loss,
+    multi_codebook_cross_entropy,
+    vits_discriminator_loss,
+    vits_feature_matching_loss,
+    vits_generator_adversarial_loss,
+    vits_kl_loss,
+)
 
 __all__ = [
     "AcousticTrainingAdapter",
@@ -65,6 +86,7 @@ __all__ = [
     "CTCTrainingAdapter",
     "DataCollatorForAudioTraining",
     "DataCollatorForTTSTraining",
+    "DiffusionTrainingPair",
     "FlowMatchingTrainingAdapter",
     "FrameClassificationTrainingAdapter",
     "MODEL_TRAINING_SPECS",
@@ -75,6 +97,11 @@ __all__ = [
     "SchedulerBundle",
     "SpeechSeq2SeqTrainingAdapter",
     "SpeechDataset",
+    "TTSDataArchitecture",
+    "TTSDataReadiness",
+    "TTSDataset",
+    "TTSDatasetSpec",
+    "TTSRecordVariant",
     "TDTTrainingAdapter",
     "TrainingFamily",
     "TrainingContext",
@@ -87,14 +114,25 @@ __all__ = [
     "TorchTrainingStrategy",
     "UpstreamNativeTrainingAdapter",
     "VITSTrainingAdapter",
+    "VITSDiscriminatorLoss",
+    "build_diffusion_training_pair",
+    "build_flow_matching_training_pair",
     "get_training_strategy",
     "get_training_spec",
+    "get_tts_dataset_spec",
     "list_training_strategies",
     "list_training_specs",
+    "list_tts_dataset_specs",
+    "masked_diffusion_regression_loss",
+    "multi_codebook_cross_entropy",
     "register_training_alias",
     "register_training_spec",
     "register_training_strategy",
     "unregister_training_alias",
     "unregister_training_spec",
     "unregister_training_strategy",
+    "vits_discriminator_loss",
+    "vits_feature_matching_loss",
+    "vits_generator_adversarial_loss",
+    "vits_kl_loss",
 ]

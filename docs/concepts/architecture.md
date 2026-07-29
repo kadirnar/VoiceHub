@@ -308,7 +308,12 @@ planning.
 A phase can also declare input aliases, required inputs, detached input paths,
 temporarily frozen components, native loss names and weights, and optimizer
 names. One optimizer name can own the whole phase, or names can map
-one-for-one to its component paths.
+one-for-one to its component paths. `optimizer_step_after_phase=True` adds an
+explicit step boundary for sequential adversarial recipes: that named
+optimizer is advanced before the next phase is recomputed. Every phase
+scheduled alongside it must be routed and use the same policy. The exact implementation is
+intentionally limited to `gradient_accumulation_steps=1`; otherwise earlier
+micro-batches could not be recomputed after the discriminator update.
 
 ## Execution and optimization boundary
 
@@ -449,6 +454,11 @@ Only active optimizer parameters are unscaled and clipped. Named schedulers
 use the number of global steps on which their optimizer is scheduled, and
 advance only after a successful optimizer step; a mixed-precision overflow
 therefore does not advance the scheduler or `global_step`.
+
+Training losses are validated immediately before backward. A loss must be a
+finite, scalar, differentiable PyTorch tensor. Generic token objectives
+require exact logits/label timebases, and generic acoustic/flow regression
+requires identical tensor shapes plus an explicit target mask for padding.
 
 Evaluation passes a mapping containing `loss`, `predictions`, `labels`, and
 `batch_size` through `gather_for_metrics()`. A distributed strategy must

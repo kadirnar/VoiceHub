@@ -75,33 +75,27 @@ Recommended source fields:
 
 ## Resolve relative audio safely
 
-Resolve paths relative to the manifest rather than the current working
-directory:
+`TTSDataset` loads JSON, JSON Lines, CSV, and TSV manifests, normalizes common
+field aliases, resolves audio paths relative to the manifest, and validates
+the selected model's declared record variants:
 
 ```python
-import json
-from pathlib import Path
+from voicehub import TTSDataset
 
-
-def load_jsonl(path: str | Path) -> list[dict]:
-    path = Path(path)
-    records = []
-    with path.open(encoding="utf-8") as stream:
-        for line_number, line in enumerate(stream, start=1):
-            if not line.strip():
-                continue
-            record = json.loads(line)
-            if not isinstance(record, dict):
-                raise TypeError(f"{path}:{line_number} is not an object")
-            audio = Path(record["audio"]).expanduser()
-            if not audio.is_absolute():
-                audio = path.parent / audio
-            record["audio"] = str(audio.resolve())
-            records.append(record)
-    if not records:
-        raise ValueError(f"No records found in {path}")
-    return records
+records = TTSDataset.from_manifest(
+    "data/manifest.jsonl",
+    model_type="dia",
+    validate_files=True,
+)
 ```
+
+Aliases such as `transcript`, `audio_path`, and `wav_path` are converted to
+`text` and `audio`. Reference-audio aliases are model-aware: Qwen3-TTS
+normalizes them to `ref_audio`, while Higgs Audio and MOSS-TTS preserve the
+native `reference_audio` field.
+`TTSDataset.from_ljspeech()` reads the common
+`id|text|normalized_text` layout. Use `to_jsonl()` to persist a portable
+manifest and `resume_fingerprint()` to capture its content and order.
 
 Keep raw recordings immutable. Write normalized audio and resolved split
 manifests to a new, versioned prepared-data directory.
@@ -196,68 +190,89 @@ duplicate content.
 ## Split by speaker or session
 
 Randomly splitting adjacent clips leaks room tone, microphone response,
-background noise, and neighboring takes into validation. Group by speaker or
-recording session:
+background noise, and neighboring takes into validation. Split whole speakers
+or recording sessions with the dataset API:
 
 ```python
-import random
+train_records, validation_records = records.train_test_split(
+    group_by="session_id",
+    validation_fraction=0.1,
+    seed=42,
+)
 
-
-def grouped_split(
-    records: list[dict],
-    *,
-    group_key: str = "session_id",
-    validation_fraction: float = 0.1,
-    seed: int = 42,
-) -> tuple[list[dict], list[dict]]:
-    if not 0.0 < validation_fraction < 1.0:
-        raise ValueError("validation_fraction must be between 0 and 1")
-
-    groups = {}
-    for record in records:
-        group = record.get(group_key)
-        if group is None:
-            raise ValueError(f"Every record requires {group_key!r}")
-        groups.setdefault(str(group), []).append(record)
-
-    group_names = sorted(groups)
-    if len(group_names) < 2:
-        raise ValueError(f"At least two {group_key} groups are required")
-    random.Random(seed).shuffle(group_names)
-
-    validation_count = max(
-        1,
-        min(len(group_names) - 1, round(len(group_names) * validation_fraction)),
-    )
-    validation_groups = set(group_names[:validation_count])
-    train_records = [
-        record
-        for record in records
-        if str(record[group_key]) not in validation_groups
-    ]
-    validation_records = [
-        record
-        for record in records
-        if str(record[group_key]) in validation_groups
-    ]
-    return train_records, validation_records
+train_records.to_jsonl("data/splits/train.jsonl")
+validation_records.to_jsonl("data/splits/validation.jsonl")
 ```
 
 Persist the resulting manifests, split seed, preprocessing revision, and
 content hashes.
 
+## Inspect the architecture contract first
+
+TTS architectures do not share one prepared batch. Inspect a generic
+architecture contract when building a reusable corpus, or a model contract
+before starting a run:
+
+```python
+from voicehub import get_tts_dataset_spec
+
+contract = get_tts_dataset_spec("f5tts")
+print(contract.architecture)       # diffusion
+print(contract.readiness)          # preprocessed
+print(contract.training_support)   # preprocessed
+
+for variant in contract.variants:
+    print(variant.name, variant.required_fields, variant.one_of)
+```
+
+The six architecture contracts deliberately stop at different boundaries:
+
+| Architecture | Canonical source record | Typical prepared target |
+| --- | --- | --- |
+| Codec/LLM | Text/audio, conversation, or codec tokens | Packed text/audio tokens, codebook layout, causal labels, validity mask |
+| Sequence-to-sequence | Text and target audio | Encoder tokens plus teacher-forced acoustic/codec labels |
+| Diffusion/flow | Text/audio/reference conditioning | Clean latent, noisy state, timestep, target, and target-aligned mask |
+| VITS/GAN | Text or phonemes and waveform | Text IDs, waveform/spectrogram lengths, posterior inputs, real/fake phase data |
+| Acoustic | Text and audio | Mel, duration, pitch, stop, codec, or waveform targets |
+| Hybrid | Conversation or text/audio | Explicit component- or phase-specific batches |
+
+`readiness` is intentionally separate from the training objective:
+
+- `integrated-raw` means the model adapter can create its training data from
+  one of the contract's non-preprocessed variants.
+- `preprocessed` means the objective is integrated but the caller must provide
+  the exact tensor variant shown by the model contract.
+- `custom` means source-owned preparation or orchestration is still required.
+- `unavailable` means the current runtime has no verified trainable graph.
+
+A generic architecture contract may describe a useful raw corpus shape even
+when a particular model contract is preprocessed-only. VoiceHub does not
+silently promote that generic shape to model support.
+
 ## Use an integrated raw-data adapter
 
-Five current integrations accept ordinary source records, but their contracts
-still differ:
+Representative integrated raw-data routes still have model-specific
+contracts:
 
-| Model   | Accepted source record                                                                                           |
-| ------- | ---------------------------------------------------------------------------------------------------------------- |
-| Dia     | Non-empty `text`; 44.1 kHz audio path or mono rank-1 audio array                                                 |
-| Orpheus | `text` plus an audio path resampled to 24 kHz by the helper, or SNAC `audio_codes`; optional `voice`/`source`    |
-| LLaSA   | `text` plus `audio` or XCodec2 `audio_codes`; completion-only labels                                             |
-| CSM     | Conversation/messages, grouped utterances, or scalar text/audio/speaker records passed directly to `Trainer`     |
-| NeuTTS-Air | `text` plus raw audio or native NeuCodec `audio_codes`; explicit phonemes or an injected phonemizer for phoneme checkpoints |
+| Model | Accepted source record |
+| --- | --- |
+| Dia | Non-empty `text`; 44.1 kHz audio path or mono rank-1 audio array |
+| Orpheus | `text` plus an audio path resampled to 24 kHz by the helper, or SNAC `audio_codes`; optional `voice` |
+| LLaSA | `text` plus `audio` or XCodec2 `audio_codes`; completion-only labels |
+| Chatterbox | T3: `text` plus raw audio; flow: raw audio alone; both also accept their explicit precomputed tensors |
+| ConversationTTS | Raw or tokenized text plus raw audio or Mimi `audio_codes` |
+| CSM | Conversation/messages; grouped `texts`/`speaker_ids` with `audios`, concatenated `audio` plus `audio_cut_idxs`, or scalar text/audio |
+| IrodoriTTS | `text` plus an in-memory waveform, or a precomputed target latent |
+| MOSS-TTS | `text` plus exactly one waveform source or `speech_tokens`; checkpoint families use different codec rates |
+| Parler-TTS | Description or text IDs plus an in-memory waveform, DAC codes, or delayed labels |
+| Zonos2 | `text` plus 44.1 kHz audio, or undelayed cached DAC frames |
+| VoxCPM2 | `text` plus an in-memory 16 kHz waveform or AudioVAE features |
+| OmniVoice | `text` plus 24 kHz audio or eight-codebook audio tokens |
+| Higgs Audio | `text` plus raw audio or audio codes; reference audio/codes require matching `reference_text` |
+| OpenVoice | Linguistically aligned `source_audio` and `target_audio`; reference waveforms or embeddings are optional |
+| NeuTTS-Air | `text` plus raw audio or native NeuCodec `audio_codes`; phoneme checkpoints need explicit phonemes or an injected phonemizer |
+| SpeechT5 | `text` plus an audio path, `AudioInput`, or waveform mapping; audio is materialized and resampled to 16 kHz |
+| VITS | `text` or text IDs plus waveform; the full GAN route also requires the explicit acoustic configuration described in the support matrix |
 
 For adapters exposing `create_training_dataset()`:
 
@@ -268,9 +283,20 @@ validation_dataset = training_model.create_training_dataset(
 )
 ```
 
-CSM is the notable exception: pass the raw records directly as
-`train_dataset`, and its specialized adapter installs the lazy processor
-collator.
+The model factory accepts a manifest directly:
+
+```python
+train_dataset = training_model.create_training_dataset(
+    "data/splits/train.jsonl",
+    validate_audio_files=True,
+)
+```
+
+Audit fields such as `id`, `session_id`, `consent`, `license`, `source`, and
+nested `metadata` remain available in `TTSDataset` and the source manifest,
+but are excluded from generic model keyword arguments. A model-owned prepared
+dataset may intentionally project them away. Conditioning fields such as
+`speaker_id` and `language` remain available to model-specific processors.
 
 ## Inspect a model-owned batch
 

@@ -16,6 +16,14 @@ checks used by the trainer. The table uses the more practical categories above:
 a native scalar loss is still a **preprocessed recipe** when VoiceHub does not
 provide raw-data preparation.
 
+Dataset readiness is independently inspectable through
+`get_tts_dataset_spec(model_type).readiness`. Shared multi-codebook,
+diffusion/flow, and VITS objective primitives make specialized adapters easier
+to implement; they do not upgrade a model in this table unless the graph,
+objective, optimizer schedule, checkpoint topology, and data boundary required
+for the claimed support level are integrated and tested. Complete raw-data
+preparation is required only for **End-to-end / raw data** status.
+
 ## Model-by-model support
 
 | Model (`model_type`) | Status | Fine-tuning boundary |

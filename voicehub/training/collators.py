@@ -91,7 +91,7 @@ class DataCollatorForAudioTraining:
 
     def __call__(self, features: list[Mapping[str, Any] | Any]) -> dict[str, Any]:
         if not features:
-            return {}
+            raise ValueError("Audio training collators require a non-empty batch.")
         normalized = [self._as_mapping(feature) for feature in features]
         derived = []
         batch = self._collate_mapping(
@@ -99,9 +99,25 @@ class DataCollatorForAudioTraining:
             path=(),
             derived=derived,
         )
+        generated_paths = set()
         for target_path, value in derived:
-            if not self._path_exists(batch, target_path):
-                self._set_path(batch, target_path, value)
+            if target_path in generated_paths:
+                raise ValueError(
+                    "Multiple field schemas derive the same batch field "
+                    f"{'.'.join(target_path)!r}. Give each source field a "
+                    "distinct length_field and mask_field.")
+            generated_paths.add(target_path)
+            if any(self._path_exists(feature, target_path) for feature in normalized):
+                self._validate_derived_field(
+                    normalized,
+                    target_path,
+                    value,
+                )
+            # Canonicalize valid per-example values to the padding policy
+            # used by the source field. This preserves left padding and
+            # pad-to-multiple expansion instead of independently padding a
+            # caller-supplied mask.
+            self._set_path(batch, target_path, value)
         return batch
 
     @staticmethod
@@ -432,6 +448,70 @@ class DataCollatorForAudioTraining:
                 return False
             current = current[part]
         return True
+
+    def _validate_derived_field(self, features, path, expected):
+        torch = self._import_torch()
+        for index, feature in enumerate(features):
+            if not self._path_exists(feature, path):
+                raise ValueError(
+                    f"Every sample must provide derived field "
+                    f"{'.'.join(path)!r} when any sample provides it.")
+            raw_value = self._get_path(feature, path)
+            try:
+                if isinstance(raw_value, torch.Tensor):
+                    actual = raw_value.detach().to(device=expected.device)
+                else:
+                    actual = torch.as_tensor(
+                        raw_value,
+                        device=expected.device,
+                    )
+            except (TypeError, ValueError, RuntimeError) as exc:
+                raise TypeError(f"Derived field {'.'.join(path)!r} must be tensor-like.") from exc
+
+            if expected.ndim == 1:
+                if (actual.ndim != 0 or actual.dtype == torch.bool or actual.is_floating_point() or
+                        actual.is_complex()):
+                    raise TypeError(
+                        f"Derived length field {'.'.join(path)!r} must contain "
+                        "integer scalars.")
+                matches = int(actual.item()) == int(expected[index].item())
+            elif expected.ndim == 2:
+                if actual.ndim != 1 or actual.is_complex():
+                    raise ValueError(
+                        f"Derived mask field {'.'.join(path)!r} must contain "
+                        "one rank-1 mask per sample.")
+                binary = (actual == 0) | (actual == 1)
+                if not bool(binary.all().item()):
+                    raise ValueError(
+                        f"Derived mask field {'.'.join(path)!r} must contain "
+                        "only boolean or 0/1 values.")
+                actual = actual.bool()
+                expected_row = expected[index]
+                if actual.numel() == expected_row.numel():
+                    matches = torch.equal(actual, expected_row)
+                elif actual.numel() == int(expected_row.sum().item()):
+                    matches = torch.equal(
+                        actual,
+                        expected_row.masked_select(expected_row),
+                    )
+                else:
+                    matches = False
+            else:
+                raise RuntimeError(
+                    "Derived audio fields must be batch lengths or "
+                    "batch-by-sequence masks.")
+            if not matches:
+                raise ValueError(
+                    f"Provided derived field {'.'.join(path)!r} for sample "
+                    f"{index} does not match the lengths or padding mask "
+                    "computed from its source field.")
+
+    @staticmethod
+    def _get_path(mapping, path):
+        current = mapping
+        for part in path:
+            current = current[part]
+        return current
 
     @staticmethod
     def _set_path(mapping, path, value):

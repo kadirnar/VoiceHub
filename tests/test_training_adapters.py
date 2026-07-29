@@ -491,6 +491,243 @@ class TrainingAdapterLoopTests(unittest.TestCase):
         self.assertIsInstance(trainer.optimizer, OptimizerBundle)
         self.assertEqual(len(trainer.optimizer.optimizers), 2)
 
+    def test_vits_phase_boundaries_step_discriminator_before_generator(self):
+        import torch
+
+        class SequentialRuntime(torch.nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.discriminator = torch.nn.Linear(1, 1, bias=False)
+                self.generator = torch.nn.Linear(1, 1, bias=False)
+                torch.nn.init.zeros_(self.discriminator.weight)
+                torch.nn.init.zeros_(self.generator.weight)
+                self.generator_observed_discriminator = None
+
+            def discriminator_step(self, input_values, labels):
+                score = self.discriminator(input_values)
+                return {
+                    "discriminator_loss": (score - labels).square().mean(),
+                }
+
+            def generator_step(self, input_values, labels):
+                del labels
+                self.generator_observed_discriminator = float(self.discriminator.weight.detach().item())
+                generated = self.generator(input_values)
+                target = self.discriminator.weight.detach().expand_as(generated)
+                return {
+                    "generator_loss": (generated - target).square().mean(),
+                }
+
+        spec = ModelTrainingSpec(
+            model_type="dummy-sequential-vits",
+            family=TrainingFamily.VITS,
+            module_paths=("model", ),
+            component_paths=(
+                "model.discriminator",
+                "model.generator",
+            ),
+            support=TrainingSupport.PREPROCESSED,
+            separate_optimizers=True,
+            recipe_kind=TrainingRecipeKind.ADVERSARIAL,
+            phases=(
+                TrainingPhaseSpec(
+                    name="discriminator",
+                    kind=TrainingPhaseKind.DISCRIMINATOR,
+                    component_paths=("model.discriminator", ),
+                    optimizer_names=("discriminator", ),
+                    forward_component="model",
+                    forward_method="discriminator_step",
+                    required_inputs=("input_values", "labels"),
+                    loss_keys=("discriminator_loss", ),
+                    frozen_component_paths=("model.generator", ),
+                    optimizer_step_after_phase=True,
+                ),
+                TrainingPhaseSpec(
+                    name="generator",
+                    kind=TrainingPhaseKind.GENERATOR,
+                    component_paths=("model.generator", ),
+                    optimizer_names=("generator", ),
+                    forward_component="model",
+                    forward_method="generator_step",
+                    required_inputs=("input_values", "labels"),
+                    loss_keys=("generator_loss", ),
+                    frozen_component_paths=("model.discriminator", ),
+                    optimizer_step_after_phase=True,
+                ),
+            ),
+        )
+        dataset = [
+            {
+                "input_values": torch.ones(1),
+                "labels": torch.ones(1),
+            },
+            {
+                "input_values": torch.ones(1),
+                "labels": torch.ones(1),
+            },
+        ]
+
+        class PartialStepStrategy(TorchTrainingStrategy):
+
+            def __init__(self, outcomes):
+                super().__init__()
+                self.outcomes = list(outcomes)
+                self.calls = 0
+
+            def optimizer_step(
+                self,
+                optimizer,
+                *,
+                scaler=None,
+                optimizer_names=None,
+            ):
+                self.calls += 1
+                outcome = self.outcomes.pop(0)
+                if not outcome:
+                    return False
+                return super().optimizer_step(
+                    optimizer,
+                    scaler=scaler,
+                    optimizer_names=optimizer_names,
+                )
+
+        def train_once(outcomes=None):
+            model = self.DummyForTextToSpeech(
+                self._config("dummy-sequential-vits"),
+                SequentialRuntime,
+            )
+            adapter = VITSTrainingAdapter(model, spec)
+            strategy = (TorchTrainingStrategy() if outcomes is None else PartialStepStrategy(outcomes))
+            with tempfile.TemporaryDirectory() as directory:
+                trainer = Trainer(
+                    model=model,
+                    args=TrainingArguments(
+                        output_dir=directory,
+                        max_steps=1,
+                        per_device_train_batch_size=2,
+                        logging_strategy="no",
+                        save_strategy="no",
+                        max_grad_norm=0,
+                        use_cpu=True,
+                    ),
+                    train_dataset=dataset,
+                    training_adapter=adapter,
+                    training_strategy=strategy,
+                    optimizer_cls_and_kwargs=(
+                        torch.optim.SGD,
+                        {
+                            "lr": 0.5
+                        },
+                    ),
+                )
+                output = trainer.train()
+            return output, model, strategy
+
+        output, model, _ = train_once()
+
+        self.assertEqual(output.global_step, 1)
+        self.assertAlmostEqual(
+            model.model.generator_observed_discriminator,
+            1.0,
+        )
+        self.assertAlmostEqual(model.model.discriminator.weight.item(), 1.0)
+        self.assertAlmostEqual(model.model.generator.weight.item(), 1.0)
+
+        for outcomes in ([True, False], [False, True]):
+            with self.subTest(outcomes=outcomes):
+                output, partial_model, strategy = train_once(outcomes)
+                self.assertEqual(output.global_step, 1)
+                self.assertEqual(strategy.calls, 2)
+                expected_discriminator = 1.0 if outcomes[0] else 0.0
+                self.assertAlmostEqual(
+                    partial_model.model.discriminator.weight.item(),
+                    expected_discriminator,
+                )
+
+    def test_scheduler_sizing_counts_each_sequential_optimizer_boundary(self):
+        import torch
+
+        phases = tuple(
+            TrainingPhaseSpec(
+                name=f"phase-{index}",
+                kind=TrainingPhaseKind.GENERATOR,
+                component_paths=("model.scale", ),
+                optimizer_names=("shared", ),
+                optimizer_step_after_phase=True,
+            ) for index in range(2))
+        spec = ModelTrainingSpec(
+            model_type="dummy-shared-boundaries",
+            family=TrainingFamily.VITS,
+            component_paths=("model.scale", ),
+            support=TrainingSupport.PREPROCESSED,
+            separate_optimizers=True,
+            phases=phases,
+        )
+        model = self.DummyForTextToSpeech(
+            self._config("dummy-shared-boundaries"),
+            self._regression_model,
+        )
+        adapter = VITSTrainingAdapter(model, spec)
+        trainer = Trainer(
+            model=model,
+            args=TrainingArguments(use_cpu=True),
+            training_adapter=adapter,
+        )
+
+        self.assertEqual(
+            trainer._optimizer_training_steps("shared", 3),
+            6,
+        )
+
+    def test_sequential_boundaries_reject_unrouted_scheduled_phases(self):
+        import torch
+
+        spec = ModelTrainingSpec(
+            model_type="dummy-unrouted-boundary",
+            family=TrainingFamily.VITS,
+            component_paths=("model.scale", ),
+            support=TrainingSupport.PREPROCESSED,
+            separate_optimizers=True,
+            phases=(
+                TrainingPhaseSpec(
+                    name="unrouted",
+                    component_paths=("model.scale", ),
+                ),
+                TrainingPhaseSpec(
+                    name="generator",
+                    kind=TrainingPhaseKind.GENERATOR,
+                    component_paths=("model.scale", ),
+                    optimizer_names=("generator", ),
+                    optimizer_step_after_phase=True,
+                ),
+            ),
+        )
+        model = self.DummyForTextToSpeech(
+            self._config("dummy-unrouted-boundary"),
+            self._regression_model,
+        )
+        adapter = VITSTrainingAdapter(model, spec)
+        with tempfile.TemporaryDirectory() as directory:
+            trainer = Trainer(
+                model=model,
+                args=TrainingArguments(
+                    output_dir=directory,
+                    max_steps=1,
+                    per_device_train_batch_size=1,
+                    logging_strategy="no",
+                    save_strategy="no",
+                    use_cpu=True,
+                ),
+                train_dataset=[{
+                    "input_values": torch.ones(1),
+                    "labels": torch.ones(1),
+                }],
+                training_adapter=adapter,
+            )
+            with self.assertRaisesRegex(ValueError, "route every scheduled"):
+                trainer.train()
+
     def test_variable_length_collator_pads_tokens_labels_and_audio(self):
         import torch
 

@@ -612,52 +612,106 @@ class SpeechT5ForTextToSpeech(PreTrainedTTSModel):
         value: Any,
         sampling_rate: Any,
     ) -> tuple[Any, int, int]:
-        if isinstance(value, AudioInput):
+        mapped_rates = None
+        if isinstance(value, Mapping):
+            mapped_rates = value.get(
+                "sampling_rate",
+                value.get("sample_rate"),
+            )
+            source = None
+            for name in ("array", "waveform", "audio", "input_values", "path"):
+                if name in value:
+                    source = value[name]
+                    break
+            if source is None:
+                raise ValueError(
+                    "SpeechT5 audio mappings require array, waveform, audio, "
+                    "input_values, or path.")
+            value = source
+
+        if isinstance(value, (str, Path, AudioInput)):
             items = [value]
             batched = False
-        elif isinstance(value, Mapping):
-            items = [value]
-            batched = False
-        elif hasattr(value, "ndim") and value.ndim == 2:
-            items = list(value.unbind(0))
+        elif hasattr(value, "ndim") and value.ndim > 1:
+            unbind = getattr(value, "unbind", None)
+            items = (
+                list(unbind(0))
+                if callable(unbind) else [value[index] for index in range(int(value.shape[0]))])
             batched = True
-        elif (isinstance(value, Sequence) and value and isinstance(value[0], (AudioInput, Mapping))):
-            items = list(value)
-            batched = True
-        elif (isinstance(value, Sequence) and value and
-              (hasattr(value[0], "ndim") or isinstance(value[0], Sequence))):
-            items = list(value)
-            batched = True
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            if not value:
+                raise ValueError("SpeechT5 training audio cannot be empty.")
+            first = value[0]
+            is_batch = (
+                isinstance(first, (str, Path, AudioInput, Mapping)) or hasattr(first, "ndim") or
+                (isinstance(first, Sequence) and not isinstance(first, (str, bytes, bytearray))))
+            items = list(value) if is_batch else [value]
+            batched = is_batch
         else:
             items = [value]
             batched = False
-        explicit_rates = None
-        if all(isinstance(item, AudioInput) for item in items):
-            explicit_rates = [item.sampling_rate for item in items]
-        elif all(isinstance(item, Mapping) for item in items):
-            candidate = [item.get("sampling_rate", item.get("sample_rate")) for item in items]
-            if all(rate is not None for rate in candidate):
-                explicit_rates = candidate
-        rates = (
-            self._rates(explicit_rates, count=len(items)) if explicit_rates is not None else self._rates(
-                sampling_rate, count=len(items)))
-        waveforms = [
-            load_audio(
-                item,
-                sampling_rate=(
-                    None if (
-                        isinstance(item, AudioInput) or (
-                            isinstance(item, Mapping) and
-                            (item.get("sampling_rate") is not None or item.get("sample_rate") is not None)))
-                    else rate),
-                target_sampling_rate=16_000,
-            ).waveform for item, rate in zip(items, rates)
-        ]
+
+        rate_source = mapped_rates if mapped_rates is not None else sampling_rate
+        rates = ([None] * len(items) if rate_source is None else self._rates(rate_source, count=len(items)))
+        waveforms = []
+        for item, rate in zip(items, rates):
+            if isinstance(item, (str, Path, AudioInput)):
+                loaded = load_audio(
+                    item,
+                    target_sampling_rate=16_000,
+                )
+            elif isinstance(item, Mapping):
+                item_rate = item.get(
+                    "sampling_rate",
+                    item.get("sample_rate"),
+                )
+                effective_rate = (rate if item_rate is None else self._rates(item_rate, count=1)[0])
+                path = item.get("path")
+                if path is not None and not any(name in item for name in (
+                        "array",
+                        "waveform",
+                        "audio",
+                        "input_values",
+                )):
+                    loaded = load_audio(
+                        path,
+                        **({} if effective_rate is None else {
+                            "sampling_rate": effective_rate
+                        }),
+                        target_sampling_rate=16_000,
+                    )
+                else:
+                    loaded = load_audio(
+                        item,
+                        sampling_rate=(None if item_rate is not None else effective_rate),
+                        target_sampling_rate=16_000,
+                    )
+            else:
+                if rate is None:
+                    raise ValueError("Raw SpeechT5 waveform arrays require positive "
+                                     "sampling rates.")
+                loaded = load_audio(
+                    item,
+                    sampling_rate=rate,
+                    target_sampling_rate=16_000,
+                )
+            waveforms.append(loaded.waveform)
         return (
             waveforms if batched else waveforms[0],
             16_000,
             len(waveforms),
         )
+
+    def _training_audio(
+        self,
+        value: Any,
+        sampling_rate: Any,
+    ) -> tuple[Any, int]:
+        audio, rate, _ = self._training_audio_batch(
+            value,
+            sampling_rate,
+        )
+        return audio, rate
 
     def prepare_training_inputs(
         self,

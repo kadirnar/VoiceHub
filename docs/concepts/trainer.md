@@ -267,6 +267,8 @@ A phase declares:
 - named loss weights and an optional, explicit fallback objective;
 - `frequency` and `offset` for zero-based step scheduling;
 - detach and temporary-freeze boundaries;
+- optional `optimizer_step_after_phase` for an exact sequential optimizer
+  boundary; and
 - a semantic kind such as objective, generator, discriminator, or auxiliary.
 
 At a training step, the adapter executes every scheduled phase in declaration
@@ -275,6 +277,12 @@ optimizer names, and advances only those optimizers and schedulers at the
 gradient-accumulation boundary. Scheduling is based on `global_step`, not on
 individual micro-batches. Each optimizer's gradients are normalized by the
 number of micro-batches in which that route was active.
+
+VITS and other GAN recipes often require the discriminator to update before a
+fresh generator forward. Setting `optimizer_step_after_phase=True` on every
+scheduled phase performs that sequence with named optimizers. Because
+the next phase must see the just-updated state, this mode currently rejects
+gradient accumulation greater than one instead of approximating the recipe.
 
 One optimizer name can own all components in a phase, or names can map
 one-to-one to component paths. A parameter may not be assigned to two optimizer

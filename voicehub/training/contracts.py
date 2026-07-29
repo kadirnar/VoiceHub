@@ -189,6 +189,7 @@ class TrainingPhaseSpec:
     kind: TrainingPhaseKind = TrainingPhaseKind.OBJECTIVE
     detach_inputs: tuple[str, ...] = ()
     frozen_component_paths: tuple[str, ...] = ()
+    optimizer_step_after_phase: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -260,12 +261,17 @@ class TrainingPhaseSpec:
                 self.fallback_objective.strip().lower().replace("-", "_"),
             )
         object.__setattr__(self, "kind", TrainingPhaseKind.coerce(self.kind))
+        if not isinstance(self.optimizer_step_after_phase, bool):
+            raise TypeError("optimizer_step_after_phase must be a boolean.")
         if (self.kind in (
                 TrainingPhaseKind.GENERATOR,
                 TrainingPhaseKind.DISCRIMINATOR,
                 TrainingPhaseKind.DURATION_DISCRIMINATOR,
         ) and not self.optimizer_names):
             raise ValueError(f"{self.kind.value} phases must declare optimizer_names.")
+        if self.optimizer_step_after_phase and not self.optimizer_names:
+            raise ValueError("A phase with optimizer_step_after_phase=True must declare "
+                             "optimizer_names.")
 
         optimizer_count = len(self.optimizer_names)
         component_count = len(self.component_paths)

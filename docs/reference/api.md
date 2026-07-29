@@ -36,6 +36,8 @@ python -m pip install "voicehub[training]"
 | Training adaptation | `AutoTrainingAdapter`, `BaseTrainingAdapter`, family adapters |
 | Training loop | `TrainingArguments`, `Trainer`, callbacks, trainer outputs |
 | Training execution | `TrainingStrategy`, `TorchTrainingStrategy` |
+| TTS datasets | `TTSDataset`, `TTSDatasetSpec`, `TTSDataArchitecture`, `TTSDataReadiness` |
+| TTS objectives | Multi-codebook CE, diffusion/flow pair builders, VITS loss primitives |
 | Collation | `default_data_collator`, `DefaultDataCollator`, `DataCollatorForTTSTraining`, `DataCollatorForAudioTraining` |
 | Extensions | Inference-strategy, training-spec, adapter, and training-strategy registries |
 
@@ -764,6 +766,7 @@ TrainingPhaseSpec(
     kind=TrainingPhaseKind.OBJECTIVE,
     detach_inputs=(),
     frozen_component_paths=(),
+    optimizer_step_after_phase=False,
 )
 ```
 
@@ -771,6 +774,10 @@ TrainingPhaseSpec(
 `step % frequency == offset`. Generator, discriminator, and duration
 discriminator phases must declare optimizer names. Multiple optimizer names
 must map one-to-one to component paths; one name may own all phase components.
+With named separate optimizers, `optimizer_step_after_phase=True` creates an
+immediate optimizer boundary before the next phase is recomputed. Every
+scheduled phase must be routed and use the policy consistently, and the current exact
+implementation requires `gradient_accumulation_steps=1`.
 
 `TrainingPhaseKind` values are `objective`, `generator`, `discriminator`,
 `duration-discriminator`, and `auxiliary`.
@@ -1275,7 +1282,9 @@ collator = DataCollatorForTTSTraining(
 
 `resume_fingerprint()` returns all options that can change exact resumed
 batching. The collator is structural: it does not invent codec delays, flow
-targets, acoustic alignments, or adversarial pairs.
+targets, acoustic alignments, or adversarial pairs. Empty batches raise, and a
+caller-provided derived length or mask must exactly match the value computed
+from its source tensor.
 
 ### `SpeechDataset` and `DataCollatorForAudioTraining`
 
@@ -1306,6 +1315,90 @@ token, or frame time dimensions. It does not infer CTC blanks, transducer
 alignments, decoder prompts, or frame labels. See the
 [ASR and VAD data guide](../guides/speech-data.md#collate-variable-length-audio-fields)
 for a schema-based example.
+
+### `TTSDataset` and TTS data contracts
+
+```python
+TTSDataset.from_manifest(
+    path,
+    *,
+    model_type: str | None = None,
+    architecture: TTSDataArchitecture | str | None = None,
+    root=None,
+    aliases=None,
+    validate=True,
+    validate_files=False,
+    transform=None,
+    transform_fingerprint=None,
+) -> TTSDataset
+
+get_tts_dataset_spec(
+    model_type: str | None = None,
+    *,
+    architecture: TTSDataArchitecture | str | None = None,
+) -> TTSDatasetSpec
+```
+
+`TTSDataset` reads JSON, JSON Lines, CSV, TSV, and LJSpeech metadata without
+importing a tensor framework. It normalizes common text/audio aliases and
+model-specific reference-audio aliases, resolves paths, validates record
+variants, performs deterministic group-disjoint splits, writes portable JSON
+Lines, and fingerprints normalized record content and order.
+
+Lazy transforms must declare a stable `transform_fingerprint` before
+`resume_fingerprint()` can be used; changing that value changes the content
+fingerprint. This prevents an exact resume from silently accepting changed
+materialization logic.
+
+`TTSDataArchitecture` values are `codec-lm`, `sequence-to-sequence`,
+`diffusion`, `vits`, `acoustic`, and `hybrid`. A model-specific
+`TTSDatasetSpec` exposes `variants`, `sample_rate`, `training_support`, and
+`readiness`. `TTSDataReadiness` values are:
+
+| Value | Meaning |
+| --- | --- |
+| `integrated-raw` | At least one ordinary source-record preparation path is integrated |
+| `preprocessed` | The caller must supply a declared backend-shaped variant |
+| `custom` | A source-owned data adapter or orchestration step is still required |
+| `unavailable` | The current model runtime has no verified training route |
+
+Each `TTSRecordVariant` declares `required_fields` and alternative `one_of`
+groups. It may also reject ambiguous aliases through `at_most_one_of`, exclude
+incompatible source forms through `forbidden_fields`, and express dependent
+metadata through `requires` or `requires_one_of`. These checks validate the
+portable record boundary; the model processor remains responsible for tensor
+rank, dtype, value range, and sample-rate checks.
+
+For the six built-in TTS training families,
+`ModelTrainingSpec.dataset_spec` lazily returns the corresponding data
+contract. A custom training-family string can select a generic contract
+directly with `get_tts_dataset_spec(architecture=...)`. Generic architecture
+contracts may describe raw corpus structures; model-specific contracts do not
+inherit raw support unless it is integrated.
+
+### Specialized TTS objective primitives
+
+The following framework-lazy helpers enforce exact shapes and explicit masks:
+
+```python
+multi_codebook_cross_entropy(...)
+build_diffusion_training_pair(...) -> DiffusionTrainingPair
+build_flow_matching_training_pair(...) -> DiffusionTrainingPair
+masked_diffusion_regression_loss(...)
+
+vits_discriminator_loss(...) -> VITSDiscriminatorLoss
+vits_generator_adversarial_loss(...)
+vits_feature_matching_loss(...)
+vits_kl_loss(...)
+```
+
+The diffusion builder delegates alpha/sigma coefficients to the selected
+recipe and supports epsilon, velocity, or clean-sample targets. The flow
+builder uses a linear continuous path. VITS helpers implement multiscale
+least-squares adversarial losses, detached-real feature matching, and masked
+diagonal-Gaussian KL. They provide objective math, not missing tokenizers,
+codecs, schedulers, posterior/alignment graphs, discriminators, or checkpoint
+assets.
 
 ## Training strategies
 

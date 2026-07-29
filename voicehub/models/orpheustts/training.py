@@ -107,7 +107,7 @@ class OrpheusSFTDataset:
         if "text" not in record:
             raise ValueError(f"Orpheus record {index} is missing 'text'.")
         text = str(record["text"])
-        voice = record.get("voice") or record.get("source")
+        voice = record.get("voice")
         if voice:
             text = f"{voice}: {text}"
         text_ids = self.tokenizer.encode(

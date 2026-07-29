@@ -10,6 +10,10 @@ TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")
 class TrainingCollatorSchemaTests(unittest.TestCase):
 
+    def test_empty_batches_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "non-empty batch"):
+            DataCollatorForTTSTraining()([])
+
     def test_nested_schema_pads_arbitrary_dimension_and_builds_metadata(self):
         import torch
 
@@ -128,6 +132,95 @@ class TrainingCollatorSchemaTests(unittest.TestCase):
             batch["attention_mask"].tolist(),
             [[True, True], [False, True]],
         )
+
+    def test_user_supplied_lengths_and_masks_must_match_padded_inputs(self):
+        import torch
+
+        collator = DataCollatorForTTSTraining(return_input_lengths=True, )
+        samples = [
+            {
+                "input_ids": torch.tensor([1, 2]),
+                "input_lengths": 2,
+                "attention_mask": torch.tensor([True, True]),
+            },
+            {
+                "input_ids": torch.tensor([3]),
+                "input_lengths": 2,
+                "attention_mask": torch.tensor([True, True]),
+            },
+        ]
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            collator(samples)
+
+    def test_supplied_masks_follow_left_and_multiple_padding_policy(self):
+        import torch
+
+        collator = DataCollatorForTTSTraining(
+            return_input_lengths=True,
+            field_schemas={
+                "input_ids": TTSFieldSchema(
+                    padding_side="left",
+                    pad_to_multiple_of=4,
+                ),
+            },
+        )
+        batch = collator([
+            {
+                "input_ids": torch.tensor([1, 2]),
+                "input_lengths": 2,
+                "attention_mask": torch.tensor([True, True]),
+            },
+            {
+                "input_ids": torch.tensor([3]),
+                "input_lengths": 1,
+                "attention_mask": torch.tensor([True]),
+            },
+        ])
+
+        self.assertEqual(batch["input_lengths"].tolist(), [2, 1])
+        self.assertEqual(
+            batch["attention_mask"].tolist(),
+            [
+                [False, False, True, True],
+                [False, False, False, True],
+            ],
+        )
+
+    def test_fractional_derived_lengths_are_rejected(self):
+        import torch
+
+        collator = DataCollatorForTTSTraining(return_input_lengths=True, )
+        with self.assertRaisesRegex(TypeError, "integer scalars"):
+            collator([
+                {
+                    "input_ids": torch.tensor([1, 2]),
+                    "input_lengths": 2.9,
+                },
+                {
+                    "input_ids": torch.tensor([3]),
+                    "input_lengths": 1.0,
+                },
+            ])
+
+    def test_duplicate_derived_schema_targets_are_rejected(self):
+        import torch
+
+        collator = DataCollatorForTTSTraining(
+            field_schemas={
+                "first": TTSFieldSchema(mask_field="shared_mask"),
+                "second": TTSFieldSchema(mask_field="shared_mask"),
+            }, )
+        with self.assertRaisesRegex(ValueError, "same batch field"):
+            collator([
+                {
+                    "first": torch.tensor([1, 2]),
+                    "second": torch.tensor([3, 4]),
+                },
+                {
+                    "first": torch.tensor([5]),
+                    "second": torch.tensor([6]),
+                },
+            ])
 
     def test_optional_nested_schema_uses_zero_length_placeholder(self):
         import torch

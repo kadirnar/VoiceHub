@@ -349,6 +349,24 @@ class ModelTrainingSpec:
         """Return the one dependency extra used by every training profile."""
         return "training"
 
+    @property
+    def dataset_spec(self):
+        """Return a built-in TTS profile's architecture-level data contract.
+
+        Dataset contracts are imported lazily to keep the framework-free
+        training registry free of import cycles. ASR and VAD use
+        :class:`SpeechDataset` and their task-specific processor contracts.
+        Custom family strings can select a generic contract explicitly with
+        ``get_tts_dataset_spec(architecture=...)``.
+        """
+        if self.task is not SpeechTask.TEXT_TO_SPEECH:
+            raise AttributeError(
+                f"{self.model_type!r} is a {self.task.value} profile and has "
+                "no TTS dataset spec.")
+        from voicehub.training.datasets import get_tts_dataset_spec
+
+        return get_tts_dataset_spec(self.model_type)
+
 
 _COMMON_LM_PATHS = (
     "model",
