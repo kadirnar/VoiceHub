@@ -141,15 +141,15 @@ codecs, les jeux de données et les fichiers audio générés peuvent être soum
 
     [Matrice d'entraînement](models/training-support.md)
 
--   **Notebook**
+-   **Notebooks**
 
     ---
 
-    Exécutez le workflow Dia depuis l'inférence initiale et la validation des
-    données jusqu'à l'entraînement, l'exportation et le rechargement dans un
-    environnement neuf.
+    Utilisez quatre notebooks : des exemples ciblés d'inférence, de préparation
+    des données et d'entraînement, ainsi que le workflow Dia complet jusqu'à
+    l'exportation et au rechargement dans un nouvel environnement d'exécution.
 
-    [Ouvrir le guide du notebook](guides/notebook.md)
+    [Ouvrir la galerie de notebooks](guides/notebook.md)
 
 -   **Référence de l'API**
 

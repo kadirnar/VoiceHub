@@ -130,14 +130,15 @@ checkpoint, 코덱, 데이터 세트, 생성된 오디오에는 별도의 조건
 
     [학습 매트릭스](models/training-support.md)
 
--   **Notebook**
+-   **Notebook 모음**
 
     ---
 
-    기준 추론과 데이터 검증부터 학습, 내보내기, 새로운 런타임에서의 다시
-    불러오기까지 Dia 워크플로를 실행합니다.
+    네 개의 Notebook에서 추론, 데이터 준비, 학습에 초점을 맞춘 예제를
+    실행하거나 내보내기와 새로운 런타임에서의 다시 불러오기까지 포함한 전체
+    Dia 워크플로를 따라갑니다.
 
-    [Notebook 가이드 열기](guides/notebook.md)
+    [Notebook 갤러리 열기](guides/notebook.md)
 
 -   **API 레퍼런스**
 

@@ -133,14 +133,15 @@ veri kümeleri ve üretilen sesler farklı koşullara tabi olabilir.
 
     [Eğitim matrisi](models/training-support.md)
 
--   **Notebook**
+-   **Notebook galerisi**
 
     ---
 
-    Dia iş akışını temel çıkarım ve veri doğrulamadan eğitim, dışa aktarma ve
-    yeni bir çalışma ortamında yeniden yüklemeye kadar çalıştırın.
+    Dört notebook kullanın: çıkarım, veri hazırlama ve eğitime odaklanan
+    örneklerin yanı sıra dışa aktarma ve yeni bir çalışma ortamında yeniden
+    yüklemeye kadar eksiksiz Dia iş akışını izleyin.
 
-    [Notebook rehberini açın](guides/notebook.md)
+    [Notebook galerisini açın](guides/notebook.md)
 
 -   **API referansı**
 

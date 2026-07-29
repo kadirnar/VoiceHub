@@ -134,14 +134,15 @@ Apache-2.0 ライセンスが適用されるのは VoiceHub 本体です。統�
 
     [学習マトリクス](models/training-support.md)
 
--   **Notebook**
+-   **Notebook コレクション**
 
     ---
 
-    ベースライン推論とデータ検証から、学習、エクスポート、新しいランタイムでの
-    再読み込みまで、Dia のワークフローを実行します。
+    4 つの Notebook で、推論、データ準備、学習に特化した例を実行するか、
+    エクスポートと新しいランタイムでの再読み込みまで含む完全な Dia
+    ワークフローをたどります。
 
-    [Notebook ガイドを開く](guides/notebook.md)
+    [Notebook ギャラリーを開く](guides/notebook.md)
 
 -   **API リファレンス**
 

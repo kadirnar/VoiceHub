@@ -124,7 +124,7 @@ A file format is not a training capability:
 ## Before a run
 
 The [training workflow](../guides/training.md) and
-[companion notebook](../guides/notebook.md)
+[companion notebooks](../guides/notebook.md)
 demonstrate these checks with Dia's raw text/audio training path.
 
 Verify that:

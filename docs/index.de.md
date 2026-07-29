@@ -138,15 +138,15 @@ Audiodateien können anderen Bedingungen unterliegen.
 
     [Trainingsmatrix](models/training-support.md)
 
--   **Notebook**
+-   **Notebooks**
 
     ---
 
-    Führen Sie den Dia-Workflow von der anfänglichen Inferenz und
-    Datenvalidierung über Training und Export bis zum erneuten Laden in einer
-    frischen Laufzeitumgebung aus.
+    Nutzen Sie vier Notebooks: fokussierte Beispiele für Inferenz,
+    Datenaufbereitung und Training sowie den vollständigen Dia-Workflow bis
+    zum Export und erneuten Laden in einer frischen Laufzeitumgebung.
 
-    [Notebook-Leitfaden öffnen](guides/notebook.md)
+    [Notebook-Galerie öffnen](guides/notebook.md)
 
 -   **API-Referenz**
 

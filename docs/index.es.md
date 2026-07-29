@@ -136,15 +136,15 @@ generado pueden estar sujetos a condiciones distintas.
 
     [Matriz de entrenamiento](models/training-support.md)
 
--   **Notebook**
+-   **Notebooks**
 
     ---
 
-    Ejecute el flujo de trabajo de Dia desde la inferencia inicial y la
-    validación de datos hasta el entrenamiento, la exportación y la recarga en
-    un entorno nuevo.
+    Use cuatro notebooks: ejemplos centrados en inferencia, preparación de
+    datos y entrenamiento, además del flujo de trabajo completo de Dia hasta
+    la exportación y la recarga en un entorno nuevo.
 
-    [Abrir la guía del notebook](guides/notebook.md)
+    [Abrir la galería de notebooks](guides/notebook.md)
 
 -   **Referencia de la API**
 

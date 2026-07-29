@@ -1,18 +1,37 @@
 ---
-description: Run the complete VoiceHub Dia inference, data preparation, fine-tuning, export, and reload workflow in Jupyter or Colab.
+description: Run focused VoiceHub inference, data preparation, training, and end-to-end workflow notebooks in Jupyter or Colab.
 ---
 
-# End-to-end notebook
+# Notebook gallery
 
-The runnable notebook connects the three workflow guides in one auditable Dia
-example. It starts from baseline inference, validates raw audio records, creates
-leakage-resistant splits, runs a one-step training smoke test, saves both
-resume and portable artifacts, and reloads the result for comparison.
+VoiceHub provides four clean, runnable notebooks. The focused notebooks keep
+inference, portable data, and architecture-specific training concerns
+separate; the Dia notebook connects the complete lifecycle in one concrete
+example.
 
-[Run in Google Colab](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb){ .md-button .md-button--primary target="_blank" rel="noopener" }
-[View the notebook on GitHub](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb){ .md-button target="_blank" rel="noopener" }
+| Notebook | Purpose | GitHub | Colab |
+| --- | --- | --- | --- |
+| Inference | Discover and run normalized TTS, ASR, VAD, and VAD-to-ASR pipelines | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/inference.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/inference.ipynb) |
+| Data preparation | Inspect TTS/ASR contracts, validate portable records, split by speaker/session, and define VAD intervals | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/data_preparation.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/data_preparation.ipynb) |
+| Training | Fine-tune codec/LLM, diffusion/flow, VITS, and ASR architectures through the shared Trainer | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/training.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/training.ipynb) |
+| Dia end to end | Baseline inference, raw-data validation, one-step training, exact resume, export, and reload | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb) |
 
-## What the notebook covers
+All notebooks keep checkpoint downloads, real audio execution, training, and
+filesystem writes explicit. Offline-safe cells inspect the registry, validate
+request/data contracts, and create one-step configurations without allocating
+model weights.
+
+## End-to-end Dia workflow
+
+The Dia notebook connects the three focused workflows in one auditable
+example. It starts from baseline inference, validates raw audio records,
+creates leakage-resistant splits, runs a one-step training smoke test, saves
+both resume and portable artifacts, and reloads the result for comparison.
+
+[Run the Dia workflow in Google Colab](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb){ .md-button .md-button--primary target="_blank" rel="noopener" }
+[View the Dia workflow on GitHub](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb){ .md-button target="_blank" rel="noopener" }
+
+### What the Dia notebook covers
 
 | Stage | What it verifies |
 | --- | --- |

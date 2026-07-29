@@ -14,7 +14,15 @@ import nbformat
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DOCS_ROOT = REPOSITORY_ROOT / "docs"
 SITE_CONFIG_PATH = REPOSITORY_ROOT / "mkdocs.yml"
-NOTEBOOK_PATH = REPOSITORY_ROOT / "notebooks" / "tts_workflow.ipynb"
+NOTEBOOK_PATHS = tuple(sorted((REPOSITORY_ROOT / "notebooks").glob("*.ipynb")))
+EXPECTED_NOTEBOOK_FILENAMES = {
+    "data_preparation.ipynb",
+    "inference.ipynb",
+    "training.ipynb",
+    "tts_workflow.ipynb",
+}
+NOTEBOOKS_README_PATH = REPOSITORY_ROOT / "notebooks" / "README.md"
+NOTEBOOK_GALLERY_PATH = DOCS_ROOT / "guides" / "notebook.md"
 README_PATH = REPOSITORY_ROOT / "README.md"
 PYPROJECT_PATH = REPOSITORY_ROOT / "pyproject.toml"
 THEME_OVERRIDE_PATH = REPOSITORY_ROOT / "overrides" / "main.html"
@@ -92,80 +100,174 @@ def _local_link_path(raw_target):
 class DocumentationSiteTests(unittest.TestCase):
 
     def setUp(self):
-        self.notebook = nbformat.read(NOTEBOOK_PATH, as_version=4)
+        self.notebooks = {path: nbformat.read(path, as_version=4) for path in NOTEBOOK_PATHS}
 
-    def test_notebook_is_clean_and_structurally_valid(self):
-        nbformat.validate(self.notebook)
-        self.assertEqual(self.notebook["nbformat"], 4)
-        self.assertGreaterEqual(self.notebook["nbformat_minor"], 5)
-        cells = self.notebook["cells"]
-        self.assertTrue(cells)
+    def test_notebooks_are_clean_and_structurally_valid(self):
+        self.assertEqual(
+            {path.name
+             for path in self.notebooks},
+            EXPECTED_NOTEBOOK_FILENAMES,
+        )
+        for path, notebook in self.notebooks.items():
+            with self.subTest(notebook=path.name):
+                nbformat.validate(notebook)
+                self.assertEqual(notebook["nbformat"], 4)
+                self.assertGreaterEqual(notebook["nbformat_minor"], 5)
+                cells = notebook["cells"]
+                self.assertTrue(cells)
+                notebook_source = "\n".join(_cell_source(cell) for cell in cells)
+                self.assertIn(
+                    "https://colab.research.google.com/github/"
+                    "kadirnar/voicehub/blob/main/notebooks/"
+                    f"{path.name}",
+                    notebook_source,
+                )
+                if path.name != "tts_workflow.ipynb":
+                    self.assertIn(
+                        'importlib.util.find_spec("voicehub") is None',
+                        notebook_source,
+                    )
 
-        cell_ids = [cell.get("id") for cell in cells]
-        self.assertTrue(all(cell_ids))
-        self.assertEqual(len(cell_ids), len(set(cell_ids)))
+                cell_ids = [cell.get("id") for cell in cells]
+                self.assertTrue(all(cell_ids))
+                self.assertEqual(len(cell_ids), len(set(cell_ids)))
 
-        for cell in cells:
-            self.assertIn(cell["cell_type"], {"code", "markdown"})
-            self.assertIsInstance(_cell_source(cell), str)
-            if cell["cell_type"] == "code":
-                self.assertIsNone(cell["execution_count"])
-                self.assertEqual(cell["outputs"], [])
+                for cell in cells:
+                    self.assertIn(cell["cell_type"], {"code", "markdown"})
+                    self.assertIsInstance(_cell_source(cell), str)
+                    if cell["cell_type"] == "code":
+                        self.assertIsNone(cell["execution_count"])
+                        self.assertEqual(cell["outputs"], [])
+                    else:
+                        for raw_target in MARKDOWN_LINK.findall(_cell_source(cell)):
+                            local_path = _local_link_path(raw_target)
+                            if local_path is None:
+                                continue
+                            with self.subTest(
+                                    notebook=path.name,
+                                    target=raw_target,
+                            ):
+                                self.assertTrue(
+                                    (path.parent / local_path).exists(),
+                                    f"Broken notebook link {raw_target!r} "
+                                    f"in {path.name}",
+                                )
 
     def test_notebook_code_cells_compile_and_execute_in_smoke_mode(self):
-        namespace = {
-            "__name__": "__main__",
-        }
-        output = io.StringIO()
-        original_directory = Path.cwd()
-        with tempfile.TemporaryDirectory() as directory:
-            os.chdir(directory)
-            try:
-                with redirect_stdout(output):
-                    for cell in self.notebook["cells"]:
-                        if cell["cell_type"] != "code":
-                            continue
-                        source = _cell_source(cell)
-                        ast.parse(
-                            source,
-                            filename=f"{NOTEBOOK_PATH.name}:{cell['id']}",
-                        )
-                        tags = set(cell["metadata"].get("tags", ()))
-                        if "smoke-safe" not in tags:
-                            continue
-                        self.assertTrue(
-                            tags.isdisjoint({
-                                "requires-model",
-                                "requires-training",
-                                "requires-audio-runtime",
-                            }))
-                        exec(
-                            compile(
+        namespaces = {}
+        for path, notebook in self.notebooks.items():
+            namespace = {
+                "__name__": "__main__",
+            }
+            output = io.StringIO()
+            original_directory = Path.cwd()
+            with tempfile.TemporaryDirectory() as directory:
+                os.chdir(directory)
+                try:
+                    with redirect_stdout(output):
+                        for cell in notebook["cells"]:
+                            if cell["cell_type"] != "code":
+                                continue
+                            source = _cell_source(cell)
+                            ast.parse(
                                 source,
-                                f"{NOTEBOOK_PATH.name}:{cell['id']}",
-                                "exec",
-                            ),
-                            namespace,
-                        )
-                self.assertFalse((Path(directory) / "runs").exists())
-                self.assertFalse((Path(directory) / "artifacts").exists())
-            finally:
-                os.chdir(original_directory)
+                                filename=f"{path.name}:{cell['id']}",
+                            )
+                            tags = set(cell["metadata"].get("tags", ()))
+                            if "smoke-safe" not in tags:
+                                continue
+                            self.assertTrue(
+                                tags.isdisjoint({
+                                    "requires-model",
+                                    "requires-training",
+                                    "requires-audio-runtime",
+                                    "writes-data",
+                                    "requires-data",
+                                    "setup",
+                                    "optional-colab",
+                                }))
+                            exec(
+                                compile(
+                                    source,
+                                    f"{path.name}:{cell['id']}",
+                                    "exec",
+                                ),
+                                namespace,
+                            )
+                    self.assertEqual(list(Path(directory).iterdir()), [])
+                finally:
+                    os.chdir(original_directory)
+            namespaces[path.name] = namespace
 
-        self.assertFalse(namespace["RUN_INFERENCE"])
-        self.assertFalse(namespace["RUN_TRAINING"])
-        self.assertFalse(namespace["RUN_POST_TRAINING_INFERENCE"])
-        self.assertEqual(namespace["MODEL_TYPE"], "dia")
-        self.assertEqual(namespace["training_spec"].model_type, "dia")
-        self.assertTrue(namespace["validation_errors"])
-        self.assertTrue(namespace["train_records"])
-        self.assertTrue(namespace["validation_records"])
-        train_sessions = {record["session_id"] for record in namespace["train_records"]}
-        validation_sessions = {record["session_id"] for record in namespace["validation_records"]}
+        workflow = namespaces["tts_workflow.ipynb"]
+        self.assertFalse(workflow["RUN_INFERENCE"])
+        self.assertFalse(workflow["RUN_TRAINING"])
+        self.assertFalse(workflow["RUN_POST_TRAINING_INFERENCE"])
+        self.assertEqual(workflow["MODEL_TYPE"], "dia")
+        self.assertEqual(workflow["training_spec"].model_type, "dia")
+        self.assertTrue(workflow["validation_errors"])
+        self.assertTrue(workflow["train_records"])
+        self.assertTrue(workflow["validation_records"])
+        train_sessions = {record["session_id"] for record in workflow["train_records"]}
+        validation_sessions = {record["session_id"] for record in workflow["validation_records"]}
         self.assertTrue(train_sessions.isdisjoint(validation_sessions))
-        self.assertNotIn("trainer", namespace)
-        self.assertNotIn("baseline_output", namespace)
-        self.assertNotIn("fine_tuned_output", namespace)
+        self.assertNotIn("trainer", workflow)
+        self.assertNotIn("baseline_output", workflow)
+        self.assertNotIn("fine_tuned_output", workflow)
+
+        inference = namespaces["inference.ipynb"]
+        self.assertFalse(inference["RUN_TTS"])
+        self.assertFalse(inference["RUN_ASR"])
+        self.assertFalse(inference["RUN_VAD"])
+        self.assertEqual(sum(inference["task_counts"].values()), len(inference["catalog"]))
+        self.assertEqual(inference["tts_preview"].sample_rate, 24_000)
+        self.assertEqual(
+            inference["asr_preview"].text,
+            "VoiceHub normalizes speech outputs.",
+        )
+        self.assertTrue(inference["vad_preview"].contains(0.25))
+        self.assertNotIn("tts_output", inference)
+        self.assertNotIn("asr_output", inference)
+        self.assertNotIn("vad_output", inference)
+
+        data = namespaces["data_preparation.ipynb"]
+        self.assertFalse(data["WRITE_EXAMPLE_MANIFESTS"])
+        self.assertFalse(data["RUN_AUDIO_VALIDATION"])
+        self.assertFalse(data["RUN_MODEL_PREPARATION"])
+        self.assertEqual(len(data["tts_source"]), 4)
+        self.assertEqual(len(data["asr_source"]), 4)
+        self.assertEqual(len(data["vad_source"]), 2)
+        self.assertTrue(data["tts_train_sessions"].isdisjoint(data["tts_validation_sessions"], ))
+        self.assertTrue(data["asr_train_speakers"].isdisjoint(data["asr_validation_speakers"], ))
+        self.assertEqual(
+            set(data["model_contract_examples"]),
+            {
+                "tts_codec_lm",
+                "tts_sequence",
+                "tts_diffusion",
+                "tts_vits",
+                "asr_ctc",
+                "asr_seq2seq",
+                "asr_transducer",
+            },
+        )
+        self.assertEqual(len(data["tts_architecture_contracts"]), 6)
+        self.assertEqual(len(data["asr_architecture_contracts"]), 7)
+
+        training = namespaces["training.ipynb"]
+        self.assertFalse(training["RUN_CODEC_LM_TRAINING"])
+        self.assertFalse(training["RUN_DIFFUSION_TRAINING"])
+        self.assertFalse(training["RUN_VITS_TRAINING"])
+        self.assertFalse(training["RUN_ASR_TRAINING"])
+        self.assertFalse(training["RUN_TINY_TRAINER"])
+        self.assertEqual(
+            set(training["profile_summary"]),
+            set(training["SPECIALIZED_PROFILES"]),
+        )
+        self.assertEqual(len(training["asr_training_profiles"]), 23)
+        self.assertEqual(training["smoke_arguments"].max_steps, 1)
+        self.assertIsNone(training["active_trainer"])
+        self.assertIsNone(training["active_model"])
 
     def test_site_sources_and_navigation_exist(self):
         config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
@@ -275,23 +377,14 @@ class DocumentationSiteTests(unittest.TestCase):
     def test_public_navigation_uses_rendered_site_routes(self):
         readme = README_PATH.read_text(encoding="utf-8")
         project_metadata = PYPROJECT_PATH.read_text(encoding="utf-8")
-        notebook_source = "\n".join(_cell_source(cell) for cell in self.notebook["cells"])
+        notebook_source = "\n".join(
+            _cell_source(cell) for notebook in self.notebooks.values() for cell in notebook["cells"])
         public_content = "\n".join((readme, project_metadata, notebook_source))
 
         for route in PUBLIC_ROUTES:
             with self.subTest(route=route):
                 self.assertIn(f"{PUBLIC_SITE_URL}{route}", public_content)
 
-        self.assertIn(
-            "https://github.com/kadirnar/voicehub/blob/main/"
-            "notebooks/tts_workflow.ipynb",
-            readme,
-        )
-        self.assertIn(
-            "https://colab.research.google.com/github/kadirnar/voicehub/blob/main/"
-            "notebooks/tts_workflow.ipynb",
-            readme,
-        )
         self.assertNotIn(
             "github.com/kadirnar/voicehub/blob/main/docs/",
             public_content,
@@ -300,6 +393,26 @@ class DocumentationSiteTests(unittest.TestCase):
             "github.com/kadirnar/voicehub/tree/main/docs",
             public_content,
         )
+
+    def test_every_notebook_is_linked_from_each_gallery(self):
+        readme = README_PATH.read_text(encoding="utf-8")
+        notebooks_readme = NOTEBOOKS_README_PATH.read_text(encoding="utf-8")
+        docs_gallery = NOTEBOOK_GALLERY_PATH.read_text(encoding="utf-8")
+
+        for filename in EXPECTED_NOTEBOOK_FILENAMES:
+            github_url = ("https://github.com/kadirnar/voicehub/blob/main/"
+                          f"notebooks/{filename}")
+            colab_url = (
+                "https://colab.research.google.com/github/"
+                "kadirnar/voicehub/blob/main/"
+                f"notebooks/{filename}")
+            with self.subTest(notebook=filename):
+                self.assertIn(github_url, readme)
+                self.assertIn(colab_url, readme)
+                self.assertIn(f"]({filename})", notebooks_readme)
+                self.assertIn(colab_url, notebooks_readme)
+                self.assertIn(github_url, docs_gallery)
+                self.assertIn(colab_url, docs_gallery)
 
     def test_model_pages_cover_every_registry_entry(self):
         from voicehub import AutoInferenceModel, list_model_specs

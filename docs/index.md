@@ -159,14 +159,14 @@ codecs, datasets, and generated audio may have separate terms.
 
     [Training matrix](models/training-support.md)
 
--   **Notebook**
+-   **Notebooks**
 
     ---
 
-    Run the Dia workflow from baseline inference and data validation through
-    training, export, and fresh-runtime reload.
+    Run focused inference, data, and training examples or follow the complete
+    Dia workflow through export and fresh-runtime reload.
 
-    [Open the notebook guide](guides/notebook.md)
+    [Open the notebook gallery](guides/notebook.md)
 
 -   **API reference**
 

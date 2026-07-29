@@ -88,14 +88,18 @@ provides searchable, task-oriented guides:
 - [ASR and VAD data](https://kadirnar.github.io/voicehub/guides/speech-data/)
 - [Data preparation](https://kadirnar.github.io/voicehub/guides/data-preparation/)
 - [Training](https://kadirnar.github.io/voicehub/guides/training/)
-- [End-to-end notebook](https://kadirnar.github.io/voicehub/guides/notebook/)
+- [Notebook gallery](https://kadirnar.github.io/voicehub/guides/notebook/)
 - [TTS training support](https://kadirnar.github.io/voicehub/models/training-support/)
 - [ASR and VAD support](https://kadirnar.github.io/voicehub/models/asr-vad-support/)
 
-The runnable
-[Jupyter notebook](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb)
-runs the complete workflow and
-[opens directly in Colab](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb).
+The runnable notebooks open on GitHub or directly in Colab:
+
+| Notebook                         | GitHub                                                                                  | Colab                                                                                                        |
+| -------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Inference: TTS, ASR, and VAD     | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/inference.ipynb)        | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/inference.ipynb)        |
+| Data preparation                 | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/data_preparation.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/data_preparation.ipynb) |
+| Specialized TTS and ASR training | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/training.ipynb)         | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/training.ipynb)         |
+| Dia end-to-end workflow          | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb)     | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb)     |
 
 ## Speech recognition
 

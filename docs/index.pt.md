@@ -133,15 +133,15 @@ de dados e áudio gerado podem estar sujeitos a termos distintos.
 
     [Matriz de treinamento](models/training-support.md)
 
--   **Notebook**
+-   **Notebooks**
 
     ---
 
-    Execute o fluxo de trabalho do Dia, desde a inferência de referência e a
-    validação de dados até o treinamento, a exportação e o recarregamento em um
-    ambiente de execução novo.
+    Use quatro notebooks: exemplos focados em inferência, preparação de dados
+    e treinamento, além do fluxo de trabalho completo do Dia até a exportação
+    e o recarregamento em um novo ambiente de execução.
 
-    [Abrir o guia do notebook](guides/notebook.md)
+    [Abrir a galeria de notebooks](guides/notebook.md)
 
 -   **Referência da API**
 

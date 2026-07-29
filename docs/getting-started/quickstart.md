@@ -110,5 +110,5 @@ audio, sample_rate = output.to_tuple()
   validation, split leakage, raw-data adapters, and preprocessed tensors.
 - [Training](../guides/training.md) covers native objectives, one-step smoke
   tests, exact resume, and portable exports.
-- The [end-to-end notebook](../guides/notebook.md)
-  runs the complete Dia workflow and opens directly in Colab.
+- The [notebook gallery](../guides/notebook.md) provides focused inference,
+  data, and training notebooks plus the complete Dia workflow.

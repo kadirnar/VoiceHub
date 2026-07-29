@@ -6,8 +6,8 @@ description: Choose the VoiceHub workflow for inference, dataset preparation, or
 
 VoiceHub shares one public lifecycle across TTS, ASR, and VAD models while
 keeping task- and architecture-specific semantics explicit. Choose a workflow
-below. The [end-to-end Dia notebook](notebook.md) demonstrates the complete
-TTS path; the speech-input guides document ASR and VAD.
+below. The [notebook gallery](notebook.md) provides focused inference, data,
+and training examples plus the complete Dia lifecycle.
 
 <ol class="vh-process vh-process--seven" role="list" aria-label="VoiceHub lifecycle workflow">
   <li>

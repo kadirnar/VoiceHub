@@ -125,7 +125,7 @@ training runtime.
 
 For a runnable raw-data walkthrough from baseline inference through export,
 see the [training workflow](../guides/training.md) and its
-[companion notebook](../guides/notebook.md).
+[companion notebooks](../guides/notebook.md).
 
 For a `native` or `preprocessed` profile, the public loop follows the familiar
 Transformers vocabulary:

@@ -123,14 +123,14 @@ checkpoint 权重仍按需下载，也可以通过本地路径提供。只有在
 
     [训练矩阵](models/training-support.md)
 
--   **Notebook**
+-   **Notebook 示例集**
 
     ---
 
-    运行完整的 Dia 工作流：从基线推理和数据验证，到训练、导出，再到在全新
-    运行时中重新加载。
+    使用四个 Notebook：运行聚焦推理、数据准备和训练的示例，或按照完整的
+    Dia 工作流完成导出，并在全新运行时中重新加载。
 
-    [打开 Notebook 指南](guides/notebook.md)
+    [打开 Notebook 示例库](guides/notebook.md)
 
 -   **API 参考**
 
