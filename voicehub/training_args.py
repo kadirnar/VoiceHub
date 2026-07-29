@@ -41,6 +41,7 @@ class TrainingArguments:
     adam_beta2: float = 0.999
     adam_epsilon: float = 1e-8
     adamw_fused: bool = False
+    adamw_torch_compile: bool = False
     max_grad_norm: float = 1.0
     num_train_epochs: float = 3.0
     max_steps: int = -1
@@ -186,6 +187,8 @@ class TrainingArguments:
             raise ValueError("At most one of `fp16` and `bf16` can be enabled.")
         if not isinstance(self.adamw_fused, bool):
             raise TypeError("`adamw_fused` must be a boolean.")
+        if not isinstance(self.adamw_torch_compile, bool):
+            raise TypeError("`adamw_torch_compile` must be a boolean.")
         if (not isinstance(self.label_names, list) or not self.label_names or
                 any(not isinstance(name, str) or not name.strip() for name in self.label_names) or
                 len(set(self.label_names)) != len(self.label_names)):

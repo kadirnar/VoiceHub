@@ -5,6 +5,8 @@ description: Configure safe runtime optimizations for every TTS model, then add 
 # TTS optimization
 
 VoiceHub separates execution optimization from training-recipe optimization.
+For the shared WaveNet gate, CUDA-graph presets, optimizer backends, and exact
+five-model inventory, see [VITS-family optimization](vits-optimization.md).
 The distinction is important: changing an attention or compiler backend is
 not the same as choosing a model's optimizer, batching unit, losses, or EMA
 policy.

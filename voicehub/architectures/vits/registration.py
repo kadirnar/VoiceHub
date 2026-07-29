@@ -52,6 +52,8 @@ def create_vits_architecture_spec() -> ArchitectureSpec:
             distributed_training=True,
             optimization_passes=("compile", "custom-kernels"),
             features=(
+                "vits-family",
+                "vits-wavenet-gate",
                 "character-frontend",
                 "declarative-language-providers",
                 "monotonic-alignment-search",
@@ -71,6 +73,8 @@ def create_vits_architecture_spec() -> ArchitectureSpec:
         metadata={
             "family":
             "vits",
+            "vits_architecture_kind":
+            "classic",
             "implementation":
             "voicehub-native",
             "tensor_backend":

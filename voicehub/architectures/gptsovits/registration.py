@@ -73,8 +73,10 @@ def create_gptsovits_architecture_spec() -> ArchitectureSpec:
             batched_inference=False,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", "sdpa"),
+            optimization_passes=("compile", "sdpa", "custom-kernels"),
             features=(
+                "vits-family",
+                "vits-wavenet-gate",
                 "autoregressive-semantic-s1",
                 "vits-gan-acoustic-s2",
                 "frozen-residual-vector-quantizer",
@@ -94,6 +96,8 @@ def create_gptsovits_architecture_spec() -> ArchitectureSpec:
         upstream_revision=GPT_SOVITS_SOURCE_REVISION,
         license_id=GPT_SOVITS_LICENSE,
         metadata={
+            "vits_architecture_kind":
+            "hybrid-acoustic",
             "implementation":
             "voicehub-native",
             "tensor_backend":

@@ -21,7 +21,8 @@ from torch.nn import functional
 
 from voicehub.architectures.vits.alignment import generate_path, maximum_path, sequence_mask
 from voicehub.architectures.vits.configuration import VitsConfig
-from voicehub.kernels import KernelBackend, tanh_sigmoid_gate
+from voicehub.kernels.vits import VITSKernelOptimizable
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 class VitsInputError(ValueError):
@@ -380,7 +381,7 @@ class WeightNormalizedConv1d(nn.Module):
         )
 
 
-class VitsWaveNet(nn.Module):
+class VitsWaveNet(VITSKernelOptimizable, nn.Module):
     """Gated residual WaveNet used by posterior and coupling flows."""
 
     def __init__(self, config: VitsConfig, num_layers: int) -> None:
@@ -388,7 +389,7 @@ class VitsWaveNet(nn.Module):
         self.hidden_size = config.hidden_size
         self.num_layers = num_layers
         self.speaker_embedding_size = config.speaker_embedding_size
-        self.kernel_backend = KernelBackend.TORCH
+        self._initialize_vits_kernel_backend()
         self.dropout = nn.Dropout(config.wavenet_dropout)
         self.in_layers = nn.ModuleList()
         self.res_skip_layers = nn.ModuleList()
@@ -416,10 +417,6 @@ class VitsWaveNet(nn.Module):
                 1,
             ))
 
-    def set_kernel_backend(self, backend: KernelBackend | str) -> None:
-        """Select a registered fused WaveNet gate implementation."""
-        self.kernel_backend = KernelBackend.coerce(backend)
-
     def forward(
         self,
         inputs: Tensor,
@@ -435,11 +432,10 @@ class VitsWaveNet(nn.Module):
             else:
                 start = index * 2 * self.hidden_size
                 condition = conditioning[:, start:start + 2 * self.hidden_size]
-            activation, gate = (hidden + condition).split(self.hidden_size, dim=1)
-            activations = tanh_sigmoid_gate(
-                activation,
-                gate,
-                backend=self.kernel_backend,
+            activations = self._vits_fused_gate(
+                hidden,
+                condition,
+                self.hidden_size,
             )
             activations = self.dropout(activations)
             residual_skip = output_layer(activations)
@@ -1401,6 +1397,23 @@ class VitsModel(nn.Module):
             )
         self.posterior_encoder = VitsPosteriorEncoder(self.config)
         self.apply(self._initialize_module)
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Compile the execution boundary actually used in each mode."""
+        if mode == "inference":
+            attribute = "synthesize"
+        elif mode == "training":
+            attribute = "forward"
+        else:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            f"vits.{attribute}",
+            self,
+            attribute,
+        ), )
 
     def _initialize_module(self, module: nn.Module) -> None:
         """Apply the published VITS initialization without framework hooks."""

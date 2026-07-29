@@ -13,7 +13,7 @@ from voicehub.architectures.melotts.artifacts import MeloTTSArtifacts, resolve_m
 from voicehub.architectures.melotts.checkpoint import load_melotts_checkpoint, read_legacy_melotts_checkpoint
 from voicehub.architectures.melotts.frontend import NativeMeloTTSFrontend
 from voicehub.architectures.melotts.modeling import build_melotts_model
-from voicehub.optimization.protocols import OptimizationCompileTarget
+from voicehub.optimization.protocols import OptimizationCompileTarget, OptimizationModuleRoot
 
 
 class MeloTTSRuntime:
@@ -68,6 +68,14 @@ class MeloTTSRuntime:
             self.model,
             attribute,
         ), )
+
+    def optimization_module_roots(self) -> tuple[OptimizationModuleRoot, ...]:
+        """Expose the checkpoint graph to reversible selector passes."""
+        return (OptimizationModuleRoot("model", self.model), )
+
+    def state_dict(self):
+        """Proxy canonical checkpoint state without wrapping the graph."""
+        return self.model.state_dict()
 
     def _load_checkpoint(
         self,

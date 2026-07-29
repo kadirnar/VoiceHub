@@ -63,6 +63,7 @@ nav:
       - ASR and VAD data: guides/speech-data.md
       - Training: guides/training.md
       - TTS optimization: guides/tts-optimization.md
+      - VITS-family optimization: guides/vits-optimization.md
       - LLM TTS serving: guides/llm-serving.md
   - Notebooks: guides/notebook.md
   - Models:

@@ -6,10 +6,10 @@ from torch.nn import functional as F
 from torch.nn import Conv1d
 from torch.nn.utils import weight_norm, remove_weight_norm
 
-from voicehub.models.openvoice.source.openvoice import commons
 from voicehub.models.openvoice.source.openvoice.commons import init_weights, get_padding
 from voicehub.models.openvoice.source.openvoice.transforms import piecewise_rational_quadratic_transform
 from voicehub.models.openvoice.source.openvoice.attentions import Encoder
+from voicehub.kernels.vits import VITSKernelOptimizable
 
 LRELU_SLOPE = 0.1
 
@@ -130,7 +130,7 @@ class DDSConv(nn.Module):
         return x * x_mask
 
 
-class WN(torch.nn.Module):
+class WN(VITSKernelOptimizable, torch.nn.Module):
     def __init__(
         self,
         hidden_channels,
@@ -148,6 +148,7 @@ class WN(torch.nn.Module):
         self.n_layers = n_layers
         self.gin_channels = gin_channels
         self.p_dropout = p_dropout
+        self._initialize_vits_kernel_backend()
 
         self.in_layers = torch.nn.ModuleList()
         self.res_skip_layers = torch.nn.ModuleList()
@@ -184,8 +185,6 @@ class WN(torch.nn.Module):
 
     def forward(self, x, x_mask, g=None, **kwargs):
         output = torch.zeros_like(x)
-        n_channels_tensor = torch.IntTensor([self.hidden_channels])
-
         if g is not None:
             g = self.cond_layer(g)
 
@@ -197,7 +196,11 @@ class WN(torch.nn.Module):
             else:
                 g_l = torch.zeros_like(x_in)
 
-            acts = commons.fused_add_tanh_sigmoid_multiply(x_in, g_l, n_channels_tensor)
+            acts = self._vits_fused_gate(
+                x_in,
+                g_l,
+                self.hidden_channels,
+            )
             acts = self.drop(acts)
 
             res_skip_acts = self.res_skip_layers[i](acts)

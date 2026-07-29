@@ -78,14 +78,16 @@ class VITSOptimizationConfig:
         1_000,
     )
     use_fp16: bool = True
-    fused_adamw: bool = False
+    fused_adamw: bool = True
+    compile_adamw: bool = False
 
     source_url: str = _VITS_SOURCE
     techniques: tuple[str, ...] = (
         "posterior-latent segment decoding",
         "sequential discriminator and generator updates",
         "spectrogram-length bucket batching",
-        "separate AdamW optimizers",
+        "separate fused AdamW optimizers when CUDA supports them",
+        "optional torch.compile optimizer-step fusion",
         "epoch-normalized exponential learning-rate decay",
         "automatic mixed precision",
     )
@@ -114,6 +116,7 @@ class VITSOptimizationConfig:
             "lr_scheduler_gamma": self.lr_decay_per_epoch,
             "fp16": self.use_fp16,
             "adamw_fused": self.fused_adamw,
+            "adamw_torch_compile": self.compile_adamw,
         }
         return _arguments(defaults, output_dir, overrides)
 
@@ -144,10 +147,11 @@ class VITSOptimizationConfig:
         kernel_backend: str = "auto",
         use_torch_compile: bool = True,
         compile_backend: str = "inductor",
-        compile_mode: str | None = "max-autotune-no-cudagraphs",
+        compile_mode: str | None = None,
         compile_fullgraph: bool = False,
-        compile_dynamic: bool | None = True,
+        compile_dynamic: bool | None = None,
         compile_requirement: str = "auto",
+        cuda_graphs: str | bool = "disabled",
     ) -> tuple[OptimizationPass, ...]:
         """Build the explicit VITS kernel and compile plan."""
         from voicehub.training.tts_acceleration import vits_acceleration_plan
@@ -160,6 +164,7 @@ class VITSOptimizationConfig:
             compile_fullgraph=compile_fullgraph,
             compile_dynamic=compile_dynamic,
             compile_requirement=compile_requirement,
+            cuda_graphs=cuda_graphs,
         )
 
     def to_dict(self) -> dict[str, Any]:

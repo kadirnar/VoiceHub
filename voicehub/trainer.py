@@ -774,13 +774,25 @@ class Trainer:
                 for parameter in parameters)
             if supports_fused and all_cuda:
                 optimizer_kwargs["fused"] = True
-        return torch.optim.AdamW(
+        optimizer = torch.optim.AdamW(
             groups,
             lr=self.args.learning_rate,
             betas=(self.args.adam_beta1, self.args.adam_beta2),
             eps=self.args.adam_epsilon,
             **optimizer_kwargs,
         )
+        if self.args.adamw_torch_compile:
+            compile_optimizer = getattr(torch, "compile", None)
+            if not callable(compile_optimizer):
+                raise RuntimeError("`adamw_torch_compile=True` requires torch.compile support.")
+            optimizer.step = compile_optimizer(
+                optimizer.step,
+                backend="inductor",
+                mode="max-autotune-no-cudagraphs",
+                fullgraph=False,
+            )
+            optimizer._voicehub_step_compiled = True
+        return optimizer
 
     def create_scheduler(self, num_training_steps: int, optimizer=None):
         """Create a linear, cosine, or constant learning-rate scheduler."""
@@ -2568,6 +2580,7 @@ class Trainer:
                     collection_attribute="schedulers",
                 ),
                 "adamw_fused": self.args.adamw_fused,
+                "adamw_torch_compile": self.args.adamw_torch_compile,
                 "learning_rate": self.args.learning_rate,
                 "weight_decay": self.args.weight_decay,
                 "adam_betas": [
