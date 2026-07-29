@@ -1,4 +1,4 @@
-"""Parler-TTS configuration and model exports."""
+"""VoiceHub-native Parler-TTS configuration and model exports."""
 
 from voicehub.models.parlertts.inference import ParlerTTSConfig, ParlerTTSForTextToSpeech
 

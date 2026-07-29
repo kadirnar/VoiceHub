@@ -15,14 +15,12 @@ Intergrating vLLM inference to further improve the inference efficiency
 from dataclasses import dataclass
 from typing import List, Tuple
 import torch
-import torchaudio
-from huggingface_hub import hf_hub_download
+
+from voicehub.audio import load_audio
 from voicehub.models.conversationtts.source.conversationtts.models.model_new import Model, ModelArgs
 from voicehub.models.conversationtts.source.conversationtts.tools.tokenizer.Text2ID.text_tokenizer import TextTokenizer
 from voicehub.models.conversationtts.source.conversationtts.tools.tokenizer.MimiCodec.mimi_tokenizer import MimiTokenizer
 from voicehub.models.conversationtts.runtime import resume_for_inference
-torch.backends.cuda.enable_mem_efficient_sdp(False)
-torch.backends.cuda.enable_flash_sdp(False)
 
 @dataclass
 class Segment:
@@ -46,11 +44,10 @@ def load_audio_tokenizer(model_path, device):
     return MimiTokenizer(ckpt_path=model_path, device=device)
 
 def load_prompt_audio(audio_path):
-    audio_tensor, sample_rate = torchaudio.load(audio_path)
-    audio_tensor = audio_tensor.squeeze(0)
-    if sample_rate != 24000:
-        audio_tensor = torchaudio.functional.resample(audio_tensor, orig_freq=sample_rate, new_freq=24000)
-    return audio_tensor # T
+    return load_audio(
+        audio_path,
+        target_sampling_rate=24_000,
+    ).waveform
 
 def prepare_prompt(text, audio_path, segment_id=1):
     audio_tensor = load_prompt_audio(audio_path)

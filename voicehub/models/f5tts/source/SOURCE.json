@@ -1,10 +1,44 @@
 {
+  "artifact_audit": {
+    "f5tts_v1_base": {
+      "file": "F5TTS_v1_Base/model_1250000.safetensors",
+      "header_sha256": "e85e84102dd87c31e80b4cf9c71546069a3790a0528f34bd6c48e911cac8ca65",
+      "license": "CC-BY-NC-4.0",
+      "parameter_count": 337096836,
+      "repository": "SWivid/F5-TTS",
+      "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+      "sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38",
+      "size": 1348435761,
+      "tensor_count": 366
+    },
+    "vocos_mel_24khz": {
+      "file": "pytorch_model.bin",
+      "license": "MIT",
+      "repository": "charactr/vocos-mel-24khz",
+      "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+      "sha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a",
+      "size": 54365991,
+      "source_revision": "c859e3b7b534f3776a357983029d34170ddd6fc3",
+      "tensor_count": 83
+    }
+  },
   "license": "MIT",
   "model_type": "f5tts",
+  "native_runtime": {
+    "checkpoint_format": "safetensors",
+    "dependencies": [
+      "python-standard-library",
+      "torch",
+      "voicehub"
+    ],
+    "implementation": "voicehub.architectures.f5tts",
+    "legacy_policy": "Trusted PyTorch weight files are converted once with weights_only=True and served from Safetensors.",
+    "parity_boundary": "The 1.35 GB F5TTS_v1_Base payload is shape/header verified but full real-weight numerical parity is gated by download size. The 54 MB Vocos artifact is hash, tensor-namespace, conversion, and decode verified."
+  },
   "nested_revisions": {
     "BigVGAN": "7d2b454564a6c7d014227f635b7423881f14bdac"
   },
-  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and are not part of this source snapshot.",
+  "policy": "The vendored tree is an auditable reference snapshot only. Production inference and training use VoiceHub-owned native code and never import this source package. Pretrained weights are resolved separately and are not part of the source snapshot.",
   "revision": "9c614e9657089213efc6a7421b30630be138a3f5",
   "upstream": "https://github.com/SWivid/F5-TTS"
 }

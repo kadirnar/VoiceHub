@@ -102,10 +102,10 @@ class RemainingTTSTrainingTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             adapter.save_pretrained(directory)
-            state = __import__(
-                "safetensors.torch",
-                fromlist=["load_file"],
-            ).load_file(str(Path(directory) / "pytorch_model.safetensors"))
+            from voicehub.checkpointing import SafeTensorReader
+
+            with SafeTensorReader(Path(directory) / "pytorch_model.safetensors") as reader:
+                state = reader.state_dict()
             self.assertTrue(torch.equal(state["out_proj.weight"], model.out_proj.weight))
             self.assertTrue((Path(directory) / "pca_state.safetensors").is_file())
 
@@ -148,6 +148,9 @@ class RemainingTTSTrainingTests(unittest.TestCase):
                 )
                 self.config = TinyVuiConfig(architecture)
                 self.codec = nn.Linear(1, 1)
+                self.codec.config = {
+                    "sample_rate": 22_050,
+                }
                 self.pattern_provider = DelayedPatternProvider(n_q=2)
                 self.token_emb = nn.Embedding(32, 8)
                 self.audio_embeddings = nn.ModuleList([nn.Embedding(16, 8), nn.Embedding(16, 8)], )
@@ -160,7 +163,12 @@ class RemainingTTSTrainingTests(unittest.TestCase):
 
         model = TinyVui()
         adapter = VuiTrainingAdapter(
-            _Wrapper(model),
+            _Wrapper(
+                model,
+                config={
+                    "name_or_path": "test",
+                },
+            ),
             _training_spec("vui", TrainingFamily.CAUSAL_LM),
         )
         output = adapter(
@@ -177,13 +185,19 @@ class RemainingTTSTrainingTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             adapter.save_pretrained(directory)
-            checkpoint = torch.load(
-                Path(directory) / "vui-finetuned.pt",
-                map_location="cpu",
-                weights_only=True,
-            )
-            self.assertIn("audio_heads.0.weight", checkpoint["model"])
-            self.assertFalse(any(name.startswith("codec.") for name in checkpoint["model"]), )
+            from voicehub.checkpointing import SafeTensorReader
+
+            with SafeTensorReader(Path(directory) / "model.safetensors") as reader:
+                self.assertIn("audio_heads.0.weight", reader)
+                self.assertFalse(any(name.startswith("codec.") for name in reader.keys()))
+                self.assertEqual(reader.metadata["component"], "model")
+            with SafeTensorReader(Path(directory) / "codec.safetensors") as reader:
+                self.assertIn("weight", reader)
+                self.assertEqual(reader.metadata["component"], "codec")
+            config = json.loads((Path(directory) / "config.json").read_text(encoding="utf-8"))
+            self.assertEqual(config["checkpoint_filename"], "model.safetensors")
+            self.assertEqual(config["codec_filename"], "codec.safetensors")
+            self.assertEqual(config["native_artifact_format"], "voicehub-vui")
 
     def test_zonos_training_graph_is_batch_safe_and_differentiable(self):
         from voicehub.models.zonos.source.zonos.backbone._torch import TorchZonosBackbone

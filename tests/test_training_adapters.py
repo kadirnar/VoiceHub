@@ -307,6 +307,13 @@ class TrainingAdapterLoopTests(unittest.TestCase):
                         if item.device.type != "cpu":
                             raise AssertionError("The test processor must create CPU tensors.")
 
+            def prepare_device(self, model, *, device):
+                # The explicit device hook owns placement before graph
+                # optimization. Keep tensors on CPU in this CPU-only test
+                # while recording the requested production device.
+                self.requested_devices.append(device)
+                return model
+
             def prepare_training_adapter(self, adapter, *, device):
                 self.requested_devices.append(device)
                 return adapter
@@ -594,7 +601,7 @@ class TrainingAdapterLoopTests(unittest.TestCase):
         self.assertEqual(output.global_step, 2)
         self.assertIsInstance(resumed.optimizer, OptimizerBundle)
 
-    def test_inference_only_profile_rejects_before_module_discovery(self):
+    def test_inflect_warm_start_requires_acknowledgement_before_loading(self):
 
         class Runtime:
 
@@ -606,7 +613,7 @@ class TrainingAdapterLoopTests(unittest.TestCase):
             lambda: Runtime(self._regression_model()),
         )
         adapter = AutoTrainingAdapter.from_model(model)
-        with self.assertRaisesRegex(ValueError, "inference-only"):
+        with self.assertRaisesRegex(ValueError, "enable_native_finetuning=True"):
             adapter.setup()
         self.assertFalse(model.is_loaded)
 

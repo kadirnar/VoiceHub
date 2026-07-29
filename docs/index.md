@@ -100,8 +100,8 @@ codecs, datasets, and generated audio may have separate terms.
 
     ---
 
-    Transcribe files or in-memory audio through Transformers, optimized
-    Whisper, and native provider runtimes with normalized timestamps.
+    Transcribe files or in-memory audio through native CTC, transducer,
+    encoder-decoder, and Whisper-family graphs with normalized timestamps.
 
     [ASR guide](guides/speech-recognition.md)
 
@@ -109,8 +109,8 @@ codecs, datasets, and generated audio may have separate terms.
 
     ---
 
-    Detect ordered speech regions with Transformers, Silero, WebRTC,
-    pyannote, SpeechBrain, NeMo, or FunASR FSMN.
+    Detect ordered speech regions with native Wav2Vec2, Silero, PyanNet,
+    WebRTC, SpeechBrain, NeMo, or FunASR FSMN.
 
     [VAD guide](guides/voice-activity-detection.md)
 
@@ -146,7 +146,7 @@ codecs, datasets, and generated audio may have separate terms.
     ---
 
     Compare provider families, default runtime coverage, output capabilities,
-    and the exact native, upstream-custom, or inference-only training boundary.
+    and the exact native-trainable or inference-only boundary.
 
     [Speech-input matrix](models/asr-vad-support.md)
 

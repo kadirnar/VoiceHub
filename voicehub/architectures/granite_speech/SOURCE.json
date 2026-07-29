@@ -1,0 +1,55 @@
+{
+  "architecture": "granite-speech",
+  "implementation": "voicehub-native",
+  "license": "Apache-2.0",
+  "source": {
+    "repository": "https://github.com/huggingface/transformers",
+    "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+    "release_revision": "753d61104116eefc8ffc977327b441ee0c8d599f",
+    "release_version": "4.57.6",
+    "reviewed_version": "5.14.1",
+    "files": [
+      "src/transformers/models/granite_speech",
+      "src/transformers/models/blip_2/modeling_blip_2.py",
+      "src/transformers/models/granite"
+    ]
+  },
+  "checkpoint": {
+    "repository": "ibm-granite/granite-speech-4.1-2b",
+    "revision": "de575db64086f84fdc79da4932d1076e965bc546",
+    "format": "sharded-safetensors",
+    "header_fingerprint": "8889064efd770b05c39cc62dba5fac842e006530649b12bcd1c3d90c7a474001",
+    "index": "model.safetensors.index.json",
+    "parameter_count": 2313207148,
+    "tensor_count": 954,
+    "total_size": 4626414392,
+    "license": "Apache-2.0"
+  },
+  "verified_scope": {
+    "inference": [
+      "HTK log-mel frontend",
+      "block-local relative-position Conformer",
+      "windowed BLIP-2 Q-Former projector",
+      "Granite decoder with architecture multipliers and KV cache",
+      "native Llama-3 byte-BPE prompt expansion",
+      "prompt-controlled speech translation"
+    ],
+    "training": [
+      "raw-waveform batch preparation",
+      "completion-only causal labels",
+      "end-to-end autograd",
+      "source-compatible projector plus native language-model LoRA training",
+      "portable Safetensors export and fresh reload"
+    ],
+    "limitations": [
+      "granite_speech_plus is a distinct architecture and fails closed",
+      "language selection is prompt-conditioned rather than a language-ID decoder option",
+      "no corpus-level benchmark or accuracy improvement is claimed"
+    ]
+  },
+  "runtime_dependencies": [
+    "Python standard library",
+    "PyTorch",
+    "VoiceHub"
+  ]
+}

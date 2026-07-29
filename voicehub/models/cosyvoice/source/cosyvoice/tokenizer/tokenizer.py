@@ -2,11 +2,10 @@ import base64
 import os
 from functools import lru_cache
 from typing import Optional
-import torch
-from transformers import AutoTokenizer
-from whisper.tokenizer import Tokenizer
 
-import tiktoken
+from voicehub.hub import resolve_pretrained_file
+from voicehub.tokenization import ByteBPETokenizer
+from voicehub.tokenization.assets import load_huggingface_byte_bpe
 
 LANGUAGES = {
     "en": "english",
@@ -169,11 +168,30 @@ TTS_Vocal_Token = {
 @lru_cache(maxsize=None)
 def get_encoding(name: str = "gpt2", num_languages: int = 99):
     vocab_path = os.path.join(os.path.dirname(__file__), "assets", f"{name}.tiktoken")
-    ranks = {
-        base64.b64decode(token): int(rank)
-        for token, rank in (line.split() for line in open(vocab_path) if line)
-    }
-    n_vocab = len(ranks)
+    if os.path.isfile(vocab_path):
+        ranks = {}
+        with open(vocab_path, encoding="utf-8") as stream:
+            for token, rank in (line.split() for line in stream if line):
+                decoded = base64.b64decode(token)
+                # The CosyVoice asset reserves one unreachable empty token.
+                # Native BPE must omit it because zero-length vocabulary
+                # entries cannot make progress during tokenization.
+                if decoded:
+                    ranks[decoded] = int(rank)
+    elif name == "gpt2":
+        tokenizer_path = resolve_pretrained_file(
+            "openai/whisper-tiny.en",
+            "tokenizer.json",
+            revision="87c7102",
+        )
+        ranks = dict(
+            load_huggingface_byte_bpe(tokenizer_path).vocabulary
+        )
+    else:
+        raise FileNotFoundError(
+            f"CosyVoice tokenizer ranks were not found: {vocab_path}."
+        )
+    n_vocab = max(ranks.values(), default=-1) + 1
     special_tokens = {}
 
     specials = [
@@ -194,16 +212,45 @@ def get_encoding(name: str = "gpt2", num_languages: int = 99):
     ]
 
     for token in specials:
-        special_tokens[token] = n_vocab
-        n_vocab += 1
+        regular_id = ranks.get(token.encode("utf-8"))
+        if regular_id is None:
+            special_tokens[token] = n_vocab
+            n_vocab += 1
+        else:
+            special_tokens[token] = regular_id
 
-    return tiktoken.Encoding(
-        name=os.path.basename(vocab_path),
-        explicit_n_vocab=n_vocab,
-        pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
-        mergeable_ranks=ranks,
+    return ByteBPETokenizer(
+        ranks,
         special_tokens=special_tokens,
     )
+
+
+class _CosyWhisperTokenizer:
+    """Narrow OpenAI-tokenizer compatibility surface used by CosyVoice."""
+
+    def __init__(
+        self,
+        encoding: ByteBPETokenizer,
+        *,
+        num_languages: int,
+        language: str | None,
+        task: str | None,
+    ) -> None:
+        self.encoding = encoding
+        self.num_languages = num_languages
+        self.language = language
+        self.task = task
+
+    def encode(self, text: str, *, allowed_special="none") -> list[int]:
+        return list(
+            self.encoding.encode(
+                text,
+                allowed_special=allowed_special,
+            ).input_ids
+        )
+
+    def decode(self, token_ids) -> str:
+        return self.encoding.decode(token_ids)
 
 
 @lru_cache(maxsize=None)
@@ -213,7 +260,7 @@ def get_tokenizer(
     num_languages: int = 99,
     language: Optional[str] = None,
     task: Optional[str] = None,  # Literal["transcribe", "translate", None]
-) -> Tokenizer:
+) -> _CosyWhisperTokenizer:
     if language is not None:
         language = language.lower()
         if language not in LANGUAGES:
@@ -233,16 +280,22 @@ def get_tokenizer(
 
     encoding = get_encoding(name=encoding_name, num_languages=num_languages)
 
-    return Tokenizer(
+    return _CosyWhisperTokenizer(
         encoding=encoding, num_languages=num_languages, language=language, task=task
     )
 
 
 class CosyVoice2Tokenizer():
-    def __init__(self, token_path, skip_special_tokens=True):
+    def __init__(
+        self,
+        token_path,
+        skip_special_tokens=True,
+        *,
+        _special_tokens=None,
+    ):
         super().__init__()
         # NOTE: non-chat model, all these special tokens keep randomly initialized.
-        special_tokens = {
+        special_tokens = _special_tokens or {
             'eos_token': '<|endoftext|>',
             'pad_token': '<|endoftext|>',
             'additional_special_tokens': [
@@ -256,19 +309,61 @@ class CosyVoice2Tokenizer():
             ]
         }
         self.special_tokens = special_tokens
-        self.tokenizer = AutoTokenizer.from_pretrained(token_path)
-        self.tokenizer.add_special_tokens(special_tokens)
+        tokenizer_path = resolve_pretrained_file(
+            token_path,
+            "tokenizer.json",
+        )
+        assets = load_huggingface_byte_bpe(tokenizer_path)
+        merged_special = dict(assets.special_tokens)
+        known_ids = set(assets.vocabulary.values()) | set(merged_special.values())
+        next_token_id = max(known_ids, default=-1) + 1
+        token_names = [
+            special_tokens["eos_token"],
+            special_tokens["pad_token"],
+            *special_tokens["additional_special_tokens"],
+        ]
+        for token in token_names:
+            if token in merged_special:
+                continue
+            regular_id = assets.vocabulary.get(token.encode("utf-8"))
+            if regular_id is not None:
+                merged_special[token] = regular_id
+                continue
+            while next_token_id in known_ids:
+                next_token_id += 1
+            merged_special[token] = next_token_id
+            known_ids.add(next_token_id)
+            next_token_id += 1
+        pad_token_id = merged_special[special_tokens["pad_token"]]
+        self.tokenizer = ByteBPETokenizer(
+            assets.vocabulary,
+            merges=assets.merges,
+            special_tokens=merged_special,
+            unk_token_id=assets.unk_token_id,
+            pad_token_id=pad_token_id,
+            add_prefix_space=assets.add_prefix_space,
+            use_regex=assets.use_regex,
+            normalization=assets.normalization,
+        )
         self.skip_special_tokens = skip_special_tokens
 
     def encode(self, text, **kwargs):
-        tokens = self.tokenizer([text], return_tensors="pt")
-        tokens = tokens["input_ids"][0].cpu().tolist()
-        return tokens
+        allowed_special = kwargs.pop("allowed_special", "all")
+        if kwargs:
+            unknown = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unsupported tokenizer options: {unknown}.")
+        return list(
+            self.tokenizer.encode(
+                text,
+                allowed_special=allowed_special,
+            ).input_ids
+        )
 
     def decode(self, tokens):
-        tokens = torch.tensor(tokens, dtype=torch.int64)
-        text = self.tokenizer.batch_decode([tokens], skip_special_tokens=self.skip_special_tokens)[0]
-        return text
+        return self.tokenizer.decode(
+            tokens,
+            skip_special_tokens=self.skip_special_tokens,
+        )
 
 
 class CosyVoice3Tokenizer(CosyVoice2Tokenizer):
@@ -308,9 +403,11 @@ class CosyVoice3Tokenizer(CosyVoice2Tokenizer):
             ]
         }
         self.special_tokens = special_tokens
-        self.tokenizer = AutoTokenizer.from_pretrained(token_path)
-        self.tokenizer.add_special_tokens(special_tokens)
-        self.skip_special_tokens = skip_special_tokens
+        super().__init__(
+            token_path,
+            skip_special_tokens=skip_special_tokens,
+            _special_tokens=special_tokens,
+        )
 
 
 @lru_cache(maxsize=None)

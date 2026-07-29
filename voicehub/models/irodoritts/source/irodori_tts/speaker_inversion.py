@@ -4,8 +4,8 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from safetensors.torch import load_file as load_safetensors_file
-from safetensors.torch import save_file as save_safetensors_file
+
+from voicehub.checkpointing import SafeTensorReader, save_safetensors
 
 SPEAKER_INVERSION_UNCOND_MODES = {"mask", "noise"}
 SPEAKER_INVERSION_SAFETENSORS_SUFFIX = ".speaker.safetensors"
@@ -137,7 +137,8 @@ def load_speaker_inversion_payload(
             "Speaker Inversion embeddings must use the "
             f"{SPEAKER_INVERSION_SAFETENSORS_SUFFIX!r} suffix: {source}"
         )
-    raw = load_safetensors_file(source, device="cpu")
+    with SafeTensorReader(source) as reader:
+        raw = reader.state_dict(device="cpu")
 
     out = normalize_speaker_inversion_payload(raw)
     return out
@@ -160,7 +161,7 @@ def save_speaker_inversion_safetensors(
         SPEAKER_EMBEDDING_KEY: normalized[SPEAKER_EMBEDDING_KEY].to(dtype=dtype),
     }
     target.parent.mkdir(parents=True, exist_ok=True)
-    save_safetensors_file(tensors, str(target), metadata={})
+    save_safetensors(tensors, target)
 
 
 def speaker_inversion_batch_tensors(

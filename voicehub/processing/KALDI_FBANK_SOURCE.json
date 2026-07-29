@@ -1,0 +1,12 @@
+{
+  "component": "kaldi-compatible-fbank",
+  "implementation": "voicehub.processing.kaldi",
+  "license": "BSD-2-Clause",
+  "reference": {
+    "file": "src/torchaudio/compliance/kaldi.py",
+    "release": "v2.8.0",
+    "repository": "https://github.com/pytorch/audio",
+    "revision": "6e1c7fe9ff6d82b8665d0a46d859d3357d2ebaaa"
+  },
+  "verification": "Randomized differential tests compare VoiceHub outputs with the pinned TorchAudio reference. TorchAudio is an audit oracle only and is not imported by the VoiceHub runtime."
+}

@@ -10,7 +10,6 @@
 
 import typing as tp
 
-from einops import rearrange
 import torch
 from torch import nn
 from torch import distributed
@@ -170,8 +169,7 @@ class EuclideanCodebook(nn.Module):
 
     def _reshape_input(self, x: torch.Tensor) -> torch.Tensor:
         # Flattens all the dimensions but the last one, e.g. return a vector of shape `[N, D]`.
-        x = rearrange(x, "... d -> (...) d")
-        return x
+        return x.reshape(-1, x.shape[-1])
 
     def _reshape_codes(self, codes: torch.Tensor, shape: torch.Size) -> torch.Tensor:
         return codes.view(*shape[:-1])
@@ -275,12 +273,10 @@ class VectorQuantization(nn.Module):
         return self._codebook.embedding
 
     def _rearrange_input(self, x):
-        x = rearrange(x, "b d n -> b n d")
-        return x
+        return x.transpose(1, 2)
 
     def _rearrange_output(self, quantized):
-        quantized = rearrange(quantized, "b n d -> b d n")
-        return quantized
+        return quantized.transpose(1, 2)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         """Encodes `x` into discrete integer codes."""

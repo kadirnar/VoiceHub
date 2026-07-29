@@ -118,40 +118,33 @@ policy is:
 
 The Dia adapter rejects unexpected sample rates. File-backed multichannel
 audio is downmixed by the adapter, while in-memory waveforms must already be
-mono rank-1 arrays. Enforcing mono files during preparation keeps the dataset
-explicit and consistent.
+mono rank-1 tensors or numeric sequences. Enforcing mono files during
+preparation keeps the dataset explicit and consistent.
 
 ```python
 from pathlib import Path
 
-import numpy as np
-import soundfile as sf
+from voicehub.processing import load_native_audio, save_pcm_wave
 
 
 def prepare_dia_audio(source: str | Path, destination: str | Path) -> Path:
-    import torch
-    import torchaudio
-
     source = Path(source)
     destination = Path(destination)
-    audio, source_rate = sf.read(
+    audio = load_native_audio(
         source,
-        dtype="float32",
-        always_2d=True,
+        target_sampling_rate=44_100,
     )
-    waveform = torch.from_numpy(np.mean(audio, axis=1))
-    if source_rate != 44_100:
-        waveform = torchaudio.functional.resample(
-            waveform,
-            source_rate,
-            44_100,
-        )
-    if waveform.numel() == 0 or not torch.isfinite(waveform).all():
-        raise ValueError(f"Invalid waveform: {source}")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    sf.write(destination, waveform.numpy(), 44_100)
-    return destination
+    return save_pcm_wave(
+        destination,
+        audio.waveform,
+        audio.sampling_rate,
+    )
 ```
+
+The native decoder accepts uncompressed PCM WAVE input, averages channels to
+mono, performs a band-limited PyTorch resample, and writes a portable 16-bit
+PCM WAVE file. It does not require NumPy, SoundFile, Librosa, or Torchaudio.
+Decode other containers explicitly before this boundary.
 
 Resampling does not repair clipping, background music, long silence, incorrect
 transcripts, or licensing problems. Measure those separately.
@@ -161,8 +154,9 @@ transcripts, or licensing problems. Measure those separately.
 ```python
 from pathlib import Path
 
-import numpy as np
-import soundfile as sf
+import torch
+
+from voicehub.processing import load_pcm_wave
 
 
 def validate_dia_records(records: list[dict]) -> None:
@@ -182,19 +176,16 @@ def validate_dia_records(records: list[dict]) -> None:
         if not audio_path.is_file():
             raise FileNotFoundError(f"{record_id}: {audio_path}")
 
-        info = sf.info(audio_path)
-        if info.channels != 1 or info.samplerate != 44_100:
+        channels, sample_rate = load_pcm_wave(
+            audio_path,
+            preserve_channels=True,
+        )
+        if channels.shape[0] != 1 or sample_rate != 44_100:
             raise ValueError(
                 f"{record_id}: expected mono 44100 Hz, received "
-                f"{info.channels} channel(s) at {info.samplerate} Hz"
+                f"{channels.shape[0]} channel(s) at {sample_rate} Hz"
             )
-
-        samples, _ = sf.read(
-            audio_path,
-            dtype="float32",
-            always_2d=False,
-        )
-        if samples.size == 0 or not np.isfinite(samples).all():
+        if channels.numel() == 0 or not torch.isfinite(channels).all():
             raise ValueError(f"{record_id}: audio is empty or non-finite")
 ```
 
@@ -257,7 +248,7 @@ content hashes.
 
 ## Use an integrated raw-data adapter
 
-Six current integrations accept ordinary source records, but their contracts
+Five current integrations accept ordinary source records, but their contracts
 still differ:
 
 | Model   | Accepted source record                                                                                           |
@@ -265,9 +256,8 @@ still differ:
 | Dia     | Non-empty `text`; 44.1 kHz audio path or mono rank-1 audio array                                                 |
 | Orpheus | `text` plus an audio path resampled to 24 kHz by the helper, or SNAC `audio_codes`; optional `voice`/`source`    |
 | LLaSA   | `text` plus `audio` or XCodec2 `audio_codes`; completion-only labels                                             |
-| OuteTTS | Prepared `speaker` mapping, or `audio` plus optional `text`; HF backend only                                     |
 | CSM     | Conversation/messages, grouped utterances, or scalar text/audio/speaker records passed directly to `Trainer`     |
-| NeuTTS  | `text` plus `audio` or NeuCodec `audio_codes`; HF backbone only                                                  |
+| NeuTTS-Air | `text` plus raw audio or native NeuCodec `audio_codes`; explicit phonemes or an injected phonemizer for phoneme checkpoints |
 
 For adapters exposing `create_training_dataset()`:
 
@@ -284,8 +274,8 @@ collator.
 
 ## Inspect a model-owned batch
 
-For Dia, the official processor creates text inputs, delayed decoder inputs,
-attention masks, and masked codec labels:
+For Dia, VoiceHub's native processor creates byte-text inputs, delayed decoder
+inputs, attention masks, and channel-major masked codec labels:
 
 ```python
 features = [
@@ -311,6 +301,101 @@ Before a long run, confirm:
 Some integrations expose a verified objective but do not yet own raw-data
 preparation. The generic collator pads structure; it does not invent semantic
 targets:
+
+OuteTTS is one such explicit boundary. Each V3 speaker profile must already
+contain word timings, equal-length two-codebook DAC codes, per-word features,
+and global features:
+
+```python
+outetts_records = [
+    {
+        "speaker_profile": {
+            "interface_version": 3,
+            "text": "Hello.",
+            "words": [
+                {
+                    "word": "Hello.",
+                    "duration": 0.32,
+                    "c1": [101, 231],
+                    "c2": [77, 912],
+                    "features": {
+                        "energy": 28,
+                        "spectral_centroid": 42,
+                        "pitch": 51,
+                    },
+                }
+            ],
+            "global_features": {
+                "energy": 28,
+                "spectral_centroid": 42,
+                "pitch": 51,
+            },
+        }
+    }
+]
+
+train_dataset = training_model.create_training_dataset(outetts_records)
+```
+
+Feature values must be integers in `[0, 100]`; each code must be in
+`[0, 1024]`. VoiceHub validates the complete profile and constructs exact V3
+completion-only labels. It rejects raw audio instead of inventing timestamps
+or acoustic features that differ from the author pipeline. A preparation
+service may also persist exact `input_ids` and `labels`, using `-100` only for
+masked label positions.
+
+Fish Speech S2 has a different prepared boundary. Each record contains
+integer `tokens` and `labels` shaped
+`[num_codebooks + 1, sequence_length]`—11 channels for S2-Pro. Channel zero
+holds text/protocol/semantic token IDs; channels 1 through 10 hold aligned
+ModifiedDAC IDs. Labels are aligned to the prediction at the same position,
+so dataset preparation must not add another causal shift:
+
+```python
+fish_records = [
+    {
+        "tokens": prepared_inputs,  # integer tensor [11, time]
+        "labels": prepared_labels,  # integer tensor [11, time]
+    }
+]
+train_dataset = training_model.create_training_dataset(
+    fish_records,
+    max_length=4096,
+)
+batch = train_dataset.collate_fn([train_dataset[0]])
+```
+
+The collator pads channel zero with the checkpoint's end-of-text token, pads
+codec channels with zero, pads every label channel with `-100`, and emits
+`attention_masks` where `True` means padding. VoiceHub rejects raw legacy Fish
+protobuf paths: convert them into this explicit channel-first contract before
+training. ModifiedDAC is the frozen offline tokenizer and is not an optimizer
+phase.
+
+OpenVoice V2 uses paired waveform records rather than text labels or codec
+tokens:
+
+```python
+openvoice_records = [
+    {
+        "source_audio": "speaker-a/line-004.wav",
+        "target_audio": "speaker-b/line-004.wav",
+        "source_reference_audio": "speaker-a/reference.wav",
+        "target_reference_audio": "speaker-b/reference.wav",
+        "sampling_rate": 22_050,
+    }
+]
+```
+
+The source and target utterances must carry the same words and should be
+temporally aligned. Split by target speaker and recording session before
+creating pairs so validation does not reuse reference identity or room
+acoustics. The native collator deliberately keeps audio as variable-length
+tuples; the OpenVoice processor then resamples, computes the released
+513-channel magnitude spectrogram, records exact frame/sample lengths, and
+right-pads. Precomputed `[256, 1]` source/target embeddings may replace
+reference waveforms, but do not mix present and missing embeddings within one
+batch.
 
 ```python
 from voicehub import DataCollatorForTTSTraining, TTSFieldSchema

@@ -361,8 +361,13 @@ duration discriminator. It must define:
 - update frequency and optimizer ownership;
 - checkpoint state for every component.
 
-If an inference snapshot contains only a synthesizer or generator, VoiceHub
-does not claim full VITS fine-tuning support.
+VoiceHub's native VITS integration implements these boundaries with a
+scale-plus-five-period discriminator and independently routed generator and
+discriminator phases. An inference-only MMS-TTS snapshot supplies the
+generator topology but not its original FFT, hop, window, mel, or segment
+settings, so the full route requires an explicit, validated
+`training_acoustic_config`. The compatibility generator warm start remains
+available, but its artifact manifest does not claim full VITS fine-tuning.
 
 ### Hybrid architectures
 
@@ -433,11 +438,26 @@ Recipes describe **what** to optimize. `TrainingStrategy` describes **how** to
 execute it. The strategy owns model and dataloader preparation, nested input
 device movement, autocast and gradient scaling, backward, gradient clipping,
 selected optimizer/scheduler steps, `no_sync`, metric gathering, unwrapping,
-and runtime checkpoint state. In particular, `prepare_training_adapter()`
-establishes the strategy-owned execution handle,
+and runtime checkpoint state. In particular, `prepare_device()` places the
+unwrapped graph before explicit optimization, `prepare_training_adapter()`
+wraps the already transformed graph into a strategy-owned execution handle,
 `execute_training_phase()` routes every recipe phase through that handle,
 `prepare_optimization()` may wrap the model and named optimization state
 together, and `unwrap_model()` returns the serializable adapter.
+
+The ordering is deliberate:
+
+```text
+build graph -> prepare device -> apply persistent passes
+            -> create strategy proxy -> create optimizers
+            -> prepare optimizer/scheduler runtime
+```
+
+Training pass contexts must request persistent results. A nonpersistent pass
+is rejected before its `apply()` method runs. If a pass changes parameter
+names or topology in a separate-optimizer recipe, it must return a complete
+post-transform route for every named optimizer; VoiceHub validates that every
+trainable parameter is owned exactly once.
 
 The built-in `"torch"` strategy is single-process. VoiceHub does not currently
 pretend to provide built-in DDP, FSDP, DeepSpeed, Accelerate, TPU, or
@@ -505,6 +525,14 @@ export either as an inference export or as a component weight warm start;
 XTTS GPT, CosyVoice component, and F5 EMA files are not advertised as complete
 source-loadable model directories.
 
+An exact checkpoint may retain optimized state only because its pass manifest
+is part of the resume identity and every Trainer pass is explicitly
+persistent. A public/final portable artifact uses canonical state instead. A
+topology/name-changing pass must declare and implement portable export;
+otherwise `save_model()` fails before writing an artifact. This prevents an
+optimized proxy state dict from being advertised as loadable by a fresh
+unoptimized runtime.
+
 The model state is the adapter's versioned component topology for integrated
 TTS wrappers. Optimizer and scheduler bundles retain their names, so a
 generator/discriminator or multi-component job resumes with the same routing.
@@ -523,7 +551,9 @@ may implement `resume_fingerprint()` to identify its content/revision; this is
 the only generic way to detect a same-length dataset whose contents or ordering
 changed. Resume rejects an incomplete checkpoint, a newer unsupported format,
 a different model type or strategy, a mismatched named-optimizer topology, or
-a changed exact-resume signature. Legacy checkpoints remain readable, but
+a changed optimization configuration or exact-resume signature. Optimization
+records snapshot the pass ID, kind, version, capabilities, configuration, and
+result metadata as strict JSON. Legacy checkpoints remain readable, but
 formats without this signature cannot make the same topology guarantee.
 
 ```python

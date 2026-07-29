@@ -1,5 +1,5 @@
-"""Stable model imports for cosyvoice."""
+"""Backward-compatible model imports for native CosyVoice 3."""
 
-from voicehub.models.cosyvoice.inference import CosyVoiceForTextToSpeech
+from voicehub.models.cosyvoice_native.modeling_cosyvoice import CosyVoiceForTextToSpeech, CosyVoiceTTS
 
-__all__ = ["CosyVoiceForTextToSpeech"]
+__all__ = ["CosyVoiceForTextToSpeech", "CosyVoiceTTS"]

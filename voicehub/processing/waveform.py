@@ -1,0 +1,527 @@
+"""PyTorch-native waveform loading, normalization, and resampling.
+
+Native VoiceHub architectures use this module instead of delegating
+their input boundary to NumPy, SoundFile, librosa, or torchaudio.
+Tensor and Python sequence inputs are accepted directly.  File input
+intentionally starts with the portable PCM WAVE format; additional
+codecs can be introduced as explicit VoiceHub decoders without changing
+the processor contract.
+"""
+
+from __future__ import annotations
+
+import sys
+import wave
+from collections.abc import Mapping
+from dataclasses import dataclass
+from io import BytesIO
+from math import ceil, gcd, isfinite
+from numbers import Integral, Real
+from pathlib import Path
+from typing import Any
+
+import torch
+from torch import Tensor
+
+
+def _positive_rate(value: Any, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral) or value <= 0:
+        raise ValueError(f"`{name}` must be a positive integer.")
+    return int(value)
+
+
+def _waveform_from_mapping(value: Mapping[str, Any]) -> tuple[Any, Any]:
+    for name in ("array", "waveform", "audio", "input_values"):
+        if name in value:
+            return value[name], value.get(
+                "sampling_rate",
+                value.get("sample_rate"),
+            )
+    raise ValueError("Audio mappings must contain one of: array, waveform, audio, "
+                     "input_values.")
+
+
+def _decode_pcm(payload: bytes, *, sample_width: int) -> Tensor:
+    """Decode little-endian PCM frames to normalized float32 samples."""
+    if sample_width == 1:
+        values = torch.frombuffer(bytearray(payload), dtype=torch.uint8)
+        return (values.float() - 128.0) / 128.0
+    if sample_width == 2:
+        values = torch.frombuffer(bytearray(payload), dtype=torch.int16)
+        return values.float() / 32768.0
+    if sample_width == 3:
+        octets = torch.frombuffer(bytearray(payload), dtype=torch.uint8)
+        if octets.numel() % 3:
+            raise ValueError("24-bit WAVE payload is not aligned to samples.")
+        octets = octets.reshape(-1, 3).to(dtype=torch.int32)
+        values = octets[:, 0] | (octets[:, 1] << 8) | (octets[:, 2] << 16)
+        values = torch.where(
+            values >= 2**23,
+            values - 2**24,
+            values,
+        )
+        return values.float() / float(2**23)
+    if sample_width == 4:
+        values = torch.frombuffer(bytearray(payload), dtype=torch.int32)
+        return values.float() / float(2**31)
+    raise ValueError(
+        "VoiceHub's native WAVE decoder supports 8-, 16-, 24-, and 32-bit "
+        f"PCM; received {sample_width * 8}-bit samples.")
+
+
+def _read_pcm_wave(
+    source,
+    *,
+    preserve_channels: bool,
+    source_label: str,
+) -> tuple[Tensor, int]:
+    try:
+        with wave.open(source, "rb") as stream:
+            if stream.getcomptype() != "NONE":
+                raise ValueError("Compressed WAVE input is not supported by the native "
+                                 "PCM decoder.")
+            channels = stream.getnchannels()
+            if not 1 <= channels <= 8:
+                raise ValueError("WAVE input must contain between one and eight channels.")
+            sample_rate = stream.getframerate()
+            sample_width = stream.getsampwidth()
+            frame_count = stream.getnframes()
+            payload = stream.readframes(frame_count)
+    except wave.Error as error:
+        raise ValueError(f"Invalid PCM WAVE {source_label}: {error}.") from error
+
+    values = _decode_pcm(payload, sample_width=sample_width)
+    expected_samples = frame_count * channels
+    if values.numel() != expected_samples:
+        raise ValueError(f"WAVE payload contains {values.numel()} samples; expected "
+                         f"{expected_samples}.")
+    if channels > 1:
+        values = values.reshape(frame_count, channels).transpose(0, 1)
+        if not preserve_channels:
+            values = values.mean(dim=0)
+    elif preserve_channels:
+        values = values.unsqueeze(0)
+    return values.contiguous(), _positive_rate(sample_rate, name="sample_rate")
+
+
+def load_pcm_wave(
+    path: str | Path,
+    *,
+    preserve_channels: bool = False,
+) -> tuple[Tensor, int]:
+    """Decode an uncompressed PCM WAVE file with the standard library.
+
+    Args:
+        path: File to decode.
+        preserve_channels: Return channel-first audio when ``True``. The
+            default returns a mono waveform and averages multi-channel input.
+
+    Returns:
+        A floating-point waveform and its sampling rate.
+
+    This is the file-level counterpart to :func:`load_native_audio`. Codec
+    implementations use the channel-preserving form while ASR and VAD
+    processors intentionally consume mono audio.
+    """
+    if not isinstance(preserve_channels, bool):
+        raise TypeError("`preserve_channels` must be a boolean.")
+    source_path = Path(path).expanduser()
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Audio file was not found: {source_path}.")
+    return _read_pcm_wave(
+        str(source_path),
+        preserve_channels=preserve_channels,
+        source_label=f"file {source_path}",
+    )
+
+
+def decode_pcm_wave(
+    payload: bytes | bytearray | memoryview,
+    *,
+    preserve_channels: bool = False,
+    max_bytes: int = 512 * 1024 * 1024,
+) -> tuple[Tensor, int]:
+    """Decode an in-memory PCM WAVE container without NumPy or SoundFile."""
+    if not isinstance(preserve_channels, bool):
+        raise TypeError("`preserve_channels` must be a boolean.")
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
+        raise ValueError("`max_bytes` must be a positive integer.")
+    if not isinstance(payload, (bytes, bytearray, memoryview)):
+        raise TypeError("PCM WAVE `payload` must be bytes-like.")
+    encoded = bytes(payload)
+    if not encoded:
+        raise ValueError("PCM WAVE `payload` cannot be empty.")
+    if len(encoded) > max_bytes:
+        raise ValueError(f"PCM WAVE payload is {len(encoded)} bytes; the limit is "
+                         f"{max_bytes}.")
+    return _read_pcm_wave(
+        BytesIO(encoded),
+        preserve_channels=preserve_channels,
+        source_label="payload",
+    )
+
+
+def normalize_waveform(value: Any) -> Tensor:
+    """Return one finite mono float32 waveform without copying
+    unnecessarily."""
+    if isinstance(value, Tensor):
+        waveform = value.detach()
+    else:
+        if isinstance(value, (str, bytes, bytearray, Mapping)):
+            raise TypeError("Audio samples must be a real numeric sequence.")
+        try:
+            waveform = torch.as_tensor(value)
+        except (TypeError, ValueError, RuntimeError) as error:
+            raise TypeError("Audio input must expose a finite real numeric array.") from error
+
+    if waveform.numel() == 0:
+        raise ValueError("Audio input cannot be empty.")
+    if waveform.dtype == torch.bool or waveform.is_complex():
+        raise TypeError("Audio samples must be real numeric values.")
+    if waveform.is_floating_point():
+        waveform = waveform.float()
+    elif waveform.dtype == torch.uint8:
+        waveform = (waveform.float() - 128.0) / 128.0
+    else:
+        limits = torch.iinfo(waveform.dtype)
+        scale = float(max(abs(limits.min), limits.max))
+        waveform = waveform.float() / scale
+    if waveform.ndim == 0:
+        waveform = waveform.reshape(1)
+    while waveform.ndim > 1 and 1 in waveform.shape:
+        waveform = waveform.squeeze()
+    if waveform.ndim == 2:
+        first_is_channels = waveform.shape[0] <= 8
+        last_is_channels = waveform.shape[1] <= 8
+        if first_is_channels and (not last_is_channels or waveform.shape[0] <= waveform.shape[1]):
+            waveform = waveform.float().mean(dim=0)
+        elif last_is_channels:
+            waveform = waveform.float().mean(dim=1)
+        else:
+            raise ValueError("Two-dimensional audio must have a channel dimension of at "
+                             "most eight.")
+    if waveform.ndim != 1:
+        raise ValueError(
+            "Audio input must resolve to one mono waveform; received shape "
+            f"{tuple(waveform.shape)}.")
+
+    if not torch.isfinite(waveform).all():
+        raise ValueError("Audio input contains NaN or infinite samples.")
+    return waveform.contiguous()
+
+
+def resample_waveform(
+    waveform: Tensor,
+    source_rate: int,
+    target_rate: int,
+    *,
+    filter_width: int = 16,
+    chunk_size: int = 8_192,
+) -> Tensor:
+    """Band-limit and resample a mono waveform with a windowed-sinc kernel.
+
+    The operation is differentiable with respect to ``waveform``.  Work is
+    chunked so long recordings do not allocate a full
+    ``output_samples × kernel_width`` matrix.
+    """
+    source_rate = _positive_rate(source_rate, name="source_rate")
+    target_rate = _positive_rate(target_rate, name="target_rate")
+    if not isinstance(waveform, Tensor) or waveform.ndim != 1:
+        raise ValueError("`waveform` must be a rank-one PyTorch tensor.")
+    if not waveform.is_floating_point():
+        raise TypeError("`waveform` must use a floating-point dtype.")
+    if waveform.numel() == 0:
+        raise ValueError("`waveform` cannot be empty.")
+    if (isinstance(filter_width, bool) or not isinstance(filter_width, int) or filter_width < 2):
+        raise ValueError("`filter_width` must be an integer of at least two.")
+    if (isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or chunk_size < 1):
+        raise ValueError("`chunk_size` must be a positive integer.")
+    if source_rate == target_rate:
+        return waveform
+    if waveform.numel() == 1:
+        output_length = max(
+            1,
+            round(waveform.numel() * target_rate / source_rate),
+        )
+        return waveform.expand(output_length).clone()
+
+    output_length = max(
+        1,
+        round(waveform.numel() * target_rate / source_rate),
+    )
+    computation_dtype = (torch.float64 if waveform.dtype == torch.float64 else torch.float32)
+    source = waveform.to(dtype=computation_dtype)
+    ratio = source_rate / target_rate
+    cutoff = min(1.0, target_rate / source_rate)
+    offsets = torch.arange(
+        -filter_width + 1,
+        filter_width + 1,
+        dtype=computation_dtype,
+        device=waveform.device,
+    )
+    chunks: list[Tensor] = []
+
+    for start in range(0, output_length, chunk_size):
+        stop = min(start + chunk_size, output_length)
+        positions = (torch.arange(
+            start,
+            stop,
+            dtype=computation_dtype,
+            device=waveform.device,
+        ) * ratio)
+        left = positions.floor().to(dtype=torch.long)
+        indices = left[:, None] + offsets.to(dtype=torch.long)[None, :]
+        distances = positions[:, None] - indices.to(dtype=computation_dtype)
+        scaled = distances * cutoff
+        support = scaled.abs() / filter_width
+        window = torch.where(
+            support <= 1.0,
+            0.5 * (1.0 + torch.cos(torch.pi * support)),
+            torch.zeros_like(support),
+        )
+        weights = cutoff * torch.sinc(scaled) * window
+        weights /= weights.sum(dim=-1, keepdim=True).clamp_min(torch.finfo(computation_dtype).eps)
+        samples = source[indices.clamp(min=0, max=source.shape[0] - 1)]
+        chunks.append((samples * weights).sum(dim=-1))
+
+    return torch.cat(chunks).to(dtype=waveform.dtype)
+
+
+def resample_waveform_kaiser(
+    waveform: Tensor,
+    source_rate: int,
+    target_rate: int,
+    *,
+    lowpass_filter_width: int = 6,
+    rolloff: float = 0.99,
+    beta: float = 14.769656459379492,
+) -> Tensor:
+    """Resample ``[..., time]`` audio with a Kaiser-windowed sinc kernel.
+
+    This is the native counterpart of the well-known polyphase algorithm
+    used by torchaudio.  Rates are reduced by their greatest common
+    divisor, one phase kernel is constructed per target-rate step, and
+    all leading dimensions are treated as independent waveforms.  The
+    operation remains differentiable with respect to its input.
+    """
+    source_rate = _positive_rate(source_rate, name="source_rate")
+    target_rate = _positive_rate(target_rate, name="target_rate")
+    if not isinstance(waveform, Tensor) or waveform.ndim < 1:
+        raise ValueError("`waveform` must be a PyTorch tensor with a time axis.")
+    if not waveform.is_floating_point():
+        raise TypeError("`waveform` must use a floating-point dtype.")
+    if waveform.shape[-1] == 0:
+        raise ValueError("`waveform` cannot be empty.")
+    if (isinstance(lowpass_filter_width, bool) or not isinstance(lowpass_filter_width, int) or
+            lowpass_filter_width <= 0):
+        raise ValueError("`lowpass_filter_width` must be a positive integer.")
+    if (isinstance(rolloff, bool) or not isinstance(rolloff, Real) or not isfinite(float(rolloff)) or
+            not 0.0 < float(rolloff) <= 1.0):
+        raise ValueError("`rolloff` must be finite and in the interval (0, 1].")
+    if (isinstance(beta, bool) or not isinstance(beta, Real) or not isfinite(float(beta)) or
+            float(beta) <= 0.0):
+        raise ValueError("`beta` must be a finite positive number.")
+    if source_rate == target_rate:
+        return waveform
+
+    divisor = gcd(source_rate, target_rate)
+    original_frequency = source_rate // divisor
+    target_frequency = target_rate // divisor
+    base_frequency = min(
+        original_frequency,
+        target_frequency,
+    ) * float(rolloff)
+    width = ceil(lowpass_filter_width * original_frequency / base_frequency)
+    computation_dtype = (torch.float64 if waveform.dtype == torch.float64 else torch.float32)
+    source = waveform.to(dtype=computation_dtype)
+    indices = (
+        torch.arange(
+            -width,
+            width + original_frequency,
+            dtype=computation_dtype,
+            device=waveform.device,
+        )[None, None] / original_frequency)
+    phases = (
+        torch.arange(
+            0,
+            -target_frequency,
+            -1,
+            dtype=computation_dtype,
+            device=waveform.device,
+        )[:, None, None] / target_frequency)
+    positions = (phases + indices) * base_frequency
+    positions = positions.clamp(
+        min=-lowpass_filter_width,
+        max=lowpass_filter_width,
+    )
+    normalized = positions / lowpass_filter_width
+    beta_tensor = torch.tensor(
+        float(beta),
+        dtype=computation_dtype,
+        device=waveform.device,
+    )
+    window = torch.i0(beta_tensor * torch.sqrt(
+        (1.0 - normalized.square()).clamp_min(0.0))) / torch.i0(beta_tensor)
+    radians = positions * torch.pi
+    sinc = torch.where(
+        radians == 0,
+        torch.ones_like(radians),
+        radians.sin() / radians,
+    )
+    kernel = sinc * window * (base_frequency / original_frequency)
+
+    leading_shape = source.shape[:-1]
+    source_length = source.shape[-1]
+    flattened = source.reshape(-1, 1, source_length)
+    padded = torch.nn.functional.pad(
+        flattened,
+        (width, width + original_frequency - 1),
+    )
+    resampled = torch.nn.functional.conv1d(
+        padded,
+        kernel,
+        stride=original_frequency,
+    )
+    output_length = ceil(target_frequency * source_length / original_frequency)
+    resampled = (resampled.transpose(1, 2).reshape(*leading_shape, -1)[..., :output_length].contiguous())
+    return resampled.to(dtype=waveform.dtype)
+
+
+@dataclass(frozen=True, slots=True)
+class NativeAudio:
+    """A normalized mono waveform with an explicit sampling rate."""
+
+    waveform: Tensor
+    sampling_rate: int
+    path: Path | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.waveform, Tensor) or self.waveform.ndim != 1:
+            raise ValueError("`waveform` must be a rank-one PyTorch tensor.")
+        if not self.waveform.is_floating_point():
+            raise TypeError("`waveform` must use a floating-point dtype.")
+        if self.waveform.numel() == 0 or not torch.isfinite(self.waveform).all():
+            raise ValueError("`waveform` must contain finite audio samples.")
+        object.__setattr__(
+            self,
+            "sampling_rate",
+            _positive_rate(self.sampling_rate, name="sampling_rate"),
+        )
+
+    @property
+    def duration(self) -> float:
+        """Waveform duration in seconds."""
+        return self.waveform.shape[-1] / self.sampling_rate
+
+
+def load_native_audio(
+    audio: NativeAudio | Mapping[str, Any] | str | Path | Any,
+    *,
+    sampling_rate: int | None = None,
+    target_sampling_rate: int | None = None,
+) -> NativeAudio:
+    """Materialize audio using only the standard library and PyTorch."""
+    source_path: Path | None = None
+    if isinstance(audio, NativeAudio):
+        if (sampling_rate is not None and int(sampling_rate) != audio.sampling_rate):
+            raise ValueError("`sampling_rate` conflicts with the rate stored in "
+                             "NativeAudio.")
+        waveform = audio.waveform
+        source_rate = audio.sampling_rate
+        source_path = audio.path
+    elif isinstance(audio, Mapping):
+        waveform, mapped_rate = _waveform_from_mapping(audio)
+        if (sampling_rate is not None and mapped_rate is not None and int(sampling_rate) != int(mapped_rate)):
+            raise ValueError("`sampling_rate` conflicts with the rate stored in the audio "
+                             "mapping.")
+        source_rate = sampling_rate if sampling_rate is not None else mapped_rate
+    elif isinstance(audio, (str, Path)):
+        source_path = Path(audio).expanduser()
+        if not source_path.is_file():
+            raise FileNotFoundError(f"Audio file was not found: {source_path}.")
+        if source_path.suffix.lower() not in {".wav", ".wave"}:
+            raise ValueError(
+                "Native VoiceHub file decoding currently accepts PCM WAVE "
+                "input. Pass other formats as a decoded tensor.")
+        waveform, file_rate = load_pcm_wave(source_path)
+        if sampling_rate is not None and int(sampling_rate) != file_rate:
+            raise ValueError("`sampling_rate` does not match the WAVE file's sampling rate.")
+        source_rate = file_rate
+    else:
+        waveform = audio
+        source_rate = sampling_rate
+
+    source_rate = _positive_rate(source_rate, name="sampling_rate")
+    resolved_target = (
+        source_rate if target_sampling_rate is None else _positive_rate(
+            target_sampling_rate,
+            name="target_sampling_rate",
+        ))
+    normalized = normalize_waveform(waveform)
+    normalized = resample_waveform(
+        normalized,
+        source_rate,
+        resolved_target,
+    )
+    return NativeAudio(
+        waveform=normalized,
+        sampling_rate=resolved_target,
+        path=source_path,
+    )
+
+
+def save_pcm_wave(
+    path: str | Path,
+    waveform: Tensor,
+    sampling_rate: int,
+) -> Path:
+    """Write finite mono or channel-first audio as 16-bit PCM WAVE.
+
+    The writer deliberately has one portable output contract. Richer
+    codecs belong behind explicit export strategies; model examples and
+    native runtimes should not need NumPy, SoundFile, or torchaudio just
+    to emit a playable waveform.
+    """
+    rate = _positive_rate(sampling_rate, name="sampling_rate")
+    if not isinstance(waveform, Tensor):
+        raise TypeError("`waveform` must be a PyTorch tensor.")
+    if waveform.ndim == 1:
+        channels = 1
+        samples = waveform.unsqueeze(0)
+    elif waveform.ndim == 2:
+        if not 1 <= waveform.shape[0] <= 8:
+            raise ValueError("Channel-first WAVE output must contain one to eight channels.")
+        channels = waveform.shape[0]
+        samples = waveform
+    else:
+        raise ValueError("`waveform` must have shape [time] or [channels, time].")
+    if samples.shape[-1] == 0:
+        raise ValueError("`waveform` cannot be empty.")
+    if samples.dtype == torch.bool or samples.is_complex():
+        raise TypeError("WAVE samples must be real numeric values.")
+    materialized = samples.detach().to(device="cpu", dtype=torch.float32)
+    if not torch.isfinite(materialized).all():
+        raise ValueError("WAVE samples must be finite.")
+    interleaved = (
+        materialized.clamp(-1.0, 1.0).transpose(0, 1).mul(32767.0).round().to(dtype=torch.int16).contiguous())
+    if sys.byteorder != "little":  # pragma: no cover - uncommon platform
+        raise RuntimeError("Native WAVE writing currently requires a little-endian host.")
+    payload = bytes(interleaved.untyped_storage())
+    output_path = Path(path).expanduser()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(output_path), "wb") as stream:
+        stream.setnchannels(channels)
+        stream.setsampwidth(2)
+        stream.setframerate(rate)
+        stream.writeframes(payload)
+    return output_path
+
+
+__all__ = [
+    "NativeAudio",
+    "load_pcm_wave",
+    "load_native_audio",
+    "normalize_waveform",
+    "resample_waveform",
+    "save_pcm_wave",
+]

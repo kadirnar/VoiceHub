@@ -1,4 +1,4 @@
-"""Stable model import for VITS and MMS-TTS."""
+"""Stable model import for native VITS and MMS-TTS."""
 
 from voicehub.models.vits.inference import VitsForTextToSpeech
 

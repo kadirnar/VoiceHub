@@ -13,10 +13,6 @@ from typing import Any
 
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSTrainingOutput
-from voicehub.models.cosyvoice.training import CosyVoiceTrainingAdapter
-from voicehub.models.dia.training import DiaTrainingAdapter
-from voicehub.models.higgstts.training import HiggsTrainingAdapter
-from voicehub.models.xtts.training import XTTSTrainingAdapter
 from voicehub.training.adapters import BaseTrainingAdapter, CausalLMTrainingAdapter, FlowMatchingTrainingAdapter
 from voicehub.training.contracts import TrainingContext
 from voicehub.training.ema import ExponentialMovingAverage
@@ -92,6 +88,7 @@ class CodecCausalLMTrainingAdapter(
                 tokenizer=self.model.tokenizer,
                 codec=self.model.codec,
                 completion_only=bool(kwargs.get("completion_only", False)),
+                max_length=kwargs.get("max_length"),
             )
         if self.model_type == "llasa":
             training = import_optional(
@@ -149,18 +146,37 @@ class CodecCausalLMTrainingAdapter(
             tokenizer.save_pretrained(destination)
 
 
+class OrpheusTrainingAdapter(CodecCausalLMTrainingAdapter):
+    """Fine-tune and export the complete VoiceHub-native Orpheus runtime."""
+
+    native_export_semantics = "inference-export"
+
+    def save_pretrained(self, save_directory) -> None:
+        self.setup()
+        export = getattr(self.model, "export_native_pretrained", None)
+        if not callable(export):
+            raise TypeError("Native Orpheus training requires a wrapper with "
+                            "export_native_pretrained().")
+        export(save_directory)
+
+
 class ConversationTTSTrainingAdapter(
         CausalLMTrainingAdapter,
         SourceRecipeTrainingAdapter,
 ):
-    """Official two-level codec language-model objective."""
+    """Published two-level codec language-model objective and export."""
+
+    native_export_semantics = "inference-reloadable-safetensors"
 
     def execute_training_phase(
         self,
         context: TrainingContext,
     ) -> TTSTrainingOutput:
         self.setup()
-        prepared = dict(context.inputs)
+        prepared = self.prepare_batch(context.inputs, context)
+        if not isinstance(prepared, Mapping):
+            raise TypeError("ConversationTTS input preparation must return a mapping.")
+        prepared = dict(prepared)
         required = ("tokens", "labels", "tokens_mask")
         missing = [name for name in required if name not in prepared]
         if missing:
@@ -184,11 +200,16 @@ class ConversationTTSTrainingAdapter(
         if zero_mask is None:
             zero_mask = prepared["tokens_mask"][:, 1:, 0].bool()
         zero_length = min(c0_logits.shape[1], zero_labels.shape[1], zero_mask.shape[1])
+        default_padding_id = int(getattr(
+            getattr(model, "config", None),
+            "audio_vocab_size",
+            2_051,
+        )) - 1
         loss_zero, zero_metrics = source.CrossEntropyAndAccuracy_zero(
             c0_logits[:, :zero_length],
             zero_labels[:, :zero_length],
             zero_mask[:, :zero_length],
-            ignore_id=int(prepared.get("ignore_id", 0)),
+            ignore_id=int(prepared.get("ignore_id", default_padding_id)),
         )
         residual_weights = prepared.get("residual_loss_weights")
         if residual_weights is None:
@@ -197,7 +218,10 @@ class ConversationTTSTrainingAdapter(
             residual_logits,
             residual_labels,
             loss_weights=residual_weights,
-            ignore_id=int(prepared.get("residual_ignore_id", 0)),
+            ignore_id=int(prepared.get(
+                "residual_ignore_id",
+                default_padding_id,
+            )),
         )
         loss = loss_zero + loss_residual
         metrics = {
@@ -216,6 +240,30 @@ class ConversationTTSTrainingAdapter(
             metadata={"metrics": metrics},
         )
 
+    def save_pretrained(self, save_directory) -> None:
+        self.setup()
+        export = getattr(self.model, "export_native_pretrained", None)
+        if not callable(export):
+            raise TypeError(
+                "Native ConversationTTS training requires a wrapper with "
+                "`export_native_pretrained()`.")
+        export(save_directory)
+
+    def artifact_manifest(self) -> dict[str, Any]:
+        manifest = super().artifact_manifest()
+        manifest.update({
+            "checkpoint_format": "voicehub-conversationtts-v1",
+            "native_architecture_family": "conversationtts",
+            "objective": "published-two-level-masked-codebook-cross-entropy",
+            "objective_author_verified": True,
+            "training_scope": "full-acoustic-language-model",
+            "frozen_components": ["mimi-codec"],
+            "raw_audio_preprocessing": "optional-frozen-native-mimi",
+            "inference_reloadable": True,
+            "commercial_use": False,
+        })
+        return manifest
+
 
 class F5TTSTrainingAdapter(
         FlowMatchingTrainingAdapter,
@@ -224,6 +272,7 @@ class F5TTSTrainingAdapter(
     """Native conditional-flow objective with update-coupled EMA."""
 
     supports_custom_recipe = True
+    native_export_semantics = "inference-export"
 
     def __init__(self, model, spec):
         super().__init__(model, spec)
@@ -304,258 +353,27 @@ class F5TTSTrainingAdapter(
             self._ema.load_state_dict(state_dict["ema"], strict=strict)
 
     def save_pretrained(self, save_directory) -> None:
-        """Export an upstream-compatible EMA safetensors checkpoint."""
+        """Export an upstream-compatible, fresh-inference EMA artifact."""
         self.setup()
+        from voicehub.architectures.f5tts.checkpoint import export_f5tts_checkpoint
+
         destination = Path(save_directory)
         destination.mkdir(parents=True, exist_ok=True)
-        safetensors = import_optional(
-            "safetensors.torch",
-            model_type="f5tts",
-            install_extra="training",
-        )
         state = self.primary_model.state_dict()
         ema_state = self._ema.state_dict()["shadow"]
-        exported = {}
-        for name, value in state.items():
-            averaged = ema_state.get(name, value)
-            exported[f"ema_model.{name}"] = averaged.detach().cpu().contiguous()
-        safetensors.save_file(
-            exported,
-            str(destination / "model_ema.safetensors"),
+        averaged = {name: ema_state.get(name, value) for name, value in state.items()}
+        export_f5tts_checkpoint(
+            self.primary_model,
+            destination / "model.safetensors",
+            state_override=averaged,
         )
-
-
-class MossTTSTrainingAdapter(
-        CausalLMTrainingAdapter,
-        SourceRecipeTrainingAdapter,
-):
-    """MOSS family adapter including Local Transformer v1.5 channel losses."""
-
-    supports_custom_recipe = True
-
-    def _is_local_v15(self) -> bool:
-        resolver = getattr(self.model, "_resolve_variant", None)
-        variant = resolver() if callable(resolver) else getattr(self.model, "_variant", "")
-        return str(variant).lower().replace(".", "_") in {
-            "local_v1_5",
-            "local_v15",
-        }
-
-    def create_dataset(self, records, **kwargs):
-        self.setup()
-        if not self._is_local_v15():
-            return super().create_dataset(records, **kwargs)
-        dataset_module = import_optional(
-            "voicehub.models.mosstts.source.moss_tts_local_v1_5."
-            "finetuning.dataset",
-            model_type="mosstts",
-            install_extra="training",
-        )
-        return dataset_module.MossTTSLocalV15SFTDataset(
-            records,
-            self.model._processor,
-            n_vq=kwargs.get("n_vq"),
-        )
-
-    def create_optimizer(self, name, parameters, training_args):
-        del name
-        if not self._is_local_v15():
-            return None
-        torch = import_optional(
-            "torch",
-            model_type="mosstts",
-            install_extra="training",
-        )
-        decay = []
-        no_decay = []
-        for parameter_name, parameter in parameters:
-            normalized = parameter_name.lower()
-            target = (
-                no_decay
-                if parameter_name.endswith(".bias") or "norm" in normalized or "ln_" in normalized else decay)
-            target.append(parameter)
-        groups = []
-        if decay:
-            groups.append({
-                "params": decay,
-                "weight_decay": training_args.weight_decay,
-            })
-        if no_decay:
-            groups.append({
-                "params": no_decay,
-                "weight_decay": 0.0,
-            })
-        config = self.model.config
-        return torch.optim.AdamW(
-            groups,
-            lr=training_args.learning_rate,
-            betas=(
-                float(config.training_adam_beta1),
-                float(config.training_adam_beta2),
-            ),
-            eps=float(config.training_adam_epsilon),
-        )
-
-    @staticmethod
-    def _loss_weights(config, n_heads: int) -> list[float]:
-        values = getattr(config, "training_channelwise_loss_weights", None)
-        if values is None:
-            values = (1.0, 32.0)
-        if isinstance(values, str):
-            values = tuple(float(item.strip()) for item in values.split(",") if item.strip())
-        values = [float(item) for item in values]
-        if len(values) == 2 and n_heads > 1:
-            text_weight, total_audio_weight = values
-            values = [text_weight] + [total_audio_weight / (n_heads - 1)] * (n_heads - 1)
-        if len(values) != n_heads:
-            raise ValueError(
-                "MOSS channelwise loss weights must contain two values or "
-                f"one value per head ({n_heads}).")
-        if (any(not math.isfinite(value) or value < 0 for value in values) or sum(values) <= 0):
-            raise ValueError(
-                "MOSS channelwise loss weights must be finite, non-negative, "
-                "and sum to a positive value.")
-        return values
-
-    def execute_training_phase(
-        self,
-        context: TrainingContext,
-    ) -> TTSTrainingOutput:
-        if not self._is_local_v15():
-            return super().execute_training_phase(context)
-        self.setup()
-        prepared = dict(context.inputs)
-        required = ("input_ids", "attention_mask", "labels")
-        missing = [name for name in required if name not in prepared]
-        if missing:
-            raise ValueError("MOSS Local v1.5 fine-tuning requires: " + ", ".join(missing))
-        outputs = self.primary_model(
-            input_ids=prepared["input_ids"],
-            attention_mask=prepared["attention_mask"],
-            use_cache=False,
-            return_dict=True,
-        )
-        hidden = outputs.last_hidden_state
-        loss, per_head = self._compute_local_v15_loss(
-            hidden,
-            prepared["labels"],
-        )
-        return self._training_output(
-            context,
-            loss=loss,
-            losses={
-                "loss": loss,
-                **per_head,
-            },
-        )
-
-    def _compute_local_v15_loss(self, hidden, labels):
-        torch = import_optional(
-            "torch",
-            model_type="mosstts",
-            install_extra="training",
-        )
-        functional = torch.nn.functional
-        model = self.primary_model
-        batch_size, seq_len, hidden_size = hidden.shape
-        n_vq = int(model.config.n_vq)
-        if labels.shape[-1] != n_vq + 1:
-            raise ValueError(
-                f"MOSS Local v1.5 expects {n_vq + 1} label channels, "
-                f"received {labels.shape[-1]}.")
-
-        weights = self._loss_weights(self.model.config, n_vq + 1)
-        flat_hidden = hidden.reshape(batch_size * seq_len, hidden_size)
-        flat_labels = labels.reshape(batch_size * seq_len, n_vq + 1)
-        local_dtype = model.local_transformer.ln_f.weight.dtype
-        prefix = model._global_hidden_to_local(flat_hidden).to(dtype=local_dtype)
-        local_inputs = torch.zeros(
-            (batch_size * seq_len, n_vq, prefix.shape[-1]),
-            dtype=local_dtype,
-            device=flat_hidden.device,
-        )
-        local_inputs[:, 0, :] = prefix
-
-        audio_targets = flat_labels[:, 1:]
-        for channel_index in range(n_vq - 1):
-            teacher_ids = audio_targets[:, channel_index]
-            embedding = model.audio_embeddings[channel_index]
-            valid = (teacher_ids >= 0) & (teacher_ids < embedding.num_embeddings)
-            safe_ids = teacher_ids.masked_fill(~valid, 0)
-            embedded = embedding(safe_ids).to(dtype=local_dtype)
-            local_inputs[:, channel_index + 1, :] = embedded * valid.unsqueeze(-1)
-
-        local_hidden = model.local_transformer(
-            input_ids=None,
-            attention_mask=None,
-            position_ids=None,
-            inputs_embeds=local_inputs,
-            use_cache=False,
-            output_attentions=False,
-            output_hidden_states=False,
-            return_dict=True,
-            cu_seqlens=None,
-            num_sequences=None,
-        ).last_hidden_state
-
-        total = torch.zeros((), device=flat_hidden.device, dtype=torch.float32)
-        total_weight = 0.0
-        losses = {}
-        text_targets = flat_labels[:, 0]
-        if (hasattr(model, "_use_binary_local_text_head") and model._use_binary_local_text_head() and
-                getattr(model, "local_text_lm_head", None) is not None):
-            logits = model.local_text_lm_head(local_hidden[:, 0, :])
-            targets = torch.full_like(text_targets, -100)
-            targets = targets.masked_fill(
-                text_targets.eq(int(model.config.audio_assistant_slot_token_id)),
-                0,
-            )
-            targets = targets.masked_fill(
-                text_targets.eq(int(model.config.audio_end_token_id)),
-                1,
-            )
-        else:
-            logits = model.text_lm_head(local_hidden[:, 0, :])
-            targets = text_targets
-        if (targets != -100).any():
-            text_loss = functional.cross_entropy(
-                logits.float(),
-                targets,
-                ignore_index=-100,
-            )
-            losses["text_loss"] = text_loss
-            total = total + weights[0] * text_loss.float()
-            total_weight += weights[0]
-
-        for channel_index in range(n_vq):
-            targets = audio_targets[:, channel_index]
-            if not (targets != -100).any():
-                continue
-            logits = model.audio_lm_heads[channel_index](local_hidden[:, channel_index, :])
-            channel_loss = functional.cross_entropy(
-                logits.float(),
-                targets,
-                ignore_index=-100,
-            )
-            losses[f"audio_loss_{channel_index}"] = channel_loss
-            weight = weights[channel_index + 1]
-            total = total + weight * channel_loss.float()
-            total_weight += weight
-        if total_weight <= 0:
-            raise ValueError("MOSS Local v1.5 received a batch with all labels ignored.")
-        return total / total_weight, losses
-
-    def save_pretrained(self, save_directory) -> None:
-        self.setup()
-        destination = Path(save_directory)
-        if hasattr(self.primary_model, "save_pretrained"):
-            self.primary_model.save_pretrained(
-                destination,
-                safe_serialization=True,
-            )
-        processor = getattr(self.model, "_processor", None)
-        if processor is not None and hasattr(processor, "save_pretrained"):
-            processor.save_pretrained(destination)
+        runtime = getattr(self.model, "model", None)
+        frontend = getattr(runtime, "frontend", None)
+        vocabulary = getattr(frontend, "vocabulary", None)
+        if vocabulary is None or not callable(getattr(vocabulary, "save", None)):
+            raise TypeError("Native F5-TTS export requires the loaded vocabulary.")
+        vocabulary.save(destination / "vocab.txt")
+        self.model.config.save_pretrained(destination)
 
 
 class Qwen3TTSTrainingAdapter(
@@ -773,17 +591,35 @@ class Qwen3TTSTrainingAdapter(
         feature_extractor.save_pretrained(speech_directory)
 
 
-def _fish_speech_adapter(model, spec):
-    # Fish's adapter extends SourceRecipeTrainingAdapter, so importing it at
-    # module import time would create a cycle.
+def _native_fish_s2_adapter(model, spec):
+    # Keep the exact two-head objective model-local while registry discovery
+    # remains dependency-light.
     from voicehub.models.fishtts.training import FishSpeechTrainingAdapter
 
     return FishSpeechTrainingAdapter(model, spec)
 
 
+def _dia_adapter(model, spec):
+    from voicehub.models.dia.training import DiaTrainingAdapter
+
+    return DiaTrainingAdapter(model, spec)
+
+
+def _cosyvoice_adapter(model, spec):
+    from voicehub.models.cosyvoice.training import CosyVoiceTrainingAdapter
+
+    return CosyVoiceTrainingAdapter(model, spec)
+
+
+def _xtts_adapter(model, spec):
+    from voicehub.models.xtts_native.training_xtts import XTTSTrainingAdapter
+
+    return XTTSTrainingAdapter(model, spec)
+
+
 def _csm_adapter(model, spec):
-    # CSM's adapter is kept model-local so the optional Transformers backend
-    # remains lazy during ordinary VoiceHub imports.
+    # Keep the specialized two-level objective and frozen Mimi preprocessing
+    # model-local while ordinary registry discovery remains dependency-light.
     from voicehub.models.csm.training import CSMTrainingAdapter
 
     return CSMTrainingAdapter(model, spec)
@@ -793,6 +629,12 @@ def _echo_adapter(model, spec):
     from voicehub.models.echo.training import EchoTrainingAdapter
 
     return EchoTrainingAdapter(model, spec)
+
+
+def _chatterbox_adapter(model, spec):
+    from voicehub.models.chatterbox.training import ChatterboxTrainingAdapter
+
+    return ChatterboxTrainingAdapter(model, spec)
 
 
 def _vui_adapter(model, spec):
@@ -807,23 +649,133 @@ def _zonos_adapter(model, spec):
     return ZonosTrainingAdapter(model, spec)
 
 
+def _zonos2_adapter(model, spec):
+    from voicehub.models.zonos2.training import Zonos2TrainingAdapter
+
+    return Zonos2TrainingAdapter(model, spec)
+
+
 def _vibevoice_adapter(model, spec):
     from voicehub.models.vibevoice.training import VibeVoiceTrainingAdapter
 
     return VibeVoiceTrainingAdapter(model, spec)
 
 
-def _vits_adapter(model, spec):
-    # Keep the experimental reconstruction recipe model-local. The generic
-    # VITS family adapter must continue to require an architecture-specific
-    # implementation of the complete adversarial objective.
-    from voicehub.models.vits.training import VitsReconstructionTrainingAdapter
+def _voxcpm_adapter(model, spec):
+    from voicehub.models.voxcpm.training import VoxCPMTrainingAdapter
 
-    return VitsReconstructionTrainingAdapter(model, spec)
+    return VoxCPMTrainingAdapter(model, spec)
+
+
+def _omnivoice_adapter(model, spec):
+    from voicehub.models.omnivoice.training import OmniVoiceTrainingAdapter
+
+    return OmniVoiceTrainingAdapter(model, spec)
+
+
+def _higgs_adapter(model, spec):
+    from voicehub.models.higgstts.training import HiggsTrainingAdapter
+
+    return HiggsTrainingAdapter(model, spec)
+
+
+def _irodori_adapter(model, spec):
+    from voicehub.models.irodoritts.training import NativeIrodoriTrainingAdapter
+
+    return NativeIrodoriTrainingAdapter(model, spec)
+
+
+def _vits_adapter(model, spec):
+    # Keep the explicitly partial generator recipe model-local. The generic
+    # VITS family adapter must continue to require an architecture-specific
+    # implementation of a complete adversarial objective.
+    from voicehub.models.vits.training import NativeVitsGeneratorTrainingAdapter
+
+    return NativeVitsGeneratorTrainingAdapter(model, spec)
+
+
+def _kokoro_adapter(model, spec):
+    from voicehub.models.kokoro.training import KokoroTrainingAdapter
+
+    return KokoroTrainingAdapter(model, spec)
+
+
+def _parlertts_adapter(model, spec):
+    from voicehub.models.parlertts.training import ParlerTTSTrainingAdapter
+
+    return ParlerTTSTrainingAdapter(model, spec)
+
+
+def _native_speecht5_adapter(model, spec):
+    from voicehub.models.speecht5.training import NativeSpeechT5TrainingAdapter
+
+    return NativeSpeechT5TrainingAdapter(model, spec)
+
+
+def _supertonic_adapter(model, spec):
+    from voicehub.models.supertonic.training import SupertonicTrainingAdapter
+
+    return SupertonicTrainingAdapter(model, spec)
+
+
+def _bark_adapter(model, spec):
+    from voicehub.architectures.bark.training import BarkTrainingAdapter
+
+    return BarkTrainingAdapter(model, spec)
+
+
+def _inflecttts_adapter(model, spec):
+    from voicehub.models.inflecttts.training import InflectTTSTrainingAdapter
+
+    return InflectTTSTrainingAdapter(model, spec)
+
+
+def _styletts2_adapter(model, spec):
+    from voicehub.models.styletts2.training import StyleTTS2TrainingAdapter
+
+    return StyleTTS2TrainingAdapter(model, spec)
+
+
+def _melotts_adapter(model, spec):
+    from voicehub.models.melotts.training import MeloTTSTrainingAdapter
+
+    return MeloTTSTrainingAdapter(model, spec)
+
+
+def _openvoice_adapter(model, spec):
+    from voicehub.models.openvoice.training import OpenVoiceTrainingAdapter
+
+    return OpenVoiceTrainingAdapter(model, spec)
+
+
+def _gptsovits_adapter(model, spec):
+    from voicehub.models.gptsovits.training import GPTSoVITSTrainingAdapter
+
+    return GPTSoVITSTrainingAdapter(model, spec)
+
+
+def _native_mosstts_adapter(model, spec):
+    from voicehub.architectures.mosstts.training import NativeMossTTSTrainingAdapter
+
+    return NativeMossTTSTrainingAdapter(model, spec)
+
+
+def _neutts_adapter(model, spec):
+    from voicehub.models.neutts.training import NeuTTSTrainingAdapter
+
+    return NeuTTSTrainingAdapter(model, spec)
+
+
+def _outetts_adapter(model, spec):
+    from voicehub.models.outetts.training import OuteTTSTrainingAdapter
+
+    return OuteTTSTrainingAdapter(model, spec)
 
 
 def _transformers_asr_adapter(model, spec):
-    # Keep Transformers optional until this provider is selected.
+    # The historical name remains public API. The generic provider dispatches
+    # only to verified VoiceHub-native graphs; dedicated providers temporarily
+    # reuse this adapter until their architecture ports are complete.
     from voicehub.models.asr_transformers.training_asr_transformers import TransformersASRTrainingAdapter
 
     return TransformersASRTrainingAdapter(model, spec)
@@ -836,40 +788,221 @@ def _transformers_vad_adapter(model, spec):
     return TransformersVADTrainingAdapter(model, spec)
 
 
+def _native_whisper_adapter(model, spec):
+    from voicehub.models.asr_whisper_native.training_asr_whisper_native import NativeWhisperTrainingAdapter
+
+    return NativeWhisperTrainingAdapter(model, spec)
+
+
+def _native_wav2vec2_adapter(model, spec):
+    from voicehub.models.asr_wav2vec2.training_asr_wav2vec2 import NativeWav2Vec2TrainingAdapter
+
+    return NativeWav2Vec2TrainingAdapter(model, spec)
+
+
+def _native_nemo_ctc_adapter(model, spec):
+    from voicehub.models.asr_nemo.training_asr_nemo import NativeNeMoCTCTrainingAdapter
+
+    return NativeNeMoCTCTrainingAdapter(model, spec)
+
+
+def _native_wenet_u2pp_adapter(model, spec):
+    from voicehub.models.asr_wenet.training_asr_wenet import NativeWeNetU2PPTrainingAdapter
+
+    return NativeWeNetU2PPTrainingAdapter(model, spec)
+
+
+def _native_espnet_adapter(model, spec):
+    from voicehub.architectures.espnet_transformer.training import NativeESPnetASRTrainingAdapter
+
+    return NativeESPnetASRTrainingAdapter(model, spec)
+
+
+def _native_hubert_adapter(model, spec):
+    from voicehub.models.asr_hubert.training_asr_hubert import NativeHubertTrainingAdapter
+
+    return NativeHubertTrainingAdapter(model, spec)
+
+
+def _native_wavlm_adapter(model, spec):
+    from voicehub.models.asr_wavlm.training_asr_wavlm import NativeWavLMTrainingAdapter
+
+    return NativeWavLMTrainingAdapter(model, spec)
+
+
+def _native_moonshine_adapter(model, spec):
+    from voicehub.models.asr_moonshine.training_asr_moonshine import NativeMoonshineTrainingAdapter
+
+    return NativeMoonshineTrainingAdapter(model, spec)
+
+
+def _native_qwen3_asr_adapter(model, spec):
+    from voicehub.models.asr_qwen3.training_asr_qwen3 import NativeQwen3ASRTrainingAdapter
+
+    return NativeQwen3ASRTrainingAdapter(model, spec)
+
+
+def _native_granite_speech_adapter(model, spec):
+    from voicehub.models.asr_granite_speech.training_asr_granite_speech import NativeGraniteSpeechTrainingAdapter
+
+    return NativeGraniteSpeechTrainingAdapter(model, spec)
+
+
+def _native_parakeet_tdt_adapter(model, spec):
+    from voicehub.models.asr_parakeet_tdt.training_asr_parakeet_tdt import NativeParakeetTDTTrainingAdapter
+
+    return NativeParakeetTDTTrainingAdapter(model, spec)
+
+
+def _native_nemotron_asr_adapter(model, spec):
+    from voicehub.models.asr_nemotron.training_asr_nemotron import NativeNemotronASRTrainingAdapter
+
+    return NativeNemotronASRTrainingAdapter(model, spec)
+
+
+def _native_cohere_asr_adapter(model, spec):
+    from voicehub.models.asr_cohere.training_asr_cohere import NativeCohereASRTrainingAdapter
+
+    return NativeCohereASRTrainingAdapter(model, spec)
+
+
+def _native_seamless_m4t_v2_adapter(model, spec):
+    from voicehub.models.asr_seamless_m4t_v2.training_asr_seamless_m4t_v2 import NativeSeamlessM4Tv2TrainingAdapter
+
+    return NativeSeamlessM4Tv2TrainingAdapter(model, spec)
+
+
+def _native_vibevoice_asr_adapter(model, spec):
+    from voicehub.models.asr_vibevoice.training_asr_vibevoice import NativeVibeVoiceASRTrainingAdapter
+
+    return NativeVibeVoiceASRTrainingAdapter(model, spec)
+
+
+def _native_medasr_adapter(model, spec):
+    from voicehub.models.asr_medasr.training_asr_medasr import NativeMedASRTrainingAdapter
+
+    return NativeMedASRTrainingAdapter(model, spec)
+
+
+def _native_sensevoice_adapter(model, spec):
+    from voicehub.architectures.sensevoice.training import NativeSenseVoiceTrainingAdapter
+
+    return NativeSenseVoiceTrainingAdapter(model, spec)
+
+
+def _llasa_adapter(model, spec):
+    from voicehub.models.llasa.training import LlasaTrainingAdapter
+
+    return LlasaTrainingAdapter(model, spec)
+
+
+def _native_silero_vad_adapter(model, spec):
+    from voicehub.models.vad_silero.training_vad_silero import NativeSileroVADTrainingAdapter
+
+    return NativeSileroVADTrainingAdapter(model, spec)
+
+
+def _native_sherpa_vad_adapter(model, spec):
+    from voicehub.models.vad_sherpa_onnx.training_vad_sherpa_onnx import create_sherpa_native_vad_training_adapter
+
+    return create_sherpa_native_vad_training_adapter(model, spec)
+
+
+def _native_pyannet_adapter(model, spec):
+    from voicehub.models.vad_pyannote.training_vad_pyannote import NativePyanNetTrainingAdapter
+
+    return NativePyanNetTrainingAdapter(model, spec)
+
+
+def _native_fsmn_vad_adapter(model, spec):
+    from voicehub.models.vad_funasr.training_vad_funasr import NativeFSMNVADTrainingAdapter
+
+    return NativeFSMNVADTrainingAdapter(model, spec)
+
+
+def _native_speechbrain_vad_adapter(model, spec):
+    from voicehub.models.vad_speechbrain.training_vad_speechbrain import NativeSpeechBrainVADTrainingAdapter
+
+    return NativeSpeechBrainVADTrainingAdapter(model, spec)
+
+
+def _native_speechbrain_asr_adapter(model, spec):
+    from voicehub.models.asr_native.speechbrain_training import NativeSpeechBrainASRTrainingAdapter
+
+    return NativeSpeechBrainASRTrainingAdapter(model, spec)
+
+
+def _native_marblenet_vad_adapter(model, spec):
+    from voicehub.models.vad_nemo.training_vad_nemo import NativeMarbleNetVADTrainingAdapter
+
+    return NativeMarbleNetVADTrainingAdapter(model, spec)
+
+
 BUILTIN_MODEL_ADAPTERS = {
-    "orpheustts": CodecCausalLMTrainingAdapter,
-    "dia": DiaTrainingAdapter,
+    "orpheustts": OrpheusTrainingAdapter,
+    "dia": _dia_adapter,
     "conversationtts": ConversationTTSTrainingAdapter,
-    "cosyvoice": CosyVoiceTrainingAdapter,
-    "llasa": CodecCausalLMTrainingAdapter,
+    "cosyvoice": _cosyvoice_adapter,
+    "llasa": _llasa_adapter,
     "f5tts": F5TTSTrainingAdapter,
-    "mosstts": MossTTSTrainingAdapter,
-    "neutts": CodecCausalLMTrainingAdapter,
-    "outetts": CodecCausalLMTrainingAdapter,
+    "gptsovits": _gptsovits_adapter,
+    "mosstts": _native_mosstts_adapter,
+    "neutts": _neutts_adapter,
+    "outetts": _outetts_adapter,
     "qwen3tts": Qwen3TTSTrainingAdapter,
-    "higgstts": HiggsTrainingAdapter,
-    "xtts": XTTSTrainingAdapter,
-    "fishtts": _fish_speech_adapter,
+    "higgstts": _higgs_adapter,
+    "irodoritts": _irodori_adapter,
+    "xtts": _xtts_adapter,
+    "fishtts": _native_fish_s2_adapter,
     "csm": _csm_adapter,
     "echo": _echo_adapter,
+    "chatterbox": _chatterbox_adapter,
     "vui": _vui_adapter,
     "zonos": _zonos_adapter,
+    "zonos2": _zonos2_adapter,
     "vibevoice": _vibevoice_adapter,
+    "voxcpm": _voxcpm_adapter,
+    "omnivoice": _omnivoice_adapter,
     "vits": _vits_adapter,
+    "kokoro": _kokoro_adapter,
+    "parlertts": _parlertts_adapter,
+    "speecht5": _native_speecht5_adapter,
+    "supertonic": _supertonic_adapter,
+    "bark": _bark_adapter,
+    "inflecttts": _inflecttts_adapter,
+    "styletts2": _styletts2_adapter,
+    "melotts": _melotts_adapter,
+    "openvoice": _openvoice_adapter,
+    "asr_whisper": _native_whisper_adapter,
+    "asr_whisperx": _native_whisper_adapter,
+    "asr_openai_whisper": _native_whisper_adapter,
+    "asr_faster_whisper": _native_whisper_adapter,
     "asr_transformers": _transformers_asr_adapter,
-    "asr_whisper": _transformers_asr_adapter,
-    "asr_tiron": _transformers_asr_adapter,
-    "asr_qwen3": _transformers_asr_adapter,
-    "asr_vibevoice": _transformers_asr_adapter,
-    "asr_granite_speech": _transformers_asr_adapter,
-    "asr_parakeet_tdt": _transformers_asr_adapter,
-    "asr_nemotron": _transformers_asr_adapter,
-    "asr_cohere": _transformers_asr_adapter,
-    "asr_medasr": _transformers_asr_adapter,
-    "asr_wav2vec2": _transformers_asr_adapter,
-    "asr_hubert": _transformers_asr_adapter,
-    "asr_wavlm": _transformers_asr_adapter,
-    "asr_moonshine": _transformers_asr_adapter,
-    "asr_seamless_m4t_v2": _transformers_asr_adapter,
+    "asr_tiron": _native_whisper_adapter,
+    "asr_qwen3": _native_qwen3_asr_adapter,
+    "asr_funasr": _native_sensevoice_adapter,
+    "asr_vibevoice": _native_vibevoice_asr_adapter,
+    "asr_granite_speech": _native_granite_speech_adapter,
+    "asr_parakeet_tdt": _native_parakeet_tdt_adapter,
+    "asr_nemotron": _native_nemotron_asr_adapter,
+    "asr_cohere": _native_cohere_asr_adapter,
+    "asr_seamless_m4t_v2": _native_seamless_m4t_v2_adapter,
+    "asr_medasr": _native_medasr_adapter,
+    "asr_wav2vec2": _native_wav2vec2_adapter,
+    "asr_nemo": _native_nemo_ctc_adapter,
+    "asr_espnet": _native_espnet_adapter,
+    "asr_wenet": _native_wenet_u2pp_adapter,
+    "asr_speechbrain": _native_speechbrain_asr_adapter,
+    "asr_hubert": _native_hubert_adapter,
+    "asr_wavlm": _native_wavlm_adapter,
+    "asr_moonshine": _native_moonshine_adapter,
     "vad_transformers": _transformers_vad_adapter,
+    "vad_silero": _native_silero_vad_adapter,
+    "vad_sherpa_onnx": _native_sherpa_vad_adapter,
+    "vad_funasr": _native_fsmn_vad_adapter,
+    "vad_speechbrain": _native_speechbrain_vad_adapter,
+    "vad_nemo": _native_marblenet_vad_adapter,
+    "vad_pyannote": _native_pyannet_adapter,
+    "vad_pyannote_segmentation": _native_pyannet_adapter,
+    "vad_pyannote_brouhaha": _native_pyannet_adapter,
 }

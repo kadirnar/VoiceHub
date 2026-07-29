@@ -29,7 +29,10 @@ class PyannoteBrouhahaVADConfig(PyannoteVADConfig):
         batch_size: int = 32,
         inference_duration_s: float | None = None,
         inference_step_s: float | None = None,
+        snr_loss_scale: float = 1.0,
+        c50_loss_scale: float = 1.0,
         pipeline_kwargs: Mapping | None = None,
+        inference_config=None,
         **kwargs,
     ):
         if pipeline_kwargs is not None and not isinstance(pipeline_kwargs, Mapping):
@@ -51,10 +54,32 @@ class PyannoteBrouhahaVADConfig(PyannoteVADConfig):
         if (inference_duration_s is not None and inference_step_s is not None and
                 inference_step_s > inference_duration_s):
             raise ValueError("`inference_step_s` cannot exceed `inference_duration_s`.")
+        for name, value in (
+            ("snr_loss_scale", snr_loss_scale),
+            ("c50_loss_scale", c50_loss_scale),
+        ):
+            normalized = _optional_positive_number(value, name=name)
+            if normalized is None:  # pragma: no cover - non-optional input
+                raise ValueError(f"`{name}` cannot be None.")
+            if name == "snr_loss_scale":
+                snr_loss_scale = normalized
+            else:
+                c50_loss_scale = normalized
         super().__init__(
             batch_size=batch_size,
             inference_duration_s=inference_duration_s,
             inference_step_s=inference_step_s,
+            snr_loss_scale=snr_loss_scale,
+            c50_loss_scale=c50_loss_scale,
             pipeline_kwargs={},
+            inference_config=({
+                "threshold": 0.780,
+                "onset": 0.780,
+                "offset": 0.780,
+                "min_speech_duration_ms": 0,
+                "min_silence_duration_ms": 0,
+                "speech_pad_ms": 0,
+                "return_frames": False,
+            } if inference_config is None else inference_config),
             **kwargs,
         )

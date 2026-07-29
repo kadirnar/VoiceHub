@@ -1,0 +1,7 @@
+{
+  "architecture": "conversationtts-decoder",
+  "license": "BSD-3-Clause",
+  "notes": "VoiceHub-owned implementation of the TorchTune Llama 3.2 subset required by the pinned ConversationTTS graph. Parameter names and numerical semantics are retained for checkpoint compatibility.",
+  "reviewed_release": "torchtune==0.6.1",
+  "upstream": "https://github.com/pytorch/torchtune"
+}

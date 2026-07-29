@@ -16,10 +16,9 @@
 import shutil
 import tarfile
 import tempfile
+import json
 from pathlib import Path
-
-import requests
-import tqdm
+from urllib.request import Request, urlopen
 
 _MODEL_INDEX_URL = ("https://modelscope.cn/api/v1/datasets/wenet/"
                     "wenet_pretrained_models/oss/tree")
@@ -29,24 +28,14 @@ def _download_archive(url: str, destination: Path) -> Path:
     archive = destination / url.split("?", 1)[0].rsplit("/", 1)[-1]
     temporary = archive.with_suffix(f"{archive.suffix}.part")
     try:
-        with requests.get(
-                url,
-                stream=True,
-                timeout=(10, 120),
-        ) as response:
-            response.raise_for_status()
-            total = int(response.headers.get("content-length", 0))
-            with temporary.open("wb") as writer, tqdm.tqdm(
-                    total=total or None,
-                    unit="B",
-                    unit_scale=True,
-                    unit_divisor=1024,
-                    desc=archive.name,
-            ) as progress:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if chunk:
-                        writer.write(chunk)
-                        progress.update(len(chunk))
+        request = Request(
+            url,
+            headers={"User-Agent": "VoiceHub/WeNet"},
+        )
+        with urlopen(request, timeout=120) as response, temporary.open(
+                "wb",
+        ) as writer:
+            shutil.copyfileobj(response, writer, length=1024 * 1024)
         temporary.replace(archive)
     except BaseException:
         temporary.unlink(missing_ok=True)
@@ -122,12 +111,12 @@ class Hub:
         if {"final.zip", "units.txt"}.issubset({path.name for path in model_dir.iterdir()}):
             return str(model_dir)
 
-        response = requests.get(
+        request = Request(
             _MODEL_INDEX_URL,
-            timeout=(10, 30),
+            headers={"User-Agent": "VoiceHub/WeNet"},
         )
-        response.raise_for_status()
-        payload = response.json()
+        with urlopen(request, timeout=30) as response:
+            payload = json.load(response)
         entries = payload.get("Data", ())
         model_info = next(
             (data for data in entries if data.get("Key") == model),

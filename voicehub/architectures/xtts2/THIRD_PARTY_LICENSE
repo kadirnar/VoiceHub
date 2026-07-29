@@ -1,0 +1,14 @@
+XTTS v2 architecture provenance
+================================
+
+The XTTS v2 architecture port in this directory is derived from portions of
+Coqui TTS at revision dbf1a08a0d4e47fdad6172e433eeb34bc6b13b4e.
+
+Copyright (c) Coqui GmbH and contributors.
+Licensed under the Mozilla Public License, version 2.0 (MPL-2.0).
+The complete license text is available at:
+https://www.mozilla.org/MPL/2.0/
+
+The separately distributed pretrained XTTS-v2 weights are not covered by the
+implementation license. They retain the Coqui Public Model License:
+https://coqui.ai/cpml

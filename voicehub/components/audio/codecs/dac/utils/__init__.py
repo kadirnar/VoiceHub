@@ -1,122 +1,139 @@
+"""Native checkpoint resolution helpers for the bundled DAC runtime."""
+
+from __future__ import annotations
+
 from pathlib import Path
 
-import argbind
-from audiotools import ml
+import torch
 
-import voicehub.components.audio.codecs.dac as dac
-DAC = dac.model.DAC
-Accelerator = ml.Accelerator
+from voicehub.architectures.dac.checkpoint import (
+    DESCRIPT_DAC_44KHZ_REVISION,
+    HuggingFaceDacCheckpointAdapter,
+)
+from voicehub.architectures.dac.configuration import DacConfig
+from voicehub.architectures.dac.modeling import DacModel
+from voicehub.checkpointing import SafeTensorReader
+from voicehub.components.audio.codecs.dac.model.dac import DAC
+from voicehub.hub import read_json_file, resolve_pretrained_file
 
-__MODEL_LATEST_TAGS__ = {
-    ("44khz", "8kbps"): "0.0.1",
-    ("24khz", "8kbps"): "0.0.4",
-    ("16khz", "8kbps"): "0.0.5",
-    ("44khz", "16kbps"): "1.0.0",
-}
-
-__MODEL_URLS__ = {
-    (
-        "44khz",
-        "0.0.1",
-        "8kbps",
-    ): "https://github.com/descriptinc/descript-audio-codec/releases/download/0.0.1/weights.pth",
-    (
-        "24khz",
-        "0.0.4",
-        "8kbps",
-    ): "https://github.com/descriptinc/descript-audio-codec/releases/download/0.0.4/weights_24khz.pth",
-    (
-        "16khz",
-        "0.0.5",
-        "8kbps",
-    ): "https://github.com/descriptinc/descript-audio-codec/releases/download/0.0.5/weights_16khz.pth",
-    (
-        "44khz",
-        "1.0.0",
-        "16kbps",
-    ): "https://github.com/descriptinc/descript-audio-codec/releases/download/1.0.0/weights_44khz_16kbps.pth",
+_MODEL_REPOSITORIES = {
+    "16khz": (
+        "descript/dac_16khz",
+        "7c2fc5e759f1f501aefc6e7a0265cc57f5d17ba7",
+    ),
+    "24khz": (
+        "descript/dac_24khz",
+        "6ba020b5ba7d9d8076fb90db7e67f27e31980f6e",
+    ),
+    "44khz": (
+        "descript/dac_44khz",
+        DESCRIPT_DAC_44KHZ_REVISION,
+    ),
 }
 
 
-@argbind.bind(group="download", positional=True, without_prefix=True)
-def download(
-    model_type: str = "44khz", model_bitrate: str = "8kbps", tag: str = "latest"
-):
-    """
-    Function that downloads the weights file from URL if a local cache is not found.
-
-    Parameters
-    ----------
-    model_type : str
-        The type of model to download. Must be one of "44khz", "24khz", or "16khz". Defaults to "44khz".
-    model_bitrate: str
-        Bitrate of the model. Must be one of "8kbps", or "16kbps". Defaults to "8kbps".
-        Only 44khz model supports 16kbps.
-    tag : str
-        The tag of the model to download. Defaults to "latest".
-
-    Returns
-    -------
-    Path
-        Directory path required to load model via audiotools.
-    """
-    model_type = model_type.lower()
-    tag = tag.lower()
-
-    assert model_type in [
-        "44khz",
-        "24khz",
-        "16khz",
-    ], "model_type must be one of '44khz', '24khz', or '16khz'"
-
-    assert model_bitrate in [
-        "8kbps",
-        "16kbps",
-    ], "model_bitrate must be one of '8kbps', or '16kbps'"
-
-    if tag == "latest":
-        tag = __MODEL_LATEST_TAGS__[(model_type, model_bitrate)]
-
-    download_link = __MODEL_URLS__.get((model_type, tag, model_bitrate), None)
-
-    if download_link is None:
-        raise ValueError(
-            f"Could not find model with tag {tag} and model type {model_type}"
-        )
-
-    local_path = (
-        Path.home()
-        / ".cache"
-        / "descript"
-        / "dac"
-        / f"weights_{model_type}_{model_bitrate}_{tag}.pth"
+def _model_source(
+    model_type: str,
+    *,
+    revision: str,
+) -> tuple[Path, Path]:
+    try:
+        repository, pinned_revision = _MODEL_REPOSITORIES[model_type]
+    except KeyError as error:
+        choices = ", ".join(sorted(_MODEL_REPOSITORIES))
+        raise ValueError(f"`model_type` must be one of: {choices}.") from error
+    resolved_revision = pinned_revision if revision == "latest" else revision
+    checkpoint = resolve_pretrained_file(
+        repository,
+        "model.safetensors",
+        revision=resolved_revision,
     )
-    if not local_path.exists():
-        local_path.parent.mkdir(parents=True, exist_ok=True)
+    configuration = resolve_pretrained_file(
+        repository,
+        "config.json",
+        revision=resolved_revision,
+    )
+    return checkpoint, configuration
 
-        # Download the model
-        import requests
 
-        response = requests.get(download_link)
+def download(
+    model_type: str = "44khz",
+    model_bitrate: str = "8kbps",
+    tag: str = "latest",
+) -> Path:
+    """Resolve a pinned, safe DAC checkpoint into VoiceHub's Hub cache."""
+    normalized_type = str(model_type).strip().lower()
+    if model_bitrate != "8kbps":
+        raise ValueError(
+            "The native Safetensors repositories expose the 8 kbps DAC "
+            "variants. Supply an explicit converted checkpoint for another "
+            "bitrate."
+        )
+    if not isinstance(tag, str) or not tag.strip():
+        raise ValueError("`tag` must be a non-empty revision string.")
+    checkpoint, _ = _model_source(
+        normalized_type,
+        revision=tag.strip(),
+    )
+    return checkpoint
 
-        if response.status_code != 200:
-            raise ValueError(
-                f"Could not download model. Received response code {response.status_code}"
-            )
-        local_path.write_bytes(response.content)
 
-    return local_path
+def _safetensors_source(
+    path: str | Path,
+) -> tuple[Path, Path]:
+    source = Path(path).expanduser()
+    if source.is_dir():
+        checkpoint = source / "model.safetensors"
+        configuration = source / "config.json"
+    else:
+        checkpoint = source
+        configuration = source.with_name("config.json")
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"DAC checkpoint was not found: {checkpoint}.")
+    if not configuration.is_file():
+        raise FileNotFoundError(
+            f"DAC configuration was not found: {configuration}."
+        )
+    return checkpoint, configuration
+
+
+def _load_safetensors(checkpoint: Path, configuration: Path) -> DacModel:
+    values = read_json_file(configuration)
+    config = DacConfig.from_dict(values)
+    with torch.device("meta"):
+        model = DacModel(config)
+    with SafeTensorReader(checkpoint) as reader:
+        HuggingFaceDacCheckpointAdapter().load_assign(
+            model,
+            reader,
+            values,
+            strict=True,
+        )
+    return model
 
 
 def load_model(
     model_type: str = "44khz",
     model_bitrate: str = "8kbps",
     tag: str = "latest",
-    load_path: str = None,
-):
-    if not load_path:
-        load_path = download(
-            model_type=model_type, model_bitrate=model_bitrate, tag=tag
+    load_path: str | Path | None = None,
+) -> DAC:
+    """Load a native DAC graph from safe Hub or local artifacts."""
+    if load_path:
+        checkpoint, configuration = _safetensors_source(load_path)
+    else:
+        if model_bitrate != "8kbps":
+            raise ValueError(
+                "The native Hub loader supports 8 kbps DAC checkpoints."
+            )
+        checkpoint, configuration = _model_source(
+            str(model_type).strip().lower(),
+            revision=tag,
         )
-    generator = DAC.load(load_path)
-    return generator
+    return _load_safetensors(checkpoint, configuration)
+
+
+__all__ = [
+    "download",
+    "load_model",
+]

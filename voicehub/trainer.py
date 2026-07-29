@@ -10,8 +10,7 @@ import random
 import shutil
 import time
 import uuid
-from collections.abc import Mapping
-from importlib import import_module
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,6 +19,14 @@ from voicehub.dependencies import import_optional
 from voicehub.errors import UnknownModelError
 from voicehub.integrations import get_reporting_integration_callbacks
 from voicehub.modeling_utils import PreTrainedSpeechModel
+from voicehub.optimization.capabilities import OptimizationContext, OptimizationMode, bind_registered_architecture
+from voicehub.optimization.passes import (
+    OPTIMIZATION_PASSES,
+    OptimizationPass,
+    OptimizationPassManager,
+    OptimizationPassRegistry,
+    OptimizationResult,
+)
 from voicehub.trainer_callback import (
     CallbackHandler,
     DefaultFlowCallback,
@@ -36,6 +43,7 @@ from voicehub.trainer_utils import (
     LEGACY_RESUME_FILES,
     MODEL_STATE_NAME,
     NATIVE_EXPORT_DIR,
+    OPTIMIZATION_MANIFEST_NAME,
     OPTIMIZER_NAME,
     PREFIX_CHECKPOINT_DIR,
     RNG_STATE_NAME,
@@ -91,6 +99,12 @@ class Trainer:
         optimizer_factory: Callable[[str, list[tuple[str, Any]], TrainingArguments], Any] | None = None,
         scheduler_factory: Callable[[str, Any, int, TrainingArguments], Any] | None = None,
         training_strategy: str | TrainingStrategy | None = None,
+        optimization_plan: (str
+                            | OptimizationPass
+                            | Iterable[str | OptimizationPass]
+                            | None) = None,
+        optimization_context: OptimizationContext | None = None,
+        optimization_pass_registry: OptimizationPassRegistry | None = None,
     ):
         if model is None and model_init is None:
             raise ValueError("Pass either `model` or `model_init` to Trainer.")
@@ -116,6 +130,31 @@ class Trainer:
 
         self.args = args or TrainingArguments()
         self.training_strategy = get_training_strategy(training_strategy)
+        self._optimization_plan = self._normalize_optimization_plan(optimization_plan)
+        if (optimization_context is not None and not isinstance(optimization_context, OptimizationContext)):
+            raise TypeError("`optimization_context` must be an OptimizationContext.")
+        if (optimization_context is not None and optimization_context.mode is not OptimizationMode.TRAINING):
+            raise ValueError("Trainer optimization context must use mode='training'.")
+        if (optimization_context is not None and not optimization_context.persist_result):
+            raise ValueError(
+                "Trainer optimization contexts must set "
+                "`persist_result=True` for exact checkpoint resume.")
+        if optimization_context is not None and not self._optimization_plan:
+            raise ValueError("`optimization_context` requires an explicit "
+                             "`optimization_plan`.")
+        if (optimization_pass_registry is not None and not isinstance(
+                optimization_pass_registry,
+                OptimizationPassRegistry,
+        )):
+            raise TypeError("`optimization_pass_registry` must be an "
+                            "OptimizationPassRegistry.")
+        self._optimization_context = optimization_context
+        self._optimization_pass_registry = (optimization_pass_registry or OPTIMIZATION_PASSES)
+        self._training_optimization_result: OptimizationResult | None = None
+        self._optimized_parameter_groups: dict[
+            str,
+            list[tuple[str, Any]],
+        ] | None = None
         self.model_init = model_init
         self.model = model
         self.model_wrapped = self.model
@@ -178,6 +217,31 @@ class Trainer:
             self.control,
         )
 
+    @staticmethod
+    def _normalize_optimization_plan(
+        plan: (str
+               | OptimizationPass
+               | Iterable[str | OptimizationPass]
+               | None),
+    ) -> tuple[str | OptimizationPass, ...]:
+        if plan is None:
+            return ()
+        if isinstance(plan, (str, OptimizationPass)):
+            normalized = (plan, )
+        else:
+            try:
+                normalized = tuple(plan)
+            except TypeError as error:
+                raise TypeError(
+                    "`optimization_plan` must be a pass name, "
+                    "OptimizationPass, or an iterable containing those "
+                    "values.") from error
+        if any(not isinstance(item, (str, OptimizationPass)) for item in normalized):
+            raise TypeError(
+                "Optimization plans may contain only pass names and "
+                "OptimizationPass instances.")
+        return normalized
+
     def add_callback(self, callback) -> None:
         """Add a callback class or instance."""
         self.callback_handler.add_callback(callback)
@@ -222,6 +286,8 @@ class Trainer:
             self.model.load()
 
     def _runtime_model(self):
+        if self._training_optimization_result is not None:
+            return self._training_optimization_result.model
         if self.training_adapter is not None:
             return self.training_adapter
         if hasattr(self.model, "parameters"):
@@ -229,19 +295,181 @@ class Trainer:
         runtime = getattr(self.model, "model", None)
         return runtime if runtime is not None else self.model
 
+    def _default_training_optimization_context(self) -> OptimizationContext:
+        dtype = ("float16" if self.args.fp16 else "bfloat16" if self.args.bf16 else "float32")
+        strategy_signature = self.training_strategy.resume_signature()
+        world_size = (
+            strategy_signature.get("world_size", 1) if isinstance(strategy_signature, Mapping) else 1)
+        return OptimizationContext(
+            mode=OptimizationMode.TRAINING,
+            device=self.args.device,
+            dtype=dtype,
+            distributed=int(world_size) > 1,
+            persist_result=True,
+        )
+
+    @staticmethod
+    def _has_optimizer_router(optimization_pass: OptimizationPass) -> bool:
+        return (
+            type(optimization_pass).route_optimizer_parameters
+            is not OptimizationPass.route_optimizer_parameters)
+
+    def _separate_optimizer_routing_contract(
+        self,
+        passes: tuple[OptimizationPass, ...],
+    ) -> tuple[OptimizationPass, tuple[str, ...]] | None:
+        adapter = self.training_adapter
+        if adapter is None or not adapter.spec.separate_optimizers:
+            return None
+        topology_passes = tuple(item for item in passes if item.capabilities.alters_parameter_topology)
+        if not topology_passes:
+            return None
+        if len(topology_passes) != 1:
+            raise ValueError(
+                "Separate-optimizer recipes reject multiple topology/name-"
+                "changing optimization passes because complete parameter "
+                "routing would be ambiguous.")
+        topology_pass = topology_passes[0]
+        if not self._has_optimizer_router(topology_pass):
+            raise ValueError(
+                "Separate-optimizer recipes reject topology/name-changing "
+                f"pass {topology_pass.qualified_id!r} without an explicit "
+                "complete optimizer-routing implementation.")
+        original_groups = adapter.named_parameter_groups()
+        optimizer_names = tuple(name for name, _ in original_groups)
+        if not optimizer_names:
+            raise ValueError(
+                "The separate-optimizer recipe resolved no parameter routes "
+                "before optimization.")
+        return topology_pass, optimizer_names
+
+    @staticmethod
+    def _validate_optimized_parameter_groups(
+        model,
+        optimization_pass: OptimizationPass,
+        optimizer_names: tuple[str, ...],
+    ) -> dict[str, list[tuple[str, Any]]]:
+        routes = optimization_pass.route_optimizer_parameters(
+            model,
+            optimizer_names=optimizer_names,
+        )
+        if not isinstance(routes, Mapping):
+            raise TypeError("Optimization pass parameter routing must return a mapping.")
+        if set(routes) != set(optimizer_names):
+            raise ValueError(
+                "Optimization pass parameter routing must cover exactly the "
+                f"recipe optimizers {optimizer_names!r}.")
+        named_parameters = getattr(model, "named_parameters", None)
+        if not callable(named_parameters):
+            raise TypeError("A routed optimized model must expose named_parameters().")
+        trainable = {
+            id(parameter): parameter
+            for _, parameter in named_parameters() if getattr(parameter, "requires_grad", False)
+        }
+        output: dict[str, list[tuple[str, Any]]] = {}
+        routed_ids: set[int] = set()
+        routed_names: set[str] = set()
+        for optimizer_name in optimizer_names:
+            try:
+                entries = tuple(routes[optimizer_name])
+            except TypeError as error:
+                raise TypeError(f"Optimizer route {optimizer_name!r} must be iterable.") from error
+            if not entries:
+                raise ValueError(f"Optimizer route {optimizer_name!r} must not be empty.")
+            normalized = []
+            for entry in entries:
+                if (not isinstance(entry, (tuple, list)) or len(entry) != 2):
+                    raise TypeError("Optimizer routes must contain (name, parameter) "
+                                    "pairs.")
+                name, parameter = entry
+                if not isinstance(name, str) or not name:
+                    raise TypeError("Optimizer route names must be non-empty strings.")
+                parameter_id = id(parameter)
+                if parameter_id not in trainable:
+                    raise ValueError(
+                        f"Optimizer route {optimizer_name!r} references "
+                        f"non-trainable or stale parameter {name!r}.")
+                if parameter_id in routed_ids:
+                    raise ValueError(f"Optimized parameter {name!r} is routed more than "
+                                     "once.")
+                if name in routed_names:
+                    raise ValueError(f"Optimized parameter name {name!r} is duplicated.")
+                routed_ids.add(parameter_id)
+                routed_names.add(name)
+                normalized.append((name, parameter))
+            output[optimizer_name] = normalized
+        if routed_ids != set(trainable):
+            raise ValueError(
+                "Optimization pass parameter routing is incomplete for the "
+                "post-transform trainable graph.")
+        return output
+
+    def _apply_training_optimization_plan(self) -> None:
+        if (not self._optimization_plan or self._training_optimization_result is not None):
+            return
+        manager = OptimizationPassManager()
+        resolved_passes = manager.resolve(
+            self._optimization_plan,
+            registry=self._optimization_pass_registry,
+        )
+        if self.optimizer is not None and any(item.capabilities.alters_parameter_topology
+                                              for item in resolved_passes):
+            raise ValueError(
+                "A supplied optimizer cannot be combined with an "
+                "optimization pass that changes parameter names or topology. "
+                "Let Trainer create the optimizer after the plan is applied.")
+        routing_contract = self._separate_optimizer_routing_contract(resolved_passes)
+        context = (self._optimization_context or self._default_training_optimization_context())
+        context = bind_registered_architecture(context, self.model)
+        result = manager.apply(
+            self.model_wrapped,
+            resolved_passes,
+            context,
+        )
+        # Fail before publishing a transformed execution handle if a pass
+        # emitted metadata that cannot be persisted for exact resume.
+        result.manifest()
+        if routing_contract is not None:
+            routing_pass, optimizer_names = routing_contract
+            self._optimized_parameter_groups = (
+                self._validate_optimized_parameter_groups(
+                    result.model,
+                    routing_pass,
+                    optimizer_names,
+                ))
+        self.model_wrapped = result.model
+        self._training_optimization_result = result
+
+    @property
+    def optimization_result(self) -> OptimizationResult | None:
+        """Return the applied training result, or ``None`` before prepare."""
+        return self._training_optimization_result
+
+    def optimization_manifest(self) -> dict[str, Any] | None:
+        """Return the exact applied training-plan manifest."""
+        result = self._training_optimization_result
+        return None if result is None else result.manifest()
+
     def _move_model_to_device(self) -> None:
         if self._model_prepared:
             return
         runtime = self._runtime_model()
         if self.training_adapter is not None:
             self.training_adapter.set_runtime_input_preparer(self._prepare_input, )
+        self.model_wrapped = self.training_strategy.prepare_device(
+            runtime,
+            device=self.args.device,
+        )
+        self._apply_training_optimization_plan()
+        transformed = self.model_wrapped
+        if self.training_adapter is not None:
             prepared = self.training_strategy.prepare_training_adapter(
-                self.training_adapter,
+                transformed,
                 device=self.args.device,
             )
         else:
             prepared = self.training_strategy.prepare_model(
-                runtime,
+                transformed,
                 device=self.args.device,
             )
         self.model_wrapped = prepared
@@ -333,7 +561,9 @@ class Trainer:
             raise ValueError("The model has no trainable parameters.")
 
         if (self.training_adapter is not None and self.training_adapter.spec.separate_optimizers):
-            named_groups = self.training_adapter.named_parameter_groups()
+            named_groups = (
+                list(self._optimized_parameter_groups.items()) if self._optimized_parameter_groups is not None
+                else self.training_adapter.named_parameter_groups())
             if not named_groups:
                 raise ValueError(
                     "The training recipe requests separate optimizers but "
@@ -846,6 +1076,8 @@ class Trainer:
             self.lr_scheduler = None
             self._model_prepared = False
             self._optimization_prepared = False
+            self._training_optimization_result = None
+            self._optimized_parameter_groups = None
             self._uses_named_optimizers = False
             self._optimizer_names = ("default", )
             self.callback_handler.model = self.model
@@ -1196,6 +1428,7 @@ class Trainer:
 
         if self.control.should_evaluate:
             metrics = self.evaluate()
+            self._step_recipe_scheduler_after_evaluation(metrics)
             metric_improved = self._update_best_metric(
                 metrics,
                 record_checkpoint=False,
@@ -1219,6 +1452,22 @@ class Trainer:
                 self.control,
                 checkpoint,
             )
+
+    def _step_recipe_scheduler_after_evaluation(
+        self,
+        metrics: Mapping[str, Any],
+    ) -> None:
+        """Advance only schedulers whose adapter selects a validation
+        metric."""
+        if self.training_adapter is None or self.lr_scheduler is None:
+            return
+        metric = self.training_adapter.evaluation_scheduler_metric(metrics)
+        if metric is None:
+            return
+        self.training_strategy.scheduler_step(
+            self.lr_scheduler,
+            metric=metric,
+        )
 
     def get_learning_rate(self) -> float:
         """Return the first optimizer group's current learning rate."""
@@ -1391,11 +1640,10 @@ class Trainer:
                 flattened = merged
             else:
                 phase = self.training_adapter.select_evaluation_phase(phase_control, )
-            names = tuple(dict.fromkeys(phase.label_names + self.training_adapter.spec.label_names))
-            for name in names:
-                if name in flattened:
-                    return [flattened[name]]
-            return []
+            return list(self.training_adapter.evaluation_label_values(
+                flattened,
+                phase,
+            ))
         if (self.args.label_names and all(name in inputs for name in self.args.label_names)):
             return [inputs[name] for name in self.args.label_names]
         return []
@@ -1501,6 +1749,9 @@ class Trainer:
                 )
                 for key in first
             }
+        if (isinstance(first, list) and all(isinstance(value, list) for value in values) and
+                all(isinstance(item, (str, bytes)) for value in values for item in value)):
+            return [item for value in values for item in value]
         if isinstance(first, (tuple, list)):
             return type(first)(
                 self._nested_concat(
@@ -1510,20 +1761,23 @@ class Trainer:
         return values
 
     def _nested_numpify(self, value):
+        """Materialize evaluation outputs on CPU without a NumPy dependency.
+
+        The historical private method name is retained for compatibility
+        with subclasses. Public prediction outputs now remain PyTorch
+        tensors, which preserves dtype and avoids a second array
+        runtime.
+        """
         torch = self._import_torch()
         if value is None:
             return None
         if torch.is_tensor(value):
-            return value.numpy()
+            return value.detach().cpu()
         if isinstance(value, dict):
             return {key: self._nested_numpify(item) for key, item in value.items()}
         if isinstance(value, (tuple, list)):
             return type(value)(self._nested_numpify(item) for item in value)
-        try:
-            numpy = import_module("numpy")
-            return numpy.asarray(value)
-        except (ModuleNotFoundError, TypeError, ValueError):
-            return value
+        return value
 
     def evaluation_loop(
         self,
@@ -1589,11 +1843,19 @@ class Trainer:
             loss_items = sum(batch_size for _, batch_size in losses)
             metrics[f"{metric_key_prefix}_loss"] = (
                 sum(loss * batch_size for loss, batch_size in losses) / max(1, loss_items))
-        if (self.compute_metrics is not None and predictions is not None and label_ids is not None):
-            computed = self.compute_metrics(EvalPrediction(
-                predictions=predictions,
-                label_ids=label_ids,
-            ))
+        if predictions is not None and label_ids is not None:
+            computed = {}
+            if self.training_adapter is not None:
+                computed.update(self.training_adapter.compute_evaluation_metrics(
+                    predictions,
+                    label_ids,
+                ))
+            if self.compute_metrics is not None:
+                computed.update(
+                    self.compute_metrics(EvalPrediction(
+                        predictions=predictions,
+                        label_ids=label_ids,
+                    )))
             for key, value in computed.items():
                 normalized_key = (
                     key if key.startswith(f"{metric_key_prefix}_") else f"{metric_key_prefix}_{key}")
@@ -1690,9 +1952,23 @@ class Trainer:
         output_dir: str | Path | None = None,
         *,
         include_native_export: bool = True,
+        portable: bool = True,
     ) -> Path:
-        """Save a portable VoiceHub artifact and optional native export."""
+        """Save model state and optional source-native artifacts.
+
+        Public saves are portable by default. Exact Trainer checkpoints
+        pass ``portable=False`` and may retain explicitly persistent
+        optimized topology for same-plan resume.
+        """
+        if not isinstance(portable, bool):
+            raise TypeError("`portable` must be a boolean.")
         torch = self._import_torch()
+        runtime = self.training_strategy.unwrap_model(self.model_wrapped)
+        state_to_save = None
+        if self._training_optimization_result is not None and portable:
+            state_to_save = (self._training_optimization_result.portable_state_dict(runtime))
+        elif hasattr(runtime, "state_dict"):
+            state_to_save = runtime.state_dict()
         destination = Path(output_dir or self.args.output_dir).expanduser()
         destination.mkdir(parents=True, exist_ok=True)
         if isinstance(self.model, PreTrainedSpeechModel):
@@ -1702,9 +1978,8 @@ class Trainer:
             )
         elif hasattr(self.model, "save_pretrained"):
             self.model.save_pretrained(destination)
-        runtime = self.training_strategy.unwrap_model(self.model_wrapped)
-        if hasattr(runtime, "state_dict"):
-            torch.save(runtime.state_dict(), destination / MODEL_STATE_NAME)
+        if state_to_save is not None:
+            torch.save(state_to_save, destination / MODEL_STATE_NAME)
         if self.training_adapter is not None:
             recipe_manifest = self.training_adapter.artifact_manifest()
             if include_native_export:
@@ -1718,6 +1993,12 @@ class Trainer:
             write_json(
                 destination / TRAINING_RECIPE_NAME,
                 recipe_manifest,
+            )
+        optimization_manifest = self.optimization_manifest()
+        if optimization_manifest is not None:
+            write_json(
+                destination / OPTIMIZATION_MANIFEST_NAME,
+                optimization_manifest,
             )
         if (self.processing_class is not None and hasattr(self.processing_class, "save_pretrained")):
             self.processing_class.save_pretrained(destination)
@@ -1781,6 +2062,7 @@ class Trainer:
             self.save_model(
                 temporary,
                 include_native_export=False,
+                portable=False,
             )
             self.state.save_to_json(temporary / TRAINER_STATE_NAME)
             torch.save(
@@ -1841,6 +2123,9 @@ class Trainer:
             required_files.append(SCALER_STATE_NAME)
         if adapter is not None:
             required_files.append(TRAINING_RECIPE_NAME)
+        optimization_manifest = self.optimization_manifest()
+        if optimization_manifest is not None:
+            required_files.append(OPTIMIZATION_MANIFEST_NAME)
         return {
             "format_version":
             CHECKPOINT_FORMAT_VERSION,
@@ -1858,6 +2143,8 @@ class Trainer:
             list(optimizer_names),
             "training_strategy":
             self.training_strategy.name,
+            "optimization_plan":
+            optimization_manifest,
             "resume_signature":
             self._build_resume_signature(),
             "required_files":
@@ -2008,6 +2295,7 @@ class Trainer:
                 "optimizer_steps": optimizer_steps,
             },
             "optimization": {
+                "passes": self.optimization_manifest(),
                 "optimizer": self._runtime_object_signature(
                     self.optimizer,
                     collection_attribute="optimizers",
@@ -2108,11 +2396,6 @@ class Trainer:
                 "loss_at_last_log": self._loss_at_last_log,
             },
         }
-        try:
-            numpy = import_module("numpy")
-            runtime_state["numpy_rng"] = numpy.random.get_state()
-        except ModuleNotFoundError:
-            pass
         if self._train_sampler is not None and hasattr(self._train_sampler, "state_dict"):
             runtime_state["sampler"] = self._train_sampler.state_dict()
         return runtime_state
@@ -2245,6 +2528,12 @@ class Trainer:
         if missing_files:
             raise FileNotFoundError(
                 "Checkpoint is incomplete; missing required files: " + ", ".join(sorted(missing_files)))
+        if OPTIMIZATION_MANIFEST_NAME in required_files:
+            optimization_record = json.loads(
+                (checkpoint / OPTIMIZATION_MANIFEST_NAME).read_text(encoding="utf-8"))
+            if optimization_record != manifest.get("optimization_plan"):
+                raise ValueError("Checkpoint optimization manifest does not match its "
+                                 "checkpoint record.")
         integrity = manifest.get("file_integrity")
         if format_version >= 2 and not isinstance(integrity, dict):
             raise ValueError("Checkpoint manifest is missing file_integrity metadata.")
@@ -2297,6 +2586,11 @@ class Trainer:
             raise ValueError(
                 f"Checkpoint uses training strategy {checkpoint_strategy!r}, "
                 f"not {self.training_strategy.name!r}.")
+        checkpoint_optimization = manifest.get("optimization_plan")
+        current_optimization = self.optimization_manifest()
+        if checkpoint_optimization != current_optimization:
+            raise ValueError("Checkpoint optimization plan does not match the current "
+                             "explicit plan.")
         adapter = self.training_adapter
         checkpoint_adapter = manifest.get("adapter_class")
         current_adapter = (
@@ -2359,8 +2653,6 @@ class Trainer:
     def _load_runtime_checkpoint_state(self, runtime_state) -> None:
         if "python_rng" in runtime_state:
             self._deferred_rng_state["python"] = runtime_state["python_rng"]
-        if "numpy_rng" in runtime_state:
-            self._deferred_rng_state["numpy"] = runtime_state["numpy_rng"]
         if "callbacks" in runtime_state:
             self.callback_handler.load_state_dict(
                 runtime_state["callbacks"],
@@ -2384,12 +2676,6 @@ class Trainer:
         state = self._deferred_rng_state
         if "python" in state:
             random.setstate(state["python"])
-        if "numpy" in state:
-            try:
-                numpy = import_module("numpy")
-                numpy.random.set_state(state["numpy"])
-            except ModuleNotFoundError:
-                pass
         rng_state = state.get("torch")
         if rng_state is not None:
             torch.random.set_rng_state(rng_state["cpu"])

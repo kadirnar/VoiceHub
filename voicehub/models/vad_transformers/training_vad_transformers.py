@@ -1,4 +1,4 @@
-"""Training adapter for clip- and frame-level Transformers VAD models."""
+"""Training adapter for native clip- and frame-level VAD models."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class TransformersVADTrainingAdapter(AudioClassificationTrainingAdapter):
     """Expose native classifier losses with a safe explicit fallback."""
 
     supports_custom_recipe = True
-    native_export_semantics = "huggingface-safetensors-and-processor"
+    native_export_semantics = "voicehub-safetensors-and-processor"
 
     @property
     def native_family(self) -> str:
@@ -29,7 +29,7 @@ class TransformersVADTrainingAdapter(AudioClassificationTrainingAdapter):
         if self.native_family not in _SUPPORTED_FAMILIES:
             choices = ", ".join(sorted(_SUPPORTED_FAMILIES))
             raise ValueError(
-                "The loaded Transformers VAD checkpoint did not resolve to a "
+                "The loaded native VAD checkpoint did not resolve to a "
                 f"trainable family. Expected one of: {choices}; received "
                 f"{self.native_family!r}.")
         return self
@@ -53,13 +53,10 @@ class TransformersVADTrainingAdapter(AudioClassificationTrainingAdapter):
         self.setup()
         destination = Path(save_directory)
         destination.mkdir(parents=True, exist_ok=True)
-        self.primary_model.save_pretrained(
-            destination,
-            safe_serialization=True,
-        )
-        processor = getattr(self.model, "feature_extractor", None)
-        if processor is not None and hasattr(processor, "save_pretrained"):
-            processor.save_pretrained(destination)
+        exporter = getattr(self.model, "_save_pretrained", None)
+        if not callable(exporter):
+            raise TypeError("Native VAD wrapper does not expose `_save_pretrained()`.")
+        exporter(destination)
 
 
 __all__ = ["TransformersVADTrainingAdapter"]

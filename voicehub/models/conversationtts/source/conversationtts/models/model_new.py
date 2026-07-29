@@ -15,11 +15,13 @@ We use mask token to solve the influence caused by these tokens
 from dataclasses import dataclass
 import torch
 import torch.nn as nn
-import torchtune
-from huggingface_hub import PyTorchModelHubMixin
-from torchtune.models import llama3_2
 from typing import List, Tuple
 from torch.nn import functional as F
+
+from voicehub.architectures.conversationtts.decoder import (
+    ConversationDecoder,
+    build_llama32_decoder,
+)
 
 def select_with_fixed_mask(x: torch.Tensor, mask: torch.Tensor, k: int) -> torch.Tensor:
     """
@@ -88,35 +90,38 @@ def CrossEntropyAndAccuracy_residual(logits, y, loss_weights=[1, 1, 1], ignore_i
     return loss_avg, metrics
 
 
-def llama3_2_1B() -> torchtune.modules.transformer.TransformerDecoder:
-    return llama3_2.llama3_2(
-        vocab_size=128_256,
-        num_layers=16,
-        num_heads=32,
-        num_kv_heads=8,
-        embed_dim=2048,
-        max_seq_len=2048,
-        intermediate_dim=8192,
-        attn_dropout=0.0,
-        norm_eps=1e-5,
+def llama3_2_1B() -> ConversationDecoder:
+    return build_llama32_decoder(
+        # ConversationTTS replaces both token I/O modules with identities.
+        # Building a one-row placeholder avoids allocating an unused 1 GiB
+        # vocabulary table before that replacement.
+        vocabulary_size=1,
+        number_of_layers=16,
+        number_of_heads=32,
+        number_of_kv_heads=8,
+        embedding_dimension=2048,
+        maximum_sequence_length=2048,
+        intermediate_dimension=8192,
+        attention_dropout=0.0,
+        normalization_epsilon=1e-5,
         rope_base=500_000,
-        scale_factor=32,
+        rope_scale_factor=32,
     )
 
 
-def llama3_2_100M() -> torchtune.modules.transformer.TransformerDecoder:
-    return llama3_2.llama3_2(
-        vocab_size=128_256,
-        num_layers=4,
-        num_heads=8,
-        num_kv_heads=2,
-        embed_dim=1024,
-        max_seq_len=2048,
-        intermediate_dim=8192,
-        attn_dropout=0.0,
-        norm_eps=1e-5,
+def llama3_2_100M() -> ConversationDecoder:
+    return build_llama32_decoder(
+        vocabulary_size=1,
+        number_of_layers=4,
+        number_of_heads=8,
+        number_of_kv_heads=2,
+        embedding_dimension=1024,
+        maximum_sequence_length=2048,
+        intermediate_dimension=8192,
+        attention_dropout=0.0,
+        normalization_epsilon=1e-5,
         rope_base=500_000,
-        scale_factor=32,
+        rope_scale_factor=32,
     )
 
 
@@ -127,7 +132,7 @@ FLAVORS = {
 
 
 def _prepare_transformer(model):
-    embed_dim = model.tok_embeddings.embedding_dim
+    embed_dim = model.embedding_dimension
     model.tok_embeddings = nn.Identity()
     model.output = nn.Identity()
     return model, embed_dim
@@ -179,11 +184,7 @@ class ModelArgs:
     audio_num_codebooks: int
 
 
-class Model(
-    nn.Module,
-    PyTorchModelHubMixin,
-    pipeline_tag="text-to-speech",
-):
+class Model(nn.Module):
     def __init__(self, config: ModelArgs):
         super().__init__()
         self.config = config
@@ -242,6 +243,7 @@ class Model(
         else:
             # Inference mode with caching
             curr_backbone_mask = _index_causal_mask(self.backbone_causal_mask, input_pos)
+            g_input_pos = input_pos
 
         h = self.backbone(h, input_pos=g_input_pos, mask=curr_backbone_mask)
         c0_logits = self.codebook0_head(h) #
@@ -258,7 +260,11 @@ class Model(
         #print('choosed_label 0 ', choosed_label.shape)
         # randomly dropout some frames during training
         if self.random_type == 'k_style':
-            indices = torch.randperm(curr_h.shape[0])[: curr_h.shape[0] // 2]
+            selected_count = max(1, curr_h.shape[0] // 2)
+            indices = torch.randperm(
+                curr_h.shape[0],
+                device=curr_h.device,
+            )[:selected_count]
             choosed_label = choosed_label[indices]
             curr_h = curr_h[indices]  # [audio_len//16, embed_dim]
         elif self.random_type == 'batch_style':

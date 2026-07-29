@@ -57,25 +57,24 @@ import sys
 import re
 import unicodedata
 
-import inflect
-import torch
-import torch.nn as nn
-from kanjize import number2kanji
-from phonemizer.backend import EspeakBackend
-from sudachipy import Dictionary, SplitMode
-
 if sys.platform == "darwin":
     os.environ["PHONEMIZER_ESPEAK_LIBRARY"] = "/opt/homebrew/lib/libespeak-ng.dylib"
 
 # --- Number normalization code from https://github.com/daniilrobnikov/vits2/blob/main/text/normalize_numbers.py ---
 
-_inflect = inflect.engine()
 _comma_number_re = re.compile(r"([0-9][0-9\,]+[0-9])")
 _decimal_number_re = re.compile(r"([0-9]+\.[0-9]+)")
 _pounds_re = re.compile(r"£([0-9\,]*[0-9]+)")
 _dollars_re = re.compile(r"\$([0-9\.\,]*[0-9]+)")
 _ordinal_re = re.compile(r"[0-9]+(st|nd|rd|th)")
 _number_re = re.compile(r"[0-9]+")
+
+
+@cache
+def _inflection_engine():
+    import inflect
+
+    return inflect.engine()
 
 
 def _remove_commas(m: re.Match) -> str:
@@ -108,7 +107,7 @@ def _expand_dollars(m: re.Match) -> str:
 
 
 def _expand_ordinal(m: re.Match) -> str:
-    return _inflect.number_to_words(m.group(0))
+    return _inflection_engine().number_to_words(m.group(0))
 
 
 def _expand_number(m: re.Match) -> str:
@@ -117,13 +116,18 @@ def _expand_number(m: re.Match) -> str:
         if num == 2000:
             return "two thousand"
         elif num > 2000 and num < 2010:
-            return "two thousand " + _inflect.number_to_words(num % 100)
+            return "two thousand " + _inflection_engine().number_to_words(num % 100)
         elif num % 100 == 0:
-            return _inflect.number_to_words(num // 100) + " hundred"
+            return _inflection_engine().number_to_words(num // 100) + " hundred"
         else:
-            return _inflect.number_to_words(num, andword="", zero="oh", group=2).replace(", ", " ")
+            return _inflection_engine().number_to_words(
+                num,
+                andword="",
+                zero="oh",
+                group=2,
+            ).replace(", ", " ")
     else:
-        return _inflect.number_to_words(num, andword="")
+        return _inflection_engine().number_to_words(num, andword="")
 
 
 def normalize_numbers(text: str) -> str:
@@ -168,7 +172,12 @@ def tokenize_phonemes(phonemes: list[str]) -> tuple[torch.Tensor, list[int]]:
     return torch.tensor(phoneme_ids), lengths
 
 
-def normalize_jp_text(text: str, tokenizer=Dictionary(dict="full").create()) -> str:
+def normalize_jp_text(text: str, tokenizer=None) -> str:
+    from kanjize import number2kanji
+    from sudachipy import Dictionary, SplitMode
+
+    if tokenizer is None:
+        tokenizer = Dictionary(dict="full").create()
     text = unicodedata.normalize("NFKC", text)
     text = re.sub(r"\d+", lambda m: number2kanji(int(m[0])), text)
     final_text = " ".join([x.reading_form() for x in tokenizer.tokenize(text, SplitMode.A)])

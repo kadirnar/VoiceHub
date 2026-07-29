@@ -1,0 +1,112 @@
+SenseVoiceSmall contains two independently licensed parts.
+
+===============================================================================
+FunASR source implementation — MIT License
+===============================================================================
+
+MIT License
+
+Copyright (c) 2022 Alibaba
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+===============================================================================
+SenseVoiceSmall model weights — FunASR Model Open Source License Agreement 1.1
+===============================================================================
+
+Version: 1.1
+
+Copyright (C) [2023-2028] [Alibaba Group]. All rights reserved.
+
+Thank you for choosing the FunASR open-source model. The FunASR open-source
+model includes a range of free and open industrial models for you to use,
+modify, share, and learn from.
+
+To ensure better community collaboration, we have established the following
+agreement, and we hope you will read and comply with its terms.
+
+Definitions
+
+In this agreement, [FunASR Software] refers to FunASR open-source model weights
+and their derivatives, including finetuned models; [You] refers to individuals
+or organizations using, modifying, sharing, and learning from [FunASR
+Software].
+
+2 License and Restrictions
+
+2.1 License
+
+You are free to use, copy, modify, and share [FunASR Software] under the terms
+of this agreement.
+
+2.2 Restrictions
+
+When using, copying, modifying, and sharing [FunASR Software], you must
+attribute the source and author information and retain relevant model names in
+[FunASR Software].
+
+3 Responsibility and Risk
+
+[FunASR Software] is provided for reference and learning purposes only, and
+Alibaba Group assumes no responsibility for any direct or indirect losses
+resulting from your use or modification of [FunASR Software]. You should
+assume all risks associated with using and modifying [FunASR Software].
+
+4 Community Conduct Guidelines
+
+4.1 Encouraged Behavior
+
+The community welcomes developers and users to engage in discussions about
+[FunASR Software]. Participants are encouraged to interact in a friendly,
+polite, and respectful manner to foster constructive discussion and
+collaboration.
+
+4.2 Prohibited Behavior
+
+Individual or organizational users shall not engage in unjustified
+denigration, malicious smearing, or baseless insults against [FunASR
+Software]. Such behavior is considered a violation of the spirit of community
+cooperation. If a user is found to be engaging in the prohibited behavior
+mentioned above, it will be considered an automatic forfeiture of all licenses
+under this agreement.
+
+5 Termination
+
+If you violate any terms of this agreement, your license will automatically
+terminate, and you must cease using, copying, modifying, and sharing [FunASR
+Software].
+
+6 Revisions
+
+This agreement may be updated and revised occasionally. The revised agreement
+will be published in the official repository of [FunASR Software] and will
+take effect automatically. Continuing to use, copy, modify, and share [FunASR
+Software] indicates your acceptance of the revised agreement.
+
+7 Miscellaneous
+
+This agreement is governed by the laws of [Country/Region]. If any provision
+is deemed illegal, invalid, or unenforceable, that provision shall be
+considered severed from this agreement, and the remaining provisions shall
+continue to be valid and binding.
+
+If you have any questions or comments regarding this agreement, please contact
+us.
+
+Copyright © [2023-2028] [Alibaba Group]. All rights reserved.

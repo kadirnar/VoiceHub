@@ -1,10 +1,8 @@
 import argparse
-import wave
 from pathlib import Path
 from typing import TYPE_CHECKING, Generator
 
-import numpy as np
-from loguru import logger
+from voicehub.processing.waveform import save_pcm_wave
 
 languages = [
     "a",  # American English
@@ -31,7 +29,8 @@ def generate_audio(text: str,
     from voicehub.models.kokoro.pipeline import KPipeline
 
     if not voice.startswith(kokoro_language):
-        logger.warning(f"Voice {voice} is not made for language {kokoro_language}")
+        print(f"Warning: voice {voice!r} is not made for language "
+              f"{kokoro_language!r}.")
     pipeline = KPipeline(lang_code=kokoro_language)
     yield from pipeline(text, voice=voice, speed=speed, split_pattern=r"\n+")
 
@@ -39,17 +38,19 @@ def generate_audio(text: str,
 def generate_and_save_audio(output_file: Path, text: str, kokoro_language: str, voice: str, speed=1) -> None:
     """Generate audio from text and write it to a 16-bit 24 kHz mono WAV
     file."""
-    with wave.open(str(output_file.resolve()), "wb") as wav_file:
-        wav_file.setnchannels(1)  # Mono audio
-        wav_file.setsampwidth(2)  # 2 bytes per sample (16-bit audio)
-        wav_file.setframerate(24000)  # Sample rate
+    import torch
 
-        for result in generate_audio(text, kokoro_language=kokoro_language, voice=voice, speed=speed):
-            logger.debug(result.phonemes)
-            if result.audio is None:
-                continue
-            audio_bytes = (result.audio.numpy() * 32767).astype(np.int16).tobytes()
-            wav_file.writeframes(audio_bytes)
+    chunks = [
+        result.audio.reshape(-1) for result in generate_audio(
+            text,
+            kokoro_language=kokoro_language,
+            voice=voice,
+            speed=speed,
+        ) if result.audio is not None
+    ]
+    if not chunks:
+        raise RuntimeError("Kokoro returned no audio.")
+    save_pcm_wave(output_file.resolve(), torch.cat(chunks), 24_000)
 
 
 def main() -> None:
@@ -101,8 +102,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     if args.debug:
-        logger.level("DEBUG")
-    logger.debug(args)
+        print("Kokoro debug logging is handled by the calling application.")
 
     lang = args.language or args.voice[0]
 
@@ -118,11 +118,9 @@ def main() -> None:
         print("Press Ctrl+D to stop reading input and start generating", flush=True)
         text = '\n'.join(sys.stdin)
 
-    logger.debug(f"Input text: {text!r}")
-
     out_file: Path = args.output_file
     if not out_file.suffix == ".wav":
-        logger.warning("The output file name should end with .wav")
+        print("Warning: the output file name should end with .wav.")
     generate_and_save_audio(
         output_file=out_file,
         text=text,

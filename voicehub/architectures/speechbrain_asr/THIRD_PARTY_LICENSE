@@ -1,0 +1,13 @@
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   The SpeechBrain source and the published
+   speechbrain/asr-crdnn-rnnlm-librispeech artifact are distributed under
+   Apache-2.0. The complete license text is available at:
+   https://www.apache.org/licenses/LICENSE-2.0
+
+   VoiceHub's implementation was written against immutable source and
+   artifact revisions recorded in SOURCE.json.

@@ -18,14 +18,18 @@ from typing import Any
 class TrainingSupport(str, Enum):
     """How completely a model's source integration supports fine-tuning.
 
-    ``NATIVE``     The integrated runtime exposes a differentiable,
-    backend-native loss. ``PREPROCESSED``     The adapter can train from
-    backend-shaped tensors, while raw     text/audio preprocessing
-    remains outside the generic path. ``CUSTOM``     The source tree
-    contains a recipe whose orchestration or loss requires     a
-    specialized adapter. ``INFERENCE_ONLY``     The integrated runtime
-    has no verified gradient path. This is explicit     metadata, not a
-    claim that the architecture can never be trained.
+    ``NATIVE`` accepts source-level records and exposes a differentiable
+    architecture-native loss.
+
+    ``PREPROCESSED`` trains from architecture-shaped tensors while some
+    raw text or audio preparation remains an explicit offline boundary.
+
+    ``CUSTOM`` uses a specialized multi-stage adapter or objective
+    instead of the generic single-phase loop.
+
+    ``INFERENCE_ONLY`` has no verified gradient-bearing graph. This is
+    explicit metadata, not a claim that the algorithm can never be
+    trained or replaced.
     """
 
     NATIVE = "native"

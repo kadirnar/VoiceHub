@@ -1,7 +1,7 @@
+import math
+
 import torch
 from torch.nn import functional as F
-
-import numpy as np
 
 
 DEFAULT_MIN_BIN_WIDTH = 1e-3
@@ -67,7 +67,7 @@ def unconstrained_rational_quadratic_spline(
 
     if tails == "linear":
         unnormalized_derivatives = F.pad(unnormalized_derivatives, pad=(1, 1))
-        constant = np.log(np.exp(1 - min_derivative) - 1)
+        constant = math.log(math.expm1(1 - min_derivative))
         unnormalized_derivatives[..., 0] = constant
         unnormalized_derivatives[..., -1] = constant
 

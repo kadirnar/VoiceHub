@@ -1,26 +1,19 @@
-"""Official Transformers fine-tuning support for Dia.
+"""Native data preparation and full fine-tuning support for Dia.
 
-Dia's released Transformers implementation owns the complete teacher-
-forced objective, including the nine-codebook delay layout and label
-masking.  This module keeps that contract intact: raw text/audio records
-are prepared by ``DiaProcessor`` and training consumes the scalar loss
-returned by ``DiaForConditionalGeneration``.
-
-PyTorch and Transformers remain lazy optional dependencies so importing
-VoiceHub does not initialize either framework.
+This module stays import-light. PyTorch and the model graph are resolved
+only when a runtime is loaded, while dataset validation and adapter
+discovery remain available to tooling without importing a provider
+framework.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from inspect import Parameter, signature
 from os import PathLike
 from pathlib import Path
 from typing import Any
 
-from voicehub.dependencies import import_optional
-from voicehub.errors import OptionalDependencyError
 from voicehub.training.adapters import Seq2SeqTrainingAdapter
 
 _PREPARED_INPUT_KEYS = frozenset({
@@ -45,74 +38,45 @@ def _is_sequence(value: Any) -> bool:
     )
 
 
-def _transformers_major_version(transformers: Any) -> int | None:
-    version = str(getattr(transformers, "__version__", "")).split(".", 1)[0]
-    try:
-        return int(version)
-    except ValueError:
-        return None
-
-
-def _require_transformers_backend() -> tuple[Any, Any, Any, int | None]:
-    torch = import_optional(
-        "torch",
-        model_type="dia",
-        install_extra="training",
-    )
-    transformers = import_optional(
-        "transformers",
-        model_type="dia",
-        install_extra="training",
-    )
-    try:
-        model_class = transformers.DiaForConditionalGeneration
-        processor_class = transformers.AutoProcessor
-    except AttributeError as exc:
-        raise OptionalDependencyError(
-            "Dia fine-tuning requires Transformers >= 4.53 with "
-            "DiaForConditionalGeneration and AutoProcessor. Upgrade the "
-            "'voicehub[training]' environment and use the "
-            "'nari-labs/Dia-1.6B-0626' checkpoint.") from exc
-    return (
-        torch,
-        model_class,
-        processor_class,
-        _transformers_major_version(transformers),
-    )
-
-
-def resolve_dia_dtype(torch: Any, dtype_name: str, device: str) -> Any:
-    """Resolve a configured dtype while keeping CPU execution reliable."""
-    if not isinstance(dtype_name, str) or not dtype_name.strip():
-        raise ValueError("Dia compute_dtype must be a non-empty torch dtype name.")
-    normalized = dtype_name.strip().lower()
-    aliases = {
-        "bf16": "bfloat16",
-        "fp16": "float16",
-        "fp32": "float32",
-    }
-    normalized = aliases.get(normalized, normalized)
-    try:
-        dtype = getattr(torch, normalized)
-    except AttributeError as exc:
-        raise ValueError(f"Unsupported Dia compute_dtype {dtype_name!r}.") from exc
-    if device == "cpu" and dtype in {torch.float16, torch.bfloat16}:
-        return torch.float32
-    return dtype
-
-
 def _processor_sample_rate(processor: Any) -> int:
+    direct = getattr(processor, "sampling_rate", None)
+    if direct is not None:
+        return int(direct)
     feature_extractor = getattr(processor, "feature_extractor", None)
     return int(getattr(feature_extractor, "sampling_rate", 44_100))
 
 
+def resolve_dia_dtype(
+    torch_or_dtype: Any,
+    dtype_name: str | None = None,
+    device: str | None = None,
+) -> Any:
+    """Resolve Dia's configured dtype.
+
+    The three-argument form is retained for callers of the former
+    provider loader. New code should pass ``(dtype_name, device)``.
+    """
+    if isinstance(torch_or_dtype, str):
+        resolved_name = torch_or_dtype
+        resolved_device = dtype_name
+    else:
+        resolved_name = dtype_name
+        resolved_device = device
+    if not isinstance(resolved_name, str) or not isinstance(resolved_device, str):
+        raise TypeError("resolve_dia_dtype requires a dtype name and device.")
+    from voicehub.architectures.dia.runtime import resolve_dia_dtype as resolve_native_dtype
+
+    return resolve_native_dtype(resolved_name, resolved_device)
+
+
 def freeze_dia_audio_tokenizer(processor: Any) -> Any:
-    """Freeze the pretrained DAC tokenizer used to construct Dia labels."""
+    """Freeze the native DAC tokenizer used for labels and reconstruction."""
+    freeze = getattr(processor, "freeze_audio_tokenizer", None)
+    if callable(freeze):
+        return freeze()
     audio_tokenizer = getattr(processor, "audio_tokenizer", None)
     if audio_tokenizer is None:
-        raise TypeError(
-            "DiaProcessor does not expose audio_tokenizer; the official DAC "
-            "tokenizer is required to prepare training labels.")
+        raise TypeError("DiaProcessor must expose the native DAC audio tokenizer.")
     requires_grad = getattr(audio_tokenizer, "requires_grad_", None)
     if callable(requires_grad):
         requires_grad(False)
@@ -121,58 +85,29 @@ def freeze_dia_audio_tokenizer(processor: Any) -> Any:
         if callable(parameters):
             for parameter in parameters():
                 parameter.requires_grad = False
-    if hasattr(audio_tokenizer, "eval"):
-        audio_tokenizer.eval()
+    evaluate = getattr(audio_tokenizer, "eval", None)
+    if callable(evaluate):
+        evaluate()
     return audio_tokenizer
 
 
-def _load_audio_path(path: str | PathLike[str], sample_rate: int) -> Any:
-    soundfile = import_optional(
-        "soundfile",
-        model_type="dia",
-        install_extra="training",
-    )
-    numpy = import_optional(
-        "numpy",
-        model_type="dia",
-        install_extra="training",
-    )
-    audio, source_rate = soundfile.read(
-        str(path),
-        dtype="float32",
-        always_2d=False,
-    )
-    if int(source_rate) != sample_rate:
-        raise ValueError(
-            "Dia training audio must be resampled to "
-            f"{sample_rate} Hz before collation; received {source_rate} Hz "
-            f"from {str(path)!r}.")
-    if audio.ndim > 1:
-        audio = numpy.mean(audio, axis=-1)
-    return numpy.asarray(audio, dtype=numpy.float32)
-
-
 def _normalize_audio(audio: Any, *, sample_rate: int) -> Any:
-    source_rate = None
     if isinstance(audio, Mapping):
         source_rate = audio.get("sampling_rate")
-        if "array" in audio:
-            audio = audio["array"]
-        elif "path" in audio:
-            audio = audio["path"]
-        else:
+        if source_rate is not None and int(source_rate) != sample_rate:
+            raise ValueError(
+                "Dia training audio must be resampled to "
+                f"{sample_rate} Hz; received {source_rate} Hz.")
+        if "array" not in audio and "path" not in audio:
             raise ValueError("Dia audio mappings require an 'array' or 'path' field.")
-    if source_rate is not None and int(source_rate) != sample_rate:
-        raise ValueError(
-            "Dia training audio must be resampled to "
-            f"{sample_rate} Hz before collation; received {source_rate} Hz.")
+        return dict(audio)
     if isinstance(audio, (str, PathLike)):
-        return _load_audio_path(audio, sample_rate)
+        if not str(audio).strip():
+            raise ValueError("Dia audio paths must be non-empty.")
+        return audio
     ndim = getattr(audio, "ndim", None)
     if ndim is not None and int(ndim) != 1:
-        raise ValueError(
-            "Dia training waveforms must be mono rank-1 arrays. Convert "
-            "multi-channel audio to mono before collation.")
+        raise ValueError("Dia training waveforms must be mono rank-1 values.")
     return audio
 
 
@@ -192,16 +127,13 @@ def _normalize_record(
         raise ValueError(f"Dia training record {index} requires non-empty text.")
     return {
         "text": text,
-        "audio": _normalize_audio(
-            record["audio"],
-            sample_rate=sample_rate,
-        ),
+        "audio": _normalize_audio(record["audio"], sample_rate=sample_rate),
     }
 
 
 @dataclass
 class DiaTrainingCollator:
-    """Create the official delayed decoder inputs and masked labels."""
+    """Create delayed decoder inputs and masked channel-major labels."""
 
     processor: Any
     sample_rate: int | None = None
@@ -261,7 +193,7 @@ class DiaTrainingCollator:
 
 
 class DiaSFTDataset:
-    """Raw text/audio dataset using the official Dia processor at collation."""
+    """Raw dialogue/audio records encoded by the native processor on batch."""
 
     def __init__(
         self,
@@ -270,7 +202,7 @@ class DiaSFTDataset:
         processor: Any,
         sample_rate: int | None = None,
         processor_kwargs: Mapping[str, Any] | None = None,
-    ):
+    ) -> None:
         if not _is_sequence(records) or not records:
             raise ValueError("DiaSFTDataset requires at least one record.")
         self.records = tuple(records)
@@ -297,9 +229,7 @@ class DiaSFTDataset:
         return self.collator(records)
 
     def resume_fingerprint(self) -> dict[str, Any]:
-        return {
-            "collator": self.collator.resume_fingerprint(),
-        }
+        return {"collator": self.collator.resume_fingerprint()}
 
 
 def _columnar_records(inputs: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -308,14 +238,10 @@ def _columnar_records(inputs: Mapping[str, Any]) -> list[Mapping[str, Any]]:
         if not _is_sequence(records):
             raise TypeError("Dia 'records' must be a sequence of mappings.")
         return list(records)
-
     text = inputs.get("text")
     audio = inputs.get("audio")
-    if (_is_sequence(text) and _is_sequence(audio) and len(text) == len(audio)):
-        return [{
-            "text": item_text,
-            "audio": item_audio,
-        } for item_text, item_audio in zip(text, audio)]
+    if _is_sequence(text) and _is_sequence(audio) and len(text) == len(audio):
+        return [{"text": item_text, "audio": item_audio} for item_text, item_audio in zip(text, audio)]
     return [inputs]
 
 
@@ -326,7 +252,7 @@ def prepare_dia_training_inputs(
     sample_rate: int | None = None,
     processor_kwargs: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Pass through model-ready tensors or process raw Dia records."""
+    """Pass model-ready tensors through or encode raw text/audio records."""
     if isinstance(inputs, Mapping):
         if _PREPARED_INPUT_KEYS.issubset(inputs):
             return dict(inputs)
@@ -344,17 +270,25 @@ def prepare_dia_training_inputs(
 
 @dataclass
 class DiaTrainingBackend:
-    """Loaded official Dia model, processor, and native loss helpers."""
+    """Small compatibility facade around a native Dia model and processor."""
 
     model: Any
     processor: Any
     sample_rate: int
+    runtime: Any | None = None
     transformers_major_version: int | None = None
 
-    def prepare_for_training(self) -> DiaTrainingBackend:
-        config = getattr(self.model, "config", None)
-        if config is not None and hasattr(config, "use_cache"):
-            config.use_cache = False
+    def prepare_for_training(self):
+        train = getattr(self.model, "train", None)
+        if callable(train):
+            train()
+        freeze_dia_audio_tokenizer(self.processor)
+        return self
+
+    def prepare_for_inference(self):
+        evaluate = getattr(self.model, "eval", None)
+        if callable(evaluate):
+            evaluate()
         freeze_dia_audio_tokenizer(self.processor)
         return self
 
@@ -384,19 +318,13 @@ class DiaTrainingBackend:
 
     @staticmethod
     def scalar_loss(outputs: Any) -> Any:
-        """Return DiaForConditionalGeneration's native masked-LM loss."""
-        if isinstance(outputs, Mapping):
-            loss = outputs.get("loss")
-        else:
-            loss = getattr(outputs, "loss", None)
+        loss = (outputs.get("loss") if isinstance(outputs, Mapping) else getattr(outputs, "loss", None))
         if loss is None:
-            raise RuntimeError(
-                "DiaForConditionalGeneration returned no loss. Prepare the "
-                "batch with generation=False and output_labels=True.")
+            raise RuntimeError("Native Dia returned no loss. Prepare the batch with "
+                               "output_labels=True.")
         numel = getattr(loss, "numel", None)
         if callable(numel) and int(numel()) != 1:
-            raise ValueError("DiaForConditionalGeneration must return exactly one native "
-                             "loss value.")
+            raise ValueError("Native Dia must return exactly one loss value.")
         reshape = getattr(loss, "reshape", None)
         return reshape(()) if callable(reshape) else loss
 
@@ -407,77 +335,70 @@ class DiaTrainingBackend:
     ) -> Any:
         if inputs is not None:
             if model_inputs:
-                raise ValueError("Pass Dia model inputs either as a mapping or keywords, "
-                                 "not both.")
+                raise ValueError("Pass Dia inputs as a mapping or keywords, not both.")
             model_inputs = dict(inputs)
         return self.scalar_loss(self.model(**model_inputs))
 
     def save_pretrained(self, save_directory: str | Path) -> Path:
-        """Export a directly loadable Transformers safetensors checkpoint."""
+        if self.runtime is not None:
+            return self.runtime.save_pretrained(save_directory)
+        save = getattr(self.model, "save_pretrained", None)
+        if not callable(save):
+            raise TypeError(
+                "This compatibility backend is not attached to a portable "
+                "native Dia runtime.")
         destination = Path(save_directory).expanduser()
         destination.mkdir(parents=True, exist_ok=True)
-        save_model = self.model.save_pretrained
-        parameters = signature(save_model).parameters.values()
-        supports_safe_serialization = (
-            self.transformers_major_version is None or (
-                self.transformers_major_version < 5 and any(
-                    parameter.name == "safe_serialization" or parameter.kind is Parameter.VAR_KEYWORD
-                    for parameter in parameters)))
-        save_kwargs = ({
-            "safe_serialization": True,
-        } if supports_safe_serialization else {})
-        save_model(destination, **save_kwargs)
-        self.processor.save_pretrained(destination)
+        save(destination)
         return destination
 
 
-def load_dia_transformers_backend(
-    model_name_or_path: str,
+def load_dia_native_backend(
+    model_name_or_path: str | Path,
     *,
     device: str,
     compute_dtype: str = "bfloat16",
     for_training: bool = False,
-) -> DiaTrainingBackend:
-    """Load Dia's official Transformers implementation and processor."""
-    (
-        torch,
-        model_class,
-        processor_class,
-        major_version,
-    ) = _require_transformers_backend()
-    dtype = resolve_dia_dtype(torch, compute_dtype, device)
-    processor = processor_class.from_pretrained(model_name_or_path)
-    dtype_key = ("dtype" if major_version is not None and major_version >= 5 else "torch_dtype")
-    model = model_class.from_pretrained(
+    revision: str | None = None,
+    cache_dir: str | None = None,
+    token: str | bool | None = None,
+    local_files_only: bool = False,
+):
+    """Load the strict VoiceHub-native Dia runtime."""
+    from voicehub.architectures.dia.runtime import load_dia_runtime
+
+    return load_dia_runtime(
         model_name_or_path,
-        use_safetensors=True,
-        **{
-            dtype_key: dtype,
-        },
+        device=device,
+        compute_dtype=compute_dtype,
+        revision=revision,
+        cache_dir=cache_dir,
+        token=token,
+        local_files_only=local_files_only,
+        for_training=for_training,
     )
-    model.to(device=device)
-    backend = DiaTrainingBackend(
-        model=model,
-        processor=processor,
-        sample_rate=_processor_sample_rate(processor),
-        transformers_major_version=major_version,
-    )
-    if for_training:
-        backend.prepare_for_training()
-    elif hasattr(model, "eval"):
-        model.eval()
-    return backend
+
+
+def load_dia_transformers_backend(*args: Any, **kwargs: Any):
+    """Compatibility alias for the now-native loader.
+
+    No Transformers module is imported or executed.
+    """
+    return load_dia_native_backend(*args, **kwargs)
 
 
 class _DiaAdapterCollator:
-    """Resolve the processor only after the Trainer loads model weights."""
 
-    def __init__(self, adapter: DiaTrainingAdapter):
+    def __init__(self, adapter: DiaTrainingAdapter) -> None:
         self.adapter = adapter
 
     def __call__(self, records):
         self.adapter.setup()
-        return self.adapter.backend.create_collator()(records)
+        backend = self.adapter.backend
+        return DiaTrainingCollator(
+            backend.processor,
+            sample_rate=backend.sample_rate,
+        )(records)
 
     def resume_fingerprint(self) -> dict[str, Any]:
         config = getattr(self.adapter.model, "config", None)
@@ -488,22 +409,22 @@ class _DiaAdapterCollator:
 
 
 class DiaTrainingAdapter(Seq2SeqTrainingAdapter):
-    """Train Dia through its official nine-codebook masked-LM loss."""
+    """Train every Dia parameter through its channel-major CE objective."""
 
     supports_custom_recipe = True
     native_export_semantics = "inference-export"
 
-    def __init__(self, model: Any, spec: Any):
+    def __init__(self, model: Any, spec: Any) -> None:
         super().__init__(model, spec)
         self.data_collator = _DiaAdapterCollator(self)
 
     @property
-    def backend(self) -> DiaTrainingBackend:
+    def backend(self):
         backend = getattr(self.model, "training_backend", None)
         if backend is None:
             raise RuntimeError(
-                "Dia's Transformers training backend is not loaded. Call "
-                "adapter.setup() or model.load_for_training() first.")
+                "Dia's native training backend is not loaded. Call setup() "
+                "or load_for_training() first.")
         return backend
 
     def setup(self):
@@ -511,8 +432,8 @@ class DiaTrainingAdapter(Seq2SeqTrainingAdapter):
         backend = self.backend
         if backend.model is not self.primary_model:
             raise RuntimeError(
-                "Dia's training profile did not resolve the official "
-                "DiaForConditionalGeneration module.")
+                "Dia's training profile did not resolve the native "
+                "DiaForConditionalGeneration graph.")
         backend.prepare_for_training()
         return self
 
@@ -543,6 +464,7 @@ __all__ = [
     "DiaTrainingBackend",
     "DiaTrainingCollator",
     "freeze_dia_audio_tokenizer",
+    "load_dia_native_backend",
     "load_dia_transformers_backend",
     "prepare_dia_training_inputs",
     "resolve_dia_dtype",

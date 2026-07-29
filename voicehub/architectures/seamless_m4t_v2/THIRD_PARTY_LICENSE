@@ -1,0 +1,24 @@
+SeamlessM4T-v2 notices
+========================
+
+The facebook/seamless-m4t-v2-large model checkpoint and associated model
+artifacts are distributed under Creative Commons
+Attribution-NonCommercial 4.0 International (CC BY-NC 4.0):
+
+    https://creativecommons.org/licenses/by-nc/4.0/legalcode
+
+Checkpoint repository:
+
+    https://huggingface.co/facebook/seamless-m4t-v2-large
+    revision 5f8cc790b19fc3f67a61c105133b20b34e3dcb76
+
+The architecture and preprocessing behavior was reviewed against Hugging
+Face Transformers 5.14.1 at revision
+a08ace4bbd97e721c98751deec37d87b026acadc. That source is licensed under
+Apache License 2.0:
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+These notices do not relicense the non-commercial checkpoint under
+VoiceHub's Apache-2.0 license. Review the checkpoint terms before using,
+fine-tuning, or redistributing model artifacts or derivatives.

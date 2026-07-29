@@ -25,12 +25,20 @@ class T3Cond:
         "Cast to a device and dtype. Dtype casting is ignored for long/int tensors."
         for k, v in self.__dict__.items():
             if torch.is_tensor(v):
-                is_fp = type(v.view(-1)[0].item()) is not int
-                setattr(self, k, v.to(device=device, dtype=dtype if is_fp else None))
+                target_dtype = (dtype if v.is_floating_point() or v.is_complex() else None)
+                setattr(
+                    self,
+                    k,
+                    v.to(device=device, dtype=target_dtype),
+                )
         return self
 
     def save(self, fpath):
-        torch.save(self.__dict__, fpath)
+        state = {
+            name: (value.detach().cpu() if torch.is_tensor(value) else value)
+            for name, value in self.__dict__.items()
+        }
+        torch.save(state, fpath)
 
     @staticmethod
     def load(fpath, map_location="cpu"):
@@ -85,7 +93,18 @@ class T3CondEnc(nn.Module):
         cond_emotion_adv = empty  # (B, 0, dim)
         if self.hp.emotion_adv:
             assert cond.emotion_adv is not None
-            cond_emotion_adv = self.emotion_adv_fc(cond.emotion_adv.view(-1, 1, 1))
+            emotion = torch.as_tensor(
+                cond.emotion_adv,
+                device=cond_spkr.device,
+                dtype=cond_spkr.dtype,
+            )
+            if emotion.numel() == 1:
+                emotion = emotion.expand(cond_spkr.shape[0])
+            if emotion.numel() != cond_spkr.shape[0]:
+                raise ValueError(
+                    "Chatterbox emotion conditioning must contain one value "
+                    "or one value per sample.")
+            cond_emotion_adv = self.emotion_adv_fc(emotion.reshape(-1, 1, 1))
 
         # Concat and return
         cond_embeds = torch.cat((

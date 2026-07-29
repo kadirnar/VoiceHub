@@ -101,7 +101,7 @@ for spec in AutoInferenceModel.available_models():
 | `config_module` / `config_class` | Lazy import target for its configuration |
 | `default_model_path` | Default Hub identifier or local artifact name |
 | `install_extra` | `None` for built-in inference; optional setup identifier reserved for external/future runtimes |
-| `capabilities` | Declared inference capabilities |
+| `capabilities` | Open capability tokens. `fine-tuning` is family-level; `default-checkpoint-inference-only` means the training profile names a different differentiable starting checkpoint. |
 | `task` | Canonical `SpeechTask` owned by the provider |
 | `architecture` | Provider/runtime architecture family, when declared |
 | `components` | Shared codecs, vocoders, or other registered components |
@@ -569,6 +569,91 @@ finally:
 Registry mutations are process-global. Register extensions during application
 startup, not per request.
 
+## Explicit optimization passes
+
+`voicehub.optimization` provides a dependency-light pass contract that can be
+used by both pretrained inference wrappers and `Trainer`:
+
+```python
+class OptimizationPass:
+    pass_id: str
+    pass_version: str
+    optimization_kind: str | None
+    capabilities: OptimizationCapabilities
+
+    def manifest_configuration(self) -> Mapping[str, Any]: ...
+    def validate(self, model, context) -> None: ...
+    def apply(self, model, context) -> PassResult: ...
+    def restore(self, model, state, context): ...
+    def route_optimizer_parameters(
+        self,
+        model,
+        *,
+        optimizer_names,
+    ) -> Mapping[str, Iterable[tuple[str, Parameter]]]: ...
+    def export_portable_state(
+        self,
+        model,
+        context,
+    ) -> Mapping[str, Tensor]: ...
+
+
+OptimizationPassManager.apply_plan(
+    model,
+    passes,  # name, pass object, or iterable mixing both
+    context,
+    *,
+    registry=None,
+) -> OptimizationResult
+```
+
+`OptimizationContext` declares `mode`, optional `architecture`, `device`,
+`dtype`, streaming, distributed execution, and whether the result must be
+persistable. Registered wrappers bind the canonical architecture
+automatically; registered model specs with `architecture=None` remain
+agnostic. Before applying any pass, the manager validates pass and architecture
+device/dtype/mode/streaming constraints, distributed-training capability, and
+each `optimization_kind`. Architecture-bound distributed inference is
+explicitly unsupported by the current schema. The manager rolls back earlier
+reversible passes after a failure and returns ordered application state.
+Declaring reversibility requires an actual `restore()` override.
+
+`manifest_configuration()` is mandatory and must return every effective pass
+option, including defaults, as a strict JSON string-key tree. The manager
+snapshots pass ID, kind, version, capabilities, and configuration before
+mutation, then snapshots result metadata. Architecture compatibility
+declarations do not register executable pass factories. Use
+`OptimizationResult.manifest()` for deterministic checkpoint metadata and
+`OptimizationResult.restore()` only when every pass declares itself
+reversible. `OptimizationResult.portable_state_dict(model=None)` returns
+canonical save state, optionally from a strategy-unwrapped execution handle.
+
+Pretrained speech wrappers expose:
+
+```python
+model.apply_optimization_plan(
+    passes,
+    *,
+    mode,
+    context=None,
+    registry=None,
+) -> OptimizationResult
+model.optimization_result(*, mode)
+model.optimization_manifest(*, mode=None)
+model.restore_optimization_plan(*, mode)
+```
+
+`Trainer` accepts `optimization_plan`, `optimization_context`, and
+`optimization_pass_registry`. It exposes the applied result through
+`trainer.optimization_result` and its checkpoint-safe record through
+`trainer.optimization_manifest()`. These APIs are opt-in: manifests document
+an application but never cause a loader to mutate a graph implicitly. Trainer
+requires `mode="training"` and `persist_result=True`. A
+topology/name-changing pass used with a separate-optimizer recipe must
+implement complete routing; a topology/name-changing pass included in a
+portable save must declare `portable_export=True` and return canonical state
+through `export_portable_state()`.
+
 ## Training discovery and contracts
 
 ### Support levels
@@ -769,6 +854,7 @@ Built-in family adapters:
 | `tdt` | `TDTTrainingAdapter` |
 | `audio-classification` | `AudioClassificationTrainingAdapter` |
 | `frame-classification` | `FrameClassificationTrainingAdapter` |
+| `native-asr-dispatch` | Verified model-specific native ASR adapter |
 | `upstream-native` | `UpstreamNativeTrainingAdapter` |
 
 Important `BaseTrainingAdapter` extension points include:
@@ -1028,7 +1114,7 @@ print(result.global_step, result.training_loss)
 | `train(resume_from_checkpoint=None)` | `TrainOutput` | `True` selects the newest complete checkpoint; a path selects one explicitly |
 | `evaluate(eval_dataset=None, metric_key_prefix="eval")` | Metrics dictionary | A mapping of named datasets is evaluated one split at a time |
 | `predict(test_dataset, metric_key_prefix="test")` | `PredictionOutput` | Returns predictions, labels, and prefixed metrics |
-| `save_model(output_dir=None, include_native_export=True)` | `Path` | Write a portable VoiceHub artifact |
+| `save_model(output_dir=None, include_native_export=True, portable=True)` | `Path` | Write canonical portable state by default; `portable=False` is for exact internal checkpoints |
 | `save_state()` | `Path` | Write only root `trainer_state.json`; this is not an exact-resume checkpoint |
 | `compute_loss(model, inputs, return_outputs=False, num_items_in_batch=None)` | Loss or `(loss, outputs)` | Override point for the scalar loss boundary |
 | `training_step(model, inputs, num_items_in_batch=None, sync_gradients=True)` | Detached loss | One prepared/backpropagated micro-batch |
@@ -1230,6 +1316,7 @@ distributed synchronization, metric gathering, and runtime state. The built-in
 Custom strategies can override these exact hooks:
 
 ```python
+prepare_device(model, *, device)
 prepare_model(model, *, device)
 prepare_training_adapter(adapter, *, device)
 prepare_optimization(model, optimizer, scheduler)
@@ -1424,6 +1511,7 @@ trainer.save_model(
     output_dir=None,
     *,
     include_native_export=True,
+    portable=True,
 ) -> Path
 ```
 
@@ -1439,9 +1527,12 @@ training_recipe.json
 native_export/             # optional; semantics declared by the adapter
 ```
 
-`model_state.pt` contains the unwrapped runtime or adapter state. The training
+`model_state.pt` contains canonical state for a fresh runtime. The training
 recipe manifest records model family, recipe identity, phases, base model, and
-native-export semantics.
+native-export semantics. If an active topology/name-changing pass has no
+declared canonical export, the default portable save fails before writing the
+artifact. `portable=False` is reserved for Trainer's exact checkpoint path,
+which may store persistent transformed state for same-plan resume.
 
 Reload through the matching checkpoint-first factory:
 
@@ -1472,6 +1563,7 @@ training_args.json
 rng_state.pth
 training_runtime.pt
 training_recipe.json       # when an adapter is active
+optimization_manifest.json # when an explicit plan is active
 scaler.pt                  # when a scaler is active
 checkpoint_manifest.json
 .complete
@@ -1479,8 +1571,9 @@ checkpoint_manifest.json
 
 Checkpoint format 3 records required files, byte sizes, SHA-256 digests, global
 step, adapter/recipe identity, optimizer names, training strategy, and the
-exact-resume signature. A checkpoint with a manifest but no `.complete` marker
-is ignored as incomplete.
+exact-resume signature. Explicit optimization records include immutable pass
+identity, kind, version, capabilities, configuration, and result metadata. A
+checkpoint with a manifest but no `.complete` marker is ignored as incomplete.
 
 ```python
 trainer.train(resume_from_checkpoint=True)  # newest valid checkpoint

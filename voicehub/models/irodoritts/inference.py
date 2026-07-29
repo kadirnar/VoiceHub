@@ -1,4 +1,4 @@
-"""Irodori-TTS integration backed by vendored runtime and DACVAE source."""
+"""VoiceHub-owned Irodori-TTS inference and fine-tuning wrapper."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from voicehub.configuration_utils import VoiceHubConfig
-from voicehub.dependencies import import_optional
+from voicehub.hub import resolve_pretrained_file
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
 from voicehub.models._shared import finish_audio_output, resolve_model_directory, validate_local_file
@@ -22,19 +22,37 @@ class IrodoriTTSConfig(VoiceHubConfig):
         self,
         *,
         codec_name_or_path: str = "Aratako/Semantic-DACVAE-Japanese-32dim",
+        tokenizer_name_or_path: str = "llm-jp/llm-jp-3-150m",
+        codec_revision: str = "47376ee24834d7a05a48ebabfe3cde29b3c5e214",
+        tokenizer_revision: str = "b112feef602fff752e4dac4c30af6a2c2fa41c7a",
+        model_revision: str | None = None,
         model_precision: str = "fp32",
         codec_precision: str = "fp32",
         compile_model: bool = False,
         checkpoint_filename: str | None = None,
-        sample_rate: int = 44100,
+        sample_rate: int = 48000,
+        training_objective: str = "joint",
+        training_rf_loss_mode: str = "utterance_mean",
+        training_duration_loss_weight: float = 0.1,
+        training_duration_huber_delta: float = 0.1,
+        training_gradient_checkpointing: bool = True,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
         self.codec_name_or_path = codec_name_or_path
+        self.tokenizer_name_or_path = tokenizer_name_or_path
+        self.codec_revision = codec_revision
+        self.tokenizer_revision = tokenizer_revision
+        self.model_revision = model_revision
         self.model_precision = model_precision
         self.codec_precision = codec_precision
         self.compile_model = compile_model
         self.checkpoint_filename = checkpoint_filename
+        self.training_objective = training_objective
+        self.training_rf_loss_mode = training_rf_loss_mode
+        self.training_duration_loss_weight = training_duration_loss_weight
+        self.training_duration_huber_delta = training_duration_huber_delta
+        self.training_gradient_checkpointing = training_gradient_checkpointing
         self.validate()
 
     def validate(self) -> None:
@@ -45,6 +63,19 @@ class IrodoriTTSConfig(VoiceHubConfig):
             setattr(self, name, value)
         if not isinstance(self.compile_model, bool):
             raise TypeError("`compile_model` must be a boolean.")
+        if not isinstance(self.training_gradient_checkpointing, bool):
+            raise TypeError("`training_gradient_checkpointing` must be a boolean.")
+        self.training_objective = str(self.training_objective).strip().lower()
+        if self.training_objective not in {"flow", "duration", "joint"}:
+            raise ValueError("`training_objective` must be flow, duration, or joint.")
+        self.training_rf_loss_mode = str(self.training_rf_loss_mode).strip().lower()
+        if self.training_rf_loss_mode not in {"echo", "utterance_mean"}:
+            raise ValueError("`training_rf_loss_mode` must be echo or utterance_mean.")
+        for name in ("training_duration_loss_weight", "training_duration_huber_delta"):
+            value = getattr(self, name)
+            if (isinstance(value, bool) or not isinstance(value, (int, float)) or
+                    not math.isfinite(float(value)) or value <= 0):
+                raise ValueError(f"`{name}` must be finite and positive.")
         if self.checkpoint_filename is not None:
             filename = Path(self.checkpoint_filename)
             if filename.name != self.checkpoint_filename:
@@ -87,6 +118,7 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
         "tail_window_size",
         "trim_tail",
         "truncation_factor",
+        "watermark",
     })
 
     def __init__(
@@ -112,9 +144,20 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
         source = Path(self.config.name_or_path).expanduser()
         if source.is_file():
             return source.resolve()
+        revision = self.config.model_revision
+        if revision is None:
+            from voicehub.architectures.irodoritts.metadata import IRODORI_CHECKPOINTS
+
+            revision = next(
+                (
+                    facts["revision"] for facts in IRODORI_CHECKPOINTS.values()
+                    if facts["model_id"] == self.config.name_or_path),
+                None,
+            )
         model_directory = resolve_model_directory(
             self.config.name_or_path,
             model_type="irodoritts",
+            revision=revision,
         )
         if self.config.checkpoint_filename:
             checkpoint = model_directory / self.config.checkpoint_filename
@@ -123,7 +166,7 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
             return checkpoint.resolve()
 
         candidates = [
-            path for pattern in ("*.safetensors", "*.pt") for path in sorted(model_directory.glob(pattern))
+            path for pattern in ("*.safetensors", ) for path in sorted(model_directory.glob(pattern))
             if not path.name.endswith(".speaker.safetensors") and
             path.name not in {"adapter_model.safetensors", "adapter_model.bin"}
         ]
@@ -148,10 +191,48 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
 
     def _build_runtime(self, runtime):
         checkpoint = self._resolve_checkpoint()
+        checkpoint_model_id = checkpoint_revision = None
+        configured_source = Path(self.config.name_or_path).expanduser()
+        if not configured_source.exists():
+            from voicehub.architectures.irodoritts.metadata import IRODORI_CHECKPOINTS
+
+            published = next(
+                (
+                    facts for facts in IRODORI_CHECKPOINTS.values()
+                    if facts["model_id"] == self.config.name_or_path and
+                    (self.config.model_revision is None or facts["revision"] == self.config.model_revision)),
+                None,
+            )
+            if published is not None:
+                checkpoint_model_id = published["model_id"]
+                checkpoint_revision = published["revision"]
+        local_tokenizer_json = checkpoint.parent / "tokenizer.json"
+        local_tokenizer_config = checkpoint.parent / "tokenizer_config.json"
+        if local_tokenizer_json.is_file() and local_tokenizer_config.is_file():
+            tokenizer_json = local_tokenizer_json
+        else:
+            tokenizer_json = resolve_pretrained_file(
+                self.config.tokenizer_name_or_path,
+                "tokenizer.json",
+                revision=self.config.tokenizer_revision,
+            )
+            resolve_pretrained_file(
+                self.config.tokenizer_name_or_path,
+                "tokenizer_config.json",
+                revision=self.config.tokenizer_revision,
+            )
+        codec_checkpoint = resolve_pretrained_file(
+            self.config.codec_name_or_path,
+            "weights.pth",
+            revision=self.config.codec_revision,
+        )
         key = runtime.RuntimeKey(
             checkpoint=str(checkpoint),
+            checkpoint_model_id=checkpoint_model_id,
+            checkpoint_revision=checkpoint_revision,
             model_device=self.device,
-            codec_repo=self.config.codec_name_or_path,
+            codec_repo=str(codec_checkpoint),
+            tokenizer_directory=str(tokenizer_json.parent),
             model_precision=self.config.model_precision,
             codec_device=self.device,
             codec_precision=self.config.codec_precision,
@@ -166,11 +247,8 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
         return model, sample_rate
 
     def _load_pretrained_model(self) -> None:
-        runtime = import_optional(
-            "voicehub.models.irodoritts.source.irodori_tts.inference_runtime",
-            model_type="irodoritts",
-            install_extra=None,
-        )
+        from voicehub.architectures.irodoritts import runtime
+
         model, sample_rate = self._build_runtime(runtime)
         self.model = model
         self._runtime_module = runtime
@@ -240,19 +318,7 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
             if moved_codec is not None:
                 codec.model = moved_codec
         if codec is not None:
-            current_codec_device = getattr(codec, "device", device)
-            try:
-                codec.device = type(current_codec_device)(device)
-            except (TypeError, ValueError):
-                codec.device = device
-            runtime.codec_device = codec.device
-            configure_decode = getattr(
-                codec,
-                "_configure_deterministic_decode",
-                None,
-            )
-            if (callable(configure_decode) and getattr(codec, "deterministic_decode", False)):
-                configure_decode(codec.model, device)
+            runtime.codec_device = getattr(codec, "device", device)
 
     def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
         super()._validate_generation_inputs(model_inputs)
@@ -417,6 +483,9 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
         if lora_adapter is not None and (not isinstance(lora_adapter,
                                                         (str, Path)) or not str(lora_adapter).strip()):
             raise ValueError("`lora_adapter` must be a non-empty path or Hub ID.")
+        watermark = model_inputs.get("watermark", False)
+        if not isinstance(watermark, bool):
+            raise TypeError("`watermark` must be a boolean.")
 
     def _generate(
         self,
@@ -473,6 +542,44 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
                 "stage_timings": result.stage_timings,
             },
         )
+
+    def prepare_training_inputs(
+        self,
+        inputs: dict[str, Any],
+        *,
+        phase: str,
+    ) -> dict[str, Any]:
+        del phase
+        if self.model is None:
+            raise RuntimeError("Irodori-TTS must be loaded before preparing training data.")
+        from voicehub.architectures.irodoritts.training import IrodoriBatchProcessor
+
+        processor = IrodoriBatchProcessor(
+            config=self.model.model_cfg,
+            tokenizer=self.model.tokenizer,
+            codec=self.model.codec,
+            device=self.model.model_device,
+        )
+        return dict(processor(inputs))
+
+    def get_training_adapter(self):
+        from voicehub.models.irodoritts.training import NativeIrodoriTrainingAdapter
+        from voicehub.training.specs import get_training_spec
+
+        return NativeIrodoriTrainingAdapter(self, get_training_spec("irodoritts"))
+
+    def _save_pretrained(self, save_directory: Path) -> None:
+        if self.model is None:
+            raise RuntimeError("Irodori-TTS must be loaded before native export.")
+        from voicehub.architectures.irodoritts.checkpoint import save_irodori_safetensors
+
+        save_directory.mkdir(parents=True, exist_ok=True)
+        save_irodori_safetensors(
+            self.model.model,
+            self.model.model_cfg,
+            save_directory / "model.safetensors",
+        )
+        self.model.tokenizer.save_pretrained(save_directory)
 
 
 IrodoriTTS = IrodoriTTSForTextToSpeech

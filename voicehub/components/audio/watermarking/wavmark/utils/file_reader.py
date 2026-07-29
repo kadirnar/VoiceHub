@@ -1,66 +1,72 @@
-import os
-import soundfile
-import librosa
-import resampy
-import numpy as np
+"""Dependency-free PCM WAVE input helpers for WavMark."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import torch
+
+from voicehub.processing.waveform import (
+    load_pcm_wave,
+    normalize_waveform,
+    resample_waveform,
+)
 
 
 def is_wav_file(filename):
-    file_extension = os.path.splitext(filename)[1]
-    return file_extension.lower() == ".wav"
+    return Path(filename).suffix.lower() == ".wav"
 
 
-def read_as_single_channel_16k(audio_file, def_sr=16000, verbose=True, aim_second=None):
-    assert os.path.exists(audio_file)
+def _load_wave(path: str | Path, target_rate: int) -> tuple[torch.Tensor, int]:
+    source = Path(path).expanduser()
+    if source.suffix.lower() != ".wav":
+        raise ValueError(
+            "Native WavMark file loading supports uncompressed PCM WAVE "
+            "only. Decode other containers before calling WavMark."
+        )
+    waveform, sample_rate = load_pcm_wave(source)
+    waveform = normalize_waveform(waveform)
+    if sample_rate != target_rate:
+        waveform = resample_waveform(
+            waveform,
+            sample_rate,
+            target_rate,
+        )
+    return waveform, sample_rate
 
-    file_extension = os.path.splitext(audio_file)[1].lower()
 
-    if file_extension == ".mp3":
-        data, origin_sr = librosa.load(audio_file, sr=None)
-    elif file_extension in [".wav", ".flac"]:
-        data, origin_sr = soundfile.read(audio_file)
-    else:
-        raise Exception("unsupported file:" + file_extension)
-
-    # channel check
-    if len(data.shape) == 2:
-        left_channel = data[:, 0]
-        if verbose:
-            print("Warning! the input audio has multiple chanel, this tool only use the first channel!")
-        data = left_channel
-
-    # sample rate check
-    if origin_sr != def_sr:
-        data = resampy.resample(data, origin_sr, def_sr)
-        if verbose:
-            print("Warning! The original samplerate is not 16Khz; the watermarked audio will be re-sampled to 16KHz")
-
-    sr = def_sr
-    audio_length_second = 1.0 * len(data) / sr
-    # if verbose:
-    #     print("input length :%d second" % audio_length_second)
-
+def read_as_single_channel_16k(
+    audio_file,
+    def_sr=16_000,
+    verbose=True,
+    aim_second=None,
+):
+    del verbose
+    waveform, original_rate = _load_wave(audio_file, def_sr)
+    original_duration = waveform.numel() / def_sr
     if aim_second is not None:
-        signal = data
-        assert len(signal) > 0
-        current_second = len(signal) / sr
-        if current_second < aim_second:
-            repeat_count = int(aim_second / current_second) + 1
-            signal = np.repeat(signal, repeat_count)
-        data = signal[0:sr * aim_second]
-
-    return data, sr, audio_length_second
+        if isinstance(aim_second, bool) or not isinstance(aim_second, (int, float)):
+            raise TypeError("`aim_second` must be a positive real number.")
+        if aim_second <= 0:
+            raise ValueError("`aim_second` must be greater than zero.")
+        target_samples = round(def_sr * float(aim_second))
+        if waveform.numel() < target_samples:
+            repetitions = (
+                target_samples + waveform.numel() - 1
+            ) // waveform.numel()
+            waveform = waveform.repeat(repetitions)
+        waveform = waveform[:target_samples]
+    del original_rate
+    return waveform, def_sr, original_duration
 
 
 def read_as_single_channel(file, aim_sr):
-    if file.endswith(".mp3"):
-        data, sr = librosa.load(file, sr=aim_sr)
-    else:
-        data, sr = soundfile.read(file)
+    waveform, _ = _load_wave(file, aim_sr)
+    return waveform
 
-    if len(data.shape) == 2:  # multi-channel
-        data = data[:, 0]  # only use the first channel
 
-    if sr != aim_sr:
-        data = resampy.resample(data, sr, aim_sr)
-    return data
+__all__ = [
+    "is_wav_file",
+    "read_as_single_channel",
+    "read_as_single_channel_16k",
+]

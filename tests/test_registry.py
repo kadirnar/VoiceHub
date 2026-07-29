@@ -19,7 +19,6 @@ ISSUE_MODEL_TYPES = {
     "f5tts",
     "gptsovits",
     "llasa",
-    "melotts",
     "openvoice",
     "outetts",
     "parlertts",
@@ -31,6 +30,7 @@ CURRENT_MODEL_TYPES = {
     "higgstts",
     "inflecttts",
     "irodoritts",
+    "melotts",
     "mosstts",
     "neutts",
     "omnivoice",
@@ -48,6 +48,7 @@ FORBIDDEN_TTS_PACKAGES = {
     "chatterbox",
     "conformer",
     "dac",
+    "encodec",
     "f5_tts",
     "fish_speech",
     "irodori_tts",
@@ -212,9 +213,12 @@ class RegistryTests(unittest.TestCase):
 
     def test_shared_components_are_connected_to_models(self):
         expected = {
+            "bark": ("encodec", ),
             "dia": ("dac", ),
             "f5tts": ("vocos", ),
+            "fishtts": ("dac", ),
             "openvoice": ("wavmark", ),
+            "zonos": ("dac", ),
             "zonos2": ("dac", ),
         }
         for model_type, components in expected.items():
@@ -224,8 +228,22 @@ class RegistryTests(unittest.TestCase):
                     components,
                 )
 
+    def test_checkpoint_specific_training_boundaries_are_discoverable(self):
+        for model_type in ("qwen3tts", "vibevoice", "neutts"):
+            with self.subTest(model_type=model_type):
+                spec = get_model_spec(model_type)
+                self.assertIn("fine-tuning", spec.capabilities)
+                self.assertIn(
+                    "default-checkpoint-inference-only",
+                    spec.capabilities,
+                )
+                self.assertNotEqual(
+                    spec.default_model_path,
+                    spec.training.training_default_model_name_or_path,
+                )
+
     def test_noncommercial_models_remain_discoverable(self):
-        for model_type in ("conversationtts", "fishtts", "llasa"):
+        for model_type in ("conversationtts", "fishtts", "llasa", "outetts"):
             with self.subTest(model_type=model_type):
                 license_spec = get_model_spec(model_type).license
                 self.assertIsNotNone(license_spec)

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from importlib import import_module
 from threading import RLock
 from typing import Any
+
+import torch
 
 from voicehub.audio import load_audio
 
@@ -63,8 +64,10 @@ class BufferedSpeechSession:
                 return self._result
             if not self._chunks:
                 raise ValueError("Cannot flush a stream that has no audio.")
-            np = import_module("numpy")
-            waveform = np.concatenate(self._chunks)
+            waveform = torch.cat(
+                tuple(torch.as_tensor(chunk) for chunk in self._chunks),
+                dim=-1,
+            )
             self._result = self.model(
                 waveform,
                 sampling_rate=self.sampling_rate,

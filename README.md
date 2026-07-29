@@ -8,11 +8,12 @@
 
 - **One lifecycle:** every architecture uses config, lazy loading, task-specific inference, and a normalized output.
 - **One trainer:** shared arguments, callbacks, evaluation, and resumable checkpoints.
-- **Fast imports:** ML frameworks and model weights are loaded only when the selected backend needs them.
+- **One native runtime:** built-in architectures use VoiceHub code and PyTorch,
+  without delegating execution to provider frameworks.
 - **Task-aware discovery:** TTS, speech-recognition, and voice-activity providers share one registry without cross-task factory mistakes.
 - **One inference install:** every built-in TTS, ASR, and VAD runtime is
   available after the default installation.
-- **Lazy execution:** frameworks and checkpoints are still imported or loaded
+- **Lazy execution:** PyTorch graphs and checkpoints are imported or loaded
   only when the selected integration needs them.
 - **Actionable errors:** an incomplete environment points back to the complete
   default runtime or the separate training setup.
@@ -27,10 +28,11 @@ VoiceHub requires Python 3.10 or newer.
 python -m pip install voicehub
 ```
 
-That one command installs the runtime dependencies for every built-in TTS,
-ASR, and VAD integration. Model implementations remain lazy, so importing
-VoiceHub or browsing the registry does not initialize every framework or
-download checkpoints.
+That command installs VoiceHub and its sole default runtime dependency,
+PyTorch. VoiceHub contains the model graphs, tokenizers, checkpoint readers,
+audio processing, and generation code for every registered TTS, ASR, and VAD
+integration. Implementations remain lazy, so importing VoiceHub or browsing
+the registry does not initialize a graph or download checkpoints.
 
 Add the separate training bundle for the shared trainer and optional Weights &
 Biases reporting:
@@ -39,16 +41,16 @@ Biases reporting:
 python -m pip install "voicehub[training]"
 ```
 
-The training bundle does not make every inference provider directly
-fine-tunable. VoiceHub-native profiles can use the shared trainer;
-upstream-custom profiles retain their source recipe, and inference-only
-profiles remain non-trainable.
+The training bundle adds dataset/evaluation utilities and reporting. Each
+trainable model still declares its exact objective, frozen preprocessing
+boundary, accepted artifact format, and supported phases; deterministic or
+serving-only algorithms remain inference-only.
 
 TTS implementations and their third-party licenses are included in the
 VoiceHub package. Checkpoints remain separate and are downloaded lazily or
 passed as local paths. See the
 [model catalog](https://kadirnar.github.io/voicehub/models/).
-ASR and VAD integrations use provider runtimes from the same default
+ASR and VAD integrations use VoiceHub-owned graphs from the same default
 installation; see the
 [speech-input matrix](https://kadirnar.github.io/voicehub/models/asr-vad-support/).
 
@@ -101,7 +103,7 @@ runs the complete workflow and
 from voicehub import AutoModelForSpeechRecognition
 
 model = AutoModelForSpeechRecognition.from_pretrained(
-    "Qwen/Qwen3-ASR-0.6B-hf",
+    "Qwen/Qwen3-ASR-0.6B",
     model_type="asr_qwen3",
     device="cuda",
 )
@@ -113,14 +115,30 @@ output = model.transcribe(
 print(output.text)
 ```
 
-The Transformers provider covers compatible CTC, speech
-sequence-to-sequence, RNN-T, and TDT checkpoints. Current, processor-correct
-presets cover Qwen3-ASR (0.6B and 1.7B HF checkpoints), VibeVoice-ASR-HF,
-Granite Speech 4.1, Whisper large-v3 Turbo, Tiron, Parakeet TDT v3, Nemotron
-3.5, Cohere Transcribe (general and Arabic 07-2026), MedASR, Wav2Vec2,
-HuBERT, WavLM, Moonshine, and SeamlessM4T v2. Separate providers expose
-faster-whisper, WhisperX, OpenAI Whisper, NeMo, SpeechBrain, FunASR, ESPnet,
-and WeNet while returning the same `ASROutput`.
+The historical `asr_transformers` key is now a closed VoiceHub-native
+dispatcher for verified Whisper, Wav2Vec2 CTC, HuBERT CTC, WavLM CTC, and
+Moonshine Safetensors checkpoints. It never imports Transformers or executes
+remote repository code. Tiron also uses a native port
+of its published grammar-constrained speaker/timestamp decoder. VoiceHub's
+native Qwen3-ASR provider covers the official 0.6B and 1.7B
+Safetensors checkpoints with its own audio tower, Qwen3 decoder, byte-BPE
+tokenizer, feature processor, generation cache, and fine-tuning objective.
+Granite Speech 4.1 is likewise native: VoiceHub owns its Conformer,
+Q-Former, Granite decoder, byte-BPE tokenizer, HTK log-mel frontend,
+completion-only training objective, and strict sharded-Safetensors loader.
+VibeVoice-ASR-HF is also native, including both continuous speech encoders,
+the multimodal projector, Qwen decoder, byte-BPE processor, target masking,
+and strict sharded-Safetensors lifecycle. The dedicated Parakeet TDT v3,
+Nemotron 3.5, Cohere Transcribe, MedASR, and SeamlessM4T v2 providers likewise
+own their executable graphs inside VoiceHub. WavLM uses VoiceHub's own gated
+relative-position CTC graph, processor, and safe checkpoint adapter. Moonshine
+uses a native learned waveform frontend, rotary encoder-decoder, SentencePiece
+BPE tokenizer, greedy decoder, and teacher-forced objective. Separate providers
+expose faster-whisper, WhisperX, OpenAI Whisper, NeMo, native SenseVoiceSmall
+through the `asr_funasr` compatibility key, ESPnet, and WeNet while returning
+the same `ASROutput`. The SpeechBrain provider now runs
+its exact CRDNN, location-aware decoder, RNNLM beam search, unigram tokenizer,
+and fine-tuning objective entirely inside VoiceHub.
 
 ## Voice activity detection
 
@@ -141,10 +159,18 @@ for segment in output.segments:
     print(segment.start, segment.end)
 ```
 
-VoiceHub integrates Transformers audio/frame classification, Silero, WebRTC,
-Auditok, Sherpa-ONNX Silero/TEN, pyannote Pipeline/Segmentation/Brouhaha,
-SpeechBrain, NeMo, and FunASR FSMN VAD behind normalized `VADOutput` speech
-regions.
+VoiceHub integrates native Wav2Vec2 frame classification, Silero, WebRTC,
+PyanNet
+segmentation/powerset/Brouhaha, SpeechBrain-compatible CRDNN,
+FunASR-compatible FSMN, and multilingual MarbleNet Frame-VAD, plus Auditok
+and native Silero/TEN with Sherpa-compatible streaming semantics behind
+normalized `VADOutput` speech
+regions. Native PyanNet does not import `pyannote.audio`; native CRDNN does
+not import SpeechBrain, torchaudio, or HyperPyYAML; native FSMN does not
+import FunASR or ModelScope; native MarbleNet does not import NeMo,
+Lightning, Hydra, librosa, or torchaudio; native WebRTC does not import
+`webrtcvad` or load a compiled extension; native TEN does not import Sherpa,
+ONNX, ONNX Runtime, Kaldi, librosa, or NumPy.
 
 ## Supported models
 
@@ -153,42 +179,42 @@ This table lists TTS integrations. See the
 for speech-input families, outputs, and fine-tuning
 boundaries.
 
-| Model type        | Backend         | Notable capabilities                 |
-| ----------------- | --------------- | ------------------------------------ |
-| `orpheustts`      | Orpheus-TTS     | Expressive speech                    |
-| `dia`             | Dia             | Dialogue                             |
-| `vui`             | Vui             | Text to speech                       |
-| `chatterbox`      | Chatterbox      | Voice cloning                        |
-| `kokoro`          | Kokoro          | Multilingual                         |
-| `echo`            | Echo-TTS        | Voice cloning                        |
-| `conversationtts` | ConversationTTS | CC BY-NC multilingual conversation   |
-| `llasa`           | LLaSA           | Multilingual synthesis and cloning   |
-| `cosyvoice`       | CosyVoice 1/2/3 | Cloning, multilingual, streaming     |
-| `f5tts`           | F5-TTS          | Voice cloning                        |
-| `gptsovits`       | GPT-SoVITS      | Few-shot multilingual cloning        |
-| `melotts`         | MeloTTS         | Fast multilingual synthesis          |
-| `openvoice`       | OpenVoice V2    | Cross-lingual voice cloning          |
-| `outetts`         | OuteTTS         | Speaker profiles, multiple runtimes  |
-| `parlertts`       | Parler-TTS      | Natural-language style control       |
-| `styletts2`       | StyleTTS 2      | Style diffusion and voice cloning    |
-| `mosstts`         | MOSS-TTS        | Delay, Local, v1.5, Realtime         |
-| `qwen3tts`        | Qwen3-TTS       | Clone, CustomVoice, VoiceDesign      |
-| `irodoritts`      | Irodori-TTS     | Reference and caption conditioning   |
-| `zonos`           | Zonos 1         | Multilingual voice cloning           |
-| `zonos2`          | ZONOS2          | Batched MoE synthesis and cloning    |
-| `voxcpm`          | VoxCPM 1/2      | Streaming and voice cloning          |
-| `omnivoice`       | OmniVoice       | Multilingual cloning and design      |
-| `higgstts`        | Higgs Audio     | Expressive long-form generation      |
-| `xtts`            | XTTS v2         | Multilingual voice cloning           |
-| `vibevoice`       | VibeVoice       | Realtime cached-voice generation     |
-| `fishtts`         | Fish Speech S2  | Multilingual cloning                 |
-| `csm`             | Sesame CSM      | Conversational speaker context       |
-| `neutts`          | NeuTTS          | Air, Nano, multilingual, 2E          |
-| `supertonic`      | Supertonic 3    | Fast multilingual ONNX inference     |
-| `inflecttts`      | Inflect v2      | Compact local synthesis              |
-| `bark`            | Bark            | Expressive prompt-conditioned speech |
-| `speecht5`        | SpeechT5        | Speaker embeddings and native FT     |
-| `vits`            | VITS / MMS-TTS  | 1,100+ language checkpoints          |
+| Model type        | Backend         | Notable capabilities                    |
+| ----------------- | --------------- | --------------------------------------- |
+| `orpheustts`      | Orpheus-TTS     | Expressive speech                       |
+| `dia`             | Dia             | Native dialogue inference + full FT     |
+| `vui`             | Vui             | Native 100M/Fluac inference + FT        |
+| `chatterbox`      | Chatterbox      | Native cloning + separate T3/flow FT    |
+| `kokoro`          | Kokoro          | Native graph + prepared FT              |
+| `echo`            | Echo-TTS        | Voice cloning                           |
+| `conversationtts` | ConversationTTS | CC BY-NC multilingual conversation      |
+| `llasa`           | LLaSA           | Multilingual synthesis and cloning      |
+| `cosyvoice`       | CosyVoice 3     | Native LM, flow, HiFT inference + FT    |
+| `f5tts`           | F5-TTS          | Voice cloning                           |
+| `gptsovits`       | GPT-SoVITS      | Native V1/V2/Pro staged inference + FT  |
+| `melotts`         | MeloTTS         | Native multilingual VITS2 + prepared FT |
+| `openvoice`       | OpenVoice V2    | Native tone conversion + paired FT      |
+| `outetts`         | OuteTTS         | Native V3 profile inference + LM FT     |
+| `parlertts`       | Parler-TTS      | Natural-language style control          |
+| `styletts2`       | StyleTTS 2      | Native diffusion, cloning + prepared FT |
+| `mosstts`         | MOSS-TTS        | Native four-variant LM + codec v1/v2 FT |
+| `qwen3tts`        | Qwen3-TTS       | Clone, CustomVoice, VoiceDesign         |
+| `irodoritts`      | Irodori-TTS     | Reference and caption conditioning      |
+| `zonos`           | Zonos 1         | Multilingual voice cloning              |
+| `zonos2`          | ZONOS2          | Batched MoE synthesis and cloning       |
+| `voxcpm`          | VoxCPM2         | Native design, cloning, SFT, and LoRA   |
+| `omnivoice`       | OmniVoice       | Multilingual cloning and design         |
+| `higgstts`        | Higgs Audio     | Expressive long-form generation         |
+| `xtts`            | XTTS v2         | Multilingual voice cloning              |
+| `vibevoice`       | VibeVoice       | Native staged graph + 1.5B full FT      |
+| `fishtts`         | Fish Speech S2  | Native cloning + semantic full FT       |
+| `csm`             | Sesame CSM      | Native conversational TTS + full FT     |
+| `neutts`          | NeuTTS          | Native Air FT; Nano/2E inference        |
+| `supertonic`      | Supertonic 3    | Native multilingual flow TTS + FT       |
+| `inflecttts`      | Inflect v2      | Native compact VITS + warm-start FT     |
+| `bark`            | Bark            | Native expressive three-stage speech    |
+| `speecht5`        | SpeechT5        | Speaker embeddings and native FT        |
+| `vits`            | VITS / MMS-TTS  | 1,100+ language checkpoints             |
 
 Aliases such as `f5-tts`, `gpt-sovits`, `melo-tts`, `parler-tts`, and
 `style-tts2`, `moss-tts`, `qwen3-tts`, `higgs-tts`, `bark-tts`, `speech-t5`,
@@ -318,10 +344,13 @@ W&B is imported only when training begins, logs only from the world-primary
 process, resumes its run ID with VoiceHub checkpoints, and never finishes a
 run created by user code.
 
-This example assumes that dataset items already contain Parler's
-backend-shaped training tensors. The generic trainer does not silently turn
-raw text/audio into architecture-specific codec, alignment, flow, or
-adversarial targets.
+For Parler-TTS, dataset rows may provide raw `description`, `text`, and
+`audio_values`; VoiceHub tokenizes both text streams, encodes audio with the
+frozen native DAC, constructs the delayed-codebook labels, and preserves
+variable waveform lengths. Precomputed `audio_codes` are also accepted. Other
+families retain their explicitly documented raw or preprocessed data
+contracts—the generic trainer never invents alignment, flow, or adversarial
+targets.
 
 Use `trainer.train(resume_from_checkpoint=True)` only when `output_dir`
 already contains a complete VoiceHub checkpoint.
@@ -343,12 +372,14 @@ profiles run directly; custom profiles fail until their specialized adapter is
 registered; ONNX/GGUF, fused, quantized, or inference-pruned variants are
 rejected before loading when they cannot preserve a verified gradient path.
 
-Speech-input training follows the same rule. Compatible unquantized
-Transformers ASR and VAD graphs use the task-neutral trainer families. NeMo,
-SpeechBrain, FunASR ASR and FSMN VAD, ESPnet, WeNet, and pyannote currently
-keep their upstream-custom recipe ownership; faster-whisper, WhisperX, OpenAI
-Whisper, Silero, and WebRTC integrations are inference-only. The exact
-boundary is in the
+Speech-input training follows the same rule. Compatible unquantized native
+ASR/VAD graphs use the task-neutral trainer families, including PyanNet
+segmentation, powerset segmentation, and Brouhaha's VAD/SNR/C50 objective.
+NeMo QuartzNet, SpeechBrain CRDNN ASR, SenseVoiceSmall, WeNet U2++, and the
+audited ESPnet LibriSpeech Transformer-e18 release have VoiceHub-owned
+raw-audio inference and training graphs. SpeechBrain CRDNN, FSMN, and MarbleNet VAD
+also have VoiceHub-owned raw-audio and aligned-frame trainers; WebRTC and
+serving-only runtimes remain inference-only. The exact boundary is in the
 [ASR/VAD support matrix](https://kadirnar.github.io/voicehub/models/asr-vad-support/#fine-tuning-boundaries).
 
 The common loop includes gradient accumulation and clipping, AdamW schedules,
@@ -367,8 +398,27 @@ Upstream implementation snapshots live under `voicehub/models/*/source`.
 Reusable code is organized by role under `voicehub/components`: codecs,
 vocoders, watermarking, and neural blocks. `ModelSpec.components` connects
 each backend to the shared components it uses. Every snapshot records its
-exact revision and license, and a static test rejects imports of external TTS
-packages.
+exact revision and license. A broader native-runtime policy now rejects model
+frameworks and DSP convenience packages from every migrated architecture,
+processor, objective, codec, and shared component. For example, shared
+WavMark audio loading, resampling, embedding, decoding, and voting now use
+only the standard library and PyTorch.
+
+Fish Speech S2 is also fully inside that boundary: VoiceHub owns the exact
+36-layer slow and 4-layer fast DualAR transformer, Qwen2 byte-BPE protocol,
+44.1 kHz ModifiedDAC, sampling caches, source-aligned two-head objective, and
+strict Safetensors lifecycle. Fish's published `codec.pth` is accepted only
+through an explicit, digest-pinned `weights_only=True` conversion; it is never
+a steady-state runtime or training artifact.
+
+MOSS-TTS follows the same owned-runtime rule for its Delay, Local, Local v1.5,
+and Realtime semantic graphs, Qwen byte-BPE protocol, and both generations of
+MOSS Audio Tokenizer. All seven official model/codec repositories resolve at
+audited immutable revisions and strict-load Safetensors. Fine-tuning accepts
+raw waveform records or pre-encoded RVQ targets for every semantic variant;
+the separately versioned native codec stays frozen. “Realtime” identifies the
+published model graph—VoiceHub currently exposes buffered generation, not an
+incremental transport or queue-streaming API.
 
 Non-commercial licenses are supported and exposed through
 `ModelSpec.license`; they are not treated as an integration failure.
@@ -381,7 +431,9 @@ VoiceHub's Apache-2.0 license: Fish Speech uses the Fish Audio Research
 License, NeuTTS and XTTS checkpoints use their respective custom licenses,
 and VibeVoice checkpoints have responsible-use conditions. Review
 [`SOURCE.json`](voicehub/models) and the selected checkpoint card before use.
-Fish Speech attribution must include “Built with Fish Audio”.
+Fish fine-tunes are derivative works. Commercial use requires a separate
+written license, and distribution must include the Fish license and exact
+notice while prominently displaying “Built with Fish Audio”.
 
 Build and dependency metadata has one source of truth in `pyproject.toml`.
 The repository no longer executes `setup.py` during installation or release.

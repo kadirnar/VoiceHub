@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import inspect
 import math
-import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from voicehub.checkpointing import save_safetensors
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSTrainingOutput
 from voicehub.training.adapters import CausalLMTrainingAdapter
@@ -215,99 +215,11 @@ class FishSpeechTrainingAdapter(
         super().validate_support()
 
     def setup(self):
-        if getattr(self.model, "model", None) is None:
-            self._load_semantic_warm_start()
-        else:
-            prepare_for_training = getattr(
-                self.model,
-                "_prepare_for_training",
-                None,
-            )
-            training_state = getattr(
-                self.model,
-                "_loaded_for_training",
-                None,
-            )
-            if callable(prepare_for_training) and training_state is not True:
-                prepare_for_training()
+        """Resolve the wrapper's already-native differentiable graph."""
         self._freeze_codec()
         super().setup()
         self._freeze_codec()
         return self
-
-    def _load_semantic_warm_start(self) -> None:
-        """Load only the differentiable semantic model for fine-tuning.
-
-        Fish's inference loader also allocates the frozen codec and
-        rejects Naive checkpoints.  The source training recipe instead
-        loads ``BaseTransformer.from_pretrained``, which supports both
-        single and sharded safetensors as well as legacy ``model.pth``
-        checkpoints.
-        """
-        model_path = str(getattr(self.model.config, "name_or_path", ""))
-        normalized_path = model_path.lower()
-        checkpoint_name = normalized_path.rsplit("/", 1)[-1]
-        if (checkpoint_name.endswith(".gguf") or "int4" in checkpoint_name or "int8" in checkpoint_name):
-            raise ValueError(
-                "Fish Speech fine-tuning requires an unquantized source "
-                "checkpoint (model.safetensors or model.pth), not GGUF/int4/int8.")
-
-        torch = import_optional(
-            "torch",
-            model_type="fishtts",
-            install_extra="training",
-        )
-        source = import_optional(
-            "voicehub.models.fishtts.source.fish_speech.models."
-            "text2semantic.llama",
-            model_type="fishtts",
-            install_extra="training",
-        )
-        shared = import_optional(
-            "voicehub.models._shared",
-            model_type="fishtts",
-            install_extra="training",
-        )
-        model_directory = shared.resolve_model_directory(
-            model_path,
-            model_type="fishtts",
-        )
-        self.model._model_directory = model_directory
-        device = self.model._resolve_device(self.model.device)
-        self.model.device = device
-        dtype = shared.resolve_torch_dtype(
-            torch,
-            getattr(self.model.config, "torch_dtype", "bfloat16"),
-            device,
-        )
-        lora_config = getattr(
-            self.model.config,
-            "training_lora_config",
-            None,
-        )
-        if isinstance(lora_config, Mapping):
-            lora_module = import_optional(
-                "voicehub.models.fishtts.source.fish_speech.models."
-                "text2semantic.lora",
-                model_type="fishtts",
-                install_extra="training",
-            )
-            lora_config = lora_module.LoraConfig(**dict(lora_config))
-        semantic_model = source.BaseTransformer.from_pretrained(
-            model_directory,
-            load_weights=True,
-            max_length=getattr(
-                self.model.config,
-                "training_max_length",
-                None,
-            ),
-            lora_config=lora_config,
-        )
-        self.model.model = semantic_model.to(device=device, dtype=dtype)
-        self.model._torch = torch
-        self.model._runtime = None
-        self.model._decode_one_token = None
-        self.model._loaded_for_training = True
 
     def _freeze_codec(self) -> None:
         codec = getattr(self.model, "_codec", None)
@@ -637,11 +549,6 @@ class FishSpeechTrainingAdapter(
             model_type="fishtts",
             install_extra="training",
         )
-        scheduler = import_optional(
-            "voicehub.models.fishtts.source.fish_speech.scheduler",
-            model_type="fishtts",
-            install_extra="training",
-        )
         configured_warmup = getattr(
             self.model.config,
             "training_warmup_steps",
@@ -653,154 +560,135 @@ class FishSpeechTrainingAdapter(
                 if training_args.warmup_steps or training_args.warmup_ratio else 10))
 
         def schedule(step: int) -> float:
-            return scheduler.get_constant_schedule_with_warmup_lr_lambda(
-                step,
-                num_warmup_steps=warmup_steps,
-                num_training_steps=num_training_steps,
-            )
+            if step < warmup_steps:
+                return float(step) / float(max(1, warmup_steps))
+            return 1.0
 
         return torch.optim.lr_scheduler.LambdaLR(optimizer, schedule)
 
     def create_dataset(self, records, **kwargs):
         self.setup()
-        tokenizer = getattr(self.primary_model, "tokenizer", None)
+        tokenizer = getattr(
+            self.model,
+            "tokenizer",
+            getattr(self.primary_model, "tokenizer", None),
+        )
         if tokenizer is None:
             raise ValueError("Fish Speech fine-tuning requires the checkpoint tokenizer.")
         num_codebooks = int(self.primary_model.config.num_codebooks)
-        max_length = int(kwargs.pop("max_length", 4096))
+        configured_max_length = getattr(
+            self.model.config,
+            "training_max_length",
+            None,
+        )
+        max_length = int(
+            kwargs.pop(
+                "max_length",
+                4096 if configured_max_length is None else configured_max_length,
+            ))
 
         if isinstance(records, (str, Path)):
-            source_paths = [str(records)]
-        else:
-            try:
-                materialized = tuple(records)
-            except TypeError as exc:
-                raise TypeError(
-                    "Fish Speech records must be pre-tokenized mappings or "
-                    "protobuf paths.") from exc
-            source_paths = ([str(item) for item in materialized] if materialized and
-                            all(isinstance(item, (str, Path)) for item in materialized) else None)
-            if source_paths is None:
-                if kwargs:
-                    unexpected = ", ".join(sorted(kwargs))
-                    raise TypeError("Unexpected FishSemanticDataset arguments: "
-                                    f"{unexpected}.")
-                return FishSemanticDataset(
-                    materialized,
-                    tokenizer=tokenizer,
-                    num_codebooks=num_codebooks,
-                    max_length=max_length,
-                )
-
-        dataset_module = import_optional(
-            "voicehub.models.fishtts.source.fish_speech.datasets.semantic",
-            model_type="fishtts",
-            install_extra="training",
-        )
-        allowed = {
-            "seed",
-            "interactive_prob",
-            "use_speaker",
-            "causal",
-            "skip_text_prob",
-        }
-        unexpected = sorted(set(kwargs) - allowed)
-        if unexpected:
-            raise TypeError("Unexpected Fish source-dataset arguments: " + ", ".join(unexpected))
-        dataset = dataset_module.AutoTextSemanticInstructionIterableDataset(
-            proto_files=source_paths,
+            raise ValueError(
+                "Native Fish training accepts validated pre-tokenized "
+                "records. Legacy protobuf datasets require provider-owned "
+                "parsers and must be converted before entering the training "
+                "runtime.")
+        try:
+            materialized = tuple(records)
+        except TypeError as exc:
+            raise TypeError("Fish records must be a sequence of pre-tokenized mappings.") from exc
+        if materialized and all(isinstance(item, (str, Path)) for item in materialized):
+            raise ValueError(
+                "Native Fish training does not load legacy protobuf paths; "
+                "convert them to pre-tokenized mappings first.")
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected FishSemanticDataset arguments: {unexpected}.")
+        return FishSemanticDataset(
+            materialized,
             tokenizer=tokenizer,
-            max_length=max_length,
             num_codebooks=num_codebooks,
-            **kwargs,
-        )
-        dataset.collate_fn = FishTextDataCollator(
-            tokenizer=tokenizer,
             max_length=max_length,
         )
-        return dataset
 
     def save_pretrained(self, save_directory) -> None:
-        """Export a checkpoint directly reloadable by Fish's source loader."""
+        """Export a strict semantic + codec Safetensors runtime."""
         self.setup()
         destination = Path(save_directory)
         destination.mkdir(parents=True, exist_ok=True)
-        safetensors = import_optional(
-            "safetensors.torch",
-            model_type="fishtts",
-            install_extra="training",
+        from voicehub.architectures.fishtts.checkpoint import (
+            save_fish_codec_pretrained,
+            save_fish_semantic_pretrained,
+            write_fish_license_files,
         )
-        save_model = getattr(safetensors, "save_model", None)
-        model_path = destination / "model.safetensors"
-        has_lora = any("lora_" in name for name in self.primary_model.state_dict())
-        if has_lora:
-            # loralib merges its low-rank delta into the base weight on eval.
-            # Clone while merged, then restore training mode so checkpointing
-            # during a run cannot silently change subsequent forwards.
-            was_training = bool(getattr(self.primary_model, "training", False))
-            self.primary_model.eval()
-            try:
-                merged_state = {
-                    name: value.detach().cpu().contiguous().clone()
-                    for name, value in self.primary_model.state_dict().items() if "lora_" not in name
-                }
-            finally:
-                self.primary_model.train(was_training)
-            safetensors.save_file(
-                merged_state,
-                str(model_path),
-                metadata={
-                    "format": "pt",
-                    "voicehub_lora": "merged",
-                },
-            )
-        elif callable(save_model):
-            save_model(
+        from voicehub.architectures.fishtts.modeling import FishS2ForConditionalGeneration
+        from voicehub.hub import write_json_file
+
+        if isinstance(
                 self.primary_model,
-                str(model_path),
-                metadata={"format": "pt"},
+                FishS2ForConditionalGeneration,
+        ):
+            save_fish_semantic_pretrained(
+                self.primary_model,
+                destination,
             )
         else:
+            # Small custom graphs used by downstream recipe extensions retain
+            # a safe generic warm-start representation.
             state = {
                 name: value.detach().cpu().contiguous()
                 for name, value in self.primary_model.state_dict().items()
             }
-            safetensors.save_file(
+            save_safetensors(
                 state,
-                str(model_path),
-                metadata={"format": "pt"},
+                destination / "model.safetensors",
+                metadata={"format": "voicehub-fish-custom-v1"},
             )
-
-        config = getattr(self.primary_model, "config", None)
-        if config is not None and hasattr(config, "save"):
-            config.save(destination / "config.json")
+            config = getattr(self.primary_model, "config", None)
+            if config is not None:
+                to_dict = getattr(config, "to_dict", None)
+                if callable(to_dict):
+                    write_json_file(
+                        destination / "config.json",
+                        to_dict(),
+                    )
+                elif callable(getattr(config, "save", None)):
+                    config.save(destination / "config.json")
+            write_fish_license_files(destination)
         tokenizer = getattr(self.primary_model, "tokenizer", None)
+        if tokenizer is None:
+            tokenizer = getattr(self.model, "tokenizer", None)
         if tokenizer is not None and hasattr(tokenizer, "save_pretrained"):
             tokenizer.save_pretrained(destination)
-
-        model_directory = getattr(self.model, "_model_directory", None)
-        codec_source = (Path(model_directory) / "codec.pth" if model_directory is not None else None)
-        codec_destination = destination / "codec.pth"
-        if codec_source is not None and codec_source.is_file():
-            shutil.copy2(codec_source, codec_destination)
-            return
 
         codec = getattr(self.model, "_codec", None)
         if codec is None:
             codec = getattr(self.model, "codec", None)
-        if codec is None or not callable(getattr(codec, "state_dict", None)):
-            raise FileNotFoundError(
-                "Fish Speech export requires the base checkpoint's codec.pth "
-                "or a loaded codec module; neither is available.")
-        torch = getattr(self.model, "_torch", None)
-        if torch is None:
-            torch = import_optional(
-                "torch",
-                model_type="fishtts",
-                install_extra="training",
+        if codec is None:
+            ensure_codec_loaded = getattr(
+                self.model,
+                "ensure_codec_loaded",
+                None,
             )
-        codec_state = {name: value.detach().cpu().contiguous() for name, value in codec.state_dict().items()}
-        torch.save(codec_state, codec_destination)
+            if callable(ensure_codec_loaded):
+                codec = ensure_codec_loaded()
+        if codec is None or not callable(getattr(codec, "state_dict", None)):
+            raise FileNotFoundError("Fish export requires a loaded native codec module.")
+        from voicehub.architectures.fishtts.codec import FishModifiedDAC
+
+        if isinstance(codec, FishModifiedDAC):
+            save_fish_codec_pretrained(codec, destination / "codec")
+        else:
+            codec_directory = destination / "codec"
+            codec_directory.mkdir(parents=True, exist_ok=True)
+            save_safetensors(
+                {
+                    name: value.detach().cpu().contiguous()
+                    for name, value in codec.state_dict().items()
+                },
+                codec_directory / "model.safetensors",
+                metadata={"format": "voicehub-fish-custom-codec-v1"},
+            )
 
 
 __all__ = [

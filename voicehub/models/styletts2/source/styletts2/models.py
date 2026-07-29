@@ -1,28 +1,15 @@
 #coding:utf-8
 
-import os
-import os.path as osp
-
-import copy
 import math
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils import weight_norm, remove_weight_norm, spectral_norm
 
-from voicehub.models.styletts2.source.styletts2.Utils.ASR.models import ASRCNN
-from voicehub.models.styletts2.source.styletts2.Utils.JDC.model import JDCNet
-
 from voicehub.models.styletts2.source.styletts2.Modules.diffusion.sampler import KDiffusion, LogNormalDistribution
 from voicehub.models.styletts2.source.styletts2.Modules.diffusion.modules import Transformer1d, StyleTransformer1d
 from voicehub.models.styletts2.source.styletts2.Modules.diffusion.diffusion import AudioDiffusionConditional
-
-from voicehub.models.styletts2.source.styletts2.Modules.discriminators import MultiPeriodDiscriminator, MultiResSpecDiscriminator, WavLMDiscriminator
-
-from munch import Munch
-import yaml
 
 class LearnedDownSample(nn.Module):
     def __init__(self, layer_type, dim_in):
@@ -311,7 +298,7 @@ class TextEncoder(nn.Module):
             
         x = x.transpose(1, 2)  # [B, T, chn]
 
-        input_lengths = input_lengths.cpu().numpy()
+        input_lengths = input_lengths.detach().to(device="cpu", dtype=torch.long)
         x = nn.utils.rnn.pack_padded_sequence(
             x, input_lengths, batch_first=True, enforce_sorted=False)
 
@@ -472,7 +459,7 @@ class ProsodyPredictor(nn.Module):
         text_size = d.shape[1]
         
         # predict duration
-        input_lengths = text_lengths.cpu().numpy()
+        input_lengths = text_lengths.detach().to(device="cpu", dtype=torch.long)
         x = nn.utils.rnn.pack_padded_sequence(
             d, input_lengths, batch_first=True, enforce_sorted=False)
         
@@ -542,7 +529,7 @@ class DurationEncoder(nn.Module):
         x.masked_fill_(masks.unsqueeze(-1).transpose(0, 1), 0.0)
                 
         x = x.transpose(0, 1)
-        input_lengths = text_lengths.cpu().numpy()
+        input_lengths = text_lengths.detach().to(device="cpu", dtype=torch.long)
         x = x.transpose(-1, -2)
         
         for block in self.lstms:
@@ -583,54 +570,67 @@ class DurationEncoder(nn.Module):
     
 def load_F0_models(path):
     # load F0 model
+    from voicehub.models.styletts2.source.styletts2.Utils.JDC.model import JDCNet
 
     F0_model = JDCNet(num_class=1, seq_len=192)
-    params = torch.load(path, map_location='cpu')['net']
+    params = torch.load(path, map_location='cpu', weights_only=True)['net']
     F0_model.load_state_dict(params)
     _ = F0_model.train()
     
     return F0_model
 
 def load_ASR_models(ASR_MODEL_PATH, ASR_MODEL_CONFIG):
-    # load ASR model
-    def _load_config(path):
-        with open(path) as f:
-            config = yaml.safe_load(f)
-        model_config = config['model_params']
-        return model_config
+    raise RuntimeError(
+        "The vendored ASR convenience loader is not part of the native "
+        "StyleTTS 2 runtime. Construct the aligner through VoiceHub's typed "
+        "training boundary and provide precomputed alignments."
+    )
 
-    def _load_model(model_config, model_path):
-        model = ASRCNN(**model_config)
-        params = torch.load(model_path, map_location='cpu')['model']
-        model.load_state_dict(params)
-        return model
+class StyleTTS2Modules(nn.Module):
+    """Attribute and mapping-compatible container for released components."""
 
-    asr_model_config = _load_config(ASR_MODEL_CONFIG)
-    asr_model = _load_model(asr_model_config, ASR_MODEL_PATH)
-    _ = asr_model.train()
+    def __init__(self, **components):
+        super().__init__()
+        for name, module in components.items():
+            self.add_module(name, module)
 
-    return asr_model
+    def __getitem__(self, name):
+        return self._modules[name]
 
-def build_model(args, text_aligner, pitch_extractor, bert):
-    assert args.decoder.type in ['istftnet', 'hifigan'], 'Decoder type unknown'
-    
-    if args.decoder.type == "istftnet":
-        from voicehub.models.styletts2.source.styletts2.Modules.istftnet import Decoder
-        decoder = Decoder(dim_in=args.hidden_dim, style_dim=args.style_dim, dim_out=args.n_mels,
-                resblock_kernel_sizes = args.decoder.resblock_kernel_sizes,
-                upsample_rates = args.decoder.upsample_rates,
-                upsample_initial_channel=args.decoder.upsample_initial_channel,
-                resblock_dilation_sizes=args.decoder.resblock_dilation_sizes,
-                upsample_kernel_sizes=args.decoder.upsample_kernel_sizes, 
-                gen_istft_n_fft=args.decoder.gen_istft_n_fft, gen_istft_hop_size=args.decoder.gen_istft_hop_size) 
-    else:
+    def __iter__(self):
+        return iter(self._modules)
+
+    def items(self):
+        return self._modules.items()
+
+    def keys(self):
+        return self._modules.keys()
+
+    def values(self):
+        return self._modules.values()
+
+
+def build_model(args, text_aligner, pitch_extractor, bert, *, include_discriminators=True):
+    if args.decoder.type == "hifigan":
         from voicehub.models.styletts2.source.styletts2.Modules.hifigan import Decoder
         decoder = Decoder(dim_in=args.hidden_dim, style_dim=args.style_dim, dim_out=args.n_mels,
                 resblock_kernel_sizes = args.decoder.resblock_kernel_sizes,
                 upsample_rates = args.decoder.upsample_rates,
                 upsample_initial_channel=args.decoder.upsample_initial_channel,
                 resblock_dilation_sizes=args.decoder.resblock_dilation_sizes,
-                upsample_kernel_sizes=args.decoder.upsample_kernel_sizes) 
+                upsample_kernel_sizes=args.decoder.upsample_kernel_sizes)
+    elif args.decoder.type == "istftnet":
+        from voicehub.models.styletts2.source.styletts2.Modules.istftnet import Decoder
+        decoder = Decoder(dim_in=args.hidden_dim, style_dim=args.style_dim, dim_out=args.n_mels,
+                resblock_kernel_sizes = args.decoder.resblock_kernel_sizes,
+                upsample_rates = args.decoder.upsample_rates,
+                upsample_initial_channel=args.decoder.upsample_initial_channel,
+                resblock_dilation_sizes=args.decoder.resblock_dilation_sizes,
+                upsample_kernel_sizes=args.decoder.upsample_kernel_sizes,
+                gen_istft_n_fft=args.decoder.gen_istft_n_fft,
+                gen_istft_hop_size=args.decoder.gen_istft_hop_size)
+    else:
+        raise ValueError("StyleTTS 2 decoder type is not recognized.")
         
     text_encoder = TextEncoder(channels=args.hidden_dim, kernel_size=5, depth=args.n_layer, n_symbols=args.n_token)
     
@@ -640,15 +640,28 @@ def build_model(args, text_aligner, pitch_extractor, bert):
     predictor_encoder = StyleEncoder(dim_in=args.dim_in, style_dim=args.style_dim, max_conv_dim=args.hidden_dim) # prosodic style encoder
         
     # define diffusion model
+    transformer_config = args.diffusion.transformer
+    if isinstance(transformer_config, dict):
+        transformer_kwargs = dict(transformer_config)
+    else:
+        transformer_kwargs = {
+            name: getattr(transformer_config, name)
+            for name in (
+                "num_layers",
+                "num_heads",
+                "head_features",
+                "multiplier",
+            )
+        }
     if args.multispeaker:
         transformer = StyleTransformer1d(channels=args.style_dim*2, 
                                     context_embedding_features=bert.config.hidden_size,
                                     context_features=args.style_dim*2, 
-                                    **args.diffusion.transformer)
+                                    **transformer_kwargs)
     else:
         transformer = Transformer1d(channels=args.style_dim*2, 
                                     context_embedding_features=bert.config.hidden_size,
-                                    **args.diffusion.transformer)
+                                    **transformer_kwargs)
     
     diffusion = AudioDiffusionConditional(
         in_channels=1,
@@ -669,7 +682,7 @@ def build_model(args, text_aligner, pitch_extractor, bert):
     diffusion.unet = transformer
 
     
-    nets = Munch(
+    components = dict(
             bert=bert,
             bert_encoder=nn.Linear(bert.config.hidden_size, args.hidden_dim),
 
@@ -683,18 +696,29 @@ def build_model(args, text_aligner, pitch_extractor, bert):
 
             text_aligner = text_aligner,
             pitch_extractor=pitch_extractor,
-
-            mpd = MultiPeriodDiscriminator(),
-            msd = MultiResSpecDiscriminator(),
-        
-            # slm discriminator head
-            wd = WavLMDiscriminator(args.slm.hidden, args.slm.nlayers, args.slm.initial_channel),
        )
+    if include_discriminators:
+        from voicehub.models.styletts2.source.styletts2.Modules.discriminators import (
+            MultiPeriodDiscriminator,
+            MultiResSpecDiscriminator,
+            WavLMDiscriminator,
+        )
+
+        components.update(
+            mpd=MultiPeriodDiscriminator(),
+            msd=MultiResSpecDiscriminator(),
+            wd=WavLMDiscriminator(
+                args.slm.hidden,
+                args.slm.nlayers,
+                args.slm.initial_channel,
+            ),
+        )
+    nets = StyleTTS2Modules(**components)
     
     return nets
 
 def load_checkpoint(model, optimizer, path, load_only_params=True, ignore_modules=[]):
-    state = torch.load(path, map_location='cpu')
+    state = torch.load(path, map_location='cpu', weights_only=True)
     params = state['net']
     for key in model:
         if key in params and key not in ignore_modules:

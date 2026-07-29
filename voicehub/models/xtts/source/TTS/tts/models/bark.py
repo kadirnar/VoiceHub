@@ -1,11 +1,15 @@
 import os
 from dataclasses import dataclass
-from typing import Optional
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from coqpit import Coqpit
-from encodec import EncodecModel
-from transformers import BertTokenizer
+
+from voicehub.components.audio.codecs.encodec import (
+    EncodecModel,
+    load_encodec_model,
+)
 
 from voicehub.models.xtts.source.TTS.tts.layers.bark.inference_funcs import (
     codec_decode,
@@ -20,6 +24,9 @@ from voicehub.models.xtts.source.TTS.tts.layers.bark.model import GPT
 from voicehub.models.xtts.source.TTS.tts.layers.bark.model_fine import FineGPT
 from voicehub.models.xtts.source.TTS.tts.models.base_tts import BaseTTS
 
+if TYPE_CHECKING:
+    from transformers import BertTokenizer
+
 
 @dataclass
 class BarkAudioConfig(Coqpit):
@@ -27,19 +34,149 @@ class BarkAudioConfig(Coqpit):
     output_sample_rate: int = 24000
 
 
+def _load_default_tokenizer():
+    """Load Bark's legacy text tokenizer without import-time network access."""
+    from transformers import BertTokenizer
+
+    return BertTokenizer.from_pretrained("bert-base-multilingual-cased")
+
+
+def _config_value(config: Coqpit, name: str, default):
+    value = getattr(config, name, default)
+    return default if value is None else value
+
+
+def _boolean_option(value, *, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise TypeError(f"`{name}` must be a boolean.")
+    return value
+
+
+def load_bark_encodec(
+    config: Coqpit,
+    *,
+    checkpoint: str | Path | None = None,
+    cache_dir: str | Path | None = None,
+    local_files_only: bool | None = None,
+    trust_official_pickle: bool | None = None,
+) -> EncodecModel:
+    """Load Bark's exact 24 kHz codec through VoiceHub's safe boundary.
+
+    Native Safetensors checkpoints are accepted without a trust override.
+    Meta's published ``.th`` artifact is a legacy pickle container and is
+    therefore loaded only after the caller explicitly opts in; VoiceHub then
+    verifies its pinned size, digest, tensor namespace, shapes, and inventory.
+    """
+    resolved_checkpoint = checkpoint
+    if resolved_checkpoint is None:
+        resolved_checkpoint = _config_value(
+            config,
+            "ENCODEC_CHECKPOINT",
+            None,
+        )
+    resolved_cache_dir = (
+        cache_dir
+        if cache_dir is not None
+        else _config_value(config, "ENCODEC_CACHE_DIR", None)
+    )
+    resolved_local_only = _boolean_option(
+        (
+            local_files_only
+            if local_files_only is not None
+            else _config_value(config, "ENCODEC_LOCAL_FILES_ONLY", False)
+        ),
+        name="local_files_only",
+    )
+    resolved_trust = _boolean_option(
+        (
+            trust_official_pickle
+            if trust_official_pickle is not None
+            else _config_value(
+                config,
+                "TRUST_OFFICIAL_ENCODEC_PICKLE",
+                False,
+            )
+        ),
+        name="trust_official_pickle",
+    )
+
+    load_options = {
+        "checkpoint": resolved_checkpoint,
+        "cache_dir": resolved_cache_dir,
+        "local_files_only": resolved_local_only,
+        "trust_official_pickle": resolved_trust,
+    }
+    if resolved_checkpoint is None and not resolved_trust:
+        # Resolve only already-cached artifacts here. This prevents an
+        # untrusted pickle from being downloaded before it is rejected while
+        # still allowing a converted Safetensors artifact to work by default.
+        load_options["local_files_only"] = True
+        try:
+            codec = load_encodec_model("encodec_24khz", **load_options)
+        except FileNotFoundError as error:
+            if resolved_local_only:
+                raise
+            raise PermissionError(
+                "Bark needs pretrained Encodec weights. Provide a converted "
+                "`.safetensors` checkpoint through `ENCODEC_CHECKPOINT`, or "
+                "set `TRUST_OFFICIAL_ENCODEC_PICKLE=True` to download and "
+                "strictly verify Meta's pinned legacy `.th` release."
+            ) from error
+    else:
+        codec = load_encodec_model("encodec_24khz", **load_options)
+
+    expected_sample_rate = _config_value(config, "sample_rate", 24_000)
+    if (
+        isinstance(expected_sample_rate, bool)
+        or not isinstance(expected_sample_rate, int)
+        or expected_sample_rate <= 0
+    ):
+        raise ValueError("Bark's `sample_rate` must be a positive integer.")
+    if codec.sample_rate != expected_sample_rate:
+        raise ValueError(
+            "Bark and Encodec sample rates must match; received "
+            f"{expected_sample_rate} Hz and {codec.sample_rate} Hz."
+        )
+    if codec.channels != 1 or codec.quantizer.bins != 1_024:
+        raise ValueError(
+            "Bark requires the official mono Encodec graph with 1,024-entry "
+            "codebooks."
+        )
+    codec.set_target_bandwidth(6.0)
+    return codec
+
+
 class Bark(BaseTTS):
     def __init__(
         self,
         config: Coqpit,
-        tokenizer: BertTokenizer = BertTokenizer.from_pretrained("bert-base-multilingual-cased"),
+        tokenizer: "BertTokenizer | None" = None,
+        *,
+        encodec_model: EncodecModel | None = None,
+        encodec_checkpoint: str | Path | None = None,
+        encodec_cache_dir: str | Path | None = None,
+        encodec_local_files_only: bool | None = None,
+        trust_official_encodec_pickle: bool | None = None,
     ) -> None:
         super().__init__(config=config, ap=None, tokenizer=None, speaker_manager=None, language_manager=None)
+        if tokenizer is None:
+            tokenizer = _load_default_tokenizer()
         self.config.num_chars = len(tokenizer)
         self.tokenizer = tokenizer
         self.semantic_model = GPT(config.semantic_config)
         self.coarse_model = GPT(config.coarse_config)
         self.fine_model = FineGPT(config.fine_config)
-        self.encodec = EncodecModel.encodec_model_24khz()
+        if encodec_model is None:
+            encodec_model = load_bark_encodec(
+                config,
+                checkpoint=encodec_checkpoint,
+                cache_dir=encodec_cache_dir,
+                local_files_only=encodec_local_files_only,
+                trust_official_pickle=trust_official_encodec_pickle,
+            )
+        elif not isinstance(encodec_model, EncodecModel):
+            raise TypeError("`encodec_model` must be a native EncodecModel.")
+        self.encodec = encodec_model
         self.encodec.set_target_bandwidth(6.0)
 
     @property

@@ -1,0 +1,32 @@
+{
+  "architecture": "bark",
+  "checkpoint": {
+    "file": "pytorch_model.bin",
+    "license": "MIT",
+    "repository": "suno/bark-small",
+    "revision": "1dbd7a128513b8ae4a4e2130fed57b7ac9da5bcd",
+    "sha256": "f0f7f16b24f65789ce42b3c491aa6a1cdf219f7ef425066fcd194485245e65d9",
+    "size": 1676663913,
+    "state_values": 443673346,
+    "tensor_count": 542,
+    "tensor_inventory_fingerprint": "2d533d2e10a325c74123bfefbceeef42503a6a5aecdbdddcf2047c76807f7b1c"
+  },
+  "implementation_sources": [
+    {
+      "license": "Apache-2.0",
+      "repository": "huggingface/transformers",
+      "revision": "e42587f596181396e1c4b63660abf0c736b10dae",
+      "tag": "v4.31.0"
+    },
+    {
+      "license": "MIT",
+      "repository": "suno-ai/bark",
+      "revision": "f4f32d4cd480dfec1c245d258174bc9bde3c2148"
+    }
+  ],
+  "notes": [
+    "The pinned model release contains no Safetensors checkpoint.",
+    "VoiceHub requires an explicit trust flag for the digest-pinned legacy conversion and exports the result as Safetensors.",
+    "The Encodec graph is provided by VoiceHub's native Meta Encodec component."
+  ]
+}

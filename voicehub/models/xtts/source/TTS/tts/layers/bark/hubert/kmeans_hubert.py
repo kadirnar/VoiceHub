@@ -13,8 +13,9 @@ from pathlib import Path
 import torch
 from einops import pack, unpack
 from torch import nn
-from torchaudio.functional import resample
 from transformers import HubertModel
+
+from voicehub.processing.waveform import resample_waveform_kaiser
 
 
 def round_down_nearest_multiple(num, divisor):
@@ -63,7 +64,11 @@ class CustomHubert(nn.Module):
         device = wav_input.device
 
         if exists(input_sample_hz):
-            wav_input = resample(wav_input, input_sample_hz, self.target_sample_hz)
+            wav_input = resample_waveform_kaiser(
+                wav_input,
+                input_sample_hz,
+                self.target_sample_hz,
+            )
 
         if exists(self.seq_len_multiple_of):
             wav_input = curtail_to_multiple(wav_input, self.seq_len_multiple_of)

@@ -1,0 +1,23 @@
+{
+  "architecture": "zonos2",
+  "checkpoint": {
+    "license": "Apache-2.0",
+    "official_repository": "Zyphra/ZONOS2",
+    "official_revision": "65f1e80f94b599d474bb6af9094a803dc52f60bd",
+    "official_safetensors_published": false,
+    "safe_conversion_repository": "drbaph/ZONOS2-BF16",
+    "safe_conversion_revision": "c8470cd6b2c43639780635fac10921fd74a381e0"
+  },
+  "implementation": "voicehub-native",
+  "source": {
+    "license": "MIT",
+    "license_sha256": "98216c34413fa17aeaaba8aeec41d157609b6b8f6c07cf6250239128cf616bb5",
+    "repository": "https://github.com/Zyphra/ZONOS2",
+    "revision": "194c0a3ab67b90383a67646289f28d4ecb1c1f64"
+  },
+  "training": {
+    "author_verified_recipe": false,
+    "boundary": "The upstream release contains a serving graph but no original optimizer, dataset pipeline, or training loop. VoiceHub implements and tests the implied next-row delayed-codebook cross-entropy objective and labels it reconstructed.",
+    "full_model_gradient_ready": true
+  }
+}

@@ -2,7 +2,6 @@ import math
 
 import torch
 import torch.nn.functional as F
-from einops import rearrange
 from torch import nn
 
 
@@ -48,7 +47,7 @@ class RelativePositionBias(nn.Module):
         rp_bucket = self._relative_position_bucket(
             rel_pos, causal=self.causal, num_buckets=self.num_buckets, max_distance=self.max_distance)
         values = self.relative_attention_bias(rp_bucket)
-        bias = rearrange(values, 'i j h -> () h i j')
+        bias = values.permute(2, 0, 1).unsqueeze(0)
         return qk_dots + (bias * self.scale)
 
 

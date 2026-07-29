@@ -1,16 +1,15 @@
 import re
 from contextlib import nullcontext
 
-import inflect
 import torch
 import torch.nn.functional as F
-import torchaudio
 from torch import Tensor
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from voicehub.models.vui.model import Vui
 from voicehub.models.vui.sampling import multinomial, sample_top_k, sample_top_p, sample_top_p_top_k
 from voicehub.models.vui.vad import detect_voice_activity as vad
+from voicehub.processing.waveform import resample_waveform
 
 
 def ensure_spaces_around_tags(text: str):
@@ -39,8 +38,51 @@ REPLACE = [
     (";", ","),
 ]
 
-engine = None
 wm = None
+
+_SMALL_NUMBERS = (
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+)
+_TENS = (
+    "",
+    "",
+    "twenty",
+    "thirty",
+    "forty",
+    "fifty",
+    "sixty",
+    "seventy",
+    "eighty",
+    "ninety",
+)
+_NUMBER_SCALES = (
+    "",
+    "thousand",
+    "million",
+    "billion",
+    "trillion",
+    "quadrillion",
+    "quintillion",
+)
 
 
 def _inference_precision(model: Vui):
@@ -56,37 +98,85 @@ def _inference_precision(model: Vui):
 
 
 def asr(chunk, model=None, prefix=None):
-    """Run Whisper ASR on a single audio chunk and return the decoded text."""
-    import whisper
-
+    """Run VoiceHub's native Whisper ASR on one 16 kHz audio chunk."""
     global wm
     if model is not None:
         wm = model
     elif wm is None:
-        wm = whisper.load_model("turbo", "cuda")
+        from voicehub.models.asr_whisper_native import WhisperForSpeechRecognition
 
-    chunk = whisper.pad_or_trim(chunk)
-    mel = whisper.log_mel_spectrogram(chunk, n_mels=wm.dims.n_mels).to(wm.device)
-    options = whisper.DecodingOptions(language="en", without_timestamps=True, prefix=prefix)
-    result = whisper.decode(wm, mel[None], options)
-    return result[0].text
+        wm = WhisperForSpeechRecognition(
+            "openai/whisper-large-v3-turbo",
+            device="auto",
+        )
+    result = wm.transcribe(
+        chunk,
+        sampling_rate=16_000,
+        language="en",
+        initial_prompt=prefix,
+        return_timestamps=False,
+    )
+    return result.text
+
+
+def _under_one_thousand(number: int) -> str:
+    words: list[str] = []
+    hundreds, remainder = divmod(number, 100)
+    if hundreds:
+        words.extend((_SMALL_NUMBERS[hundreds], "hundred"))
+        if remainder:
+            words.append("and")
+    if remainder < 20:
+        if remainder:
+            words.append(_SMALL_NUMBERS[remainder])
+    else:
+        tens, ones = divmod(remainder, 10)
+        words.append(_TENS[tens] if not ones else f"{_TENS[tens]}-{_SMALL_NUMBERS[ones]}")
+    return " ".join(words)
+
+
+def number_to_words(value: str | int) -> str:
+    """Convert a non-negative integer to source-compatible English words."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid integer value: {value!r}.") from None
+    if number < 0:
+        return f"minus {number_to_words(-number)}"
+    if number == 0:
+        return _SMALL_NUMBERS[0]
+
+    groups: list[int] = []
+    while number:
+        number, group = divmod(number, 1_000)
+        groups.append(group)
+    if len(groups) > len(_NUMBER_SCALES):
+        return " ".join(_SMALL_NUMBERS[int(digit)] for digit in str(value))
+
+    rendered: list[str] = []
+    populated = [(index, group) for index, group in enumerate(groups) if group]
+    for offset, (index, group) in enumerate(reversed(populated)):
+        part = _under_one_thousand(group)
+        scale = _NUMBER_SCALES[index]
+        if scale:
+            part = f"{part} {scale}"
+        is_final = offset == len(populated) - 1
+        if is_final and index == 0 and group < 100 and rendered:
+            rendered.append(f"and {part}")
+        else:
+            rendered.append(part)
+    return ", ".join(rendered[:-1]) + (
+        (", " if len(rendered) > 1 and not rendered[-1].startswith("and ") else " ") +
+        rendered[-1] if len(rendered) > 1 else rendered[0])
 
 
 def replace_numbers_with_words(text):
-    """Replace all digit sequences in *text* with their English word
-    equivalents."""
-    global engine
+    """Replace digit sequences with deterministic English words."""
 
-    if engine is None:
-        engine = inflect.engine()
+    def replacement(match):
+        return number_to_words(match.group()) + " "
 
-    # Function to convert a number match to words
-    def number_to_words(match):
-        number = match.group()
-        return engine.number_to_words(number) + " "
-
-    # Replace digits with their word equivalents
-    return re.sub(r"\d+", number_to_words, text)
+    return re.sub(r"\d+", replacement, text)
 
 
 valid_non_speech = ["breath", "sigh", "laugh", "tut", "hesitate"]
@@ -373,7 +463,11 @@ def render(
         codes = generate(self, text, prompt_codes, temperature, top_k, top_p, max_gen_len)
         codes = codes[..., :-10]
         audio = self.codec.from_indices(codes)
-        paudio = torchaudio.functional.resample(audio[0], SR, 16000)
+        paudio = resample_waveform(
+            audio[0].reshape(-1).float(),
+            SR,
+            16_000,
+        )
         results = vad(paudio)
 
         if len(results):
@@ -425,7 +519,11 @@ def render(
                 codes = codes[..., :-10]
                 audio = self.codec.from_indices(codes)
                 # Resample for VAD
-                paudio = torchaudio.functional.resample(audio[0], SR, 16000)
+                paudio = resample_waveform(
+                    audio[0].reshape(-1).float(),
+                    SR,
+                    16_000,
+                )
 
                 results = vad(paudio)
 

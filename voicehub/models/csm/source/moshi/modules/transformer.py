@@ -1,6 +1,7 @@
 # Copyright (c) Kyutai, all rights reserved.
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
+# Modified by VoiceHub: replace external reshape helpers with native PyTorch.
 
 """
 Transformer model, with streaming support, + CUDA Graphable.
@@ -12,7 +13,6 @@ See `StreamingTransformer` for more information.
 from contextlib import ExitStack
 from dataclasses import dataclass
 import typing as tp
-from einops import rearrange
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -501,7 +501,16 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
         assert isinstance(in_proj, nn.Linear)
         dim = in_proj.weight.shape[0] // 3
         kv = nn.functional.linear(key, in_proj.weight[dim:])
-        k, v = rearrange(kv, "b t (p h d) -> p b h t d", p=2, h=self.num_heads)
+        batch, time, _ = kv.shape
+        k, v = (
+            kv.reshape(
+                batch,
+                time,
+                2,
+                self.num_heads,
+                -1,
+            ).permute(2, 0, 3, 1, 4)
+        )
         return k, v
 
     def update_streaming_cross_attention_src(
@@ -548,20 +557,39 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             assert isinstance(in_proj, nn.Linear)
             dim = in_proj.weight.shape[0] // 3
             q = nn.functional.linear(query, in_proj.weight[:dim])
-            q = rearrange(q, "b t (h d) -> b h t d", h=self.num_heads)
+            q = q.reshape(B, T, self.num_heads, -1).permute(0, 2, 1, 3)
             k, v = self._get_cross_attention(key, value)
         else:
             projected = apply_weights_per_step(
                 self.in_projs, self.weights_per_step_schedule, query, offset_cpu)
             if self.kv_repeat == 1:
-                q, k, v = rearrange(
-                    projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
+                q, k, v = (
+                    projected.reshape(
+                        B,
+                        T,
+                        3,
+                        self.num_heads,
+                        -1,
+                    ).permute(2, 0, 3, 1, 4)
                 )
             else:
-                q = rearrange(projected[:, :, :self.embed_dim], "b t (h d) -> b h t d", h=self.num_heads)
-                k, v = rearrange(
-                    projected[:, :, self.embed_dim:],
-                    "b t (p kh d) -> p b kh t d", p=2, kh=self.num_heads // self.kv_repeat
+                q = (
+                    projected[:, :, :self.embed_dim].reshape(
+                        B,
+                        T,
+                        self.num_heads,
+                        -1,
+                    ).permute(0, 2, 1, 3)
+                )
+                key_value_heads = self.num_heads // self.kv_repeat
+                k, v = (
+                    projected[:, :, self.embed_dim:].reshape(
+                        B,
+                        T,
+                        2,
+                        key_value_heads,
+                        -1,
+                    ).permute(2, 0, 3, 1, 4)
                 )
         if self.rope:
             q, k = self.rope(q, k, offset, time_before_heads=False)
@@ -584,7 +612,7 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             attn_bias = None
         x = F.scaled_dot_product_attention(q, k, v, attn_bias, dropout_p=0.0)
 
-        x = rearrange(x, "b h t d -> b t (h d)")
+        x = x.permute(0, 2, 1, 3).contiguous().reshape(B, T, -1)
         x = apply_weights_per_step(
             self.out_projs, self.weights_per_step_schedule, x, offset_cpu)
 

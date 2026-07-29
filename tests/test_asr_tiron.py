@@ -1,605 +1,433 @@
+from __future__ import annotations
+
+import json
 import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import contextmanager
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
 
-import numpy as np
+import torch
 
-from voicehub.modeling_outputs import ASROutput
+from voicehub import AutoConfig, AutoModelForSpeechRecognition
+from voicehub.architectures.whisper import WhisperConfig, WhisperModel
+from voicehub.architectures.whisper.checkpoint import huggingface_whisper_tensor_mapping
+from voicehub.architectures.whisper.tokenization import build_openai_whisper_special_tokens
+from voicehub.checkpointing import save_safetensors
 from voicehub.models.asr_tiron import TironASRConfig, TironForSpeechRecognition
+from voicehub.models.asr_tiron.metadata import SPEAKER_TOKEN_IDS, TIRON_CHECKPOINT_REVISION, TIRON_HARNESS_REVISION
+from voicehub.models.asr_whisper_native import NativeWhisperTrainingAdapter
+from voicehub.tokenization import encode_gpt2_token
+from voicehub.training.auto import AutoTrainingAdapter
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-@contextmanager
-def _temporary_modules(modules):
-    missing = object()
-    originals = {name: sys.modules.get(name, missing) for name in modules}
-    sys.modules.update(modules)
-    try:
-        yield
-    finally:
-        for name, original in originals.items():
-            if original is missing:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = original
+def _tiron_tokenizer_document():
+    mergeable = {bytes((value, )): value for value in range(256)}
+    mergeable.update({
+        b"he": 256,
+        b"hel": 257,
+        b"hell": 258,
+        b"hello": 259,
+        b"": 50_256,
+    })
+    vocabulary = {encode_gpt2_token(token): token_id for token, token_id in mergeable.items()}
+    special = dict(build_openai_whisper_special_tokens(
+        50_257,
+        num_languages=100,
+    ))
+    special.update({
+        f"<|speaker{index}|>": token_id
+        for index, token_id in enumerate(SPEAKER_TOKEN_IDS, start=1)
+    })
+    vocabulary["<|endoftext|>"] = special["<|endoftext|>"]
+    return {
+        "version":
+        "1.0",
+        "added_tokens": [{
+            "id": token_id,
+            "content": token,
+            "single_word": False,
+            "lstrip": False,
+            "rstrip": False,
+            "normalized": token.startswith("<|0."),
+            "special": (not token.startswith("<|0.") or token.startswith("<|speaker")),
+        } for token, token_id in sorted(
+            special.items(),
+            key=lambda item: item[1],
+        )],
+        "normalizer":
+        None,
+        "pre_tokenizer": {
+            "type": "ByteLevel",
+            "add_prefix_space": False,
+            "trim_offsets": True,
+            "use_regex": True,
+        },
+        "decoder": {
+            "type": "ByteLevel",
+            "add_prefix_space": True,
+            "trim_offsets": True,
+            "use_regex": True,
+        },
+        "model": {
+            "type": "BPE",
+            "dropout": None,
+            "unk_token": None,
+            "continuing_subword_prefix": "",
+            "end_of_word_suffix": "",
+            "fuse_unk": False,
+            "byte_fallback": False,
+            "ignore_merges": False,
+            "vocab": vocabulary,
+            "merges": [
+                ["h", "e"],
+                ["he", "l"],
+                ["hel", "l"],
+                ["hell", "o"],
+            ],
+        },
+    }
 
 
-class FakeTensor:
-
-    def __init__(self, values):
-        self.values = values
-        self.to_calls = []
-
-    def to(self, *args, **kwargs):
-        self.to_calls.append((args, kwargs))
-        return self
-
-    def tolist(self):
-        return self.values
-
-
-class RecordingFeatureExtractor:
-    sampling_rate = 16_000
-
-    def __init__(self):
-        self.calls = []
-        self.features = FakeTensor("features")
-
-    def __call__(self, audio, **kwargs):
-        self.calls.append((audio, kwargs))
-        return SimpleNamespace(input_features=self.features)
-
-
-class TironTokenizer:
-
-    def __init__(self):
-        self.vocabulary = {
-            "<|startoftranscript|>": 100,
-            "<|en|>": 101,
-            "<|zh|>": 102,
-            "<|transcribe|>": 103,
-            "<|endoftext|>": 104,
-            "<|notimestamps|>": 200,
-            "<|30.00|>": 1701,
-            "<|speaker1|>": 3000,
-            "<|speaker2|>": 3001,
-            "<|nospeech|>": 3002,
-        }
-        self.reverse_vocabulary = {value: key for key, value in self.vocabulary.items()}
-        self.text = {
-            10: " Thanks",
-            11: " everyone.",
-            12: " Let's start.",
-            13: " Morning!",
-            14: " trailing words",
-        }
-        self.unk_token_id = -1
-        self.eos_token_id = 104
-        self.pad_token_id = 104
-        self.calls = []
-        self.pad_calls = []
-        self.saved_to = None
-
-    def convert_tokens_to_ids(self, token):
-        return self.vocabulary.get(token, self.unk_token_id)
-
-    def convert_ids_to_tokens(self, token_id):
-        return self.reverse_vocabulary.get(token_id, f"text-{token_id}")
-
-    def get_decoder_prompt_ids(
-        self,
-        *,
-        language,
-        task,
-        no_timestamps=False,
-    ):
-        del no_timestamps
-        if language == "english" and task == "transcribe":
-            return [(1, self.vocabulary["<|en|>"])]
-        return []
-
-    def decode(self, token_ids, **kwargs):
-        del kwargs
-        return "".join(self.text.get(token_id, "") for token_id in token_ids)
-
-    def __call__(self, text, **kwargs):
-        self.calls.append((text, kwargs))
-        values = [text] if isinstance(text, str) else list(text)
-        return {
-            "input_ids": [[3000, 201, 10, 251] for _ in values],
-        }
-
-    def pad(self, encoded, **kwargs):
-        self.pad_calls.append((encoded, kwargs))
-        sequences = encoded["input_ids"]
-        width = max(len(row) for row in sequences)
-        return {
-            "input_ids": [[*row, *([self.pad_token_id] * (width - len(row)))] for row in sequences],
-            "attention_mask": [[*([1] * len(row)), *([0] * (width - len(row)))] for row in sequences],
-        }
-
-    def save_pretrained(self, directory):
-        self.saved_to = Path(directory)
-
-
-class RecordingProcessor:
-
-    def __init__(self):
-        self.feature_extractor = RecordingFeatureExtractor()
-        self.tokenizer = TironTokenizer()
-        self.calls = []
-        self.saved_to = None
-
-    def __call__(self, audio=None, **kwargs):
-        self.calls.append((audio, kwargs))
-        return {
-            "input_features": "training-features",
-        }
-
-    def save_pretrained(self, directory):
-        self.saved_to = Path(directory)
-
-
-class FakeNativeModel:
-
-    def __init__(self, generated=None):
-        self.config = SimpleNamespace(
-            forced_decoder_ids=[(1, 100)],
-            suppress_tokens=[1],
-            begin_suppress_tokens=[2],
-        )
-        self.generation_config = SimpleNamespace(
-            forced_decoder_ids=[(1, 100)],
-            language="en",
-            task="transcribe",
-            suppress_tokens=[1],
-            begin_suppress_tokens=[2],
-            no_timestamps_token_id=200,
-            no_speech_threshold=0.6,
-        )
-        self.device = "cpu"
-        self.dtype = "float32"
-        self.generated = generated or [[]]
-        self.generate_calls = []
-        self.training = True
-        self.saved_to = None
-
-    def to(self, device):
-        self.device = device
-        return self
-
-    def eval(self):
-        self.training = False
-        return self
-
-    def train(self, mode=True):
-        self.training = mode
-        return self
-
-    def generate(self, **kwargs):
-        self.generate_calls.append(kwargs)
-        return FakeTensor(self.generated)
-
-    def save_pretrained(self, directory, **kwargs):
-        self.saved_to = (Path(directory), kwargs)
-
-
-def _fake_transformers(*, model_type="whisper"):
-    module = ModuleType("transformers")
-    processor = RecordingProcessor()
-    native_model = FakeNativeModel()
-    native_config = SimpleNamespace(
-        model_type=model_type,
-        architectures=["WhisperForConditionalGeneration"],
+def _tiny_tiron_artifact(root: Path):
+    torch.manual_seed(17)
+    config = WhisperConfig(
+        vocab_size=51_904,
+        num_mel_bins=4,
+        d_model=8,
+        encoder_layers=1,
+        encoder_attention_heads=2,
+        encoder_ffn_dim=16,
+        decoder_layers=1,
+        decoder_attention_heads=2,
+        decoder_ffn_dim=16,
+        max_source_positions=4,
+        max_target_positions=24,
+        use_cache=False,
+        pad_token_id=50_256,
+        bos_token_id=50_257,
+        eos_token_id=50_257,
+        decoder_start_token_id=50_258,
     )
-
-    class AutoConfig:
-
-        @classmethod
-        def from_pretrained(cls, source, **kwargs):
-            del cls, source, kwargs
-            return native_config
-
-    class AutoProcessor:
-
-        @classmethod
-        def from_pretrained(cls, source, **kwargs):
-            del cls, source, kwargs
-            return processor
-
-    class AutoModelForSpeechSeq2Seq:
-        calls = []
-
-        @classmethod
-        def from_pretrained(cls, source, **kwargs):
-            cls.calls.append((source, kwargs))
-            return native_model
-
-    module.AutoConfig = AutoConfig
-    module.AutoProcessor = AutoProcessor
-    module.AutoModelForSpeechSeq2Seq = AutoModelForSpeechSeq2Seq
-    module.processor = processor
-    module.native_model = native_model
-    return module
-
-
-def _fake_torch():
-    module = ModuleType("torch")
-    module.long = "long"
-    module.tensor_calls = []
-
-    def tensor(values, **kwargs):
-        module.tensor_calls.append((values, kwargs))
-        return FakeTensor(values)
-
-    class InferenceMode:
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            del exc_type, exc, traceback
-            return False
-
-    module.tensor = tensor
-    module.inference_mode = InferenceMode
-    return module
+    reference = WhisperModel(config)
+    values = config.to_dict()
+    values["architectures"] = ["WhisperForConditionalGeneration"]
+    (root / "config.json").write_text(
+        json.dumps(values),
+        encoding="utf-8",
+    )
+    (root / "tokenizer.json").write_text(
+        json.dumps(_tiron_tokenizer_document()),
+        encoding="utf-8",
+    )
+    (root / "generation_config.json").write_text(
+        json.dumps({
+            "eos_token_id": 50_257,
+            "decoder_start_token_id": 50_258,
+            "no_timestamps_token_id": 50_364,
+            "is_multilingual": True,
+            "task_to_id": {
+                "translate": 50_359,
+                "transcribe": 50_360,
+            },
+            "lang_to_id": {
+                "<|en|>": 50_259,
+                "<|zh|>": 50_260,
+            },
+            "suppress_tokens": [],
+            "begin_suppress_tokens": [],
+            "max_new_tokens": 20,
+        }),
+        encoding="utf-8",
+    )
+    (root / "preprocessor_config.json").write_text(
+        json.dumps({
+            "feature_size": 4,
+            "sampling_rate": 16_000,
+            "hop_length": 160,
+            "n_fft": 400,
+        }),
+        encoding="utf-8",
+    )
+    state = reference.state_dict()
+    source = {
+        source_name: state[target_name]
+        for source_name, target_name in huggingface_whisper_tensor_mapping(values)
+    }
+    save_safetensors(source, root / "model.safetensors")
+    return reference
 
 
 class TironConfigurationTests(unittest.TestCase):
 
-    def test_config_locks_whisper_sequence_to_sequence_runtime(self):
+    def test_config_pins_public_artifacts_and_validates_grammar_controls(self):
         model = TironForSpeechRecognition()
 
         self.assertEqual(model.config.model_type, "asr_tiron")
         self.assertEqual(model.config.architecture_family, "speech-seq2seq")
         self.assertEqual(model.config.default_language, "en")
         self.assertEqual(model.config.name_or_path, "Trelis/tiron")
-        self.assertEqual(
-            model.config.to_dict()["default_language"],
-            "en",
-        )
+        self.assertEqual(model.config.revision, TIRON_CHECKPOINT_REVISION)
+        self.assertTrue(model.config.constrained_decoding)
         with self.assertRaisesRegex(ValueError, "speech-seq2seq"):
             TironASRConfig(architecture_family="auto")
         with self.assertRaisesRegex(ValueError, "default_language"):
             TironASRConfig(default_language="")
         with self.assertRaisesRegex(ValueError, "pipeline_kwargs"):
             TironASRConfig(pipeline_kwargs={"batch_size": 2})
+        with self.assertRaisesRegex(ValueError, "between 1 and 8"):
+            TironASRConfig(max_speakers=9)
 
-    def test_package_import_is_dependency_light(self):
-        command = (
-            "import sys; "
-            "import voicehub.models.asr_tiron; "
-            "print('transformers' in sys.modules, 'torch' in sys.modules)")
+    def test_public_import_loads_no_external_runtime_or_torch(self):
+        code = """
+import json
+import sys
+from voicehub.models.asr_tiron import TironForSpeechRecognition
+names = ("torch", "transformers", "safetensors", "torchaudio")
+print(json.dumps({name: name in sys.modules for name in names}))
+"""
         result = subprocess.run(
-            [sys.executable, "-c", command],
+            [sys.executable, "-c", code],
             cwd=PROJECT_ROOT,
             check=True,
             capture_output=True,
             text=True,
         )
 
-        self.assertEqual(result.stdout.strip(), "False False")
-
-
-class TironLoadingTests(unittest.TestCase):
-
-    def test_loading_uses_native_whisper_and_applies_published_generation_setup(self, ):
-        fake_transformers = _fake_transformers()
-        model = TironForSpeechRecognition(device="cpu")
-
-        with _temporary_modules({"transformers": fake_transformers}):
-            model._load_pretrained_model()
-
-        native_model = fake_transformers.native_model
-        self.assertEqual(model.architecture_family, "speech-seq2seq")
-        self.assertIs(model.model, native_model)
         self.assertEqual(
-            fake_transformers.AutoModelForSpeechSeq2Seq.calls[0][0],
-            "Trelis/tiron",
-        )
-        self.assertFalse(fake_transformers.AutoModelForSpeechSeq2Seq.calls[0][1]["trust_remote_code"], )
-        self.assertIsNone(native_model.config.forced_decoder_ids)
-        self.assertEqual(native_model.config.suppress_tokens, [])
-        self.assertEqual(native_model.config.begin_suppress_tokens, [])
-        self.assertIsNone(native_model.generation_config.forced_decoder_ids)
-        self.assertIsNone(native_model.generation_config.language)
-        self.assertIsNone(native_model.generation_config.task)
-        self.assertIsNone(native_model.generation_config.suppress_tokens)
-        self.assertIsNone(native_model.generation_config.begin_suppress_tokens, )
-        self.assertIsNone(native_model.generation_config.no_speech_threshold, )
-        self.assertFalse(hasattr(
-            native_model.generation_config,
-            "no_timestamps_token_id",
-        ))
-
-    def test_loading_rejects_non_whisper_checkpoints(self):
-        fake_transformers = _fake_transformers(model_type="moonshine")
-        model = TironForSpeechRecognition(
-            TironASRConfig(name_or_path="publisher/not-tiron"),
-            device="cpu",
+            json.loads(result.stdout),
+            {
+                "torch": False,
+                "transformers": False,
+                "safetensors": False,
+                "torchaudio": False,
+            },
         )
 
-        with _temporary_modules({"transformers": fake_transformers}):
-            with self.assertRaisesRegex(ValueError, "native Whisper"):
-                model._load_pretrained_model()
 
+class TironNativeRuntimeTests(unittest.TestCase):
 
-class TironInferenceTests(unittest.TestCase):
+    def test_strict_safetensors_load_training_backward_and_target_grammar(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reference = _tiny_tiron_artifact(root)
+            wrapper = TironForSpeechRecognition(
+                TironASRConfig(name_or_path=root),
+                device="cpu",
+            )
+            wrapper.load_for_training()
 
-    @staticmethod
-    def _loaded_model(generated):
-        model = TironForSpeechRecognition(device="cpu")
-        model.model = FakeNativeModel(generated=generated)
-        model.transformers_processor = RecordingProcessor()
-        model.architecture_family = "speech-seq2seq"
-        return model
+            for name, expected in reference.state_dict().items():
+                torch.testing.assert_close(
+                    wrapper.model.state_dict()[name],
+                    expected,
+                    rtol=0,
+                    atol=0,
+                )
 
-    def test_direct_generation_preserves_speakers_timestamps_and_all_text(self):
-        timestamp_begin = 201
-        generated = [[
-            100,
-            101,
-            103,
-            3000,
-            timestamp_begin,
-            10,
-            11,
-            timestamp_begin + 148,
-            timestamp_begin + 176,
-            12,
-            timestamp_begin + 240,
-            3001,
-            timestamp_begin + 149,
-            13,
-            timestamp_begin + 170,
-            104,
-        ]]
-        model = self._loaded_model(generated)
-        fake_torch = _fake_torch()
+            batch = wrapper.prepare_training_inputs(
+                {
+                    "audio": torch.zeros(800),
+                    "sampling_rate": 16_000,
+                    "language": "en",
+                    "text": ("<|speaker1|><|0.00|>"
+                             "hello"
+                             "<|0.04|>"),
+                },
+                phase="speech_recognition",
+            )
+            self.assertEqual(
+                batch["labels"].tolist(),
+                [
+                    50_259,
+                    50_360,
+                    51_866,
+                    50_365,
+                    259,
+                    50_367,
+                    50_257,
+                ],
+            )
+            output = wrapper.model(
+                batch["input_features"].unsqueeze(0),
+                labels=batch["labels"].unsqueeze(0),
+            )
+            self.assertIsNotNone(output.loss)
+            self.assertTrue(torch.isfinite(output.loss))
+            output.loss.backward()
+            self.assertIsNotNone(wrapper.model.decoder.token_embedding.weight.grad)
 
-        with _temporary_modules({"torch": fake_torch}):
-            output = model._transcribe(
-                np.zeros(8_000, dtype=np.float32),
+            with self.assertRaisesRegex(ValueError, "speaker1"):
+                wrapper.prepare_training_inputs(
+                    {
+                        "audio": torch.zeros(800),
+                        "sampling_rate": 16_000,
+                        "text": ("<|speaker2|><|0.00|>"
+                                 "hello"
+                                 "<|0.04|>"),
+                    },
+                    phase="speech_recognition",
+                )
+
+    def test_inference_preserves_speakers_timestamps_and_trailing_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _tiny_tiron_artifact(root)
+            wrapper = TironForSpeechRecognition(
+                TironASRConfig(name_or_path=root),
+                device="cpu",
+            )
+            wrapper.load()
+            generated = [
+                51_866,
+                50_365,
+                259,
+                50_367,
+                51_867,
+                50_368,
+                259,
+                50_257,
+            ]
+            calls = []
+
+            def generate_window(
+                input_features,
+                *,
+                language,
+                max_new_tokens,
+                max_speakers,
+                constrained_decoding,
+            ):
+                calls.append({
+                    "shape": tuple(input_features.shape),
+                    "language": language,
+                    "max_new_tokens": max_new_tokens,
+                    "max_speakers": max_speakers,
+                    "constrained_decoding": constrained_decoding,
+                })
+                return generated, language
+
+            wrapper._generate_window = generate_window
+            result = wrapper.transcribe(
+                torch.zeros(1_600),
                 sampling_rate=16_000,
                 return_timestamps=True,
+                max_speakers=2,
             )
 
-        self.assertIsInstance(output, ASROutput)
-        self.assertEqual(
-            output.text,
-            "Thanks everyone. Let's start. Morning!",
-        )
+        self.assertEqual(result.text, "hello hello")
         self.assertEqual(
             [(
                 segment.speaker,
                 segment.start,
                 segment.end,
                 segment.text,
-            ) for segment in output.segments],
+            ) for segment in result.segments],
             [
-                ("SPEAKER_00", 0.0, 2.96, "Thanks everyone."),
-                ("SPEAKER_00", 3.52, 4.8, "Let's start."),
-                ("SPEAKER_01", 2.98, 3.4, "Morning!"),
+                ("SPEAKER_00", 0.0, 0.04, "hello"),
+                ("SPEAKER_01", 0.06, 0.1, "hello"),
             ],
         )
+        self.assertEqual(result.metadata["backend"], "voicehub-native")
         self.assertEqual(
-            output.segments[0].metadata["local_speaker_index"],
-            1,
+            result.metadata["reference_harness_revision"],
+            TIRON_HARNESS_REVISION,
         )
-        self.assertEqual(output.metadata["backend"], "tiron")
-        self.assertTrue(output.metadata["native_segment_timestamps"])
-
-        generation = model.model.generate_calls[0]
-        self.assertEqual(generation["max_new_tokens"], 444)
-        self.assertFalse(generation["do_sample"])
-        self.assertEqual(generation["num_beams"], 1)
         self.assertEqual(
-            generation["decoder_input_ids"].tolist(),
-            [[100, 101, 103]],
-        )
-        feature_call = model.transformers_processor.feature_extractor.calls[0]
-        self.assertEqual(feature_call[1]["sampling_rate"], 16_000)
-        self.assertEqual(feature_call[1]["return_tensors"], "pt")
-        self.assertEqual(
-            fake_torch.tensor_calls[0][1],
-            {
-                "device": "cpu",
-                "dtype": "long",
-            },
+            calls,
+            [{
+                "shape": (1, 4, 8),
+                "language": "en",
+                "max_new_tokens": 444,
+                "max_speakers": 2,
+                "constrained_decoding": True,
+            }],
         )
 
-    def test_text_without_timestamps_is_not_dropped(self):
-        model = self._loaded_model([[
-            100,
-            101,
-            103,
-            3000,
-            10,
-            11,
-            14,
-            104,
-        ]])
-        fake_torch = _fake_torch()
-
-        with _temporary_modules({"torch": fake_torch}):
-            output = model._transcribe(
-                np.zeros(800, dtype=np.float32),
-                sampling_rate=16_000,
-                language="english",
-            )
-
-        self.assertEqual(
-            output.text,
-            "Thanks everyone. trailing words",
-        )
-        self.assertEqual(len(output.segments), 1)
-        self.assertIsNone(output.segments[0].start)
-        self.assertIsNone(output.segments[0].end)
-        self.assertEqual(output.language, "english")
-
-    def test_native_nospeech_token_produces_an_empty_transcript(self):
-        model = self._loaded_model([[
-            100,
-            101,
-            103,
-            3002,
-            104,
-        ]])
-        fake_torch = _fake_torch()
-
-        with _temporary_modules({"torch": fake_torch}):
-            output = model._transcribe(
-                np.zeros(800, dtype=np.float32),
-                sampling_rate=16_000,
-            )
-
-        self.assertEqual(output.text, "")
-        self.assertEqual(output.segments, ())
-
-    def test_invalid_controls_fail_before_generation(self):
-        model = self._loaded_model([[]])
+    def test_invalid_inference_controls_fail_before_generation(self):
+        wrapper = TironForSpeechRecognition(device="cpu")
         cases = (
             ({
-                "task": "translate",
-            }, "translation"),
+                "task": "translate"
+            }, "not translation"),
             ({
-                "return_timestamps": "word",
+                "return_timestamps": "word"
             }, "word-level"),
             ({
-                "chunk_length_s": 15.0,
-            }, "meeting harness"),
+                "chunk_length_s": 15.0
+            }, "one window"),
             ({
-                "batch_size": 2,
+                "batch_size": 2
             }, "one audio window"),
             ({
-                "num_beams": 2,
+                "num_beams": 2
             }, "num_beams=1"),
             ({
-                "hotwords": ("VoiceHub", ),
+                "hotwords": ("VoiceHub", )
             }, "hotword"),
-            ({
-                "language": "auto",
-            }, "explicit"),
         )
-        fake_torch = _fake_torch()
+        for kwargs, message in cases:
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaisesRegex(ValueError, message):
+                    wrapper._transcribe(
+                        torch.zeros(800),
+                        sampling_rate=16_000,
+                        **kwargs,
+                    )
+        for invalid_limit in (True, 1.5):
+            with self.subTest(max_new_tokens=invalid_limit):
+                with self.assertRaisesRegex(TypeError, "must be an integer"):
+                    wrapper._transcribe(
+                        torch.zeros(800),
+                        sampling_rate=16_000,
+                        max_new_tokens=invalid_limit,
+                    )
 
-        with _temporary_modules({"torch": fake_torch}):
-            for kwargs, message in cases:
-                with self.subTest(kwargs=kwargs):
-                    with self.assertRaisesRegex(ValueError, message):
-                        model._transcribe(
-                            np.zeros(800, dtype=np.float32),
-                            sampling_rate=16_000,
-                            **kwargs,
-                        )
-
-    def test_audio_longer_than_native_window_is_rejected(self):
-        model = self._loaded_model([[]])
-        fake_torch = _fake_torch()
-
-        with _temporary_modules({"torch": fake_torch}):
-            with self.assertRaisesRegex(ValueError, "at most 30 seconds"):
-                model._transcribe(
-                    np.zeros(480_100, dtype=np.float32),
-                    sampling_rate=16_000,
-                )
-
-
-class TironTrainingAndExportTests(unittest.TestCase):
-
-    def test_training_uses_checkpoint_tokenizer_without_stripping_tiron_tokens(self, ):
-        model = TironForSpeechRecognition(device="cpu")
-        processor = RecordingProcessor()
-        model.transformers_processor = processor
-        transcript = "<|speaker1|><|0.00|> hello<|1.00|>"
-
-        batch = model.prepare_training_inputs(
-            {
-                "audio": np.zeros(800, dtype=np.float32),
-                "sampling_rate": 16_000,
-                "text": transcript,
-            },
-            phase="asr",
-        )
-
-        self.assertEqual(batch["input_features"], "training-features")
-        self.assertEqual(
-            processor.calls[0][1],
-            {
-                "sampling_rate": 16_000,
-                "padding": "max_length",
-                "truncation": True,
-                "return_tensors": "pt",
-            },
-        )
-        self.assertEqual(
-            batch["labels"],
-            [[101, 103, 3000, 201, 10, 251, 104]],
-        )
-        self.assertNotIn(200, batch["labels"][0])
-        self.assertEqual(processor.tokenizer.calls[0][0], [transcript])
-        self.assertEqual(
-            processor.tokenizer.calls[0][1],
-            {
-                "add_special_tokens": False,
-                "padding": False,
-            },
-        )
-        self.assertEqual(
-            processor.tokenizer.pad_calls[0],
-            (
-                {
-                    "input_ids": [[
-                        101,
-                        103,
-                        3000,
-                        201,
-                        10,
-                        251,
-                        104,
-                    ]],
-                },
-                {
-                    "padding": True,
-                    "return_attention_mask": True,
-                    "return_tensors": "pt",
-                },
-            ),
-        )
-
-    def test_training_accepts_safetensors_and_rejects_serving_artifacts(self):
+    def test_training_rejects_serving_artifacts_before_loading(self):
         TironForSpeechRecognition(
-            TironASRConfig(name_or_path="publisher/tiron.safetensors"), )._validate_training_runtime()
-
+            TironASRConfig(name_or_path="publisher/tiron.safetensors"))._validate_training_runtime()
         with self.assertRaisesRegex(ValueError, "inference-only"):
             TironForSpeechRecognition(
-                TironASRConfig(name_or_path="publisher/tiron.gguf"), )._validate_training_runtime()
+                TironASRConfig(name_or_path="publisher/tiron.gguf"))._validate_training_runtime()
 
-    def test_native_export_saves_safe_weights_and_checkpoint_processor(self):
-        model = TironForSpeechRecognition(device="cpu")
-        model.model = FakeNativeModel()
-        model.transformers_processor = RecordingProcessor()
-
+    def test_native_training_adapter_exports_and_reloads_complete_artifact(self):
         with tempfile.TemporaryDirectory() as directory:
-            destination = Path(directory) / "native"
-            model._save_pretrained(destination)
+            root = Path(directory)
+            reference = _tiny_tiron_artifact(root)
+            wrapper = TironForSpeechRecognition(
+                TironASRConfig(name_or_path=root),
+                device="cpu",
+            )
+            adapter = AutoTrainingAdapter.from_model(wrapper)
+            self.assertIsInstance(adapter, NativeWhisperTrainingAdapter)
 
-        self.assertEqual(
-            model.model.saved_to,
-            (destination, {
-                "safe_serialization": True,
-            }),
-        )
-        self.assertEqual(
-            model.transformers_processor.saved_to,
-            destination,
-        )
+            export = root / "export"
+            adapter.save_pretrained(export)
+            exported_values = json.loads((export / "config.json").read_text(encoding="utf-8"))
+            auto_config = AutoConfig.from_pretrained(export)
+            reloaded = AutoModelForSpeechRecognition.from_pretrained(
+                export,
+                config=auto_config,
+                device="cpu",
+                lazy_load=False,
+            )
+
+            self.assertEqual(exported_values["model_type"], "asr_tiron")
+            self.assertEqual(
+                exported_values["tiron_token_grammar"],
+                "speaker_blocks-v1",
+            )
+            self.assertIsInstance(auto_config, TironASRConfig)
+            self.assertIsInstance(reloaded, TironForSpeechRecognition)
+            for name, expected in reference.state_dict().items():
+                torch.testing.assert_close(
+                    reloaded.model.state_dict()[name],
+                    expected,
+                    rtol=0,
+                    atol=0,
+                )
 
 
 if __name__ == "__main__":

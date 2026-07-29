@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, Type
 
-import numpy as np
 import torch
 
 
@@ -22,10 +21,11 @@ def serialize_type(self) -> Dict:
     serialized = {}
 
     if isinstance(self, torch.Tensor):
+        materialized = self.detach().to(device="cpu").contiguous()
         serialized["__type__"] = "Tensor"
-        serialized["buffer"] = self.numpy().tobytes()
-        serialized["dtype"] = str(self.dtype)
-        serialized["shape"] = list(self.shape)
+        serialized["buffer"] = bytes(materialized.untyped_storage())
+        serialized["dtype"] = str(materialized.dtype)
+        serialized["shape"] = list(materialized.shape)
         return serialized
 
     # normal type
@@ -54,13 +54,32 @@ def deserialize_type(cls_map: Dict[str, Type], data: Dict) -> Any:
     if type_name == "Tensor":
         buffer = data["buffer"]
         dtype_str = data["dtype"].replace("torch.", "")
-        np_dtype = getattr(np, dtype_str)
         assert isinstance(buffer, bytes)
-        np_tensor = np.frombuffer(buffer, dtype=np_dtype)
+        dtype = getattr(torch, dtype_str, None)
+        if not isinstance(dtype, torch.dtype):
+            raise ValueError(f"Unsupported serialized tensor dtype {dtype_str!r}.")
+        tensor = torch.frombuffer(bytearray(buffer), dtype=dtype)
         shape = data.get("shape")
         if shape is not None:
-            np_tensor = np_tensor.reshape(shape)
-        return torch.from_numpy(np_tensor.copy())
+            if (
+                not isinstance(shape, list)
+                or any(
+                    isinstance(dimension, bool)
+                    or not isinstance(dimension, int)
+                    or dimension < 0
+                    for dimension in shape
+                )
+            ):
+                raise ValueError("Serialized tensor shape must contain non-negative integers.")
+            expected = 1
+            for dimension in shape:
+                expected *= dimension
+            if tensor.numel() != expected:
+                raise ValueError(
+                    "Serialized tensor byte length does not match its shape."
+                )
+            tensor = tensor.reshape(shape)
+        return tensor.clone()
 
     cls = cls_map[type_name]
     kwargs = {}

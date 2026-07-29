@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import torch
-import torchaudio
-from huggingface_hub import hf_hub_download
 
 from voicehub.components.audio.codecs._compat import normalize_loudness
+from voicehub.hub import resolve_pretrained_file
+from voicehub.processing.waveform import load_pcm_wave, resample_waveform
 
 _CODEC_DEFAULT = object()
 
@@ -71,7 +71,7 @@ class DACVAECodec:
             location = location[len("hf://") :]
         if not Path(location).exists() and "/" in location and not location.endswith(".pth"):
             try:
-                location = hf_hub_download(repo_id=location, filename="weights.pth")
+                location = str(resolve_pretrained_file(location, "weights.pth"))
                 print(f"[codec] dacvae: hf://{repo_id} -> {location}", flush=True)
             except Exception:
                 # Let DACVAE.load surface a clearer error if this is not a valid path/repo.
@@ -189,7 +189,19 @@ class DACVAECodec:
         if waveform.shape[1] != 1:
             waveform = waveform.mean(dim=1, keepdim=True)
         if sample_rate != self.sample_rate:
-            waveform = torchaudio.functional.resample(waveform, sample_rate, self.sample_rate)
+            rows = [
+                resample_waveform(
+                    item,
+                    sample_rate,
+                    self.sample_rate,
+                )
+                for item in waveform.reshape(-1, waveform.shape[-1])
+            ]
+            waveform = torch.stack(rows, dim=0).reshape(
+                waveform.shape[0],
+                waveform.shape[1],
+                -1,
+            )
 
         if normalize_db is _CODEC_DEFAULT:
             effective_normalize_db = self.normalize_db
@@ -258,16 +270,6 @@ class DACVAECodec:
         return self.model.decode(z)
 
     def encode_file(self, path: str | Path) -> torch.Tensor:
-        try:
-            wav, sr = torchaudio.load(str(path))
-        except RuntimeError:
-            import soundfile as sf
-
-            data, sr = sf.read(str(path), dtype="float32")
-            wav = torch.from_numpy(data)
-            if wav.ndim == 1:
-                wav = wav.unsqueeze(0)
-            else:
-                wav = wav.T
+        wav, sr = load_pcm_wave(path, preserve_channels=True)
         wav = wav.unsqueeze(0)  # (1, C, T)
         return self.encode_waveform(wav, sr).cpu()

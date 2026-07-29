@@ -1,7 +1,8 @@
-"""Sherpa-ONNX voice activity detection."""
+"""Native TEN/Silero VAD with Sherpa-compatible streaming semantics."""
 
 from voicehub.models.vad_sherpa_onnx.configuration_vad_sherpa_onnx import SherpaONNXVADConfig
 from voicehub.models.vad_sherpa_onnx.modeling_vad_sherpa_onnx import (
+    SherpaNativeVADSession,
     SherpaONNXVADForVoiceActivityDetection,
     SherpaONNXVADSession,
 )
@@ -10,4 +11,5 @@ __all__ = [
     "SherpaONNXVADConfig",
     "SherpaONNXVADForVoiceActivityDetection",
     "SherpaONNXVADSession",
+    "SherpaNativeVADSession",
 ]

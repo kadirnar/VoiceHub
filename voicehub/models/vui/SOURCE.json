@@ -1,0 +1,60 @@
+{
+  "architecture": "vui-100m-fluac",
+  "implementation": "voicehub-native",
+  "source": {
+    "repository": "https://github.com/fluxions-ai/vui",
+    "revision": "8656f9f175161cb19a7f6c1ff4374c9b56739b4a",
+    "license": "MIT",
+    "notes": "Pinned to the final June 2025 Fluac-based 100M family represented by VoiceHub's existing vui provider. The upstream project replaced this family with Vui Nano in May 2026; Nano is a distinct graph/checkpoint and is not silently treated as compatible."
+  },
+  "checkpoint": {
+    "repository": "fluxions/vui",
+    "revision": "8dc2bd9993a8118b6e2b71f3d9d92d1deb80e5f7",
+    "license": "MIT",
+    "model": {
+      "filename": "vui-abraham-100m.pt",
+      "sha256": "28353f13788c353160efbfc4fa5f5db56844746d3de9a92531dfee704cc394ff",
+      "size": 198204301
+    },
+    "codec": {
+      "filename": "fluac-22hz-22khz.pt",
+      "sha256": "04d1ee6567b5eaade6720bf7cc0241fbbd3c0aaeca00ac37cd1656afa08f3c96",
+      "size": 306573425
+    },
+    "format": "restricted torch weights-only pickle"
+  },
+  "dependencies_removed": [
+    "einops",
+    "inflect",
+    "numpy",
+    "pandas",
+    "pydantic",
+    "pyannote.audio",
+    "scipy",
+    "torchaudio",
+    "transformers"
+  ],
+  "verification": {
+    "byt5_boundary": "Exact UTF-8 byte-plus-three IDs, EOS, padding, and attention-mask vectors were checked against Transformers ByT5Tokenizer 4.52.4.",
+    "fsq_max_abs_error": 0.0,
+    "fsq_indices_exact": true,
+    "mha_max_abs_error": 0.0,
+    "rope_max_abs_error": 0.0,
+    "reference_runtime": "Pinned upstream source on deterministic synthetic tensors."
+  },
+  "training": {
+    "objective": "delayed-codebook teacher-forced cross-entropy",
+    "author_verified_recipe": false,
+    "boundary": "The released repository contains inference code and checkpoints but no original optimizer, dataset, or training loop. VoiceHub's differentiable objective is architecture-consistent and explicitly reconstructed.",
+    "native_export": {
+      "format": "safetensors",
+      "layout": [
+        "config.json",
+        "model.safetensors",
+        "codec.safetensors"
+      ],
+      "reloadable": true,
+      "notes": "VoiceHub's dependency-free Safetensors implementation writes the fine-tuned acoustic graph and frozen Fluac graph separately. config.json records both validated graph configurations and the versioned artifact contract."
+    }
+  }
+}

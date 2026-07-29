@@ -1,0 +1,85 @@
+{
+  "architecture": "ESPnet LibriSpeech Transformer e18",
+  "audit_date": "2026-07-28",
+  "checkpoint": {
+    "asr": {
+      "filename": "exp/asr_train_asr_transformer_e18_raw_bpe_sp/54epoch.pth",
+      "sha256": "1ab4b8ea9c656aac1044f628564f8476121f5624b62c26bf81c923cea2a09578",
+      "size": 397647953,
+      "stored_values": 99385344,
+      "tensor_count": 462,
+      "tensor_fingerprint": "0709694e76ea178d45c7d7765efeb90f58d83e95136beb1a54aed1e34ff6fd7e"
+    },
+    "language_model": {
+      "filename": "exp/lm_train_lm_adam_bpe/17epoch.pth",
+      "sha256": "ed0c5dbed55057a513efcba58cabaa0ae3e8ceb754cff1ea19920cc2160ee091",
+      "size": 619075639,
+      "stored_values": 154768264,
+      "tensor_count": 19,
+      "tensor_fingerprint": "f1d94bea3bc029fc9da0417efdbd98a94d281456f032aacc1452bbbd6dc4a274"
+    },
+    "license": "CC-BY-4.0",
+    "repository": "espnet/shinji-watanabe-librispeech_asr_train_asr_transformer_e18_raw_bpe_sp_valid.acc.best",
+    "revision": "bc6bbd771cec698f070640ee677a66719181f0a2"
+  },
+  "dependency_boundary": {
+    "conversion_only": [
+      "PyTorch weights_only restricted pickle reader"
+    ],
+    "steady_state": [
+      "Python standard library",
+      "PyTorch",
+      "VoiceHub"
+    ]
+  },
+  "graph": {
+    "decoder": "6 pre-norm Transformer blocks, 512 hidden, 8 heads, 2048 feed-forward",
+    "encoder": "conv2d6 plus 18 pre-norm Transformer blocks, 512 hidden, 8 heads, 2048 feed-forward",
+    "frontend": "16 kHz, 512-point centered Hann STFT, 128-sample hop, 80-bin checkpoint-stored librosa Slaney log-mel, global MVN",
+    "language_model": "4-layer batch-first LSTM, 2048 embedding/hidden units",
+    "objective": "0.3 CTC plus 0.7 label-smoothed autoregressive sequence loss",
+    "vocabulary_size": 5000
+  },
+  "parity": {
+    "checkpoint_inventory": "Obtained from the legacy pickle metadata and persistent storage descriptors via bounded HTTP ranges; no tensor payload was downloaded.",
+    "source_release_results": {
+      "test_clean_wer_beam20": 2.6,
+      "test_other_wer_beam20": 6.2
+    },
+    "warning": "Published WER includes the exact released language model and decoding recipe. VoiceHub does not claim those numbers for modified weights, decoding settings, or data."
+  },
+  "scope": {
+    "supported": [
+      "The exact ESPnet 0.8.0 LibriSpeech Transformer e18 graph",
+      "VoiceHub-native artifacts exported from that graph",
+      "Explicit custom configurations for new training runs"
+    ],
+    "unsupported": [
+      "Conformer, Branchformer, transducer, RNN, streaming, and arbitrary ESPnet YAML graphs",
+      "The dead kan-bayashi Hugging Face identifier as a download source"
+    ]
+  },
+  "source": {
+    "license": "Apache-2.0",
+    "repository": "https://github.com/espnet/espnet",
+    "revision": "75db853dd26a40d3d4dd979b2ff2457fbbb0cd69"
+  },
+  "tokenizer": {
+    "model_filename": "data/token_list/bpe_unigram5000/bpe.model",
+    "model_sha256": "bdf1e0d937462a6e0487016db635feba953802be53b8d9d51cb59bc2cdcc4786",
+    "model_size": 324480,
+    "runtime": "VoiceHub native SentencePiece unigram reader",
+    "token_list_sha256": "48ec6eedbee6a22e2a9b51adeb425af3c39db23128086c015240f591601a3ea3"
+  },
+  "training": {
+    "augmentation": "published bicubic time warp plus two frequency and two time masks",
+    "gradient_accumulation": 6,
+    "gradient_clip_norm": 5.0,
+    "optimizer": "Adam, learning rate 0.002",
+    "scheduler": "Noam/WarmupLR, 25000 warmup steps",
+    "supported_inputs": [
+      "raw waveforms plus transcripts",
+      "precomputed log-mel features plus token labels"
+    ]
+  }
+}

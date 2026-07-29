@@ -1,0 +1,57 @@
+{
+  "architecture": "speechbrain-crdnn-asr",
+  "implementation": "voicehub-native",
+  "source": {
+    "repository": "https://github.com/speechbrain/speechbrain",
+    "revision": "2abd9f01d8437740c70df1b4779e81cc45641e0e",
+    "license": "Apache-2.0"
+  },
+  "artifact": {
+    "repository": "speechbrain/asr-crdnn-rnnlm-librispeech",
+    "revision": "979a53a7a3f6c9291c02c040fd8ebfb2471cf8a3",
+    "asr_checkpoint": "asr.ckpt",
+    "asr_sha256": "1e795c7e18f3bab6bd5f47060ab852233deb33d7d550e989994c8683901e18d5",
+    "lm_checkpoint": "lm.ckpt",
+    "lm_sha256": "3f73e243f5f0eb070a05a2069ba5b9014232e926384cc7d5ba24cde060c84997",
+    "normalizer_checkpoint": "normalizer.ckpt",
+    "normalizer_sha256": "e11bfd7dbe13a266d13c00f6ff042a00fdbd40f3f5973928f9b49c33da32b512",
+    "tokenizer": "tokenizer.ckpt",
+    "tokenizer_sha256": "37a6cba34cd520b33fd83612d5efc8ba7e351166541eb2726642bb3032234d31",
+    "hyperparams_sha256": "b23fdf3da84c931b6605b0b9669e1579a206ea0d835f04b7753e2b37309f2703",
+    "asr_tensor_count": 83,
+    "asr_values": 119883564,
+    "lm_tensor_count": 15,
+    "lm_values": 53104104,
+    "normalizer_tensor_count": 3,
+    "normalizer_values": 81,
+    "license": "Apache-2.0"
+  },
+  "verified_scope": {
+    "inference": [
+      "legacy 16 kHz / 40-bin Fbank and released global CMVN",
+      "exact CRDNN, location-aware GRU decoder, and two-layer RNNLM graph",
+      "80-beam shallow-fusion decoding with attention-shift, EOS, and coverage constraints",
+      "native protobuf-free SentencePiece unigram decoding",
+      "strict Safetensors conversion and portable reload"
+    ],
+    "training": [
+      "raw-waveform and transcript preparation",
+      "teacher-forced attention decoding",
+      "label-smoothed sequence NLL",
+      "CTC plus sequence loss for the first five epochs, then sequence loss",
+      "published Adadelta and NewBob recipe metadata"
+    ],
+    "limitations": [
+      "The released model is English-only despite the provider family's generic name.",
+      "The encoder is bidirectional and does not provide causally correct streaming.",
+      "The public recipe depends on OpenRIR noise and speed perturbation; VoiceHub exposes those as dataset transforms rather than hidden model-side downloads.",
+      "No corpus-level benchmark or accuracy improvement over the 3.09 WER model-card result is claimed."
+    ]
+  },
+  "security_boundary": {
+    "source_format": "three pickle checkpoints plus a protobuf SentencePiece model",
+    "conversion": "Explicit trust_pickle_checkpoint=True, torch.load(weights_only=True), pinned SHA-256, and complete namespace/shape/fingerprint validation.",
+    "runtime_format": "Safetensors plus the bounded original tokenizer.model bytes",
+    "runtime_dependencies": "PyTorch, the Python standard library, and VoiceHub only"
+  }
+}

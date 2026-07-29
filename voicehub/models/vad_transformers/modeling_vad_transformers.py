@@ -1,45 +1,28 @@
-"""Universal Transformers checkpoint provider for neural VAD."""
+"""Native Wav2Vec2 checkpoint provider for neural VAD."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from contextlib import nullcontext
+from collections.abc import Mapping, Sequence
 from math import isfinite
 from numbers import Integral, Real
 from pathlib import Path
 from re import findall
 from typing import Any
 
-from voicehub.audio import load_audio
 from voicehub.audio_modeling_utils import PreTrainedVADModel
-from voicehub.dependencies import import_optional
-from voicehub.errors import OptionalDependencyError
+from voicehub.hub import read_json_file, write_json_file
 from voicehub.inference_configuration import VADInferenceConfig
 from voicehub.modeling_outputs import VADOutput
 from voicehub.models.vad_transformers.configuration_vad_transformers import TransformersVADConfig
 from voicehub.vad_utils import frame_probabilities_to_segments
 
-_SERVING_ONLY_MARKERS = (
-    ".gguf",
-    "-gguf",
-    "/gguf",
-    ".onnx",
-    ".ort",
-    ".engine",
-    ".plan",
-    ".tflite",
-    ".mlmodel",
-)
-_QUANTIZATION_KEYS = (
-    "gguf_file",
-    "hf_quantizer",
-    "is_loaded_in_4bit",
-    "is_loaded_in_8bit",
-    "load_in_4bit",
-    "load_in_8bit",
-    "quantization_config",
-    "quantization_method",
-)
+_SEQUENCE_ARCHITECTURES = frozenset({
+    "Wav2Vec2ForAudioClassification",
+    "Wav2Vec2ForSequenceClassification",
+})
+_FRAME_ARCHITECTURES = frozenset({
+    "Wav2Vec2ForAudioFrameClassification",
+})
 _NON_VAD_ARCHITECTURE_MARKERS = (
     "forctc",
     "forrnnt",
@@ -58,13 +41,41 @@ _NEGATIVE_SPEECH_LABEL_TOKENS = frozenset({
     "silence",
     "silent",
 })
+_RAW_TRAINING_FIELDS = frozenset({
+    "audio",
+    "audio_lengths",
+    "sample_rate",
+    "sampling_rate",
+})
+
+
+def _config_value(config: Any, name: str, default: Any = None) -> Any:
+    if isinstance(config, Mapping):
+        return config.get(name, default)
+    return getattr(config, name, default)
+
+
+def _architecture_names(config: Any) -> tuple[str, ...]:
+    architectures = _config_value(config, "architectures", ()) or ()
+    if isinstance(architectures, str):
+        architectures = (architectures, )
+    if not isinstance(architectures, Sequence):
+        raise TypeError("Checkpoint `architectures` must be a sequence.")
+    return tuple(str(name) for name in architectures)
 
 
 class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
-    """Run and fine-tune compatible Transformers VAD checkpoints."""
+    """Run and fine-tune native Wav2Vec2 VAD classifiers.
+
+    The historical provider name remains stable for API compatibility. No
+    Transformers code is imported or executed: configuration, waveform
+    processing, architecture, checkpoint mapping, inference, and training
+    are all implemented by VoiceHub.
+    """
 
     config_class = TransformersVADConfig
     default_model_name_or_path = ""
+    native_checkpoint_format = "voicehub-wav2vec2-vad-v1"
 
     def __init__(
         self,
@@ -74,186 +85,160 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
         device: str = "auto",
         lazy_load: bool = True,
         token: str | bool | None = None,
-        **kwargs,
-    ):
-        config = self._coerce_config(config, model_path=model_path, **kwargs)
+        **kwargs: Any,
+    ) -> None:
+        if token is not None and not isinstance(token, (str, bool)):
+            raise TypeError("`token` must be a string, boolean, or None.")
+        if isinstance(token, str) and not token.strip():
+            raise ValueError("String `token` values must be non-empty.")
+        self._hub_token = token
+        self.artifacts: Any | None = None
+        self.native_config: Any | None = None
+        self.feature_extractor: Any | None = None
+        self.architecture_family: str | None = None
+        config = self._coerce_config(
+            config,
+            model_path=model_path,
+            **kwargs,
+        )
         config.validate()
-        if token is not None and (not isinstance(token, (str, bool)) or
-                                  isinstance(token, str) and not token.strip()):
-            raise ValueError("`token` must be a non-empty string, boolean, or None.")
-        super().__init__(config, device=device, lazy_load=lazy_load)
-        self.native_config = None
-        self.feature_extractor = None
-        self.architecture_family = config.architecture_family
-        self._token = token
+        super().__init__(
+            config,
+            device=device,
+            lazy_load=lazy_load,
+        )
 
     @staticmethod
     def _infer_architecture_family(native_config: Any) -> str:
-        architectures = getattr(native_config, "architectures", ()) or ()
-        if isinstance(architectures, str):
-            architectures = (architectures, )
+        """Resolve a declared VAD head without task-ambiguous guessing."""
+        architectures = _architecture_names(native_config)
         for architecture in architectures:
-            architecture_name = str(architecture)
-            normalized = (architecture_name.replace("_", "").replace("-", "").lower())
-            if "foraudioframeclassification" in normalized:
+            normalized = architecture.replace("_", "").replace("-", "").lower()
+            if architecture in _FRAME_ARCHITECTURES:
                 return "frame-classification"
-            if "foraudioclassification" in normalized:
+            if architecture in _SEQUENCE_ARCHITECTURES:
                 return "audio-classification"
             if any(marker in normalized for marker in _NON_VAD_ARCHITECTURE_MARKERS):
                 raise ValueError(
-                    f"Checkpoint architecture {architecture_name!r} is an ASR "
-                    "head, not a VAD classifier. Use "
-                    "AutoModelForSpeechRecognition instead.")
-
-        auto_map = getattr(native_config, "auto_map", {}) or {}
-        if isinstance(auto_map, Mapping):
-            for auto_class_name in auto_map:
-                normalized = str(auto_class_name).replace("_", "").lower()
-                if normalized.endswith("automodelforaudioframeclassification"):
-                    return "frame-classification"
-                if normalized.endswith("automodelforaudioclassification"):
-                    return "audio-classification"
-                if normalized.endswith((
-                        "automodelforctc",
-                        "automodelforrnnt",
-                        "automodelfortdt",
-                        "automodelforspeechseq2seq",
-                )):
-                    raise ValueError(
-                        "This checkpoint advertises an ASR auto class, not a "
-                        "VAD classifier. Use AutoModelForSpeechRecognition.")
-
-        model_type = getattr(native_config, "model_type", None)
+                    f"Checkpoint architecture {architecture!r} is an ASR "
+                    "head, not a VAD classifier.")
+        model_type = str(_config_value(native_config, "model_type", "")).strip().lower()
         raise ValueError(
-            "Transformers could not determine whether this checkpoint uses "
-            "audio- or frame-classification" +
-            (f" from model_type {model_type!r}" if model_type is not None else "") +
-            ". Shared base model types such as 'wav2vec2' are task-"
-            "ambiguous; set `architecture_family` explicitly or publish an "
-            "ASR/VAD-specific `architectures` entry.")
+            "VoiceHub could not determine whether this checkpoint uses "
+            "audio- or frame-classification" + (f" from model_type {model_type!r}" if model_type else "") +
+            ". Shared encoders such as Wav2Vec2 are task-ambiguous; "
+            "publish an explicit classification architecture or set "
+            "`architecture_family`.")
 
-    @staticmethod
-    def _local_weight_file(name_or_path: str | Path) -> Path | None:
-        path = Path(name_or_path).expanduser()
-        if path.is_file() and path.suffix.lower() == ".safetensors":
-            return path.resolve()
-        return None
+    @classmethod
+    def _validate_architecture(
+        cls,
+        values: Mapping[str, Any],
+        requested_family: str,
+    ) -> str:
+        model_type = str(values.get("model_type", "")).strip().lower()
+        if model_type not in {"vad_transformers", "wav2vec2"}:
+            raise ValueError(
+                "The native VAD provider currently supports Wav2Vec2 "
+                f"classifiers; received model type {model_type or '<missing>'!r}.")
+        declared = cls._infer_architecture_family(values)
+        if requested_family == "auto":
+            return declared
+        normalized = (
+            "audio-classification" if requested_family == "audio-classification" else "frame-classification")
+        if declared != normalized:
+            raise ValueError(
+                f"Configured architecture family {normalized!r} conflicts "
+                f"with checkpoint architecture family {declared!r}.")
+        return normalized
 
-    def _model_source(self) -> str:
-        source = self.config.name_or_path or self.default_model_name_or_path
-        weight_file = self._local_weight_file(source)
-        return str(weight_file.parent) if weight_file is not None else str(source)
+    def _model_dtype(self) -> Any:
+        import torch
 
-    def _config_source(self) -> str:
-        return str(self.config.config_name_or_path or self._model_source())
-
-    def _processor_source(self) -> str:
-        return str(self.config.processor_name_or_path or self._config_source())
-
-    def _hub_kwargs(self) -> dict[str, Any]:
-        return {
-            name: value
-            for name, value in {
-                "revision": self.config.revision,
-                "cache_dir": self.config.cache_dir,
-                "local_files_only": self.config.local_files_only,
-                "token": self._token,
-            }.items() if value is not None
-        }
-
-    def _direct_state_dict(self) -> Mapping[str, Any] | None:
-        weight_file = self._local_weight_file(self.config.name_or_path)
-        if weight_file is None:
-            return None
-        safetensors = import_optional(
-            "safetensors.torch",
-            model_type=self.config.model_type,
-            install_extra=None,
-        )
-        state_dict = safetensors.load_file(str(weight_file), device="cpu")
-        if not isinstance(state_dict, Mapping):
-            raise TypeError("The safetensors loader did not return a state-dict mapping.")
-        return state_dict
+        configured = self.config.torch_dtype
+        if configured == "auto":
+            return (torch.float16 if torch.device(self.device).type in {"cuda", "mps"} else torch.float32)
+        dtype = {
+            "bfloat16": torch.bfloat16,
+            "float16": torch.float16,
+            "float32": torch.float32,
+        }[configured]
+        if torch.device(self.device).type == "cpu" and dtype == torch.float16:
+            raise ValueError(
+                "Native Wav2Vec2 VAD does not support float16 on CPU; "
+                "use float32 or bfloat16.")
+        return dtype
 
     def _load_pretrained_model(self) -> None:
-        source = self._model_source()
+        from voicehub.architectures.wav2vec2.artifacts import resolve_wav2vec2_classification_artifacts
+        from voicehub.architectures.wav2vec2.checkpoint import HuggingFaceWav2Vec2ClassificationCheckpointAdapter
+        from voicehub.architectures.wav2vec2.configuration import Wav2Vec2Config
+        from voicehub.architectures.wav2vec2.modeling import (
+            Wav2Vec2ForAudioFrameClassification,
+            Wav2Vec2ForSequenceClassification,
+        )
+        from voicehub.architectures.wav2vec2.processing import Wav2Vec2FeatureExtractor
+        from voicehub.checkpointing import SafeTensorReader, ShardedSafeTensorReader
+
+        source = self.config.name_or_path or self.default_model_name_or_path
         if not source:
             raise ValueError(
-                "`vad_transformers` is a checkpoint-family provider. Pass a "
-                "compatible binary audio- or frame-classification checkpoint "
-                "to from_pretrained().")
-        transformers = import_optional(
-            "transformers",
-            model_type=self.config.model_type,
-            install_extra=None,
+                "`vad_transformers` is a native checkpoint-family provider. "
+                "Pass a Wav2Vec2 audio- or frame-classification Safetensors "
+                "checkpoint to from_pretrained().")
+        artifacts = resolve_wav2vec2_classification_artifacts(
+            source,
+            checkpoint_filename=self.config.checkpoint_filename,
+            cache_dir=self.config.cache_dir,
+            revision=self.config.revision,
+            token=self._hub_token,
+            local_files_only=self.config.local_files_only,
         )
-        self.native_config = transformers.AutoConfig.from_pretrained(
-            self._config_source(),
-            trust_remote_code=self.config.trust_remote_code,
-            **self._hub_kwargs(),
+        values = read_json_file(artifacts.config)
+        family = self._validate_architecture(
+            values,
+            self.config.architecture_family,
         )
-        family = self.config.architecture_family
-        if family == "auto":
-            family = self._infer_architecture_family(self.native_config)
-        if family == "frame-classification":
-            model_class = getattr(
-                transformers,
-                "AutoModelForAudioFrameClassification",
-                None,
-            )
-            if model_class is None:
-                raise OptionalDependencyError(
-                    "This frame-classification checkpoint requires a newer "
-                    "Transformers release exposing "
-                    "AutoModelForAudioFrameClassification.")
-        else:
-            model_class = getattr(
-                transformers,
-                "AutoModelForAudioClassification",
-                None,
-            )
-            if model_class is None:
-                raise OptionalDependencyError(
-                    "'vad_transformers' requires a Transformers release "
-                    "exposing `AutoModelForAudioClassification`. Upgrade "
-                    "`voicehub` and retry.")
-
-        model_options = {
-            **self._hub_kwargs(),
-            **self.config.model_kwargs,
-            "config": self.native_config,
-            "trust_remote_code": self.config.trust_remote_code,
-        }
-        if self.config.use_safetensors is not None:
-            model_options["use_safetensors"] = self.config.use_safetensors
-        state_dict = self._direct_state_dict()
-        if state_dict is not None:
-            model_options["state_dict"] = state_dict
-        self.model = model_class.from_pretrained(source, **model_options)
-        processor_class = getattr(transformers, "AutoFeatureExtractor", None)
-        if processor_class is None:
-            processor_class = getattr(transformers, "AutoProcessor", None)
-        if processor_class is None:
-            raise OptionalDependencyError(
-                "'vad_transformers' requires a Transformers release exposing "
-                "`AutoFeatureExtractor` or `AutoProcessor`. Upgrade "
-                "`voicehub` and retry.")
-        self.feature_extractor = processor_class.from_pretrained(
-            self._processor_source(),
-            trust_remote_code=self.config.trust_remote_code,
-            **self._hub_kwargs(),
-            **self.config.processor_kwargs,
+        values["_classification_family"] = family
+        native_config = Wav2Vec2Config.from_dict(values)
+        feature_extractor = Wav2Vec2FeatureExtractor.from_preprocessor_config(
+            artifacts.preprocessor_config,
+            default_sampling_rate=native_config.sampling_rate,
         )
+        if feature_extractor.sampling_rate != native_config.sampling_rate:
+            raise ValueError(
+                "Wav2Vec2 processor/model sampling-rate mismatch: "
+                f"{feature_extractor.sampling_rate} != "
+                f"{native_config.sampling_rate}.")
+        model = (
+            Wav2Vec2ForAudioFrameClassification(native_config)
+            if family == "frame-classification" else Wav2Vec2ForSequenceClassification(native_config))
+        reader_type = (ShardedSafeTensorReader if artifacts.is_sharded else SafeTensorReader)
+        with reader_type(artifacts.checkpoint) as reader:
+            (
+                HuggingFaceWav2Vec2ClassificationCheckpointAdapter().load_streaming(
+                    model,
+                    reader,
+                    values,
+                    strict=True,
+                ))
+        model.to(
+            device=self.device,
+            dtype=self._model_dtype(),
+        )
+        self.artifacts = artifacts
+        self.native_config = native_config
+        self.feature_extractor = feature_extractor
         self.architecture_family = family
-        has_device_map = (
-            "device_map" in self.config.model_kwargs or bool(getattr(self.model, "hf_device_map", None)))
-        if not has_device_map:
-            move = getattr(self.model, "to", None)
-            if callable(move):
-                moved = move(self.device)
-                if moved is not None:
-                    self.model = moved
-        self.config.sample_rate = self._processor_sample_rate()
+        self.config.sample_rate = native_config.sampling_rate
+        self.model = model
+
+    def _id2label(self) -> Mapping[Any, Any]:
+        if self.native_config is None:
+            return {}
+        values = getattr(self.native_config, "extra_config", {})
+        labels = values.get("id2label", {}) if isinstance(values, Mapping) else {}
+        return labels if isinstance(labels, Mapping) else {}
 
     def _speech_class_id(self, class_count: int) -> int:
         if (isinstance(class_count, bool) or not isinstance(class_count, Integral) or class_count <= 0):
@@ -262,27 +247,25 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
         configured = self.config.speech_class_id
         if configured is not None:
             if configured >= class_count:
-                raise ValueError(f"`speech_class_id` {configured} is outside {class_count} classes.")
+                raise ValueError(f"`speech_class_id` {configured} is outside "
+                                 f"{class_count} classes.")
             return configured
         if class_count == 1:
-            # A single sigmoid logit represents the positive class.
             return 0
-        id2label = getattr(self.native_config, "id2label", {}) or {}
-        labels = self.config.speech_labels
-        for class_id, label in id2label.items():
+        for class_id, label in self._id2label().items():
             normalized = str(label).strip().lower()
-            label_tokens = frozenset(findall(r"[a-z0-9]+", normalized))
-            is_exact_match = normalized in labels
-            is_positive_token_match = (
-                not label_tokens.intersection(_NEGATIVE_SPEECH_LABEL_TOKENS) and
-                any(token in label_tokens for token in labels))
-            if is_exact_match or is_positive_token_match:
-                class_id = int(class_id)
-                if not 0 <= class_id < class_count:
+            tokens = frozenset(findall(r"[a-z0-9]+", normalized))
+            exact = normalized in self.config.speech_labels
+            positive = (
+                not tokens.intersection(_NEGATIVE_SPEECH_LABEL_TOKENS) and
+                any(token in tokens for token in self.config.speech_labels))
+            if exact or positive:
+                resolved = int(class_id)
+                if not 0 <= resolved < class_count:
                     raise ValueError(
                         "Checkpoint `id2label` contains a class index outside "
                         "the logits dimension.")
-                return class_id
+                return resolved
         if class_count == 2:
             return 1
         raise ValueError(
@@ -290,14 +273,12 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
             "Set `speech_class_id` in TransformersVADConfig.")
 
     def _processor_sample_rate(self) -> int:
-        value = getattr(
-            self.feature_extractor,
-            "sampling_rate",
-            self.config.sample_rate,
-        )
+        value = (
+            self.config.sample_rate
+            if self.feature_extractor is None else self.feature_extractor.sampling_rate)
         if (isinstance(value, bool) or not isinstance(value, Real) or not isfinite(float(value)) or
                 float(value) <= 0 or not float(value).is_integer()):
-            raise ValueError("The Transformers VAD processor reported an invalid sampling rate.")
+            raise ValueError("The native VAD processor reported an invalid sampling rate.")
         return int(value)
 
     def _frame_geometry(
@@ -308,7 +289,7 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
     ) -> tuple[int, int]:
         if (isinstance(frame_count, bool) or not isinstance(frame_count, Integral) or frame_count <= 0):
             raise ValueError("Frame-classification logits must contain at least one frame.")
-        ratio = getattr(self.native_config, "inputs_to_logits_ratio", None)
+        ratio = (None if self.native_config is None else self.native_config.inputs_to_logits_ratio)
         if ratio is not None:
             if (isinstance(ratio, bool) or not isinstance(ratio, Real) or not isfinite(float(ratio)) or
                     ratio <= 0):
@@ -321,19 +302,9 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
         return frame_hop, frame_hop
 
     @staticmethod
-    def _model_inputs(batch, device: str) -> dict[str, Any]:
-        values = dict(batch)
-        for key, value in values.items():
-            if hasattr(value, "to"):
-                values[key] = value.to(device)
-        return values
+    def _probabilities(logits: Any) -> Any:
+        import torch
 
-    def _probabilities(self, logits):
-        torch = import_optional(
-            "torch",
-            model_type=self.config.model_type,
-            install_extra=None,
-        )
         if logits.shape[-1] == 1:
             return torch.sigmoid(logits)
         return torch.softmax(logits, dim=-1)
@@ -353,71 +324,83 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
         window_size_samples: int | None = None,
         return_frames: bool = False,
     ) -> VADOutput:
+        import torch
+
+        from voicehub.processing.waveform import load_native_audio
+
+        if (self.model is None or self.native_config is None or self.feature_extractor is None or
+                self.architecture_family is None):
+            raise RuntimeError("Native Wav2Vec2 VAD runtime is not loaded.")
         target_rate = self._processor_sample_rate()
-        materialized = load_audio(
+        materialized = load_native_audio(
             audio,
             sampling_rate=sampling_rate,
             target_sampling_rate=target_rate,
         )
-        torch = import_optional(
-            "torch",
-            model_type=self.config.model_type,
-            install_extra=None,
-        )
-        context = torch.inference_mode() if hasattr(torch, "inference_mode") else nullcontext()
+        waveform = materialized.waveform
+        parameter = next(self.model.parameters())
+
         if self.architecture_family == "frame-classification":
-            batch = self.feature_extractor(
-                materialized.waveform,
-                sampling_rate=target_rate,
-                return_tensors="pt",
-            )
-            with context:
-                outputs = self.model(**self._model_inputs(batch, self.device))
+            if waveform.numel() < self.native_config.minimum_input_samples:
+                waveform = torch.nn.functional.pad(
+                    waveform,
+                    (
+                        0,
+                        self.native_config.minimum_input_samples - waveform.numel(),
+                    ),
+                )
+            batch = self.feature_extractor.prepare_audio_batch((waveform, ))
+            with torch.inference_mode():
+                outputs = self.model(
+                    batch["input_values"].to(
+                        device=parameter.device,
+                        dtype=parameter.dtype,
+                    ),
+                    attention_mask=batch["attention_mask"].to(device=parameter.device, ),
+                )
             probabilities = self._probabilities(outputs.logits)[0]
-            class_count = probabilities.shape[-1]
-            speech_id = self._speech_class_id(class_count)
+            valid_frames = int(outputs.feature_attention_mask[0].sum().item())
+            probabilities = probabilities[:valid_frames]
+            speech_id = self._speech_class_id(probabilities.shape[-1])
             frame_scores = probabilities[..., speech_id]
-            frame_count = int(frame_scores.shape[0])
             frame_hop, frame_length = self._frame_geometry(
-                frame_count=frame_count,
-                waveform_samples=len(materialized.waveform),
+                frame_count=valid_frames,
+                waveform_samples=materialized.waveform.numel(),
             )
         else:
             frame_length = (
                 window_size_samples if window_size_samples is not None else round(
                     self.config.window_duration_s * target_rate))
             frame_hop = round(self.config.hop_duration_s * target_rate)
-            if frame_length <= 0 or frame_hop <= 0:
+            if frame_length < self.native_config.minimum_input_samples:
                 raise ValueError(
-                    "VAD window and hop durations must each resolve to at "
-                    "least one audio sample.")
+                    "The VAD window is shorter than the Wav2Vec2 "
+                    "convolutional frontend minimum.")
             windows = []
-            np = import_optional(
-                "numpy",
-                model_type=self.config.model_type,
-                install_extra=None,
-            )
-            for start in range(0, len(materialized.waveform), frame_hop):
-                window = materialized.waveform[start:start + frame_length]
-                if len(window) < frame_length:
-                    window = np.pad(window, (0, frame_length - len(window)))
+            for start in range(0, waveform.numel(), frame_hop):
+                window = waveform[start:start + frame_length]
+                if window.numel() < frame_length:
+                    window = torch.nn.functional.pad(
+                        window,
+                        (0, frame_length - window.numel()),
+                    )
                 windows.append(window)
-                if start + frame_length >= len(materialized.waveform):
+                if start + frame_length >= waveform.numel():
                     break
-            batch = self.feature_extractor(
-                windows,
-                sampling_rate=target_rate,
-                padding=True,
-                return_tensors="pt",
-            )
-            with context:
-                outputs = self.model(**self._model_inputs(batch, self.device))
+            batch = self.feature_extractor.prepare_audio_batch(tuple(windows))
+            with torch.inference_mode():
+                outputs = self.model(
+                    batch["input_values"].to(
+                        device=parameter.device,
+                        dtype=parameter.dtype,
+                    ),
+                    attention_mask=batch["attention_mask"].to(device=parameter.device, ),
+                )
             probabilities = self._probabilities(outputs.logits)
             speech_id = self._speech_class_id(probabilities.shape[-1])
             frame_scores = probabilities[..., speech_id]
 
         cpu_scores = frame_scores.detach().float().cpu()
-        score_values = cpu_scores.tolist()
         postprocessing = VADInferenceConfig(
             threshold=threshold,
             onset=onset,
@@ -428,11 +411,11 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
             max_speech_duration_s=max_speech_duration_s,
         )
         segments = frame_probabilities_to_segments(
-            score_values,
+            cpu_scores.tolist(),
             sampling_rate=target_rate,
             frame_hop_samples=frame_hop,
             frame_length_samples=frame_length,
-            duration_samples=len(materialized.waveform),
+            duration_samples=materialized.waveform.numel(),
             config=postprocessing,
         )
         return VADOutput(
@@ -441,8 +424,10 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
             sample_rate=target_rate,
             probabilities=cpu_scores if return_frames else None,
             metadata={
-                "backend": "transformers",
+                "backend": "voicehub-native",
+                "architecture": "wav2vec2",
                 "architecture_family": self.architecture_family,
+                "checkpoint_revision": (None if self.artifacts is None else self.artifacts.revision),
                 "speech_class_id": speech_id,
                 "frame_hop_samples": frame_hop,
                 "frame_length_samples": frame_length,
@@ -480,73 +465,33 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
         return values
 
     @staticmethod
-    def _plain_value(value: Any) -> Any:
-        for method_name in ("detach", "cpu"):
-            method = getattr(value, method_name, None)
-            if callable(method):
-                value = method()
-        tolist = getattr(value, "tolist", None)
-        if callable(tolist):
-            try:
-                return tolist()
-            except (RuntimeError, TypeError, ValueError):
-                pass
-        item = getattr(value, "item", None)
-        if callable(item):
-            try:
-                return item()
-            except (RuntimeError, TypeError, ValueError):
-                pass
-        return value
-
-    @classmethod
-    def _batch_scalar_values(
-        cls,
+    def _batch_values(
         value: Any,
         *,
         batch_size: int,
         name: str,
         broadcast: bool,
     ) -> list[Any]:
+        import torch
+
         if value is None:
             return [None] * batch_size
-        plain = cls._plain_value(value)
-        if isinstance(plain, (list, tuple)):
-            values = list(plain)
-            if broadcast and len(values) == 1 and batch_size > 1:
-                values *= batch_size
-            if len(values) != batch_size:
-                raise ValueError(f"Batched audio and `{name}` fields must have equal lengths.")
+        if isinstance(value, torch.Tensor):
+            if value.ndim == 0:
+                values = [value.item()]
+            elif value.ndim == 1:
+                values = value.tolist()
+            else:
+                raise ValueError(f"`{name}` must be scalar or one-dimensional.")
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            values = list(value)
         else:
-            values = [plain] * batch_size
-        return [cls._plain_value(item) for item in values]
-
-    @classmethod
-    def _trim_audio_batch(
-        cls,
-        audio_values: list[Any],
-        audio_lengths: Any,
-    ) -> list[Any]:
-        if audio_lengths is None:
-            return audio_values
-        lengths = cls._batch_scalar_values(
-            audio_lengths,
-            batch_size=len(audio_values),
-            name="audio_lengths",
-            broadcast=False,
-        )
-        trimmed = []
-        for audio, length in zip(audio_values, lengths):
-            if isinstance(length, bool) or not isinstance(length, Integral):
-                raise TypeError("`audio_lengths` must contain positive integer sample counts.")
-            length = int(length)
-            sample_count = int(audio.shape[-1]) if hasattr(audio, "shape") else len(audio)
-            if length <= 0 or length > sample_count:
-                raise ValueError(
-                    "Each `audio_lengths` value must be between 1 and the "
-                    "corresponding padded waveform length.")
-            trimmed.append(audio[:length])
-        return trimmed
+            values = [value]
+        if broadcast and len(values) == 1 and batch_size > 1:
+            values *= batch_size
+        if len(values) != batch_size:
+            raise ValueError(f"Batched audio and `{name}` fields must have equal lengths.")
+        return values
 
     def prepare_training_inputs(
         self,
@@ -554,68 +499,100 @@ class TransformersVADForVoiceActivityDetection(PreTrainedVADModel):
         *,
         phase: str,
     ) -> dict[str, Any]:
+        """Build a native waveform batch while preserving classifier labels."""
+        import torch
+
+        from voicehub.processing.waveform import load_native_audio
+
         del phase
-        if "input_values" in inputs or "input_features" in inputs:
+        if "input_values" in inputs:
             return dict(inputs)
+        if self.model is None:
+            self.load_for_training()
+        if self.native_config is None or self.feature_extractor is None:
+            raise RuntimeError("Native VAD training processor is not loaded.")
         audio = inputs.get("audio")
         if audio is None:
             return dict(inputs)
-        if self.feature_extractor is None:
-            raise RuntimeError("Training input preparation requires load_for_training().")
-        values = self._trim_audio_batch(
-            self._audio_batch(audio),
+        values = self._audio_batch(audio)
+        lengths = self._batch_values(
             inputs.get("audio_lengths"),
+            batch_size=len(values),
+            name="audio_lengths",
+            broadcast=False,
         )
-        sampling_rates = self._batch_scalar_values(
-            inputs.get("sampling_rate"),
+        rates = self._batch_values(
+            inputs.get("sampling_rate", inputs.get("sample_rate")),
             batch_size=len(values),
             name="sampling_rate",
             broadcast=True,
         )
-        materialized = [
-            load_audio(
+        waveforms = []
+        for value, length, rate in zip(values, lengths, rates):
+            if length is not None:
+                if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
+                    raise ValueError("`audio_lengths` must contain positive integers.")
+                value = torch.as_tensor(value)
+                if value.ndim != 1 or length > value.shape[-1]:
+                    raise ValueError("`audio_lengths` exceeds a waveform's sample count.")
+                value = value[:int(length)]
+            waveform = load_native_audio(
                 value,
                 sampling_rate=rate,
-                target_sampling_rate=self._processor_sample_rate(),
-            ).waveform for value, rate in zip(values, sampling_rates)
-        ]
-        batch = dict(
-            self.feature_extractor(
-                materialized,
-                sampling_rate=self._processor_sample_rate(),
-                padding=True,
-                return_tensors="pt",
-            ))
-        for name in (
-                "labels",
-                "loss_mask",
-                "label_mask",
-                "labels_mask",
-                "frame_mask",
-                "valid_frames",
-        ):
-            if name in inputs:
-                batch[name] = inputs[name]
-        return batch
+                target_sampling_rate=self.native_config.sampling_rate,
+            ).waveform
+            minimum = self.native_config.minimum_input_samples
+            if waveform.numel() < minimum:
+                waveform = torch.nn.functional.pad(
+                    waveform,
+                    (0, minimum - waveform.numel()),
+                )
+            waveforms.append(waveform)
+        prepared = self.feature_extractor.prepare_audio_batch(tuple(waveforms))
+        for name, value in inputs.items():
+            if name in _RAW_TRAINING_FIELDS:
+                continue
+            if name == "labels" and not isinstance(value, torch.Tensor):
+                value = torch.as_tensor(value)
+            prepared[name] = value
+        return prepared
 
     def _save_pretrained(self, save_directory: Path) -> None:
+        from voicehub.checkpointing import save_safetensors
+
+        if (self.model is None or self.native_config is None or self.feature_extractor is None or
+                self.architecture_family is None):
+            self.load()
         save_directory.mkdir(parents=True, exist_ok=True)
-        if hasattr(self.model, "save_pretrained"):
-            self.model.save_pretrained(save_directory, safe_serialization=True)
-        if hasattr(self.feature_extractor, "save_pretrained"):
-            self.feature_extractor.save_pretrained(save_directory)
+        save_safetensors(
+            self.model.state_dict(),
+            save_directory / "model.safetensors",
+            metadata={"format": self.native_checkpoint_format},
+        )
+        architecture = (
+            "Wav2Vec2ForAudioFrameClassification"
+            if self.architecture_family == "frame-classification" else "Wav2Vec2ForSequenceClassification")
+        values = self.native_config.to_dict()
+        values.update({
+            "architectures": [architecture],
+            "model_type": "wav2vec2",
+            "voicehub_checkpoint_format": self.native_checkpoint_format,
+            "voicehub_provider": self.config.model_type,
+        })
+        write_json_file(save_directory / "config.json", values)
+        self.feature_extractor.save_pretrained(save_directory)
+
+    def export_native_pretrained(
+        self,
+        save_directory: str | Path,
+    ) -> Path:
+        """Write a self-contained native VAD artifact."""
+        destination = Path(save_directory).expanduser()
+        self._save_pretrained(destination)
+        return destination
 
     def _validate_training_runtime(self) -> None:
-        identifier = str(self.config.name_or_path).lower()
-        if any(marker in identifier for marker in _SERVING_ONLY_MARKERS):
-            raise ValueError(
-                "Transformers VAD fine-tuning requires a differentiable "
-                "PyTorch/safetensors checkpoint; optimized serving artifacts "
-                "such as GGUF, ONNX, TensorRT, and Core ML are inference-only.")
-        for name in _QUANTIZATION_KEYS:
-            value = self.config.model_kwargs.get(name)
-            if value not in (None, False, "", {}, ()):
-                raise ValueError(
-                    "Transformers VAD fine-tuning requires an unquantized "
-                    f"native model. Remove `model_kwargs[{name!r}]` or "
-                    "register a quantization-aware training adapter.")
+        self.config.validate()
+
+
+__all__ = ["TransformersVADForVoiceActivityDetection"]

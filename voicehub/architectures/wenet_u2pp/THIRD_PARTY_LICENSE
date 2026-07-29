@@ -1,0 +1,22 @@
+WeNet source attribution
+========================
+
+Copyright 2019-2021 Mobvoi Inc. and WeNet contributors.
+
+The architecture implementation adapted by VoiceHub is licensed under the
+Apache License, Version 2.0:
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations.
+
+Checkpoint notice
+=================
+
+The published 20210728 GigaSpeech U2++ checkpoint archive does not include an
+artifact license or model card declaring checkpoint terms. VoiceHub therefore
+records its checkpoint license as "NOT DECLARED"; the Apache-2.0 source
+license is not automatically attributed to the checkpoint weights.

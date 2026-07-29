@@ -1,0 +1,40 @@
+{
+  "architecture": "webrtc-vad",
+  "implementation": "voicehub-native",
+  "upstream": {
+    "repository": "https://github.com/wiseman/py-webrtcvad",
+    "revision": "e283ca41df3a84b0e87fb1f5cb9b21580a286b09",
+    "license": "MIT and BSD-3-Clause",
+    "audited_files": [
+      "cbits/webrtc/common_audio/vad/vad_core.c",
+      "cbits/webrtc/common_audio/vad/vad_filterbank.c",
+      "cbits/webrtc/common_audio/vad/vad_gmm.c",
+      "cbits/webrtc/common_audio/vad/vad_sp.c",
+      "cbits/webrtc/common_audio/vad/webrtc_vad.c",
+      "cbits/webrtc/common_audio/signal_processing/resample_48khz.c",
+      "cbits/webrtc/common_audio/signal_processing/resample_by_2_internal.c",
+      "cbits/webrtc/common_audio/signal_processing/resample_fractional.c"
+    ]
+  },
+  "compatibility": {
+    "sample_rates": [8000, 16000, 32000, 48000],
+    "frame_durations_ms": [10, 20, 30],
+    "modes": [0, 1, 2, 3],
+    "state": "per-stream adaptive GMM, filter, resampler, and hangover state"
+  },
+  "training": {
+    "supported": false,
+    "reason": "The detector is a fixed-point adaptive signal-processing algorithm and exposes no differentiable parameters."
+  },
+  "verification": {
+    "reference_package": "webrtcvad-wheels==2.0.14",
+    "randomized_sequential_decisions": 19200,
+    "decision_mismatches": 0,
+    "matrix": {
+      "sample_rates": [8000, 16000, 32000, 48000],
+      "frame_durations_ms": [10, 20, 30],
+      "modes": [0, 1, 2, 3],
+      "frames_per_combination": 400
+    }
+  }
+}

@@ -1,412 +1,574 @@
-"""Native Transformers integration for IBM Granite Speech ASR."""
+"""Native Granite Speech inference, fine-tuning, and safe export."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from importlib import import_module
-from math import isfinite
-from numbers import Integral, Real
+from collections.abc import Sequence
+from numbers import Integral
+from pathlib import Path
 from typing import Any
 
+from voicehub.audio_modeling_utils import PreTrainedASRModel
 from voicehub.modeling_outputs import ASROutput
-from voicehub.models import asr_transformers_multimodal as multimodal_asr
 from voicehub.models.asr_granite_speech.configuration_asr_granite_speech import GraniteSpeechASRConfig
 
+_RAW_TRAINING_FIELDS = frozenset({
+    "audio",
+    "audio_lengths",
+    "language",
+    "prompt",
+    "sample_rate",
+    "sampling_rate",
+    "text",
+    "transcript",
+    "transcription",
+})
 
-class GraniteSpeechForSpeechRecognition(multimodal_asr.MultimodalTransformersASRForSpeechRecognition):
-    """Granite Speech inference and completion-only supervised fine-tuning.
+_TRANSLATION_LANGUAGES = {
+    "chinese": ("zh", "Mandarin"),
+    "cmn": ("zh", "Mandarin"),
+    "de": ("de", "German"),
+    "deu": ("de", "German"),
+    "english": ("en", "English"),
+    "en": ("en", "English"),
+    "eng": ("en", "English"),
+    "es": ("es", "Spanish"),
+    "spa": ("es", "Spanish"),
+    "fr": ("fr", "French"),
+    "fra": ("fr", "French"),
+    "fre": ("fr", "French"),
+    "french": ("fr", "French"),
+    "german": ("de", "German"),
+    "it": ("it", "Italian"),
+    "ita": ("it", "Italian"),
+    "italian": ("it", "Italian"),
+    "ja": ("ja", "Japanese"),
+    "japanese": ("ja", "Japanese"),
+    "jpn": ("ja", "Japanese"),
+    "mandarin": ("zh", "Mandarin"),
+    "por": ("pt", "Portuguese"),
+    "portuguese": ("pt", "Portuguese"),
+    "pt": ("pt", "Portuguese"),
+    "spanish": ("es", "Spanish"),
+    "zh": ("zh", "Mandarin"),
+    "zho": ("zh", "Mandarin"),
+}
 
-    IBM's processor consumes a rendered text prompt and waveform
-    separately; it does not expose the transcription-request helper used
-    by other current multimodal ASR families. Training follows IBM's
-    published collator: processor-owned prompt/audio inputs are
-    concatenated with tokenized target text, while prompt and target-
-    padding positions are masked with ``-100``.
-    """
+
+def _batch_values(
+    value: Any,
+    *,
+    batch_size: int,
+    name: str,
+    default: Any = None,
+) -> tuple[Any, ...]:
+    if value is None:
+        return (default, ) * batch_size
+    if isinstance(value, (str, bytes, Path)):
+        return (value, ) * batch_size
+    try:
+        import torch
+    except ModuleNotFoundError:  # pragma: no cover - package invariant
+        torch = None
+    if torch is not None and isinstance(value, torch.Tensor):
+        if value.ndim == 0:
+            return (value.item(), ) * batch_size
+        if value.ndim != 1:
+            raise ValueError(f"`{name}` must be scalar or one-dimensional.")
+        values = tuple(value.detach().cpu().tolist())
+    elif isinstance(value, Sequence):
+        values = tuple(value)
+    else:
+        return (value, ) * batch_size
+    if len(values) != batch_size:
+        raise ValueError(f"`{name}` contains {len(values)} values for a batch of "
+                         f"{batch_size}.")
+    return values
+
+
+class GraniteSpeechForSpeechRecognition(PreTrainedASRModel):
+    """Run IBM Granite Speech Safetensors with VoiceHub-owned code."""
 
     config_class = GraniteSpeechASRConfig
-    default_model_name_or_path = "ibm-granite/granite-speech-4.1-2b"
-    expected_native_model_types = frozenset({"granite_speech"})
-    backend_name = "transformers-granite-speech-asr"
+    default_model_name_or_path = ("ibm-granite/granite-speech-4.1-2b")
+    architecture_family = "speech-seq2seq"
+    native_checkpoint_format = "native-granite-speech-v1"
+    supports_gradient_checkpointing = True
 
-    def _validate_processor_contract(self) -> None:
-        processor = self.transformers_processor
-        tokenizer = getattr(processor, "tokenizer", None)
-        apply_template = getattr(tokenizer, "apply_chat_template", None)
-        batch_decode = getattr(tokenizer, "batch_decode", None)
-        if (not callable(processor) or not callable(tokenizer) or not callable(apply_template) or
-                not callable(batch_decode)):
-            raise TypeError(
-                "Granite Speech requires a callable processor plus a "
-                "callable tokenizer exposing `apply_chat_template()` and "
-                "`batch_decode()`.")
-
-    def _processor_sample_rate(self) -> int:
-        audio_processor = getattr(
-            self.transformers_processor,
-            "audio_processor",
-            None,
-        )
-        sample_rate = getattr(
-            audio_processor,
-            "sampling_rate",
-            self.config.sample_rate,
-        )
-        if (isinstance(sample_rate, bool) or not isinstance(sample_rate, Real) or
-                not isfinite(float(sample_rate)) or float(sample_rate) <= 0 or
-                not float(sample_rate).is_integer()):
-            raise ValueError("The Granite Speech processor reported an invalid sampling rate.")
-        return int(sample_rate)
-
-    def _instruction_prompt(self, prompt: str | None) -> str:
-        instruction = prompt or self.config.transcription_prompt
-        instruction = instruction.strip()
-        if "<|audio|>" not in instruction:
-            instruction = f"<|audio|>{instruction}"
-        return instruction
-
-    def _render_instruction(self, prompt: str | None) -> str:
-        tokenizer = self.transformers_processor.tokenizer
-        rendered = tokenizer.apply_chat_template(
-            [{
-                "role": "user",
-                "content": self._instruction_prompt(prompt),
-            }],
-            add_generation_prompt=True,
-            tokenize=False,
-        )
-        if not isinstance(rendered, str) or not rendered:
-            raise TypeError(
-                "The Granite Speech tokenizer must render the transcription "
-                "instruction as a non-empty string.")
-        return rendered
-
-    def _hotword_prompt(
+    def __init__(
         self,
-        prompt: str | None,
-        hotwords: str | tuple[str, ...] | list[str] | None,
-    ) -> str | None:
-        if hotwords is None:
-            return prompt
-        values = [hotwords] if isinstance(hotwords, str) else list(hotwords)
-        words = []
-        for value in values:
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError("Granite Speech hotwords must be non-empty strings.")
-            words.append(value.strip())
-        if not words:
-            raise ValueError("Granite Speech hotwords cannot be empty.")
-        instruction = self._instruction_prompt(prompt)
-        return f"{instruction.rstrip()} Keywords: {', '.join(words)}"
+        config: GraniteSpeechASRConfig | str | Path | None = None,
+        *,
+        model_path: str | Path | None = None,
+        device: str = "auto",
+        lazy_load: bool = True,
+        token: str | bool | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if token is not None and not isinstance(token, (str, bool)):
+            raise TypeError("`token` must be a string, boolean, or None.")
+        if isinstance(token, str) and not token.strip():
+            raise ValueError("String `token` values must be non-empty.")
+        self._hub_token = token
+        self.runtime: Any | None = None
+        self.artifacts: Any | None = None
+        self.native_config: Any | None = None
+        self.granite_processor: Any | None = None
+        self.training_processor: Any | None = None
+        self.transformers_processor: Any | None = None
+        self._lora_injection: Any | None = None
+        self._lora_base_trainability: dict[str, bool] | None = None
+        config = self._coerce_config(
+            config,
+            model_path=model_path,
+            **kwargs,
+        )
+        super().__init__(
+            config,
+            device=device,
+            lazy_load=lazy_load,
+        )
+
+    def prepare_inputs_for_inference(
+        self,
+        audio: Any,
+        *,
+        sampling_rate: int | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return {
+            "audio": audio,
+            "sampling_rate": sampling_rate,
+            **kwargs,
+        }
+
+    def _load_pretrained_model(self) -> None:
+        from voicehub.architectures.granite_speech.runtime import load_granite_speech_runtime
+
+        source = (self.config.name_or_path or self.default_model_name_or_path)
+        runtime = load_granite_speech_runtime(
+            source,
+            device=self.device,
+            compute_dtype=self.config.torch_dtype,
+            revision=self.config.revision,
+            cache_dir=self.config.cache_dir,
+            token=self._hub_token,
+            local_files_only=self.config.local_files_only,
+            for_training=self.is_training_load,
+        )
+        self.runtime = runtime
+        self.artifacts = runtime.artifacts
+        self.native_config = runtime.config
+        self.granite_processor = runtime.processor
+        self.training_processor = runtime.processor
+        # Transitional attribute name; the value is a VoiceHub processor.
+        self.transformers_processor = runtime.processor
+        self.model = runtime.model
 
     @staticmethod
-    def _reject_owned_processor_options(options: Mapping[str, Any]) -> None:
-        reserved = {
-            "padding",
-            "padding_side",
-            "return_tensors",
-        }
-        conflicts = reserved.intersection(options)
-        if conflicts:
-            names = ", ".join(sorted(conflicts))
+    def _translation_language(language: str | None, ) -> tuple[str, str]:
+        if not isinstance(language, str) or not language.strip():
+            raise ValueError("Granite Speech translation requires a target `language`.")
+        normalized = (language.strip().lower().replace("_", "-"))
+        try:
+            return _TRANSLATION_LANGUAGES[normalized]
+        except KeyError as error:
+            supported = ("English, French, German, Spanish, Portuguese, Japanese, "
+                         "Italian, and Mandarin")
             raise ValueError(
-                "Granite Speech `processor_kwargs` cannot replace "
-                f"provider-owned option(s): {names}.")
+                "Unsupported Granite Speech translation target "
+                f"{language!r}. Supported targets: {supported}.") from error
 
-    def _apply_transcription_request(
-        self,
+    @staticmethod
+    def _validate_request(
         *,
-        waveform: Any,
         language: str | None,
-        prompt: str | None,
-        processor_kwargs: Mapping[str, Any],
-    ) -> Mapping[str, Any]:
-        if language is not None:
+        task: str,
+        return_timestamps: bool | str,
+        chunk_length_s: float | None,
+        stride_length_s: float | tuple[float, float] | None,
+        batch_size: int | None,
+        num_beams: int | None,
+    ) -> None:
+        if task not in {"transcribe", "translate"}:
+            raise ValueError("Granite Speech `task` must be 'transcribe' or "
+                             "'translate'.")
+        if task == "transcribe" and language is not None:
             raise ValueError(
-                "Granite Speech does not expose a language-ID forcing "
-                "argument. Put language guidance in `prompt` instead.")
-        self._reject_owned_processor_options(processor_kwargs)
-        return self.transformers_processor(
-            self._render_instruction(prompt),
-            waveform,
-            return_tensors="pt",
-            padding=True,
-            padding_side="left",
-            **processor_kwargs,
-        )
+                "Granite Speech does not expose language-ID forcing. Put "
+                "language guidance in `prompt` instead.")
+        if task == "translate":
+            GraniteSpeechForSpeechRecognition._translation_language(language, )
+        if return_timestamps is not False:
+            raise ValueError("Granite Speech does not emit timestamps.")
+        if chunk_length_s is not None:
+            raise ValueError(
+                "Granite Speech has no checkpoint-validated overlapping "
+                "chunk protocol; `chunk_length_s` is unsupported.")
+        if stride_length_s is not None:
+            raise ValueError(
+                "Granite Speech has no checkpoint-validated stride "
+                "stitching protocol; `stride_length_s` is unsupported.")
+        if batch_size not in (None, 1):
+            raise ValueError("One public transcription request requires `batch_size=1`.")
+        if num_beams not in (None, 1):
+            raise ValueError(
+                "The native Granite Speech decoder supports greedy or "
+                "sampling generation; `num_beams` must be 1 or None.")
 
-    def _decode_output(
+    def _transcribe(
         self,
-        generated_tokens: Any,
+        audio: Any,
         *,
-        duration: float,
-        language: str | None,
+        sampling_rate: int | None = None,
+        language: str | None = None,
+        task: str = "transcribe",
+        return_timestamps: bool | str = False,
+        chunk_length_s: float | None = None,
+        stride_length_s: float | tuple[float, float] | None = None,
+        batch_size: int | None = None,
+        num_beams: int | None = None,
+        max_new_tokens: int | None = None,
+        hotwords: str | tuple[str, ...] | list[str] | None = None,
+        prompt: str | None = None,
+        do_sample: bool | None = None,
+        temperature: float | None = None,
+        top_k: int | None = None,
+        top_p: float | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
+        seed: int | None = None,
     ) -> ASROutput:
-        decoded = self.transformers_processor.tokenizer.batch_decode(
-            generated_tokens,
-            add_special_tokens=False,
-            skip_special_tokens=True,
+        import torch
+
+        from voicehub.generation.config import GenerationConfig
+
+        self._validate_request(
+            language=language,
+            task=task,
+            return_timestamps=return_timestamps,
+            chunk_length_s=chunk_length_s,
+            stride_length_s=stride_length_s,
+            batch_size=batch_size,
+            num_beams=num_beams,
         )
-        if isinstance(decoded, str):
-            text = decoded.strip()
-        elif (isinstance(decoded, Sequence) and not isinstance(decoded, (str, bytes)) and len(decoded) == 1):
-            text = str(decoded[0]).strip()
-        else:
-            raise TypeError(
-                "The Granite Speech tokenizer must decode a single "
-                "transcription for a single audio input.")
+        if self.model is None or self.runtime is None:
+            raise RuntimeError("Granite Speech runtime is not loaded.")
+        processor = self.granite_processor
+        if processor is None:
+            raise RuntimeError("Granite Speech processor is not loaded.")
+        output_language = None
+        resolved_prompt = prompt
+        if task == "translate":
+            output_language, target_name = self._translation_language(language, )
+            if resolved_prompt is None:
+                resolved_prompt = (
+                    "<|audio|>translate the speech to "
+                    f"{target_name} with proper punctuation and "
+                    "capitalization.")
+        prepared = processor.prepare_inference_batch(
+            (audio, ),
+            sampling_rates=(sampling_rate, ),
+            prompts=(self.config.transcription_prompt if resolved_prompt is None else resolved_prompt),
+            hotwords=hotwords,
+        )
+        defaults = dict(self.runtime.generation_config)
+        generation = GenerationConfig(
+            max_new_tokens=(512 if max_new_tokens is None else max_new_tokens),
+            do_sample=(bool(defaults.get("do_sample", False)) if do_sample is None else do_sample),
+            temperature=(float(defaults.get("temperature", 1.0)) if temperature is None else temperature),
+            top_k=top_k,
+            top_p=top_p,
+            min_p=min_p,
+            repetition_penalty=(1.0 if repetition_penalty is None else repetition_penalty),
+            eos_token_id=defaults.get(
+                "eos_token_id",
+                self.native_config.text_config.eos_token_id,
+            ),
+            pad_token_id=int(defaults.get(
+                "pad_token_id",
+                self.native_config.text_config.pad_token_id,
+            )),
+            seed=seed,
+            use_cache=True,
+        )
+        input_ids = prepared["input_ids"]
+        if (input_ids.shape[1] + generation.max_new_tokens
+                > self.native_config.text_config.max_position_embeddings):
+            raise ValueError(
+                "Granite Speech prompt plus `max_new_tokens` exceeds the "
+                "checkpoint context window.")
+        parameter = next(self.model.parameters())
+        input_ids = input_ids.to(parameter.device)
+        attention_mask = prepared["attention_mask"].to(parameter.device, )
+        input_features = prepared["input_features"].to(
+            device=parameter.device,
+            dtype=parameter.dtype,
+        )
+        feature_mask = prepared["input_features_mask"].to(parameter.device, )
+        with torch.inference_mode():
+            output = self.model.generate(
+                input_ids,
+                input_features=input_features,
+                input_features_mask=feature_mask,
+                attention_mask=attention_mask,
+                generation_config=generation,
+            )
+        completion = output.sequences[
+            0,
+            input_ids.shape[1]:,
+        ].detach().cpu().tolist()
+        text = processor.tokenizer.decode(
+            completion,
+            skip_special_tokens=True,
+        ).strip()
+        duration = (int(prepared["audio_lengths"][0].item()) / processor.sample_rate)
         return ASROutput(
             text=text,
-            language=language,
+            segments=(),
+            language=output_language,
             duration=duration,
             metadata={
-                "backend": self.backend_name,
-                "native_model_type":
-                self._normalized_model_type(getattr(self.native_config, "model_type", None)),
+                "architecture": "granite-speech",
+                "architecture_family": self.architecture_family,
+                "backend": "voicehub-native",
+                "checkpoint_revision": self.artifacts.revision,
+                "decoding": ("sampling" if generation.do_sample else "greedy"),
+                "generated_tokens": int(output.generated_lengths[0].item(), ),
+                "task": task,
+                "timestamps": False,
             },
         )
 
-    def _training_conversation(
-        self,
+    @staticmethod
+    def _training_audio_rows(
+        audio: Any,
         *,
-        waveform: Any,
-        transcription: str,
-        language: str | None,
-    ) -> list[dict[str, Any]]:
+        batch_size: int,
+    ) -> tuple[Any, ...]:
+        import torch
+
+        if isinstance(audio, torch.Tensor):
+            if audio.ndim == 1:
+                if batch_size != 1:
+                    raise ValueError("Batched transcripts require rank-two audio.")
+                return (audio, )
+            if audio.ndim == 2:
+                if audio.shape[0] != batch_size:
+                    raise ValueError("Audio and transcript batch sizes do not match.")
+                return tuple(audio[index] for index in range(batch_size))
+            raise ValueError("Granite Speech training audio must be rank one or two.")
+        if batch_size == 1:
+            return (audio, )
+        if (isinstance(audio, Sequence) and not isinstance(audio, (str, bytes, bytearray, Path))):
+            rows = tuple(audio)
+            if len(rows) == batch_size:
+                return rows
+        raise ValueError("Batched transcripts require one audio value per row.")
+
+    def prepare_training_inputs(
+        self,
+        inputs: dict[str, Any],
+        *,
+        phase: str,
+    ) -> dict[str, Any]:
+        """Build completion-only causal labels from raw audio and text."""
+        import torch
+
+        del phase
+        if "input_ids" in inputs:
+            if "labels" not in inputs:
+                raise ValueError("Cached Granite Speech batches must include "
+                                 "completion-only `labels`.")
+            return dict(inputs)
+        if self.model is None:
+            self.load_for_training()
+        processor = self.granite_processor
+        if processor is None:
+            raise RuntimeError("Granite Speech training processor is not loaded.")
+        language = inputs.get("language")
         if language is not None:
-            raise ValueError(
-                "Granite Speech fine-tuning is prompt-conditioned. Remove "
-                "`language` from the batch or express it in the configured "
-                "`transcription_prompt`.")
-        return [
-            {
-                "role": "user",
-                "content": [self._audio_content(waveform)],
-            },
-            {
-                "role": "assistant",
-                "content": [{
-                    "type": "text",
-                    "text": transcription,
-                }],
-            },
-        ]
-
-    @staticmethod
-    def _training_example(conversation: Sequence[Mapping[str, Any]], ) -> tuple[Any, str]:
-        if len(conversation) != 2:
-            raise ValueError(
-                "A Granite Speech training conversation must contain one "
-                "user audio turn and one assistant transcript.")
-        user_content = conversation[0].get("content")
-        assistant_content = conversation[1].get("content")
-        if (not isinstance(user_content, Sequence) or isinstance(user_content, (str, bytes)) or
-                not isinstance(assistant_content, Sequence) or isinstance(assistant_content, (str, bytes))):
-            raise TypeError("Granite Speech training turns must contain structured content.")
-        audio_entries = [
-            value for value in user_content if isinstance(value, Mapping) and value.get("type") == "audio"
-        ]
-        text_entries = [
-            value for value in assistant_content if isinstance(value, Mapping) and value.get("type") == "text"
-        ]
-        if len(audio_entries) != 1 or len(text_entries) != 1:
-            raise ValueError(
-                "Granite Speech training requires exactly one waveform and "
-                "one transcript per example.")
-        transcript = text_entries[0].get("text")
-        if not isinstance(transcript, str) or not transcript.strip():
-            raise ValueError("Granite Speech training transcripts must be non-empty strings.")
-        return audio_entries[0].get("audio"), transcript.strip()
-
-    @staticmethod
-    def _token_rows(value: Any, *, name: str) -> list[list[int]]:
-        tolist = getattr(value, "tolist", None)
-        if callable(tolist):
-            value = tolist()
-        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-            raise TypeError(f"Granite Speech training `{name}` must be a token sequence.")
-        if value and isinstance(value[0], Integral):
-            value = [value]
-        rows = []
-        for row in value:
-            if not isinstance(row, Sequence) or isinstance(row, (str, bytes)):
-                raise TypeError(f"Granite Speech training `{name}` must be rank two.")
-            normalized = []
-            for token_id in row:
-                if isinstance(token_id, bool) or not isinstance(token_id, Integral):
-                    raise TypeError(f"Granite Speech training `{name}` contains a "
-                                    "non-integer value.")
-                normalized.append(int(token_id))
-            rows.append(normalized)
-        if not rows:
-            raise ValueError(f"Granite Speech training `{name}` cannot be empty.")
-        return rows
-
-    @classmethod
-    def _combine_list_tokens(
-        cls,
-        *,
-        prompt_ids: Any,
-        prompt_mask: Any,
-        target_ids: Any,
-        target_mask: Any,
-    ) -> tuple[list[list[int]], list[list[int]], list[list[int]]]:
-        prompt_rows = cls._token_rows(prompt_ids, name="input_ids")
-        prompt_mask_rows = cls._token_rows(
-            prompt_mask,
-            name="attention_mask",
-        )
-        target_rows = cls._token_rows(target_ids, name="target input_ids")
-        target_mask_rows = cls._token_rows(
-            target_mask,
-            name="target attention_mask",
-        )
-        batch_size = len(prompt_rows)
-        if not all(len(rows) == batch_size for rows in (
-                prompt_mask_rows,
-                target_rows,
-                target_mask_rows,
-        )):
-            raise ValueError("Granite Speech prompt and target tensors must share a batch size.")
-
-        combined_ids = []
-        combined_mask = []
-        labels = []
-        for prompt_row, prompt_attention, target_row, target_attention in zip(
-                prompt_rows,
-                prompt_mask_rows,
-                target_rows,
-                target_mask_rows,
-        ):
-            if len(prompt_row) != len(prompt_attention):
+            if isinstance(language, str):
+                values = (language, )
+            elif isinstance(language, Sequence):
+                values = tuple(language)
+            else:
+                raise TypeError("Granite Speech training `language` must be a string, "
+                                "sequence, or None.")
+            if any(value is not None for value in values):
                 raise ValueError(
-                    "Granite Speech prompt IDs and attention mask must have "
-                    "identical shapes.")
-            if len(target_row) != len(target_attention):
-                raise ValueError(
-                    "Granite Speech target IDs and attention mask must have "
-                    "identical shapes.")
-            if not any(value == 1 for value in target_attention):
-                raise ValueError("Granite Speech training produced an empty transcript target.")
-            combined_ids.append(prompt_row + target_row)
-            combined_mask.append(prompt_attention + target_attention)
-            labels.append(([-100] * len(prompt_row)) + [
-                token_id if attended == 1 else -100
-                for token_id, attended in zip(target_row, target_attention)
-            ])
-        return combined_ids, combined_mask, labels
-
-    @staticmethod
-    def _combine_tensor_tokens(
-        *,
-        prompt_ids: Any,
-        prompt_mask: Any,
-        target_ids: Any,
-        target_mask: Any,
-    ) -> tuple[Any, Any, Any] | None:
-        try:
-            torch = import_module("torch")
-        except ModuleNotFoundError:
-            return None
-        is_tensor = getattr(torch, "is_tensor", None)
-        concatenate = getattr(torch, "cat", None)
-        full_like = getattr(torch, "full_like", None)
-        if (not callable(is_tensor) or not callable(concatenate) or not callable(full_like) or
-                not all(is_tensor(value) for value in (
-                    prompt_ids,
-                    prompt_mask,
-                    target_ids,
-                    target_mask,
-                ))):
-            return None
-        if (prompt_ids.ndim != 2 or prompt_mask.shape != prompt_ids.shape or target_ids.ndim != 2 or
-                target_mask.shape != target_ids.shape):
-            raise ValueError(
-                "Granite Speech prompt and target IDs/masks must be rank-two "
-                "tensors with matching shapes.")
-        if prompt_ids.shape[0] != target_ids.shape[0]:
-            raise ValueError("Granite Speech prompt and target tensors must share a batch size.")
-        if not bool(target_mask.ne(0).any(dim=-1).all()):
-            raise ValueError("Granite Speech training produced an empty transcript target.")
-        target_labels = target_ids.clone().masked_fill(target_mask.ne(1), -100)
-        labels = concatenate(
-            (
-                full_like(prompt_ids, -100),
-                target_labels,
+                    "Granite Speech fine-tuning is prompt-conditioned. "
+                    "Express language guidance in `prompt`.")
+        text = inputs.get(
+            "text",
+            inputs.get(
+                "transcription",
+                inputs.get("transcript"),
             ),
-            dim=-1,
         )
-        return (
-            concatenate((prompt_ids, target_ids), dim=-1),
-            concatenate((prompt_mask, target_mask), dim=-1),
-            labels,
-        )
-
-    def _apply_training_template(
-        self,
-        conversations: list[list[dict[str, Any]]],
-    ) -> Mapping[str, Any]:
-        examples = [self._training_example(conversation) for conversation in conversations]
-        waveforms = [waveform for waveform, _text in examples]
-        texts = [text for _waveform, text in examples]
-        prompts = [self._render_instruction(None) for _ in examples]
-
-        processed = self.transformers_processor(
-            prompts,
-            waveforms,
-            return_tensors="pt",
-            padding=True,
-            padding_side="left",
-        )
-        if not isinstance(processed, Mapping):
-            raise TypeError("The Granite Speech processor must return a mapping for training.")
-        prompt_ids = processed.get("input_ids")
-        prompt_mask = processed.get("attention_mask")
-        if prompt_ids is None or prompt_mask is None:
-            raise TypeError(
-                "The Granite Speech processor must emit `input_ids` and "
-                "`attention_mask` for training.")
-
-        tokenizer = self.transformers_processor.tokenizer
-        eos_token = getattr(tokenizer, "eos_token", None)
-        if not isinstance(eos_token, str) or not eos_token:
-            raise ValueError("The Granite Speech tokenizer must expose a non-empty EOS token.")
-        targets = tokenizer(
-            [f"{text}{eos_token}" for text in texts],
-            return_tensors="pt",
-            padding=True,
-            padding_side="right",
-        )
-        if not isinstance(targets, Mapping):
-            raise TypeError("The Granite Speech tokenizer must return a mapping for targets.")
-        target_ids = targets.get("input_ids")
-        target_mask = targets.get("attention_mask")
-        if target_ids is None or target_mask is None:
-            raise TypeError(
-                "The Granite Speech tokenizer must emit target `input_ids` "
-                "and `attention_mask`.")
-
-        combined = self._combine_tensor_tokens(
-            prompt_ids=prompt_ids,
-            prompt_mask=prompt_mask,
-            target_ids=target_ids,
-            target_mask=target_mask,
-        )
-        if combined is None:
-            combined = self._combine_list_tokens(
-                prompt_ids=prompt_ids,
-                prompt_mask=prompt_mask,
-                target_ids=target_ids,
-                target_mask=target_mask,
+        if text is None:
+            raise ValueError("Granite Speech training records require "
+                             "`text`/`transcription`.")
+        if isinstance(text, str):
+            texts = (text, )
+        elif (isinstance(text, Sequence) and not isinstance(text, (str, bytes))):
+            texts = tuple(text)
+        else:
+            raise TypeError("Granite Speech transcripts must be a string or sequence.")
+        if not texts or any(not isinstance(value, str) or not value.strip() for value in texts):
+            raise ValueError("Granite Speech transcripts must be non-empty strings.")
+        audio = inputs.get("audio")
+        if audio is None:
+            raise ValueError("Granite Speech training records require `audio`.")
+        audios = list(self._training_audio_rows(
+            audio,
+            batch_size=len(texts),
+        ))
+        lengths = inputs.get("audio_lengths")
+        if lengths is not None:
+            length_values = _batch_values(
+                lengths,
+                batch_size=len(audios),
+                name="audio_lengths",
             )
-        input_ids, attention_mask, labels = combined
-        batch = dict(processed)
-        batch.update({
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": labels,
-        })
-        return batch
+            for index, (value, length) in enumerate(zip(audios, length_values)):
+                if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
+                    raise ValueError("`audio_lengths` must contain positive integers.")
+                tensor = (value if isinstance(value, torch.Tensor) else torch.as_tensor(value))
+                if (tensor.ndim != 1 or int(length) > tensor.shape[-1]):
+                    raise ValueError("`audio_lengths` exceeds a waveform's samples.")
+                audios[index] = tensor[:int(length)]
+        rates = _batch_values(
+            inputs.get(
+                "sampling_rate",
+                inputs.get("sample_rate"),
+            ),
+            batch_size=len(audios),
+            name="sampling_rate",
+        )
+        prompts = _batch_values(
+            inputs.get("prompt"),
+            batch_size=len(audios),
+            name="prompt",
+            default=self.config.transcription_prompt,
+        )
+        prepared = processor.prepare_training_batch(
+            tuple(audios),
+            tuple(value.strip() for value in texts),
+            sampling_rates=rates,
+            prompts=prompts,
+        )
+        if (prepared["input_ids"].shape[1] > self.native_config.text_config.max_position_embeddings):
+            raise ValueError("A Granite Speech training example exceeds the checkpoint "
+                             "context window.")
+        for name, value in inputs.items():
+            if (name not in _RAW_TRAINING_FIELDS and name not in prepared):
+                prepared[name] = value
+        return prepared
+
+    def enable_lora(
+        self,
+        *,
+        rank: int = 8,
+        alpha: float = 16.0,
+        dropout: float = 0.0,
+        target_modules: tuple[str, ...] = (
+            "*.q_proj",
+            "*.k_proj",
+            "*.v_proj",
+            "*.o_proj",
+            "*.to_q",
+            "*.to_kv",
+            "*.to_out",
+        ),
+        freeze_base: bool = True,
+        seed: int = 0,
+    ) -> Any:
+        """Inject VoiceHub-native trainable adapters into the loaded graph."""
+        from voicehub.optimization import LoRAConfig, inject_lora
+
+        self.load_for_training()
+        if self._lora_injection is not None:
+            raise RuntimeError("Granite Speech LoRA is already enabled.")
+        original = {name: parameter.requires_grad for name, parameter in self.model.named_parameters()}
+        if freeze_base:
+            for parameter in self.model.parameters():
+                parameter.requires_grad_(False)
+        try:
+            self._lora_injection = inject_lora(
+                self.model,
+                LoRAConfig(
+                    rank=rank,
+                    alpha=alpha,
+                    dropout=dropout,
+                    target_modules=target_modules,
+                    freeze_base=freeze_base,
+                    seed=seed,
+                ),
+            )
+        except BaseException:
+            for name, parameter in self.model.named_parameters():
+                parameter.requires_grad_(original[name])
+            raise
+        self._lora_base_trainability = original
+        return self._lora_injection
+
+    def disable_lora(self) -> None:
+        if self._lora_injection is None:
+            return
+        self._lora_injection.restore()
+        self._lora_injection = None
+        if self._lora_base_trainability is not None:
+            for name, parameter in self.model.named_parameters():
+                parameter.requires_grad_(self._lora_base_trainability[name], )
+        self._lora_base_trainability = None
+
+    def _portable_state_dict(self) -> dict[str, Any]:
+        if self._lora_injection is None:
+            return dict(self.model.state_dict())
+        portable = {}
+        for name, tensor in self.model.state_dict().items():
+            if name.endswith((".lora_a", ".lora_b")):
+                continue
+            target_name = name.replace(".base.", ".")
+            value = tensor.detach()
+            if name.endswith(".base.weight"):
+                module_name = name[:-len(".base.weight")]
+                module = self._lora_injection.modules.get(module_name)
+                if module is None:
+                    raise RuntimeError(
+                        "Granite Speech export found an untracked LoRA "
+                        f"base module at {module_name!r}.")
+                if not module.merged:
+                    value = value + module.adapter_delta().detach().to(
+                        device=value.device,
+                        dtype=value.dtype,
+                    )
+            if target_name in portable:
+                raise RuntimeError(
+                    "Granite Speech LoRA export produced duplicate tensor "
+                    f"{target_name!r}.")
+            portable[target_name] = value
+        return portable
+
+    def _save_pretrained(self, save_directory: Path) -> None:
+        from voicehub.architectures.granite_speech.runtime import save_granite_speech_runtime
+
+        if self.runtime is None or self.model is None:
+            self.load()
+        self.runtime.model = self.model
+        save_granite_speech_runtime(
+            self.runtime,
+            save_directory,
+            state_dict=self._portable_state_dict(),
+        )
+
+    def export_native_pretrained(
+        self,
+        save_directory: str | Path,
+    ) -> Path:
+        destination = Path(save_directory).expanduser()
+        self._save_pretrained(destination)
+        return destination
 
 
 __all__ = ["GraniteSpeechForSpeechRecognition"]

@@ -1,4 +1,4 @@
-"""Stable model imports for neutts."""
+"""Stable public model imports for NeuTTS."""
 
 from voicehub.models.neutts.inference import NeuTTSForTextToSpeech
 

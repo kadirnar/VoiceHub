@@ -1,21 +1,33 @@
-import warnings
+"""Programmatic native DAC archive decoder."""
+
+from __future__ import annotations
+
+import logging
 from pathlib import Path
 
-import argbind
-import numpy as np
 import torch
-from audiotools import AudioSignal
-from tqdm import tqdm
 
 from voicehub.components.audio.codecs.dac import DACFile
 from voicehub.components.audio.codecs.dac.utils import load_model
 
-warnings.filterwarnings("ignore", category=UserWarning)
+logger = logging.getLogger(__name__)
 
 
-@argbind.bind(group="decode", positional=True, without_prefix=True)
+def _dac_files(source: Path) -> tuple[Path, ...]:
+    if source.is_file():
+        if source.suffix.lower() != ".dac":
+            raise ValueError("Native DAC decoding requires a `.dac` archive.")
+        return (source,)
+    if not source.is_dir():
+        raise FileNotFoundError(f"DAC input was not found: {source}.")
+    return tuple(sorted(path for path in source.rglob("*.dac") if path.is_file()))
+
+
+def _relative_path(path: Path, source: Path) -> Path:
+    return Path(path.name) if source.is_file() else path.relative_to(source)
+
+
 @torch.inference_mode()
-@torch.no_grad()
 def decode(
     input: str,
     output: str = "",
@@ -25,71 +37,36 @@ def decode(
     device: str = "cuda",
     model_type: str = "44khz",
     verbose: bool = False,
-):
-    """Decode audio from codes.
-
-    Parameters
-    ----------
-    input : str
-        Path to input directory or file
-    output : str, optional
-        Path to output directory, by default "".
-        If `input` is a directory, the directory sub-tree relative to `input` is re-created in `output`.
-    weights_path : str, optional
-        Path to weights file, by default "". If not specified, the weights file will be downloaded from the internet using the
-        model_tag and model_type.
-    model_tag : str, optional
-        Tag of the model to use, by default "latest". Ignored if `weights_path` is specified.
-    model_bitrate: str
-        Bitrate of the model. Must be one of "8kbps", or "16kbps". Defaults to "8kbps".
-    device : str, optional
-        Device to use, by default "cuda". If "cpu", the model will be loaded on the CPU.
-    model_type : str, optional
-        The type of model to use. Must be one of "44khz", "24khz", or "16khz". Defaults to "44khz". Ignored if `weights_path` is specified.
-    """
+) -> tuple[Path, ...]:
+    """Decode one native ``.dac`` archive or directory tree to PCM WAVE."""
     generator = load_model(
         model_type=model_type,
         model_bitrate=model_bitrate,
         tag=model_tag,
-        load_path=weights_path,
+        load_path=weights_path or None,
     )
-    generator.to(device)
-    generator.eval()
-
-    # Find all .dac files in input directory
-    _input = Path(input)
-    input_files = list(_input.glob("**/*.dac"))
-
-    # If input is a .dac file, add it to the list
-    if _input.suffix == ".dac":
-        input_files.append(_input)
-
-    # Create output directory
-    output = Path(output)
-    output.mkdir(parents=True, exist_ok=True)
-
-    for i in tqdm(range(len(input_files)), desc=f"Decoding files"):
-        # Load file
-        artifact = DACFile.load(input_files[i])
-
-        # Reconstruct audio from codes
-        recons = generator.decompress(artifact, verbose=verbose)
-
-        # Compute output path
-        relative_path = input_files[i].relative_to(input)
-        output_dir = output / relative_path.parent
-        if not relative_path.name:
-            output_dir = output
-            relative_path = input_files[i]
-        output_name = relative_path.with_suffix(".wav").name
-        output_path = output_dir / output_name
+    generator.to(device).eval()
+    source = Path(input).expanduser()
+    input_files = _dac_files(source)
+    destination = Path(output).expanduser()
+    destination.mkdir(parents=True, exist_ok=True)
+    outputs = []
+    for index, archive_path in enumerate(input_files, start=1):
+        if verbose:
+            logger.info(
+                "Decoding DAC file %d/%d: %s",
+                index,
+                len(input_files),
+                archive_path,
+            )
+        artifact = DACFile.load(archive_path)
+        reconstruction = generator.decompress(artifact, verbose=verbose)
+        relative = _relative_path(archive_path, source).with_suffix(".wav")
+        output_path = destination / relative
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        reconstruction.write(output_path)
+        outputs.append(output_path)
+    return tuple(outputs)
 
-        # Write to file
-        recons.write(output_path)
 
-
-if __name__ == "__main__":
-    args = argbind.parse_args()
-    with argbind.scope(args):
-        decode()
+__all__ = ["decode"]

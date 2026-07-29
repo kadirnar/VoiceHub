@@ -121,8 +121,6 @@ def sample_blockwise_euler_cfg_independent_guidances(
 
 
 if __name__ == "__main__":
-    import torchaudio
-
     from voicehub.models.echo.sampling import (
         ae_decode,
         ae_encode,
@@ -134,6 +132,7 @@ if __name__ == "__main__":
         load_model_from_hf,
         load_pca_state_from_hf,
     )
+    from voicehub.processing.waveform import save_pcm_wave
 
     model = load_model_from_hf()
     fish_ae = load_fish_ae_from_hf()
@@ -170,7 +169,11 @@ if __name__ == "__main__":
     )
     audio_out = ae_decode(fish_ae, pca_state, latent_out)
     audio_out = crop_audio_to_flattening_point(audio_out, latent_out[0])
-    torchaudio.save("output_blockwise.wav", audio_out[0].cpu(), 44100)
+    save_pcm_wave(
+        "output_blockwise.wav",
+        audio_out[0].cpu(),
+        44_100,
+    )
 
     # ___________________________________________________________
     # example 2: with continuation latent (use same speaker audio as first example, generate from partial output of first example)
@@ -213,4 +216,8 @@ if __name__ == "__main__":
     )
     audio_out_continued = ae_decode(fish_ae, pca_state, latent_out_continued)
     audio_out_continued = crop_audio_to_flattening_point(audio_out_continued, latent_out_continued[0])
-    torchaudio.save("output_blockwise_continued.wav", audio_out_continued[0].cpu(), 44100)
+    save_pcm_wave(
+        "output_blockwise_continued.wav",
+        audio_out_continued[0].cpu(),
+        44_100,
+    )

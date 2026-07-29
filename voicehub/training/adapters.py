@@ -1197,6 +1197,57 @@ class BaseTrainingAdapter:
         """Hook invoked after a phase output has been normalized."""
         return output
 
+    def evaluation_label_values(
+        self,
+        inputs: Mapping[str, Any],
+        phase: TrainingPhaseSpec,
+    ) -> tuple[Any, ...]:
+        """Return references from an unprocessed evaluation batch.
+
+        Most adapters receive model-ready targets, so the declared phase
+        labels are sufficient. Raw speech recipes can override this hook
+        to expose transcripts or other references before
+        ``prepare_batch()`` converts them into backend tensors.
+        """
+        names = tuple(dict.fromkeys(phase.label_names + self.spec.label_names))
+        for name in names:
+            if name in inputs:
+                return (inputs[name], )
+        return ()
+
+    def prepare_evaluation_predictions(
+        self,
+        outputs: Any,
+        context: TrainingContext,
+        predictions: Any,
+    ) -> Any:
+        """Convert native outputs into values suitable for evaluation."""
+        del outputs, context
+        return predictions
+
+    def compute_evaluation_metrics(
+        self,
+        predictions: Any,
+        label_ids: Any,
+    ) -> Mapping[str, Any]:
+        """Return recipe-owned metrics after all evaluation batches."""
+        del predictions, label_ids
+        return {}
+
+    def evaluation_scheduler_metric(
+        self,
+        metrics: Mapping[str, Any],
+    ) -> float | None:
+        """Select an evaluation metric for a recipe-owned scheduler.
+
+        Step-based schedulers keep their existing optimizer-update
+        cadence. Specialized validation schedulers opt in by returning
+        one scalar metric after evaluation; the default intentionally
+        returns ``None``.
+        """
+        del metrics
+        return None
+
     def execute_training_plan(
         self,
         inputs: Mapping[str, Any],
@@ -1334,6 +1385,12 @@ class BaseTrainingAdapter:
                 self._restore_frozen_parameters(frozen_parameters)
             losses = self._extract_losses(outputs, phase)
             predictions = self._extract_predictions(outputs, phase)
+            if not context.is_training:
+                predictions = self.prepare_evaluation_predictions(
+                    outputs,
+                    context,
+                    predictions,
+                )
             loss = self._aggregate_losses(losses, phase)
             if loss is None:
                 if labels is None and not context.is_training:

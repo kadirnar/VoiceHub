@@ -1,0 +1,40 @@
+{
+  "architecture": "CosyVoice 3",
+  "checkpoint": {
+    "files": {
+      "flow.pt": {
+        "sha256": "a6fab32a7825e5b0bc855ddd948f8db9370b0a786fbc249caa4595e95b608e4b",
+        "size": 1329116148
+      },
+      "hift.pt": {
+        "sha256": "b279d7641eb97ae55b3b540cfba4f953c26492a2df758328a89a4d007ab87a65",
+        "size": 83202622
+      },
+      "llm.pt": {
+        "sha256": "69f43bd545131c30e98947fb360ea8b4dc9916d8e83dded7757c7ea4f5a24970",
+        "size": 2024669519
+      }
+    },
+    "license": "Apache-2.0",
+    "model_id": "FunAudioLLM/Fun-CosyVoice3-0.5B-2512",
+    "revision": "29e01c4e8d000f4bcd70751be16fa94bf3d85a18"
+  },
+  "implementation": {
+    "claim": "VoiceHub-owned PyTorch implementation; numerical parity is not claimed without checkpoint-level evidence.",
+    "executable_checkpoint_compatibility": "Fun-CosyVoice3-0.5B-2512 only; CosyVoice 1 and 2 use different graphs and are not claimed compatible.",
+    "external_model_runtime_dependencies": [],
+    "legacy_policy": "Published pickle-based .pt files are accepted only by the explicit audited conversion API. Normal loading and every exported artifact require Safetensors."
+  },
+  "source": {
+    "license": "Apache-2.0",
+    "repository": "https://github.com/FunAudioLLM/CosyVoice",
+    "revision": "074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc"
+  },
+  "training": {
+    "flow_matching": true,
+    "full_llm_sft": true,
+    "hift_discriminator": true,
+    "hift_generator": true,
+    "speech_tokenizer_frozen": true
+  }
+}

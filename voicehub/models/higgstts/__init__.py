@@ -1,5 +1,31 @@
-"""Higgs Audio TTS model family."""
+"""Public, dependency-light imports for VoiceHub-native Higgs Audio v2."""
 
-from voicehub.models.higgstts.inference import HiggsTTSConfig, HiggsTTSForTextToSpeech
+from __future__ import annotations
 
-__all__ = ["HiggsTTSConfig", "HiggsTTSForTextToSpeech"]
+import importlib
+from typing import Any
+
+_PACKAGE = "voicehub.models.higgstts."
+_EXPORTS = {
+    "HiggsTTS": _PACKAGE + "modeling_higgstts",
+    "HiggsTTSConfig": _PACKAGE + "configuration_higgstts",
+    "HiggsTTSForTextToSpeech": _PACKAGE + "modeling_higgstts",
+    "HiggsTrainingAdapter": _PACKAGE + "training",
+    "HiggsTrainingCollator": _PACKAGE + "training",
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_name = _EXPORTS[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    value = getattr(importlib.import_module(module_name), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted((*globals(), *_EXPORTS))

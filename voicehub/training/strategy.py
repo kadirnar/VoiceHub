@@ -25,10 +25,18 @@ class TrainingStrategy:
 
     name = "base"
 
-    def prepare_model(self, model, *, device: str):
-        """Move or wrap a trainable model and return the runtime object."""
+    def prepare_device(self, model, *, device: str):
+        """Place an unwrapped graph on its execution device.
+
+        Trainer calls this hook before explicit graph optimization and
+        before any strategy proxy is created.
+        """
         if hasattr(model, "to"):
             model.to(device)
+        return model
+
+    def prepare_model(self, model, *, device: str):
+        """Wrap a device-prepared, explicitly optimized model handle."""
         return model
 
     def prepare_training_adapter(self, adapter, *, device: str):
@@ -38,7 +46,7 @@ class TrainingStrategy:
         and return a proxy handle here. They must then implement
         :meth:`execute_training_phase` and :meth:`unwrap_model`.
         """
-        adapter.to(device)
+        del device
         return adapter
 
     def prepare_optimization(self, model, optimizer, scheduler):

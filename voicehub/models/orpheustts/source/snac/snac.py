@@ -1,9 +1,12 @@
+"""VoiceHub-owned SNAC graph vendored from the pinned official source."""
+
+from __future__ import annotations
+
 import json
 import math
-import os
+from pathlib import Path
 from typing import List, Tuple
 
-import numpy as np
 import torch
 from torch import nn
 
@@ -36,7 +39,7 @@ class SNAC(nn.Module):
         if latent_dim is None:
             latent_dim = encoder_dim * (2 ** len(encoder_rates))
         self.latent_dim = latent_dim
-        self.hop_length = np.prod(encoder_rates)
+        self.hop_length = math.prod(encoder_rates)
         self.encoder = Encoder(
             encoder_dim,
             encoder_rates,
@@ -48,6 +51,8 @@ class SNAC(nn.Module):
         self.codebook_dim = codebook_dim
         self.vq_strides = vq_strides
         self.attn_window_size = attn_window_size
+        self.noise = noise
+        self.depthwise = depthwise
         self.quantizer = ResidualVectorQuantize(
             input_dim=latent_dim,
             codebook_size=codebook_size,
@@ -92,23 +97,30 @@ class SNAC(nn.Module):
 
     @classmethod
     def from_config(cls, config_path):
-        with open(config_path, "r") as f:
+        with Path(config_path).open(encoding="utf-8") as f:
             config = json.load(f)
+        if not isinstance(config, dict):
+            raise ValueError("SNAC configuration must be a JSON object.")
         model = cls(**config)
         return model
 
     @classmethod
     def from_pretrained(cls, repo_id, **kwargs):
-        from huggingface_hub import hf_hub_download
+        from voicehub.models.orpheustts.artifacts import resolve_snac_artifacts
+        from voicehub.models.orpheustts.checkpoint import (
+            SNACCheckpointAdapter,
+        )
+        from voicehub.checkpointing import SafeTensorReader
 
-        if not os.path.isdir(repo_id):
-            config_path = hf_hub_download(repo_id=repo_id, filename="config.json", **kwargs)
-            model_path = hf_hub_download(repo_id=repo_id, filename="pytorch_model.bin", **kwargs)
-            model = cls.from_config(config_path)
-            state_dict = torch.load(model_path, map_location="cpu")
-        else:
-            model = cls.from_config(os.path.join(repo_id, "config.json"))
-            state_dict = torch.load(os.path.join(repo_id, "pytorch_model.bin"), map_location="cpu")
-        model.load_state_dict(state_dict)
+        artifacts = resolve_snac_artifacts(repo_id, **kwargs)
+        model = cls.from_config(artifacts.config)
+        with SafeTensorReader(artifacts.checkpoint) as reader:
+            SNACCheckpointAdapter.for_model(model).load_streaming(
+                model,
+                reader,
+                {},
+                strict=True,
+            )
+        model._voicehub_artifacts = artifacts
         model.eval()
         return model

@@ -1,0 +1,41 @@
+{
+  "architecture": "zonos",
+  "checkpoint": {
+    "header_fingerprint": "f9345518599a051d9bd0391e79d853fdd752e257916a2f05ca57cbf2f6372d3d",
+    "license": "Apache-2.0",
+    "parameter_count": 1624411136,
+    "repository": "Zyphra/Zonos-v0.1-transformer",
+    "revision": "9d8331fc49cb5ba8aad2bb56cafd809c66598f4e",
+    "sha256": "4ac68319d6b8c1b29b94b8801ca41a93a5fc458f4b1d4bbbe5045b2ee77efcf0",
+    "size": 3248848864,
+    "tensor_count": 246
+  },
+  "codec": {
+    "implementation": "voicehub-native",
+    "repository": "descript/dac_44khz",
+    "revision": "c1bc521685adf9cfe247bc39a5ca58917eda1ac4"
+  },
+  "hybrid": {
+    "repository": "Zyphra/Zonos-v0.1-hybrid",
+    "revision": "5b91c392fc599c194d429c00ee4d157ead6f0394",
+    "support": "fail-closed",
+    "why": "The hybrid artifact contains a distinct Mamba-2 state-space graph. It is not compatible with the dense Transformer namespace."
+  },
+  "implementation": "voicehub-native",
+  "source": {
+    "license": "Apache-2.0",
+    "license_sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+    "repository": "https://github.com/Zyphra/Zonos",
+    "revision": "bc40d98e1e1ab54fc65c483be127a90e3c7c0645"
+  },
+  "text_frontend": {
+    "boundary": "The checkpoint consumes eSpeak-compatible phonemes. VoiceHub accepts precomputed phonemes or an injected frontend and never substitutes raw graphemes silently.",
+    "external_runtime_required": false
+  },
+  "training": {
+    "author_verified_recipe": false,
+    "boundary": "The upstream release does not publish its original data pipeline or optimizer recipe. VoiceHub reconstructs and tests the next-token delayed-codebook cross-entropy implied by generation.",
+    "full_model_gradient_ready": true,
+    "inference_reloadable_safetensors": true
+  }
+}

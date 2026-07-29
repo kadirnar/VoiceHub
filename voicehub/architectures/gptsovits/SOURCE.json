@@ -1,0 +1,76 @@
+{
+  "architecture": "gpt-sovits-classic-s2",
+  "checkpoint_provider": {
+    "license": "MIT",
+    "repository": "https://huggingface.co/lj1995/GPT-SoVITS",
+    "revision": "336b2ec4e8d4ac74740798dd40af44e74659ecaf",
+    "s1": {
+      "path": "gsv-v2final-pretrained/s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt",
+      "sha256": "732f94e63b148066e24c7f9d2637f3374083e637635f07fbdb695dee20ddbe1f"
+    },
+    "s2_discriminator": {
+      "path": "gsv-v2final-pretrained/s2D2333k.pth",
+      "sha256": "8ae7fe8dd8c8f2e718de359e00edac88b0c71ab2fd10b07ad4cc45070eb8a836"
+    },
+    "s2_generator": {
+      "path": "gsv-v2final-pretrained/s2G2333k.pth",
+      "sha256": "924fdccaa3c574bf139c25c9759aa1ed3b3f99e19a7c529ee996c2bc17663695"
+    },
+    "variants": {
+      "v1": {
+        "s1": {
+          "path": "s1bert25hz-2kh-longer-epoch=68e-step=50232.ckpt",
+          "sha256": "b1c1e17e9c99547a89388f72048cd6e1b41b5a18b170e86a46dfde0324d63eb1"
+        },
+        "s2_discriminator": {
+          "path": "s2D488k.pth",
+          "sha256": "fc579c1db3c1e21b721001cf99d7a584214280df19b002e200b630a34fa06eb8"
+        },
+        "s2_generator": {
+          "path": "s2G488k.pth",
+          "sha256": "020a014e1e01e550e510f2f61fae5e5f5b6aab40f15c22f1f12f724df507e835"
+        }
+      },
+      "v2Pro": {
+        "s1": "same as v2",
+        "s2_discriminator": {
+          "path": "v2Pro/s2Dv2Pro.pth",
+          "sha256": "257a7f36ae49e9ff08790d2cd3d398592530852caba810197f8606e884a52c54"
+        },
+        "s2_generator": {
+          "path": "v2Pro/s2Gv2Pro.pth",
+          "sha256": "0f8ead815234365edf045c6d86370ed6e4f440e8195be77ff0ea72684ad406a5"
+        }
+      },
+      "v2ProPlus": {
+        "s1": "same as v2",
+        "s2_discriminator": {
+          "path": "v2Pro/s2Dv2ProPlus.pth",
+          "sha256": "635cd84bf6f7f9b8d41c88c7106f81d782c794c61f931845214ea037b0c5bef2"
+        },
+        "s2_generator": {
+          "path": "v2Pro/s2Gv2ProPlus.pth",
+          "sha256": "d42a22bbbf65fb2bbdd45ad6a66841156977db45c7aabe0a6992ff378d9c7d3b"
+        }
+      }
+    }
+  },
+  "implementation": "voicehub-native",
+  "license": "MIT",
+  "policy": "The active classic-S2 graphs import only PyTorch, Python's standard library, and VoiceHub-owned modules. Legacy pickle checkpoints require explicit trust and weights-only loading before conversion to Safetensors. Raw multilingual preprocessing fails closed because the released frontend depends on separately versioned language G2P, Chinese-RoBERTa, and CNHubert assets. V2Pro and V2ProPlus require caller-prepared ERes2NetV2 speaker-verification embeddings.",
+  "source": {
+    "repository": "https://github.com/RVC-Boss/GPT-SoVITS",
+    "revision": "d523079fc05d9a8028d6085bffe4a2757c32abb6"
+  },
+  "supported_variants": [
+    "v1",
+    "v2",
+    "v2Pro",
+    "v2ProPlus"
+  ],
+  "unsupported_variants": [
+    "v3",
+    "v4",
+    "LoRA"
+  ]
+}

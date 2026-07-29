@@ -1,5 +1,30 @@
-"""MeloTTS configuration and model exports."""
+"""Lazy public exports for VoiceHub's native MeloTTS family."""
 
-from voicehub.models.melotts.inference import MeloTTSConfig, MeloTTSForTextToSpeech
+from __future__ import annotations
 
-__all__ = ["MeloTTSConfig", "MeloTTSForTextToSpeech"]
+from importlib import import_module
+from typing import Any
+
+_EXPORTS = {
+    "MeloTTSConfig": ("voicehub.models.melotts.configuration_melotts"),
+    "MeloTTSForTextToSpeech": "voicehub.models.melotts.inference",
+    "MeloTTSTrainingAdapter": "voicehub.models.melotts.training",
+    "MeloTTSTrainingCollator": "voicehub.models.melotts.training",
+}
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_name = _EXPORTS[name]
+    except KeyError as error:
+        raise AttributeError(name) from error
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted((*globals(), *_EXPORTS))
+
+
+__all__ = sorted(_EXPORTS)

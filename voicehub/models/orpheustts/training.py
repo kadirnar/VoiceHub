@@ -6,21 +6,34 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from voicehub.dependencies import import_optional
+from voicehub.models.orpheustts.protocol import (
+    AUDIO_TOKEN_OFFSET,
+    END_AI_TOKEN_ID,
+    END_HUMAN_TOKEN_ID,
+    END_SPEECH_TOKEN_ID,
+    END_TEXT_TOKEN_ID,
+    PAD_TOKEN_ID,
+    START_AI_TOKEN_ID,
+    START_HUMAN_TOKEN_ID,
+    START_SPEECH_TOKEN_ID,
+    interleave_snac_codes,
+    normalize_orpheus_audio_tokens,
+)
 from voicehub.training.data import CausalTokenCollator, load_audio_tensor
 
 
 class OrpheusSFTDataset:
     """Build Orpheus control-token and seven-code SNAC sequences."""
 
-    START_HUMAN = 128259
-    END_TEXT = 128009
-    END_HUMAN = 128260
-    START_AI = 128261
-    START_SPEECH = 128257
-    END_SPEECH = 128258
-    END_AI = 128262
-    PAD = 128263
-    AUDIO_OFFSET = 128266
+    START_HUMAN = START_HUMAN_TOKEN_ID
+    END_TEXT = END_TEXT_TOKEN_ID
+    END_HUMAN = END_HUMAN_TOKEN_ID
+    START_AI = START_AI_TOKEN_ID
+    START_SPEECH = START_SPEECH_TOKEN_ID
+    END_SPEECH = END_SPEECH_TOKEN_ID
+    END_AI = END_AI_TOKEN_ID
+    PAD = PAD_TOKEN_ID
+    AUDIO_OFFSET = AUDIO_TOKEN_OFFSET
 
     def __init__(
         self,
@@ -29,11 +42,18 @@ class OrpheusSFTDataset:
         tokenizer,
         codec,
         completion_only: bool = False,
+        max_length: int | None = None,
     ):
         self.records = tuple(dict(record) for record in records)
         self.tokenizer = tokenizer
         self.codec = codec
-        self.completion_only = bool(completion_only)
+        if not isinstance(completion_only, bool):
+            raise TypeError("`completion_only` must be a boolean.")
+        if max_length is not None:
+            if (isinstance(max_length, bool) or not isinstance(max_length, int) or max_length < 2):
+                raise ValueError("`max_length` must be an integer of at least two or None.")
+        self.completion_only = completion_only
+        self.max_length = max_length
         self.collate_fn = CausalTokenCollator(pad_token_id=self.PAD)
         if not self.records:
             raise ValueError("OrpheusSFTDataset requires at least one record.")
@@ -43,45 +63,7 @@ class OrpheusSFTDataset:
 
     @staticmethod
     def _flatten_snac_codes(layers) -> list[int]:
-        normalized = []
-        for layer in layers:
-            values = layer
-            if hasattr(values, "detach"):
-                values = values.detach().cpu()
-            if hasattr(values, "reshape"):
-                values = values.reshape(-1).tolist()
-            normalized.append([int(value) for value in values])
-        if len(normalized) != 3:
-            raise ValueError("Orpheus SNAC codes must contain three hierarchy layers.")
-        layer_1, layer_2, layer_3 = normalized
-        frame_count = min(
-            len(layer_1),
-            len(layer_2) // 2,
-            len(layer_3) // 4,
-        )
-        frames = []
-        for index in range(frame_count):
-            frames.append((
-                layer_1[index],
-                layer_2[2 * index],
-                layer_3[4 * index],
-                layer_3[4 * index + 1],
-                layer_2[2 * index + 1],
-                layer_3[4 * index + 2],
-                layer_3[4 * index + 3],
-            ))
-        deduplicated = []
-        previous_first = None
-        for frame in frames:
-            if frame[0] == previous_first:
-                continue
-            deduplicated.append(frame)
-            previous_first = frame[0]
-        offsets = (0, 4096, 8192, 12288, 16384, 20480, 24576)
-        return [
-            value + OrpheusSFTDataset.AUDIO_OFFSET + offsets[channel] for frame in deduplicated
-            for channel, value in enumerate(frame)
-        ]
+        return interleave_snac_codes(layers)
 
     def _audio_tokens(self, record: Mapping[str, Any]) -> list[int]:
         codes = record.get("audio_codes")
@@ -91,7 +73,7 @@ class OrpheusSFTDataset:
                 raise ValueError("Orpheus records require 'audio' or precomputed 'audio_codes'.")
             waveform = load_audio_tensor(
                 str(audio_path),
-                sample_rate=24_000,
+                sample_rate=int(getattr(self.codec, "sampling_rate", 24_000)),
                 model_type="orpheustts",
                 install_extra="training",
             )
@@ -117,6 +99,7 @@ class OrpheusSFTDataset:
             raise ValueError(
                 "Flat Orpheus audio_codes must already include codebook offsets. "
                 "Pass the three raw SNAC hierarchy layers instead.")
+        normalize_orpheus_audio_tokens(flattened)
         return flattened
 
     def __getitem__(self, index: int) -> dict[str, Any]:
@@ -135,6 +118,11 @@ class OrpheusSFTDataset:
         sequence = ([self.START_HUMAN] + list(text_ids) +
                     [self.END_TEXT, self.END_HUMAN, self.START_AI, self.START_SPEECH] + audio_tokens +
                     [self.END_SPEECH, self.END_AI])
+        if self.max_length is not None and len(sequence) > self.max_length:
+            raise ValueError(
+                f"Orpheus record {index} produces {len(sequence)} tokens, "
+                f"exceeding max_length={self.max_length}. Pre-segment the "
+                "record instead of truncating a SNAC frame.")
         labels = list(sequence)
         if self.completion_only:
             speech_index = sequence.index(self.START_SPEECH)

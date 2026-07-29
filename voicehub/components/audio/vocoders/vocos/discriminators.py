@@ -1,11 +1,48 @@
-from typing import List, Optional, Tuple
+from __future__ import annotations
 
 import torch
-from einops import rearrange
 from torch import nn
 from torch.nn import Conv2d
 from torch.nn.utils import weight_norm
-from torchaudio.transforms import Spectrogram
+
+
+class NativeComplexSpectrogram(nn.Module):
+    """PyTorch-only complex spectrogram with torchaudio-compatible state."""
+
+    def __init__(
+        self,
+        *,
+        n_fft: int,
+        hop_length: int,
+        win_length: int,
+    ) -> None:
+        super().__init__()
+        self.n_fft = n_fft
+        self.hop_length = hop_length
+        self.win_length = win_length
+        self.register_buffer("window", torch.hann_window(win_length))
+
+    def forward(self, waveform: torch.Tensor) -> torch.Tensor:
+        window = self.window.to(
+            device=waveform.device,
+            dtype=waveform.dtype,
+        )
+        return torch.stft(
+            waveform,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            win_length=self.win_length,
+            window=window,
+            center=True,
+            pad_mode=(
+                "reflect"
+                if waveform.shape[-1] > self.n_fft // 2
+                else "constant"
+            ),
+            normalized=False,
+            onesided=True,
+            return_complex=True,
+        )
 
 
 class MultiPeriodDiscriminator(nn.Module):
@@ -19,13 +56,25 @@ class MultiPeriodDiscriminator(nn.Module):
             Defaults to None.
     """
 
-    def __init__(self, periods: Tuple[int, ...] = (2, 3, 5, 7, 11), num_embeddings: Optional[int] = None):
+    def __init__(
+        self,
+        periods: tuple[int, ...] = (2, 3, 5, 7, 11),
+        num_embeddings: int | None = None,
+    ):
         super().__init__()
         self.discriminators = nn.ModuleList([DiscriminatorP(period=p, num_embeddings=num_embeddings) for p in periods])
 
     def forward(
-        self, y: torch.Tensor, y_hat: torch.Tensor, bandwidth_id: Optional[torch.Tensor] = None
-    ) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[List[torch.Tensor]], List[List[torch.Tensor]]]:
+        self,
+        y: torch.Tensor,
+        y_hat: torch.Tensor,
+        bandwidth_id: torch.Tensor | None = None,
+    ) -> tuple[
+        list[torch.Tensor],
+        list[torch.Tensor],
+        list[list[torch.Tensor]],
+        list[list[torch.Tensor]],
+    ]:
         y_d_rs = []
         y_d_gs = []
         fmap_rs = []
@@ -49,7 +98,7 @@ class DiscriminatorP(nn.Module):
         kernel_size: int = 5,
         stride: int = 3,
         lrelu_slope: float = 0.1,
-        num_embeddings: Optional[int] = None,
+        num_embeddings: int | None = None,
     ):
         super().__init__()
         self.period = period
@@ -70,8 +119,16 @@ class DiscriminatorP(nn.Module):
         self.lrelu_slope = lrelu_slope
 
     def forward(
-        self, x: torch.Tensor, cond_embedding_id: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        self,
+        x: torch.Tensor,
+        cond_embedding_id: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        if x.ndim == 3 and x.shape[1] == 1:
+            x = x[:, 0]
+        if x.ndim != 2:
+            raise ValueError(
+                "Period discriminator input must have shape [batch, samples]."
+            )
         x = x.unsqueeze(1)
         fmap = []
         # 1d to 2d
@@ -88,8 +145,10 @@ class DiscriminatorP(nn.Module):
             if i > 0:
                 fmap.append(x)
         if cond_embedding_id is not None:
+            if cond_embedding_id.ndim == 0:
+                cond_embedding_id = cond_embedding_id.unsqueeze(0)
             emb = self.emb(cond_embedding_id)
-            h = (emb.view(1, -1, 1, 1) * x).sum(dim=1, keepdims=True)
+            h = (emb[:, :, None, None] * x).sum(dim=1, keepdim=True)
         else:
             h = 0
         x = self.conv_post(x)
@@ -103,8 +162,8 @@ class DiscriminatorP(nn.Module):
 class MultiResolutionDiscriminator(nn.Module):
     def __init__(
         self,
-        fft_sizes: Tuple[int, ...] = (2048, 1024, 512),
-        num_embeddings: Optional[int] = None,
+        fft_sizes: tuple[int, ...] = (2048, 1024, 512),
+        num_embeddings: int | None = None,
     ):
         """
         Multi-Resolution Discriminator module adapted from https://github.com/descriptinc/descript-audio-codec.
@@ -123,7 +182,12 @@ class MultiResolutionDiscriminator(nn.Module):
 
     def forward(
         self, y: torch.Tensor, y_hat: torch.Tensor, bandwidth_id: torch.Tensor = None
-    ) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[List[torch.Tensor]], List[List[torch.Tensor]]]:
+    ) -> tuple[
+        list[torch.Tensor],
+        list[torch.Tensor],
+        list[list[torch.Tensor]],
+        list[list[torch.Tensor]],
+    ]:
         y_d_rs = []
         y_d_gs = []
         fmap_rs = []
@@ -144,16 +208,24 @@ class DiscriminatorR(nn.Module):
     def __init__(
         self,
         window_length: int,
-        num_embeddings: Optional[int] = None,
+        num_embeddings: int | None = None,
         channels: int = 32,
         hop_factor: float = 0.25,
-        bands: Tuple[Tuple[float, float], ...] = ((0.0, 0.1), (0.1, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0)),
+        bands: tuple[tuple[float, float], ...] = (
+            (0.0, 0.1),
+            (0.1, 0.25),
+            (0.25, 0.5),
+            (0.5, 0.75),
+            (0.75, 1.0),
+        ),
     ):
         super().__init__()
         self.window_length = window_length
         self.hop_factor = hop_factor
-        self.spec_fn = Spectrogram(
-            n_fft=window_length, hop_length=int(window_length * hop_factor), win_length=window_length, power=None
+        self.spec_fn = NativeComplexSpectrogram(
+            n_fft=window_length,
+            hop_length=int(window_length * hop_factor),
+            win_length=window_length,
         )
         n_fft = window_length // 2 + 1
         bands = [(int(b[0] * n_fft), int(b[1] * n_fft)) for b in bands]
@@ -177,12 +249,18 @@ class DiscriminatorR(nn.Module):
 
     def spectrogram(self, x):
         # Remove DC offset
-        x = x - x.mean(dim=-1, keepdims=True)
+        if x.ndim == 3 and x.shape[1] == 1:
+            x = x[:, 0]
+        if x.ndim != 2:
+            raise ValueError(
+                "Resolution discriminator input must have shape [batch, samples]."
+            )
+        x = x - x.mean(dim=-1, keepdim=True)
         # Peak normalize the volume of input audio
         x = 0.8 * x / (x.abs().max(dim=-1, keepdim=True)[0] + 1e-9)
         x = self.spec_fn(x)
         x = torch.view_as_real(x)
-        x = rearrange(x, "b f t c -> b c t f")
+        x = x.permute(0, 3, 2, 1)
         # Split into bands
         x_bands = [x[..., b[0] : b[1]] for b in self.bands]
         return x_bands
@@ -200,8 +278,10 @@ class DiscriminatorR(nn.Module):
             x.append(band)
         x = torch.cat(x, dim=-1)
         if cond_embedding_id is not None:
+            if cond_embedding_id.ndim == 0:
+                cond_embedding_id = cond_embedding_id.unsqueeze(0)
             emb = self.emb(cond_embedding_id)
-            h = (emb.view(1, -1, 1, 1) * x).sum(dim=1, keepdims=True)
+            h = (emb[:, :, None, None] * x).sum(dim=1, keepdim=True)
         else:
             h = 0
         x = self.conv_post(x)
@@ -209,3 +289,12 @@ class DiscriminatorR(nn.Module):
         x += h
 
         return x, fmap
+
+
+__all__ = [
+    "DiscriminatorP",
+    "DiscriminatorR",
+    "MultiPeriodDiscriminator",
+    "MultiResolutionDiscriminator",
+    "NativeComplexSpectrogram",
+]

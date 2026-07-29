@@ -7,7 +7,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from voicehub.dependencies import import_optional
+import torch
+
+from voicehub.architectures.qwen3_tts.runtime import qwen3_tts_speaker_mel
+from voicehub.processing import load_native_audio
 
 
 class Qwen3TTSSFTDataset:
@@ -19,35 +22,29 @@ class Qwen3TTSSFTDataset:
     """
 
     def __init__(self, records: Sequence[Mapping[str, Any]], processor, config):
-        self.records = tuple(dict(record) for record in records)
+        normalized_records: list[dict[str, Any]] = []
+        for index, record in enumerate(records):
+            if not isinstance(record, Mapping):
+                raise TypeError(f"Qwen3-TTS record {index} must be a mapping.")
+            normalized_records.append(dict(record))
+        self.records = tuple(normalized_records)
         self.processor = processor
         self.config = config
         if not self.records:
             raise ValueError("Qwen3TTSSFTDataset requires at least one record.")
+        if not callable(processor):
+            raise TypeError("Qwen3-TTS dataset processor must be callable.")
 
     def __len__(self) -> int:
         return len(self.records)
 
     @staticmethod
     def _load_audio(path: str):
-        soundfile = import_optional(
-            "soundfile",
-            model_type="qwen3tts",
-            install_extra="training",
-        )
-        numpy = import_optional(
-            "numpy",
-            model_type="qwen3tts",
-            install_extra="training",
-        )
-        audio, sample_rate = soundfile.read(
+        audio = load_native_audio(
             path,
-            dtype="float32",
-            always_2d=False,
+            target_sampling_rate=24_000,
         )
-        if audio.ndim > 1:
-            audio = numpy.mean(audio, axis=-1)
-        return numpy.asarray(audio, dtype=numpy.float32), int(sample_rate)
+        return audio.waveform, audio.sampling_rate
 
     @staticmethod
     def _assistant_prompt(text: str) -> str:
@@ -59,43 +56,21 @@ class Qwen3TTSSFTDataset:
             raise ValueError(
                 "Qwen3-TTS SFT reference audio must be 24 kHz. Resample it "
                 "during dataset preparation.")
-        torch = import_optional(
-            "torch",
-            model_type="qwen3tts",
-            install_extra="training",
-        )
-        modeling = import_optional(
-            "voicehub.models.qwen3tts.source.qwen_tts.core.models."
-            "modeling_qwen3_tts",
-            model_type="qwen3tts",
-            install_extra="training",
-        )
         with torch.inference_mode():
-            return modeling.mel_spectrogram(
-                torch.from_numpy(audio).unsqueeze(0),
-                n_fft=1024,
-                num_mels=128,
-                sampling_rate=24_000,
-                hop_size=256,
-                win_size=1024,
-                fmin=0,
-                fmax=12_000,
-            ).transpose(1, 2)
+            return qwen3_tts_speaker_mel(audio)
 
     def __getitem__(self, index: int) -> dict[str, Any]:
-        torch = import_optional(
-            "torch",
-            model_type="qwen3tts",
-            install_extra="training",
-        )
         record = self.records[index]
         required = ("audio_codes", "text", "ref_audio")
         missing = [name for name in required if name not in record]
         if missing:
             raise ValueError(f"Qwen3-TTS record {index} is missing: {', '.join(missing)}.")
 
+        text = record["text"]
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError(f"Qwen3-TTS record {index} requires non-empty `text`.")
         tokenized = self.processor(
-            text=self._assistant_prompt(str(record["text"])),
+            text=self._assistant_prompt(text),
             return_tensors="pt",
             padding=True,
         )
@@ -106,10 +81,15 @@ class Qwen3TTSSFTDataset:
             raise ValueError(f"Qwen3-TTS record {index} produced an invalid assistant prompt.")
 
         audio_codes = torch.as_tensor(record["audio_codes"], dtype=torch.long)
-        if audio_codes.ndim != 2 or audio_codes.shape[-1] != 16:
+        if (audio_codes.ndim != 2 or audio_codes.shape[0] == 0 or audio_codes.shape[-1] != 16):
             raise ValueError(
                 "Qwen3-TTS 12 Hz audio_codes must have shape [frames, 16], "
                 f"received {tuple(audio_codes.shape)} for record {index}.")
+        codebook_size = int(self.config.talker_config.code_predictor_config.vocab_size)
+        if bool(((audio_codes < 0) | (audio_codes >= codebook_size)).any()):
+            raise ValueError(
+                f"Qwen3-TTS record {index} contains audio codes outside "
+                f"[0, {codebook_size}).")
 
         reference, sample_rate = self._load_audio(str(record["ref_audio"]))
         return {
@@ -125,11 +105,6 @@ class Qwen3TTSSFTDataset:
         """Apply Qwen's two-channel prompt and 16-codebook delay layout."""
         if not batch:
             raise ValueError("Cannot collate an empty Qwen3-TTS batch.")
-        torch = import_optional(
-            "torch",
-            model_type="qwen3tts",
-            install_extra="training",
-        )
         item_lengths = [item["text_ids"].shape[1] + item["audio_codes"].shape[0] for item in batch]
         max_length = max(item_lengths) + 8
         batch_size = len(batch)

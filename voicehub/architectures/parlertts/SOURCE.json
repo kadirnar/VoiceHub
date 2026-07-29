@@ -1,0 +1,41 @@
+{
+  "architecture": "parlertts",
+  "checkpoint": {
+    "filename": "model.safetensors",
+    "header_fingerprint": "21ec5034f975e823a87c6706003bf84a1bdaa286316b528fe5e769dd2c0992db",
+    "license": "Apache-2.0",
+    "parameter_count": 877842290,
+    "repository": "parler-tts/parler-tts-mini-v1",
+    "revision": "0392b9451a601e528fd863bbb0598431fee810d9",
+    "sha256": "bc430eb6752b96ffb3f67036d1a6e207fbd031575a775716ffa64ef1eeb03692",
+    "size": 3511490560,
+    "tensor_count": 926
+  },
+  "license": "Apache-2.0",
+  "nested_sources": {
+    "dac": {
+      "implementation": "voicehub.architectures.dac",
+      "upstream": "https://github.com/descriptinc/descript-audio-codec"
+    },
+    "t5": {
+      "license": "Apache-2.0",
+      "revision": "4fdf58afb72b0754da30037fc800b6044e7d9c99",
+      "tag": "v4.40.2",
+      "upstream": "https://github.com/huggingface/transformers"
+    }
+  },
+  "notes": "The graph namespace and every tensor shape were checked against the pinned checkpoint's remote Safetensors header. Decoder and T5 forward math are tested against audit-only upstream reference runtimes on deterministic tiny graphs. Full-checkpoint audio parity was not executed in CI because the pinned weight file is 3.5 GB.",
+  "revision": "d108732cd57788ec86bc857d99a6cabd66663d68",
+  "training": {
+    "always_frozen": [
+      "audio_encoder"
+    ],
+    "default_trainable": [
+      "text_encoder",
+      "decoder",
+      "embed_prompts"
+    ],
+    "objective": "delayed-codebook-cross-entropy"
+  },
+  "upstream": "https://github.com/huggingface/parler-tts"
+}

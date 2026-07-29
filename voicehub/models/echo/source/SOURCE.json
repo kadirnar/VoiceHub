@@ -1,0 +1,31 @@
+{
+  "architecture_source": {
+    "repository": "https://github.com/jordandare/echo-tts",
+    "revision": "2ed95fce62d33bf7b56f835fd9ec0f0b6fb9155e",
+    "license": "MIT"
+  },
+  "checkpoint": {
+    "repository": "jordand/echo-tts-base",
+    "license": "CC-BY-NC-SA-4.0",
+    "format": "safetensors"
+  },
+  "codec_checkpoint": {
+    "repository": "jordand/fish-s1-dac-min",
+    "license": "CC-BY-NC-SA-4.0",
+    "format": "safetensors"
+  },
+  "voicehub_port": {
+    "runtime_dependencies": [
+      "python-standard-library",
+      "torch",
+      "voicehub"
+    ],
+    "training": "Rectified-flow velocity objective over precomputed Fish codec and speaker latents.",
+    "limitations": [
+      "The released data preparation and full raw-audio training recipe are not public.",
+      "The codec remains frozen during the integrated flow fine-tuning phase.",
+      "The default weights are non-commercial and share-alike.",
+      "No objective quality improvement is claimed without a benchmark."
+    ]
+  }
+}

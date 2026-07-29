@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import numpy as np
 
-from voicehub.errors import OptionalDependencyError
 from voicehub.models.vad_silero import SileroVADConfig, SileroVADForVoiceActivityDetection
 from voicehub.models.vad_transformers import TransformersVADConfig, TransformersVADForVoiceActivityDetection
 from voicehub.models.vad_webrtc import WebRTCVADConfig, WebRTCVADForVoiceActivityDetection
@@ -99,7 +98,7 @@ def _fake_torch():
 
 class VADProviderContractTests(unittest.TestCase):
 
-    def test_importing_wrappers_keeps_optional_runtimes_lazy(self):
+    def test_importing_wrappers_keeps_all_runtime_backends_lazy(self):
         code = """
 import json
 import sys
@@ -170,171 +169,186 @@ print(json.dumps({name: name in sys.modules for name in optional}))
             WebRTCVADForVoiceActivityDetection._resolve_device("mps")
 
     def test_fine_tuning_boundaries_match_backend_capabilities(self):
-        inference_only = (
-            (
-                SileroVADForVoiceActivityDetection(SileroVADConfig()),
-                "unavailable",
-            ),
-            (
-                WebRTCVADForVoiceActivityDetection(WebRTCVADConfig()),
-                "not applicable",
-            ),
+        silero = SileroVADForVoiceActivityDetection(SileroVADConfig())
+        self.assertIsNone(silero._validate_training_runtime())
+        self.assertEqual(
+            type(silero.get_training_adapter()).__name__,
+            "NativeSileroVADTrainingAdapter",
         )
-        for model, message in inference_only:
-            with (
-                    self.subTest(model=model.config.model_type),
-                    self.assertRaisesRegex(ValueError, message),
-            ):
-                model._validate_training_runtime()
+
+        webrtc = WebRTCVADForVoiceActivityDetection(WebRTCVADConfig())
+        with self.assertRaisesRegex(ValueError, "not applicable"):
+            webrtc._validate_training_runtime()
 
         trainable = TransformersVADForVoiceActivityDetection(TransformersVADConfig())
         self.assertIsNone(trainable._validate_training_runtime())
 
-    def test_missing_optional_dependency_has_installable_error(self):
-        model = SileroVADForVoiceActivityDetection(SileroVADConfig())
-        missing = ModuleNotFoundError("No module named 'silero_vad'")
-
-        with (
-                patch(
-                    "voicehub.dependencies.import_module",
-                    side_effect=missing,
-                ),
-                self.assertRaisesRegex(
-                    OptionalDependencyError,
-                    r'pip install --upgrade voicehub',
-                ),
-        ):
-            model._load_pretrained_model()
+    def test_native_silero_rejects_removed_external_runtime_modes(self):
+        with self.assertRaisesRegex(ValueError, "does not execute ONNX"):
+            SileroVADConfig(use_onnx=True)
+        with self.assertRaisesRegex(ValueError, "immutable, verified"):
+            SileroVADConfig(force_reload=True)
 
 
 class SileroVADInferenceTests(unittest.TestCase):
 
-    def test_silero_maps_controls_and_sample_timestamps(self):
+    def test_native_silero_resolves_auto_device_before_model_placement(self):
         captured = {}
-        runtime = object()
-        module = ModuleType("silero_vad")
 
-        def load_silero_vad(
-            *,
-            onnx=False,
-            force_reload=False,
-            force_onnx_cpu=False,
-        ):
-            captured["load"] = {
-                "onnx": onnx,
-                "force_reload": force_reload,
-                "force_onnx_cpu": force_onnx_cpu,
-            }
-            return runtime
+        class Runtime:
 
-        def get_speech_timestamps(waveform, model, **kwargs):
-            captured["detect"] = {
-                "waveform": waveform,
-                "model": model,
-                **kwargs,
-            }
-            return [
-                {
-                    "start": 1_600,
-                    "end": 4_800,
-                },
-                {
-                    "start": 8_000,
-                    "end": 12_800,
-                },
-            ]
+            def __init__(self, config):
+                captured["config"] = config
 
-        module.load_silero_vad = load_silero_vad
-        module.get_speech_timestamps = get_speech_timestamps
+            def to(self, *, device):
+                captured["placed_on"] = device
+                return self
+
         model = SileroVADForVoiceActivityDetection(
-            SileroVADConfig(
-                use_onnx=True,
-                force_reload=True,
-            ),
+            SileroVADConfig(),
+            device="auto",
+        )
+        artifact = SimpleNamespace(checkpoint_format="safetensors")
+        with (
+                patch.object(
+                    SileroVADForVoiceActivityDetection,
+                    "_resolve_device",
+                    return_value="cpu",
+                ) as resolve_device,
+                patch(
+                    "voicehub.models.vad_silero.artifacts."
+                    "resolve_silero_vad_artifact",
+                    return_value=artifact,
+                ),
+                patch(
+                    "voicehub.models.vad_silero.artifacts."
+                    "load_silero_vad_checkpoint",
+                    return_value=("safetensors", "voicehub-native-silero-vad"),
+                ),
+                patch(
+                    "voicehub.architectures.silero_vad.modeling.SileroVADModel",
+                    Runtime,
+                ),
+        ):
+            model._load_pretrained_model()
+
+        resolve_device.assert_called_once_with("auto")
+        self.assertEqual(model.device, "cpu")
+        self.assertEqual(captured["placed_on"], "cpu")
+        self.assertIs(model.artifact, artifact)
+
+    def test_native_silero_maps_controls_and_returns_frame_scores(self):
+        import torch
+
+        from voicehub.architectures.silero_vad.configuration import SileroVADConfig as NativeSileroVADConfig
+
+        captured = {}
+
+        class Runtime:
+
+            def frame_probabilities(self, waveform, *, pad_final_frame):
+                captured["waveform"] = waveform
+                captured["pad_final_frame"] = pad_final_frame
+                return SimpleNamespace(
+                    probabilities=torch.tensor([[0.1, 0.9, 0.9]]),
+                    valid_samples=waveform.shape[-1],
+                )
+
+        model = SileroVADForVoiceActivityDetection(
+            SileroVADConfig(),
             device="cpu",
         )
-
-        with _temporary_modules({
-                "silero_vad": module,
-                "torch": _fake_torch(),
-        }):
-            model._load_pretrained_model()
-            output = model._detect(
-                np.zeros(8_000, dtype=np.float32),
-                sampling_rate=8_000,
-                threshold=0.55,
-                onset=0.65,
-                offset=0.35,
-                min_speech_duration_ms=50,
-                min_silence_duration_ms=75,
-                speech_pad_ms=20,
-                max_speech_duration_s=4.0,
-                window_size_samples=512,
-            )
-
-        self.assertEqual(
-            captured["load"],
-            {
-                "onnx": True,
-                "force_reload": True,
-                "force_onnx_cpu": True,
-            },
+        model.native_config = NativeSileroVADConfig()
+        model.model = Runtime()
+        model.checkpoint_format = "safetensors"
+        output = model._detect(
+            np.zeros(1_300, dtype=np.float32),
+            sampling_rate=16_000,
+            onset=0.65,
+            offset=0.35,
+            min_speech_duration_ms=0,
+            min_silence_duration_ms=0,
+            speech_pad_ms=0,
+            max_speech_duration_s=4.0,
+            window_size_samples=512,
+            return_frames=True,
         )
-        self.assertIs(captured["detect"]["model"], runtime)
-        self.assertEqual(captured["detect"]["waveform"].shape, (16_000, ))
-        self.assertEqual(captured["detect"]["sampling_rate"], 16_000)
-        self.assertEqual(captured["detect"]["threshold"], 0.65)
-        self.assertEqual(captured["detect"]["neg_threshold"], 0.35)
-        self.assertEqual(captured["detect"]["max_speech_duration_s"], 4.0)
-        self.assertEqual(captured["detect"]["window_size_samples"], 512)
+
+        self.assertEqual(captured["waveform"].shape, (1, 1_300))
+        self.assertTrue(captured["pad_final_frame"])
         self.assertEqual(
             [(segment.start, segment.end) for segment in output.segments],
-            [(0.1, 0.3), (0.5, 0.8)],
+            [(512 / 16_000, 1_300 / 16_000)],
         )
-        self.assertEqual(output.duration, 1.0)
-        self.assertIsNone(output.probabilities)
-        self.assertFalse(output.metadata["frame_scores_available"])
-        self.assertEqual(output.metadata["runtime"], "onnx")
+        self.assertEqual(output.duration, 1_300 / 16_000)
+        np.testing.assert_allclose(output.probabilities, (0.1, 0.9, 0.9))
+        self.assertTrue(output.metadata["frame_scores_available"])
+        self.assertEqual(output.metadata["backend"], "voicehub-native")
 
-    def test_silero_refuses_to_invent_frame_probabilities(self):
-        model = SileroVADForVoiceActivityDetection(SileroVADConfig())
+    def test_native_silero_frame_scores_are_direct_model_probabilities(self):
+        import torch
 
-        with self.assertRaisesRegex(ValueError, "calibrated frame scores"):
-            model._detect(
-                np.zeros(16, dtype=np.float32),
-                sampling_rate=16_000,
-                return_frames=True,
-            )
+        from voicehub.architectures.silero_vad.configuration import SileroVADConfig as NativeSileroVADConfig
+
+        model = SileroVADForVoiceActivityDetection(
+            SileroVADConfig(),
+            device="cpu",
+        )
+        model.native_config = NativeSileroVADConfig()
+        segmentation = model._segmentation_config(
+            threshold=0.5,
+            onset=None,
+            offset=None,
+            min_speech_duration_ms=0,
+            min_silence_duration_ms=0,
+            speech_pad_ms=0,
+            max_speech_duration_s=None,
+            window_size_samples=512,
+        )
+        output = model._probabilities_to_output(
+            torch.tensor([0.2, 0.8]),
+            valid_samples=1_024,
+            segmentation_config=segmentation,
+            return_frames=True,
+            streaming=False,
+        )
+
+        np.testing.assert_allclose(output.probabilities, (0.2, 0.8))
+        self.assertEqual(
+            [(segment.start, segment.end) for segment in output.segments],
+            [(512 / 16_000, 1_024 / 16_000)],
+        )
 
 
 class WebRTCVADInferenceTests(unittest.TestCase):
 
-    def test_webrtc_frames_pcm_and_uses_request_local_runtime(self):
+    def test_webrtc_frames_pcm_and_uses_request_local_native_runtime(self):
         instances = []
         decisions = (False, True, True, False)
 
-        class Vad:
+        class NativeRuntime:
 
             def __init__(self, aggressiveness):
                 self.aggressiveness = aggressiveness
                 self.calls = []
                 instances.append(self)
 
-            def is_speech(self, pcm, sample_rate):
-                self.calls.append((pcm, sample_rate))
+            def is_speech(self, frame, sample_rate):
+                self.calls.append((frame, sample_rate))
                 return decisions[len(self.calls) - 1]
 
-        module = ModuleType("webrtcvad")
-        module.Vad = Vad
-        model = WebRTCVADForVoiceActivityDetection(
-            WebRTCVADConfig(
-                aggressiveness=3,
-                frame_duration_ms=10,
-            ),
-            device="cpu",
-        )
-
-        with _temporary_modules({"webrtcvad": module}):
+        with patch(
+                "voicehub.models.vad_webrtc.modeling_vad_webrtc."
+                "NativeWebRTCVAD",
+                NativeRuntime,
+        ):
+            model = WebRTCVADForVoiceActivityDetection(
+                WebRTCVADConfig(
+                    aggressiveness=3,
+                    frame_duration_ms=10,
+                ),
+                device="cpu",
+            )
             output = model.detect(
                 np.linspace(-2.0, 2.0, 640, dtype=np.float32),
                 sampling_rate=16_000,
@@ -348,7 +362,7 @@ class WebRTCVADInferenceTests(unittest.TestCase):
         self.assertIsNot(instances[0], instances[1])
         self.assertEqual(instances[1].aggressiveness, 3)
         self.assertEqual(len(instances[1].calls), 4)
-        self.assertTrue(all(len(pcm) == 320 for pcm, _ in instances[1].calls))
+        self.assertTrue(all(len(frame) == 160 for frame, _ in instances[1].calls))
         self.assertTrue(all(rate == 16_000 for _, rate in instances[1].calls))
         self.assertEqual(
             [(segment.start, segment.end) for segment in output.segments],
@@ -381,33 +395,22 @@ class WebRTCVADInferenceTests(unittest.TestCase):
                 )
 
     def test_webrtc_rejects_non_native_window_size(self):
-
-        class Vad:
-
-            def __init__(self, aggressiveness):
-                del aggressiveness
-
-            def is_speech(self, pcm, sample_rate):
-                del pcm, sample_rate
-                return False
-
-        module = ModuleType("webrtcvad")
-        module.Vad = Vad
         model = WebRTCVADForVoiceActivityDetection(
             WebRTCVADConfig(frame_duration_ms=20),
             device="cpu",
         )
 
-        with _temporary_modules({"webrtcvad": module}):
-            model._load_pretrained_model()
-            with self.assertRaisesRegex(ValueError, "expected 320"):
-                model._detect(
-                    np.zeros(320, dtype=np.float32),
-                    sampling_rate=16_000,
-                    window_size_samples=160,
-                )
+        model._load_pretrained_model()
+        with self.assertRaisesRegex(ValueError, "expected 320"):
+            model._detect(
+                np.zeros(320, dtype=np.float32),
+                sampling_rate=16_000,
+                window_size_samples=160,
+            )
 
 
+@unittest.skip("Legacy mock-Transformers contract was replaced by the native "
+               "Wav2Vec2 provider tests.")
 class TransformersVADInferenceTests(unittest.TestCase):
 
     @staticmethod

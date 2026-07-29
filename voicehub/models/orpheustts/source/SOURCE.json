@@ -1,12 +1,37 @@
 {
   "components": [
     {
+      "license": "Apache-2.0",
+      "name": "orpheus-tts-protocol-and-recipes",
+      "revision": "e64661fe6d02c414fc77c53578c9d64082614861",
+      "upstream": "https://github.com/canopyai/Orpheus-TTS"
+    },
+    {
       "license": "MIT",
       "name": "snac",
       "revision": "8f79a718f1ad71f94f79999f0071348227aff22e",
       "upstream": "https://github.com/hubertsiuzdak/snac"
     }
   ],
+  "checkpoint_audits": [
+    {
+      "filename": "model.safetensors.index.json",
+      "model_id": "canopylabs/orpheus-3b-0.1-ft",
+      "notes": "Gated, four-shard dense Llama checkpoint with Llama-3 RoPE and a 156940-token byte-BPE vocabulary.",
+      "revision": "4206a56e5a68cf6cf96900a8a78acd3370c02eb6"
+    },
+    {
+      "filename": "model.safetensors",
+      "model_id": "hubertsiuzdak/snac_24khz",
+      "notes": "Safe Hugging Face conversion; 269 tensors map exactly to the pinned SNAC graph.",
+      "revision": "c29a77c025506947a7ff15a678787b66b4c2ff47"
+    }
+  ],
+  "limitations": [
+    "The reference Orpheus checkpoint is gated and requires accepted model access.",
+    "Native loading supports dense Llama Safetensors checkpoints; GGUF, quantized tensors, mixture-of-experts, and non-Llama Orpheus derivatives are rejected.",
+    "SNAC loading intentionally uses the immutable Safetensors conversion rather than the unsafe pickle checkpoint on the repository's main revision."
+  ],
   "model_type": "orpheustts",
-  "policy": "Runtime component source is vendored; pretrained weights remain external."
+  "policy": "Architecture and tokenizer execution are VoiceHub-owned; pretrained weights remain external and are loaded through strict Safetensors adapters."
 }

@@ -16,14 +16,14 @@
 from pathlib import Path
 
 import torch
-import torchaudio
-import torchaudio.compliance.kaldi as kaldi
 
 from .context_graph import ContextGraph
 from .ctc_utils import force_align, gen_ctc_peak_time, gen_timestamps_from_peak
 from .file_utils import read_symbol_table
 from .hub import Hub
 from .search import DecodeResult, attention_rescoring, ctc_prefix_beam_search
+from voicehub.processing.kaldi import KaldiFbankConfig, kaldi_fbank
+from voicehub.processing.waveform import load_native_audio
 
 
 class Model:
@@ -68,19 +68,23 @@ class Model:
             self.context_graph = None
 
     def compute_feats(self, audio_file: str) -> torch.Tensor:
-        waveform, sample_rate = torchaudio.load(audio_file, normalize=False)
-        waveform = waveform.to(torch.float)
-        if sample_rate != self.resample_rate:
-            waveform = torchaudio.transforms.Resample(
-                orig_freq=sample_rate, new_freq=self.resample_rate)(waveform)
-        waveform = waveform.to(self.device)
-        feats = kaldi.fbank(
-            waveform,
-            num_mel_bins=80,
-            frame_length=25,
-            frame_shift=10,
-            energy_floor=0.0,
-            sample_frequency=self.resample_rate,
+        audio = load_native_audio(
+            audio_file,
+            target_sampling_rate=self.resample_rate,
+        )
+        waveform = audio.waveform.to(self.device)
+        # The published WeNet recipes multiply normalized PCM by 2**15
+        # before Kaldi feature extraction.
+        feats = kaldi_fbank(
+            waveform * float(1 << 15),
+            KaldiFbankConfig(
+                sample_frequency=float(self.resample_rate),
+                num_mel_bins=80,
+                frame_length=25.0,
+                frame_shift=10.0,
+                dither=0.0,
+                energy_floor=0.0,
+            ),
         )
         feats = feats.unsqueeze(0)
         return feats

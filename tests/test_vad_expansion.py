@@ -4,8 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
-from unittest.mock import patch
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -24,30 +23,6 @@ from voicehub.models.vad_sherpa_onnx import (
     SherpaONNXVADForVoiceActivityDetection,
     SherpaONNXVADSession,
 )
-
-
-class _FakeTensor:
-
-    def __init__(self, values):
-        self.values = np.asarray(values)
-
-    @property
-    def shape(self):
-        return self.values.shape
-
-    @property
-    def ndim(self):
-        return self.values.ndim
-
-    def unsqueeze(self, dimension):
-        return _FakeTensor(np.expand_dims(self.values, dimension))
-
-
-def _fake_torch():
-    module = ModuleType("torch")
-    module.as_tensor = lambda value: _FakeTensor(value)
-    module.device = lambda value: f"device:{value}"
-    return module
 
 
 class VADExpansionConfigTests(unittest.TestCase):
@@ -88,32 +63,42 @@ print(json.dumps({
                 AuditokVADForVoiceActivityDetection,
                 AuditokVADConfig(),
                 "inference-only",
+                False,
             ),
             (
                 SherpaONNXVADForVoiceActivityDetection,
                 SherpaONNXVADConfig(),
-                "inference-only",
+                "native",
+                True,
             ),
             (
                 PyannoteSegmentationVADForVoiceActivityDetection,
                 PyannoteSegmentationVADConfig(),
-                "upstream-custom",
+                "native",
+                True,
             ),
             (
                 PyannoteBrouhahaVADForVoiceActivityDetection,
                 PyannoteBrouhahaVADConfig(),
-                "upstream-custom",
+                "native",
+                True,
             ),
         )
-        for model_class, config, support in cases:
+        for model_class, config, support, generic_finetuning in cases:
             with self.subTest(model=model_class.__name__):
                 model = model_class(config)
                 self.assertIsInstance(model, PreTrainedVADModel)
                 self.assertIsNone(model.model)
                 self.assertEqual(model.training_support, support)
-                self.assertFalse(model.supports_generic_finetuning)
-                with self.assertRaises(ValueError):
+                self.assertEqual(
+                    model.supports_generic_finetuning,
+                    generic_finetuning,
+                )
+                if generic_finetuning:
                     model._validate_training_runtime()
+                else:
+                    with self.assertRaises(ValueError):
+                        model._validate_training_runtime()
 
     def test_auditok_calibration_config_is_validated_and_serializable(self):
         config = AuditokVADConfig(
@@ -144,7 +129,7 @@ print(json.dumps({
             model_family="ten",
             subfolder="onnx/vad",
             local_files_only=True,
-            provider="coreml",
+            provider="cpu",
         )
         self.assertEqual(config.model_filename, "ten-vad.onnx")
         self.assertEqual(config.window_size_samples, 256)
@@ -159,6 +144,7 @@ print(json.dumps({
             {"model_filename": "model.pt"},
             {"subfolder": "../weights"},
             {"model_family": "unknown"},
+            {"provider": "coreml"},
             {"provider": "tensorrt"},
             {"kwargs": {"token": "secret"}},
         ):
@@ -182,23 +168,10 @@ print(json.dumps({
 
 class AuditokVADRuntimeTests(unittest.TestCase):
 
-    def test_energy_detection_uses_raw_pcm_and_normalizes_seconds(self):
-        captured = {}
-
-        class Region:
-
-            def __init__(self, start, end):
-                self.start = start
-                self.end = end
-
-        module = ModuleType("auditok")
-
-        def split(audio, **kwargs):
-            captured["audio"] = audio
-            captured["kwargs"] = kwargs
-            return iter((Region(0.1, 0.4), Region(0.7, 1.5)))
-
-        module.split = split
+    def test_energy_detection_is_native_and_normalizes_seconds(self):
+        waveform = np.zeros(16_000, dtype=np.float32)
+        waveform[1_600:6_400] = 0.1
+        waveform[11_200:] = 0.1
         model = AuditokVADForVoiceActivityDetection(
             AuditokVADConfig(
                 threshold_method="otsu",
@@ -206,27 +179,24 @@ class AuditokVADRuntimeTests(unittest.TestCase):
                 calibration_duration_s=2,
                 minimum_energy_threshold_db=38,
             ))
-        with patch.dict(sys.modules, {"auditok": module}):
-            output = model.detect(
-                np.zeros(16_000, dtype=np.float32),
-                sampling_rate=16_000,
-                min_speech_duration_ms=0,
-                min_silence_duration_ms=120,
-                speech_pad_ms=20,
-            )
+        output = model.detect(
+            waveform,
+            sampling_rate=16_000,
+            min_speech_duration_ms=0,
+            min_silence_duration_ms=120,
+            speech_pad_ms=20,
+        )
 
-        self.assertIsInstance(captured["audio"], bytes)
-        self.assertEqual(len(captured["audio"]), 32_000)
-        self.assertEqual(captured["kwargs"]["validator"], "otsu")
-        self.assertEqual(captured["kwargs"]["calibration_dur"], 2)
-        self.assertEqual(captured["kwargs"]["min_energy_threshold"], 38)
-        self.assertEqual(captured["kwargs"]["analysis_window"], 0.02)
-        self.assertEqual(captured["kwargs"]["min_dur"], 0.02)
         self.assertEqual(
             [(segment.start, segment.end) for segment in output.segments],
-            [(0.1, 0.4), (0.7, 1.0)],
+            [(0.08, 0.42), (0.68, 1.0)],
         )
+        self.assertEqual(output.metadata["backend"], "voicehub-native")
         self.assertEqual(output.metadata["threshold_method"], "otsu")
+        self.assertGreater(
+            output.metadata["resolved_energy_threshold_db"],
+            60,
+        )
         self.assertIsNone(output.probabilities)
 
     def test_probability_options_are_rejected_instead_of_misrepresented(self):
@@ -247,182 +217,78 @@ class AuditokVADRuntimeTests(unittest.TestCase):
                     )
 
 
-class _FakeSherpaConfig:
+def _native_ten_artifact(directory: str | Path) -> Path:
+    import torch
 
-    def __init__(self):
-        self.silero_vad = SimpleNamespace()
-        self.ten_vad = SimpleNamespace()
-        self.sample_rate = None
-        self.num_threads = None
-        self.provider = None
-        self.debug = None
+    from voicehub.architectures.ten_vad.checkpoint import NATIVE_TEN_VAD_FILENAME, NATIVE_TEN_VAD_FORMAT
+    from voicehub.architectures.ten_vad.configuration import TENVADConfig
+    from voicehub.architectures.ten_vad.modeling import TENVADModel
+    from voicehub.checkpointing import save_safetensors
 
-    def validate(self):
-        return True
-
-
-class _FakeSherpaDetector:
-    instances = []
-
-    def __init__(self, config, buffer_size_in_seconds):
-        self.config = config
-        self.buffer_size_in_seconds = buffer_size_in_seconds
-        self.queue = []
-        self.accepted = []
-        self.was_reset = False
-        self.__class__.instances.append(self)
-
-    def accept_waveform(self, samples):
-        self.accepted.append(np.asarray(samples))
-        if len(self.accepted) == 1:
-            self.queue.append(SimpleNamespace(
-                start=160,
-                samples=np.zeros(320, dtype=np.float32),
-            ))
-
-    def flush(self):
-        self.queue.append(SimpleNamespace(
-            start=800,
-            samples=np.zeros(160, dtype=np.float32),
-        ))
-
-    def empty(self):
-        return not self.queue
-
-    @property
-    def front(self):
-        return self.queue[0]
-
-    def pop(self):
-        self.queue.pop(0)
-
-    def reset(self):
-        self.queue.clear()
-        self.accepted.clear()
-        self.was_reset = True
-
-
-def _fake_sherpa():
-    _FakeSherpaDetector.instances.clear()
-    module = ModuleType("sherpa_onnx")
-    module.VadModelConfig = _FakeSherpaConfig
-    module.VoiceActivityDetector = _FakeSherpaDetector
-    return module
+    destination = Path(directory)
+    config = TENVADConfig()
+    native = TENVADModel(config)
+    with torch.no_grad():
+        for parameter in native.parameters():
+            parameter.zero_()
+        native.output.bias.fill_(20)
+    save_safetensors(
+        native.state_dict(),
+        destination / NATIVE_TEN_VAD_FILENAME,
+        metadata={
+            "format": NATIVE_TEN_VAD_FORMAT,
+            "architecture": "ten-vad",
+        },
+    )
+    (destination / "config.json").write_text(
+        json.dumps(config.to_dict()),
+        encoding="utf-8",
+    )
+    return destination
 
 
 class SherpaONNXVADRuntimeTests(unittest.TestCase):
 
-    def test_hub_asset_and_native_options_are_applied(self):
-        module = _fake_sherpa()
-        captured = {}
-        model = SherpaONNXVADForVoiceActivityDetection(
+    @staticmethod
+    def _model(directory: str | Path):
+        return SherpaONNXVADForVoiceActivityDetection(
             SherpaONNXVADConfig(
-                name_or_path="org/vad",
-                revision="v1",
-                subfolder="runtime",
-                cache_dir="cache",
-                local_files_only=True,
-                num_threads=3,
-                buffer_size_s=12,
+                name_or_path=_native_ten_artifact(directory),
+                model_family="ten",
+                model_filename="model.safetensors",
             ),
-            token="hub-token",
+            lazy_load=False,
         )
-
-        def resolve(source, filename, **kwargs):
-            captured["source"] = source
-            captured["filename"] = filename
-            captured["resolve_kwargs"] = kwargs
-            return Path("/tmp/silero_vad.onnx")
-
-        with (patch.dict(sys.modules, {"sherpa_onnx": module}), patch(
-                "voicehub.models.vad_sherpa_onnx."
-                "modeling_vad_sherpa_onnx.resolve_pretrained_file",
-                side_effect=resolve,
-        )):
-            model._load_pretrained_model()
-            output = model._detect(
-                np.zeros(1_600, dtype=np.float32),
-                sampling_rate=16_000,
-                threshold=0.4,
-                offset=0.2,
-                min_speech_duration_ms=100,
-                min_silence_duration_ms=80,
-                speech_pad_ms=0,
-                max_speech_duration_s=2,
-                window_size_samples=400,
-            )
-
-        detector = _FakeSherpaDetector.instances[0]
-        native = detector.config.silero_vad
-        self.assertEqual(captured["source"], "org/vad")
-        self.assertEqual(captured["filename"], "silero_vad.onnx")
-        self.assertEqual(captured["resolve_kwargs"]["revision"], "v1")
-        self.assertEqual(captured["resolve_kwargs"]["token"], "hub-token")
-        self.assertTrue(captured["resolve_kwargs"]["local_files_only"])
-        self.assertEqual(native.model, str(Path("/tmp/silero_vad.onnx")))
-        self.assertEqual(native.threshold, 0.4)
-        self.assertEqual(native.neg_threshold, 0.2)
-        self.assertEqual(native.min_speech_duration, 0.1)
-        self.assertEqual(native.min_silence_duration, 0.08)
-        self.assertEqual(native.max_speech_duration, 2)
-        self.assertEqual(native.window_size, 400)
-        self.assertEqual(detector.config.num_threads, 3)
-        np.testing.assert_allclose(
-            [(segment.start, segment.end) for segment in output.segments],
-            [(0.01, 0.03), (0.05, 0.06)],
-        )
-        self.assertEqual(output.metadata["model_family"], "silero")
 
     def test_streaming_session_is_incremental_idempotent_and_resettable(self):
-        module = _fake_sherpa()
-        model = SherpaONNXVADForVoiceActivityDetection(
-            SherpaONNXVADConfig(
-                name_or_path="local",
-                window_size_samples=256,
-            ))
-        with (patch.dict(sys.modules, {"sherpa_onnx": module}), patch(
-                "voicehub.models.vad_sherpa_onnx."
-                "modeling_vad_sherpa_onnx.resolve_pretrained_file",
-                return_value=Path("/tmp/silero_vad.onnx"),
-        )):
-            model._load_pretrained_model()
+        with tempfile.TemporaryDirectory() as directory:
+            model = self._model(directory)
             session = model.stream(
                 sampling_rate=16_000,
                 speech_pad_ms=0,
+                min_speech_duration_ms=0,
+                return_frames=True,
             )
             self.assertIsInstance(session, SherpaONNXVADSession)
-            self.assertEqual(
-                [(item.start, item.end) for item in session.push(np.zeros(300, dtype=np.float32))],
-                [(0.01, 0.03)],
-            )
-            self.assertEqual(session.push(np.zeros(100, dtype=np.float32)), ())
+            self.assertEqual(session.push(np.zeros(1_024, dtype=np.float32)), ())
             first = session.flush()
             second = session.flush()
             self.assertIs(first, second)
-            self.assertAlmostEqual(first.duration, 0.025)
+            self.assertAlmostEqual(first.duration, 0.064)
+            self.assertEqual(len(first.probabilities), 4)
+            self.assertGreater(len(first.segments), 0)
             self.assertTrue(all(segment.end <= first.duration for segment in first.segments))
 
             session.reset()
-            self.assertTrue(_FakeSherpaDetector.instances[0].was_reset)
-            session.push(np.zeros(256, dtype=np.float32))
+            session.push(np.zeros(512, dtype=np.float32))
             self.assertGreater(len(session.flush().segments), 0)
             session.close()
             with self.assertRaisesRegex(RuntimeError, "closed"):
                 session.push(np.zeros(256, dtype=np.float32))
 
     def test_ten_vad_rejects_an_unsupported_offset_threshold(self):
-        module = _fake_sherpa()
-        model = SherpaONNXVADForVoiceActivityDetection(
-            SherpaONNXVADConfig(
-                name_or_path="local",
-                model_family="ten",
-            ))
-        with (patch.dict(sys.modules, {"sherpa_onnx": module}), patch(
-                "voicehub.models.vad_sherpa_onnx."
-                "modeling_vad_sherpa_onnx.resolve_pretrained_file",
-                return_value=Path("/tmp/ten-vad.onnx"),
-        )):
-            model._load_pretrained_model()
+        with tempfile.TemporaryDirectory() as directory:
+            model = self._model(directory)
             with self.assertRaisesRegex(ValueError, "TEN VAD"):
                 model._detect(
                     np.zeros(512, dtype=np.float32),
@@ -430,29 +296,21 @@ class SherpaONNXVADRuntimeTests(unittest.TestCase):
                     offset=0.3,
                 )
 
-    def test_direct_local_onnx_files_do_not_require_a_matching_default_name(self):
-        module = _fake_sherpa()
+    def test_direct_local_onnx_requires_explicit_review(self):
         with tempfile.TemporaryDirectory() as directory:
             model_path = Path(directory) / "custom-vad.onnx"
             model_path.touch()
-            model = SherpaONNXVADForVoiceActivityDetection(SherpaONNXVADConfig(name_or_path=model_path))
-            with (patch.dict(sys.modules, {"sherpa_onnx": module}),
-                  patch("voicehub.models.vad_sherpa_onnx."
-                        "modeling_vad_sherpa_onnx.resolve_pretrained_file", ) as resolve):
+            model = SherpaONNXVADForVoiceActivityDetection(
+                SherpaONNXVADConfig(
+                    name_or_path=model_path,
+                    model_family="ten",
+                ), )
+            with self.assertRaisesRegex(ValueError, "Review the TEN artifact"):
                 model._load_pretrained_model()
 
-        resolve.assert_not_called()
-        self.assertEqual(model.model.model_path, model_path.resolve())
-
     def test_streaming_validates_common_inference_values_and_closed_state(self):
-        module = _fake_sherpa()
-        model = SherpaONNXVADForVoiceActivityDetection(SherpaONNXVADConfig(name_or_path="local"))
-        with (patch.dict(sys.modules, {"sherpa_onnx": module}), patch(
-                "voicehub.models.vad_sherpa_onnx."
-                "modeling_vad_sherpa_onnx.resolve_pretrained_file",
-                return_value=Path("/tmp/silero_vad.onnx"),
-        )):
-            model._load_pretrained_model()
+        with tempfile.TemporaryDirectory() as directory:
+            model = self._model(directory)
             with self.assertRaisesRegex(ValueError, "between 0 and 1"):
                 model.stream(sampling_rate=16_000, threshold=2)
             session = model.stream(sampling_rate=16_000)
@@ -469,261 +327,25 @@ class PyannotePresetRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not supported"):
             PyannoteBrouhahaVADConfig(pipeline_kwargs={"batch_size": 1})
 
-    def test_segmentation_checkpoint_is_wrapped_in_the_public_vad_pipeline(self):
-        captured = {}
-
-        class SegmentationFactory:
-
-            @staticmethod
-            def from_pretrained(
-                checkpoint,
-                revision=None,
-                token=None,
-                cache_dir=None,
-            ):
-                captured["load"] = {
-                    "checkpoint": checkpoint,
-                    "revision": revision,
-                    "token": token,
-                    "cache_dir": cache_dir,
-                }
-                return "segmentation-model"
-
-        class Pipeline:
-
-            def __init__(self, segmentation, **kwargs):
-                captured["segmentation"] = segmentation
-                captured["pipeline_kwargs"] = kwargs
-
-            def instantiate(self, parameters):
-                captured["parameters"] = parameters
-
-            def __call__(self, payload):
-                captured["payload"] = payload
-                timeline = (SimpleNamespace(start=0.2, end=0.5), )
-                return SimpleNamespace(get_timeline=lambda: SimpleNamespace(support=lambda: timeline))
-
-        pyannote = ModuleType("pyannote")
-        pyannote.__path__ = []
-        audio = ModuleType("pyannote.audio")
-        audio.__path__ = []
-        audio.Model = SegmentationFactory
-        pipelines = ModuleType("pyannote.audio.pipelines")
-        pipelines.VoiceActivityDetection = Pipeline
-        modules = {
-            "pyannote": pyannote,
-            "pyannote.audio": audio,
-            "pyannote.audio.pipelines": pipelines,
-            "torch": _fake_torch(),
-        }
-        model = PyannoteSegmentationVADForVoiceActivityDetection(
-            PyannoteSegmentationVADConfig(
-                revision="main",
-                cache_dir="cache",
-                pipeline_kwargs={"batch_size": 8},
+    def test_official_presets_require_the_explicit_conversion_boundary(self):
+        cases = (
+            (
+                PyannoteSegmentationVADForVoiceActivityDetection,
+                PyannoteSegmentationVADConfig(),
             ),
-            device="cpu",
-            token="gated-token",
+            (
+                PyannoteBrouhahaVADForVoiceActivityDetection,
+                PyannoteBrouhahaVADConfig(),
+            ),
         )
-        with patch.dict(sys.modules, modules):
-            model._load_pretrained_model()
-            output = model._detect(
-                np.zeros(16_000, dtype=np.float32),
-                sampling_rate=16_000,
-                min_speech_duration_ms=0,
-                speech_pad_ms=0,
-            )
-
-        self.assertEqual(
-            captured["load"],
-            {
-                "checkpoint": "pyannote/segmentation-3.0",
-                "revision": "main",
-                "token": "gated-token",
-                "cache_dir": "cache",
-            },
-        )
-        self.assertEqual(captured["segmentation"], "segmentation-model")
-        self.assertEqual(captured["pipeline_kwargs"], {"batch_size": 8})
-        self.assertEqual(captured["parameters"]["onset"], 0.5)
-        self.assertEqual(
-            [(segment.start, segment.end) for segment in output.segments],
-            [(0.2, 0.5)],
-        )
-
-    def test_brouhaha_returns_vad_frames_and_auxiliary_summaries(self):
-        captured = {}
-
-        class ModelFactory:
-
-            @staticmethod
-            def from_pretrained(checkpoint, token=None):
-                captured["load"] = {
-                    "checkpoint": checkpoint,
-                    "token": token,
-                }
-                return "brouhaha-model"
-
-        class Inference:
-
-            def __init__(self, model, **kwargs):
-                captured["model"] = model
-                captured["inference_kwargs"] = kwargs
-
-            def __call__(self, payload):
-                captured["payload"] = payload
-                return SimpleNamespace(
-                    data=np.asarray([
-                        [0.1, 10.0, 2.0],
-                        [0.9, 20.0, 4.0],
-                        [0.8, 30.0, 6.0],
-                        [0.1, 40.0, 8.0],
-                    ]),
-                    sliding_window=SimpleNamespace(
-                        start=0.0,
-                        step=0.1,
-                        duration=0.1,
-                    ),
-                )
-
-        pyannote = ModuleType("pyannote")
-        pyannote.__path__ = []
-        audio = ModuleType("pyannote.audio")
-        audio.Model = ModelFactory
-        audio.Inference = Inference
-        brouhaha = ModuleType("brouhaha")
-        brouhaha.__path__ = []
-        brouhaha_models = ModuleType("brouhaha.models")
-        modules = {
-            "brouhaha": brouhaha,
-            "brouhaha.models": brouhaha_models,
-            "pyannote": pyannote,
-            "pyannote.audio": audio,
-            "torch": _fake_torch(),
-        }
-        model = PyannoteBrouhahaVADForVoiceActivityDetection(
-            PyannoteBrouhahaVADConfig(batch_size=4),
-            device="cpu",
-            token="gated-token",
-        )
-        with patch.dict(sys.modules, modules):
-            model._load_pretrained_model()
-            output = model._detect(
-                np.zeros(16_000, dtype=np.float32),
-                sampling_rate=16_000,
-                min_speech_duration_ms=0,
-                min_silence_duration_ms=0,
-                speech_pad_ms=0,
-                return_frames=True,
-            )
-
-        self.assertEqual(
-            captured["load"],
-            {
-                "checkpoint": "pyannote/brouhaha",
-                "token": "gated-token",
-            },
-        )
-        self.assertEqual(captured["model"], "brouhaha-model")
-        self.assertEqual(captured["inference_kwargs"]["batch_size"], 4)
-        self.assertEqual(captured["payload"]["waveform"].shape, (1, 16_000))
-        self.assertEqual(
-            [(segment.start, segment.end) for segment in output.segments],
-            [(0.1, 0.3)],
-        )
-        np.testing.assert_allclose(output.probabilities, [0.1, 0.9, 0.8, 0.1])
-        self.assertEqual(output.metadata["mean_snr_db"], 25.0)
-        self.assertEqual(output.metadata["mean_c50_db"], 5.0)
-        self.assertEqual(output.metadata["auxiliary_outputs"], ("snr_db", "c50_db"))
-
-    def test_brouhaha_provides_its_checkpoint_architecture_during_loading(self):
-        captured = {}
-        architecture = ModuleType("voicehub_brouhaha_architecture")
-        architecture.CustomPyanNetModel = type("CustomPyanNetModel", (), {})
-
-        def import_architecture(name):
-            if name == "brouhaha.models":
-                error = ModuleNotFoundError("No module named 'brouhaha'")
-                error.name = "brouhaha"
-                raise error
-            if name == "voicehub.models.vad_pyannote_brouhaha._architecture":
-                return architecture
-            raise AssertionError(f"unexpected import: {name}")
-
-        class ModelFactory:
-
-            @staticmethod
-            def from_pretrained(checkpoint):
-                captured["checkpoint"] = checkpoint
-                from brouhaha.models import CustomPyanNetModel
-                captured["architecture"] = CustomPyanNetModel
-                return "brouhaha-model"
-
-        class Inference:
-
-            def __init__(self, model, **kwargs):
-                captured["model"] = model
-                captured["inference_kwargs"] = kwargs
-
-        pyannote = ModuleType("pyannote")
-        pyannote.__path__ = []
-        audio = ModuleType("pyannote.audio")
-        audio.Model = ModelFactory
-        audio.Inference = Inference
-        model = PyannoteBrouhahaVADForVoiceActivityDetection(
-            PyannoteBrouhahaVADConfig(),
-            device="cpu",
-        )
-        with patch.dict(sys.modules, {
-                "pyannote": pyannote,
-                "pyannote.audio": audio,
-                "torch": _fake_torch(),
-        }), patch(
-                "voicehub.models.vad_pyannote_brouhaha."
-                "modeling_vad_pyannote_brouhaha.import_module",
-                side_effect=import_architecture,
-        ):
-            self.assertNotIn("brouhaha.models", sys.modules)
-            model._load_pretrained_model()
-            self.assertNotIn("brouhaha.models", sys.modules)
-
-        self.assertEqual(captured["checkpoint"], "pyannote/brouhaha")
-        self.assertEqual(captured["architecture"].__name__, "CustomPyanNetModel")
-        self.assertEqual(captured["model"], "brouhaha-model")
-
-    def test_brouhaha_does_not_mask_nested_architecture_import_errors(self):
-
-        class ModelFactory:
-
-            @staticmethod
-            def from_pretrained(checkpoint):
-                del checkpoint
-                raise AssertionError("loader should not be reached")
-
-        pyannote = ModuleType("pyannote")
-        pyannote.__path__ = []
-        audio = ModuleType("pyannote.audio")
-        audio.Model = ModelFactory
-        audio.Inference = object
-        model = PyannoteBrouhahaVADForVoiceActivityDetection(
-            PyannoteBrouhahaVADConfig(),
-            device="cpu",
-        )
-        error = ModuleNotFoundError("No module named 'pyannote.audio.models'")
-        error.name = "pyannote.audio.models"
-        with (
-                patch.dict(sys.modules, {
-                    "pyannote": pyannote,
-                    "pyannote.audio": audio,
-                }),
-                patch(
-                    "voicehub.models.vad_pyannote_brouhaha."
-                    "modeling_vad_pyannote_brouhaha.import_module",
-                    side_effect=error,
-                ),
-                self.assertRaises(ModuleNotFoundError),
-        ):
-            model._load_pretrained_model()
+        for model_class, config in cases:
+            with self.subTest(model=model_class.__name__):
+                model = model_class(config, device="cpu")
+                with self.assertRaisesRegex(
+                        ValueError,
+                        "Lightning pickle checkpoint",
+                ):
+                    model._load_pretrained_model()
 
 
 if __name__ == "__main__":

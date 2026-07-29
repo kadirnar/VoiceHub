@@ -1,0 +1,75 @@
+{
+  "architecture": "cohere-asr",
+  "implementation": "voicehub-native",
+  "architecture_references": [
+    {
+      "repository": "https://github.com/huggingface/transformers",
+      "revision": "af71155683b4d34dd92d8f037392fa6bf334035e",
+      "license": "Apache-2.0",
+      "notes": "The integrated CohereAsr configuration, FastConformer compatibility, decoder equations, feature extraction, prompt construction, and long-form chunk semantics were audited at this immutable revision. VoiceHub imports none of Transformers at runtime."
+    },
+    {
+      "repository": "https://huggingface.co/CohereLabs/cohere-transcribe-03-2026",
+      "revision": "b1eacc2686a3d08ceaae5f24a88b1d519620bc09",
+      "license": "Apache-2.0",
+      "notes": "Cohere's original remote-code configuration, model, processor, tokenizer, model card, and exact gated Safetensors header were audited at this immutable model revision. Repository Python is never executed."
+    }
+  ],
+  "tokenizer_references": [
+    {
+      "repository": "https://github.com/huggingface/tokenizers",
+      "revision": "f383101a26663708484cac0727792aad74f78234",
+      "license": "Apache-2.0",
+      "notes": "BPE merge order, byte fallback, added-token matching, decoder fusion, and identity post-processing."
+    },
+    {
+      "repository": "https://github.com/huggingface/spm_precompiled",
+      "revision": "3795b14343d25782df654b49f5c3e9f2a7db7d6f",
+      "license": "Apache-2.0",
+      "notes": "SentencePiece precompiled normalization character-map format and Darts-trie traversal."
+    }
+  ],
+  "checkpoints": [
+    {
+      "repository": "CohereLabs/cohere-transcribe-03-2026",
+      "revision": "b1eacc2686a3d08ceaae5f24a88b1d519620bc09",
+      "license": "Apache-2.0",
+      "format": "Safetensors",
+      "sha256": "987bd3e141c7bfdb5a78f5db11397ee7737308357e6cc0a3f36a4979b158137a",
+      "file_bytes": 4131862976,
+      "header_bytes": 254488,
+      "tensor_data_bytes": 4131608480,
+      "tensors": 2152,
+      "learned_parameters": 2047822080,
+      "state_values": 2065804096,
+      "dtype": "BF16 plus 48 I64 BatchNorm counters",
+      "header_fingerprint": "06a76e1e91f509c865013ce962a695a05b6a50ae0290d1258910c660ccb06292"
+    }
+  ],
+  "verified_scope": {
+    "inference": [
+      "16 kHz deterministic dither, pre-emphasis, log-mel extraction, and per-feature normalization",
+      "48-layer, 1280-wide FastConformer encoder with 8x subsampling",
+      "eight-layer, 1024-wide causal decoder with encoder cross-attention",
+      "source-verified 14-language and punctuation prompts",
+      "greedy autoregressive decoding",
+      "source-verified quiet-boundary long-form segmentation and language-aware text joining",
+      "strict Safetensors header verification and portable sharded reload"
+    ],
+    "training": [
+      "raw waveform, language, punctuation, and transcript preparation",
+      "coherent shifted teacher-forcing inputs and padding-masked cross-entropy",
+      "optional source-configured prompt-loss masking",
+      "full-model backward and gradient checkpointing",
+      "inference-ready Safetensors export"
+    ],
+    "limitations": [
+      "Only Safetensors checkpoints with the Cohere conditional-generation graph are accepted.",
+      "Only greedy decoding is implemented; beam search, sampling, hotwords, timestamps, diarization, translation, and language detection fail closed.",
+      "The language must be one of the 14 source-verified language codes.",
+      "Long-form splitting is offline quiet-boundary segmentation, not streaming and not literal overlap.",
+      "KV-cache generation is not exposed until cache parity is independently verified.",
+      "No corpus-level WER benchmark was run, so no accuracy improvement over Cohere's published checkpoint is claimed."
+    ]
+  }
+}

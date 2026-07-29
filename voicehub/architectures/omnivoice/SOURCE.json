@@ -1,0 +1,69 @@
+{
+  "architecture": "omnivoice",
+  "audit_date": "2026-07-29",
+  "implementation": "voicehub-native",
+  "license": "Apache-2.0",
+  "source": {
+    "repository": "https://github.com/k2-fsa/OmniVoice",
+    "revision": "468e927ba3716cd8dd86421148dfb3046e9f9d7b"
+  },
+  "checkpoint": {
+    "repository": "k2-fsa/OmniVoice",
+    "revision": "c5fdb5ccb189668d56333f77ba2629f4cd7535f4",
+    "filename": "model.safetensors",
+    "size": 2450344112,
+    "sha256": "730839316de585f4c8298ec0e1712efc10fb19c6fa4e36eb741cb8d51ebcf6aa",
+    "dtype": "F32 with I64 codebook offsets",
+    "tensor_count": 313,
+    "parameter_count": 612577288,
+    "header_fingerprint": "bb648e25ffab0efb8a6d330ddf4709f5acd574efa830afc34c645970730e52fa"
+  },
+  "text_tokenizer": {
+    "filename": "tokenizer.json",
+    "size": 11423986,
+    "sha256": "408f669b7e2b045fdf54201d815bd364e6667dbd845115da81239c40bc6dcfd1",
+    "implementation": "VoiceHub-native Qwen2 byte-level BPE",
+    "token_id_space": 151676
+  },
+  "audio_tokenizer": {
+    "repository": "eustlb/higgs-audio-v2-tokenizer",
+    "revision": "528e871c2a26c4f0f7773b9754e2e1acae20899d",
+    "filename": "model.safetensors",
+    "size": 805665628,
+    "sha256": "fe7c5e8785e0a05833e1bfc3e002ec7f55af21e306b2e7154a448c1f54ccfb0d",
+    "dtype": "F32",
+    "tensor_count": 527,
+    "parameter_count": 201400553,
+    "header_fingerprint": "f34d990376e0b79953b962e2fc76e881ff7b5ac6954b3dcbd416ef23b4fa16df",
+    "transformers_reference_revision": "aad13b87ed59f2afcfaebc985f403301887a35fc",
+    "boson_reference_revision": "05a145bb490501b534563bf51bf2f7aa2326b271"
+  },
+  "training": {
+    "published": true,
+    "full_finetuning": true,
+    "audio_codebooks": 8,
+    "attention": "fully bidirectional",
+    "objective": "Per-codebook masked cross entropy, independently averaged over labels not equal to -100, then combined with normalized weights [8,8,6,6,4,4,2,2].",
+    "codec_policy": "Higgs Audio V2 and its HuBERT semantic encoder are frozen.",
+    "raw_boundary": "Mono waveform plus explicit sample rate; peak-normalized to 0.9 and encoded at 24 kHz.",
+    "preprocessed_boundary": "Integer audio_tokens with shape [8, frames] and values in [0,1024).",
+    "corruption_policy": "Prompt ratio [0,0.3], mask ratio [0,1], conditioning dropout 0.1, language probability 0.8, pinyin probability 0.3, instruction probability 1.0, instruction-only probability 0.5."
+  },
+  "generation": {
+    "algorithm": "Iterative masked-token decoding with classifier-free guidance",
+    "published_defaults": {
+      "num_steps": 32,
+      "guidance_scale": 2.0,
+      "time_shift": 0.1,
+      "layer_penalty_factor": 5.0,
+      "position_temperature": 5.0,
+      "class_temperature": 0.0
+    }
+  },
+  "limits": [
+    "No numerical waveform-parity or quality claim is made without a reference-output audit.",
+    "Voice cloning requires an explicit reference transcript; native OmniVoice does not invoke an external ASR model.",
+    "External text normalization and silence-removal packages are outside the architecture boundary.",
+    "The native generator currently executes one utterance per call; checkpoint and training batches remain supported."
+  ]
+}

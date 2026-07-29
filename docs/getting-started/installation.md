@@ -9,7 +9,7 @@ feature:
 
 | Layer                  | Install target                 | What it provides                                                                         |
 | ---------------------- | ------------------------------ | ---------------------------------------------------------------------------------------- |
-| Complete inference     | `voicehub`                     | Registry, configuration, and every built-in TTS, ASR, and VAD runtime                    |
+| Complete inference     | `voicehub`                     | VoiceHub-owned TTS, ASR, and VAD runtimes on a shared PyTorch substrate                  |
 | Training and reporting | `voicehub[training]`           | Shared trainers, data/evaluation tools, and Weights & Biases integration                 |
 | Contributor tools      | `.[test]` or `.[docs]`         | Tests, pre-commit hooks, notebook validation, or the documentation build                 |
 
@@ -17,15 +17,15 @@ feature:
 extras are contributor conveniences rather than product runtime choices.
 
 The package requires Python 3.10 or newer. Project metadata explicitly lists
-Python 3.10, 3.11, and 3.12. A later Python release may work, but every selected
-model dependency must also publish a compatible wheel.
+Python 3.10, 3.11, and 3.12. A later Python release may work when PyTorch
+publishes a compatible wheel.
 
-!!! note "Current WhisperX platform boundary"
+!!! note "Current PyTorch platform boundary"
 
     The default runtime resolves on Linux x86-64, Windows x86-64, and Apple
-    Silicon for Python 3.10–3.12. Its pinned WhisperX runtime requires
-    PyTorch 2.8, which does not publish Intel macOS wheels. Use Apple Silicon,
-    Linux, or Windows for the complete default installation.
+    Silicon for Python 3.10–3.12. VoiceHub's native graphs require PyTorch
+    2.8, which does not publish Intel macOS wheels. Use Apple Silicon, Linux,
+    or Windows for the complete default installation.
 
 ## Create an isolated environment
 
@@ -48,7 +48,7 @@ VoiceHub:
     python -m pip install --upgrade pip
     ```
 
-Verify the selected interpreter before installing large model dependencies:
+Verify the selected interpreter before installing PyTorch:
 
 ```bash
 python --version
@@ -67,13 +67,14 @@ Install the complete package:
 python -m pip install voicehub
 ```
 
-This includes the Python runtime dependencies for every built-in TTS, ASR, and
-VAD provider. Checkpoint files are not bundled: they are resolved lazily from a
-model repository or supplied as local artifacts.
+The default dependency surface is deliberately small: PyTorch is the only
+external runtime. VoiceHub owns each built-in model graph, tokenizer/parser,
+checkpoint reader, audio frontend, objective, and generation loop. Checkpoint
+files are not bundled: they are resolved lazily from a model repository or
+supplied as local artifacts.
 
-Installing the dependencies does not make discovery eager. VoiceHub still
-avoids initializing tensor frameworks and does not load model weights while
-you inspect the registry:
+Installing PyTorch does not make discovery eager. VoiceHub still avoids
+importing it or loading model weights while you inspect the registry:
 
 ```python
 from voicehub import AutoInferenceModel
@@ -93,12 +94,70 @@ extension contract so future separately distributed integrations or
 optimization backends can describe their own setup without changing the
 registry schema.
 
-The default installation covers Transformers ASR/VAD, faster-whisper,
-WhisperX, OpenAI
-Whisper, NeMo, SpeechBrain, FunASR, ESPnet, WeNet, Silero, WebRTC, pyannote,
-and ONNX execution. VoiceHub vendors the small Apache-licensed WeNet inference
-surface required by its wrapper because the official Python package is not
-published on PyPI. WeNet's full training repository remains upstream-owned.
+The default installation covers native Whisper, faster-whisper and WhisperX
+compatibility providers, native Wav2Vec2/HuBERT/WavLM/Moonshine ASR,
+native NeMo QuartzNet, SpeechBrain, SenseVoiceSmall, ESPnet, WeNet, Silero, WebRTC, native PyanNet,
+and ONNX execution. WhisperX word alignment composes VoiceHub's Whisper and
+Wav2Vec2 graphs and does not install or import the upstream `whisperx`
+package. The WebRTC fixed-point detector is also implemented in VoiceHub and
+does not install or import `webrtcvad` or a compiled WebRTC extension.
+PyanNet inference and fine-tuning likewise do not install or import
+`pyannote.audio`. The FunASR-compatible FSMN VAD graph likewise runs and trains
+without importing FunASR, ModelScope, torchaudio, or Transformers. The
+`asr_funasr` compatibility key likewise runs the VoiceHub-native
+SenseVoiceSmall SANM-CTC graph and no longer installs FunASR. VoiceHub also
+owns both the multilingual MarbleNet Frame-VAD graph and the audited
+QuartzNet15x5 character-CTC graph, frontends, objectives, and checkpoint
+adapters. Neither `vad_nemo` nor `asr_nemo` imports NeMo, Lightning, Hydra,
+OmegaConf, librosa, torchaudio, or Transformers. VoiceHub also owns the exact
+GigaSpeech U2++ WeNet architecture, Kaldi frontend, SentencePiece-unigram
+reader, CTC prefix search, bidirectional attention rescoring, and hybrid
+training objective; it does not import WeNet, SentencePiece, TorchAudio, or a
+YAML runtime.
+The SpeechBrain ASR provider likewise owns the released Fbank/global-CMVN
+frontend, CRDNN, location-aware decoder, RNNLM shallow fusion, unigram
+tokenizer, staged CTC/sequence objective, and trainer adapter. It imports no
+SpeechBrain, SentencePiece, protobuf, HyperPyYAML, TorchAudio, or Transformers
+runtime.
+
+The `asr_espnet` key does not install or import ESPnet or
+`espnet-model-zoo`. VoiceHub implements the exact audited LibriSpeech
+Transformer-e18 frontend, graph, tokenizer, beam search, hybrid objective, and
+export path. The released legacy checkpoint is accepted only through an
+explicit, digest-pinned `weights_only=True` conversion; later inference and
+fine-tuning use the converted Safetensors artifact.
+
+The published WeNet checkpoint is a legacy pickle container. Its first
+conversion is therefore explicit and trust-gated:
+
+```python
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "wenet/gigaspeech-u2pp-conformer",
+    model_type="asr_wenet",
+    trust_pickle_checkpoint=True,
+)
+```
+
+VoiceHub verifies the archive and all five assets by SHA-256 before using
+PyTorch's restricted `weights_only=True` reader. Later loads use the converted
+Safetensors artifact. The archive does not declare a checkpoint license;
+VoiceHub does not infer the architecture source's Apache-2.0 terms for the
+weights.
+
+The public SpeechBrain CRDNN release also uses legacy pickle containers.
+Authorize its one-time restricted conversion in the same way:
+
+```python
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "speechbrain/asr-crdnn-rnnlm-librispeech",
+    model_type="asr_speechbrain",
+    trust_pickle_checkpoint=True,
+)
+```
+
+All three states and the tokenizer/hyperparameter assets are pinned by digest,
+and the complete tensor inventories are checked before one native
+Safetensors artifact is accepted. The source and checkpoint are Apache-2.0.
 
 The [model catalog](../models/index.md) maps those keys to model families,
 default checkpoints, capabilities, conditioning requirements, and important
@@ -116,13 +175,13 @@ providers to runtime families, outputs, and training boundaries.
 
 ### Install an accelerator-specific PyTorch build
 
-The default runtime depends on PyTorch and TorchAudio. The package resolver may
-not select the accelerator build required by a particular machine.
+The default runtime depends on PyTorch. The package resolver may not select
+the accelerator build required by a particular machine.
 
 When CUDA or another platform-specific build is needed:
 
-1. select the compatible PyTorch and TorchAudio build for the operating system,
-   driver, and accelerator;
+1. select the compatible PyTorch build for the operating system, driver, and
+   accelerator;
 2. install it into the active environment; and
 3. install VoiceHub afterward.
 
@@ -146,9 +205,10 @@ Install it on top of the default inference runtime:
 python -m pip install "voicehub[training]"
 ```
 
-This installs training infrastructure, not universal fine-tuning support.
-VoiceHub-native profiles can run directly; upstream-custom profiles still use
-their source recipe, and inference-only profiles remain non-trainable.
+This installs training infrastructure. A model profile can then run the
+VoiceHub-owned objective phases it explicitly advertises. Frozen tokenizers,
+codecs, speaker encoders, and offline preprocessing boundaries remain frozen;
+deterministic or serving-only algorithms remain inference-only.
 
 Because extras always extend the main package, `voicehub[training]` also
 installs every built-in inference runtime. No model-specific or task-specific
@@ -159,8 +219,8 @@ with `wandb login` or `WANDB_API_KEY`; credentials are never accepted by or
 serialized into VoiceHub training arguments. Use `wandb_mode="offline"` when a
 training machine should write local run data for later synchronization.
 
-Training support is checkpoint- and backend-aware. A model can be trainable
-upstream while a particular GGUF, ONNX, quantized, fused, or
+Training support is checkpoint- and backend-aware. A model graph can be
+trainable while a particular GGUF, ONNX, quantized, fused, or
 inference-pruned artifact remains inference-only. Safetensors is a weight
 container, not proof that the complete differentiable training graph can be
 reconstructed.
@@ -234,9 +294,9 @@ command when dependency metadata changes.
 
 ## Match the backend and checkpoint
 
-The default installation supplies Python inference dependencies. A registry
-key selects the VoiceHub integration. A checkpoint selects the weights and,
-sometimes, a specific backend or variant. The latter two choices must agree.
+The default installation supplies VoiceHub plus PyTorch. A registry key
+selects the native architecture. A checkpoint selects the weights and,
+sometimes, a specific variant. Those choices must agree.
 
 Inspect the registry before loading weights:
 
@@ -298,7 +358,7 @@ from voicehub import AutoModelForTextToSpeech
 training_model = AutoModelForTextToSpeech.from_pretrained(
     "nari-labs/Dia-1.6B-0626",
     model_type="dia",
-    backend="transformers",
+    backend="native",
     device="auto",
     lazy_load=True,
 )
@@ -406,15 +466,14 @@ The final value should be `False`. Call `model.load()` only when the
 checkpoint download, license, device, and memory requirements have been
 reviewed.
 
-## Resolve runtime dependency errors
+## Resolve runtime installation errors
 
-When a built-in inference backend cannot import a required Python module,
-VoiceHub raises `OptionalDependencyError` with guidance for repairing the
-default runtime:
+When PyTorch is unavailable, VoiceHub reports the missing runtime before
+constructing a graph:
 
 ```text
-'dia' requires dependencies that are not installed.
-Reinstall the complete runtime with `pip install --upgrade voicehub` and retry.
+'dia' requires PyTorch, which is not installed.
+Reinstall VoiceHub with `pip install --upgrade voicehub` and retry.
 ```
 
 Run that command through the active interpreter:

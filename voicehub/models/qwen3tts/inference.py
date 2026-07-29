@@ -1,4 +1,4 @@
-"""Qwen3-TTS integration backed by the vendored Qwen source."""
+"""Qwen3-TTS inference backed by VoiceHub's native PyTorch graph."""
 
 from __future__ import annotations
 
@@ -8,10 +8,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from voicehub.configuration_utils import VoiceHubConfig
-from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
-from voicehub.models._shared import finish_audio_output, resolve_torch_dtype, seeded_inference
+from voicehub.models._shared import finish_audio_output, seeded_inference
 
 
 class Qwen3TTSConfig(VoiceHubConfig):
@@ -30,12 +29,28 @@ class Qwen3TTSConfig(VoiceHubConfig):
         sample_rate: int = 24000,
         **kwargs,
     ):
+        if not isinstance(torch_dtype, str) or not torch_dtype.strip():
+            raise ValueError("`torch_dtype` must be a non-empty string.")
+        if attention_implementation not in {None, "eager"}:
+            raise ValueError(
+                "Native Qwen3-TTS supports only eager attention; "
+                "`attention_implementation` must be None or 'eager'.")
+        if (not isinstance(training_speaker_name, str) or not training_speaker_name.strip()):
+            raise ValueError("`training_speaker_name` must be non-empty.")
+        if (isinstance(training_speaker_id, bool) or not isinstance(training_speaker_id, int) or
+                training_speaker_id < 0):
+            raise ValueError("`training_speaker_id` must be a non-negative integer.")
+        if (isinstance(sub_talker_loss_weight, bool) or not isinstance(sub_talker_loss_weight, Real) or
+                not math.isfinite(sub_talker_loss_weight) or sub_talker_loss_weight < 0):
+            raise ValueError("`sub_talker_loss_weight` must be finite and non-negative.")
+        if sample_rate != 24_000:
+            raise ValueError("Published Qwen3-TTS 12 Hz checkpoints output 24 kHz audio.")
         super().__init__(sample_rate=sample_rate, **kwargs)
-        self.torch_dtype = torch_dtype
+        self.torch_dtype = torch_dtype.strip()
         self.attention_implementation = attention_implementation
-        self.training_speaker_name = training_speaker_name
+        self.training_speaker_name = training_speaker_name.strip()
         self.training_speaker_id = training_speaker_id
-        self.sub_talker_loss_weight = sub_talker_loss_weight
+        self.sub_talker_loss_weight = float(sub_talker_loss_weight)
 
 
 class Qwen3TTSForTextToSpeech(PreTrainedTTSModel):
@@ -70,8 +85,17 @@ class Qwen3TTSForTextToSpeech(PreTrainedTTSModel):
         model_path: str | None = None,
         device: str = "auto",
         lazy_load: bool = True,
+        token: str | bool | None = None,
         **config_overrides,
     ):
+        if token is not None and not isinstance(token, (str, bool)):
+            raise TypeError("`token` must be a string, boolean, or None.")
+        if isinstance(token, str) and not token.strip():
+            raise ValueError("String `token` values must be non-empty.")
+        self._hub_token = token
+        self.runtime = None
+        self.native_model = None
+        self.processor = None
         config = self._coerce_config(
             config,
             model_path=model_path,
@@ -114,9 +138,8 @@ class Qwen3TTSForTextToSpeech(PreTrainedTTSModel):
         """Normalize local paths while preserving URL/base64 inputs."""
         value = str(reference_audio).strip()
         parsed = urlparse(value)
-        if (parsed.scheme in {"http", "https"} and
-                parsed.netloc) or value.startswith("data:audio") or ("/" not in value and
-                                                                     "\\" not in value and len(value) > 256):
+        if ((parsed.scheme in {"http", "https"} and parsed.netloc) or value.startswith("data:audio") or
+                "".join(value.split()).startswith("UklGR")):
             return value
 
         path = Path(value).expanduser()
@@ -228,10 +251,14 @@ class Qwen3TTSForTextToSpeech(PreTrainedTTSModel):
             value = model_inputs.get(name)
             if value is not None and not isinstance(value, bool):
                 raise TypeError(f"`{name}` must be a boolean.")
-        for name in ("top_k", "subtalker_top_k", "max_new_tokens"):
+        for name in ("top_k", "subtalker_top_k"):
             value = model_inputs.get(name)
-            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
-                raise ValueError(f"`{name}` must be a positive integer.")
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                raise ValueError(f"`{name}` must be a non-negative integer.")
+        max_new_tokens = model_inputs.get("max_new_tokens")
+        if max_new_tokens is not None and (isinstance(max_new_tokens, bool) or
+                                           not isinstance(max_new_tokens, int) or max_new_tokens <= 0):
+            raise ValueError("`max_new_tokens` must be a positive integer.")
         for name in ("top_p", "subtalker_top_p"):
             value = model_inputs.get(name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, Real) or
@@ -268,30 +295,26 @@ class Qwen3TTSForTextToSpeech(PreTrainedTTSModel):
                 "Qwen/Qwen3-TTS-12Hz-1.7B-Base.")
 
     def _load_pretrained_model(self) -> None:
-        torch = import_optional(
-            "torch",
-            model_type="qwen3tts",
-            install_extra=None,
+        if self.config.attention_implementation not in (None, "eager"):
+            raise ValueError(
+                "Native Qwen3-TTS owns its attention implementation; "
+                "`attention_implementation` must be None or 'eager'.")
+        from voicehub.architectures.qwen3_tts.runtime import load_qwen3_tts_runtime
+
+        runtime = load_qwen3_tts_runtime(
+            self.config.name_or_path or self.default_model_name_or_path,
+            device=self.device,
+            compute_dtype=self.config.torch_dtype,
+            revision=getattr(self.config, "revision", None),
+            cache_dir=getattr(self.config, "cache_dir", None),
+            token=self._hub_token,
+            local_files_only=bool(getattr(self.config, "local_files_only", False)),
+            for_training=self.is_training_load,
         )
-        runtime = import_optional(
-            "voicehub.models.qwen3tts.source.qwen_tts",
-            model_type="qwen3tts",
-            install_extra=None,
-        )
-        kwargs = {
-            "device_map": self.device,
-            "dtype": resolve_torch_dtype(
-                torch,
-                self.config.torch_dtype,
-                self.device,
-            ),
-        }
-        if self.config.attention_implementation:
-            kwargs["attn_implementation"] = (self.config.attention_implementation)
-        self.model = runtime.Qwen3TTSModel.from_pretrained(
-            self.config.name_or_path,
-            **kwargs,
-        )
+        self.runtime = runtime
+        self.native_model = runtime.model
+        self.processor = runtime.processor
+        self.model = runtime
 
     def _prepare_for_inference(self) -> None:
         """Restore serving state on the optimizer-owned Qwen module."""
@@ -357,6 +380,7 @@ class Qwen3TTSForTextToSpeech(PreTrainedTTSModel):
                     ref_audio=reference_audio,
                     ref_text=reference_text,
                     x_vector_only_mode=x_vector_only_mode,
+                    seed=effective_seed,
                     **generation_options,
                 )
             elif normalized_mode == "voice_design":
@@ -364,6 +388,7 @@ class Qwen3TTSForTextToSpeech(PreTrainedTTSModel):
                     text=text,
                     language=language,
                     instruct=instruct,
+                    seed=effective_seed,
                     **generation_options,
                 )
             elif normalized_mode == "custom_voice":
@@ -372,6 +397,7 @@ class Qwen3TTSForTextToSpeech(PreTrainedTTSModel):
                     language=language,
                     speaker=speaker,
                     instruct=instruct or None,
+                    seed=effective_seed,
                     **generation_options,
                 )
         if wavs is None or len(wavs) == 0:

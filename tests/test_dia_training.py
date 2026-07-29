@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import importlib.util
 import json
+import math
 import subprocess
 import sys
 import tempfile
@@ -7,467 +10,417 @@ import unittest
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
-
-import voicehub.models.dia.training as dia_training
-from voicehub.models.dia.inference import DiaConfig, DiaForTextToSpeech
-from voicehub.models.dia.training import (
-    DiaSFTDataset,
-    DiaTrainingAdapter,
-    DiaTrainingBackend,
-    DiaTrainingCollator,
-    load_dia_transformers_backend,
-)
-from voicehub.trainer_utils import NATIVE_EXPORT_DIR
-from voicehub.training.contracts import TrainingSupport
-from voicehub.training.specs import ModelTrainingSpec, TrainingFamily
+from unittest.mock import patch
 
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-class FakeBatch(dict):
+@unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is VoiceHub's compute runtime")
+class NativeDiaTests(unittest.TestCase):
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.moved_to = None
+    @staticmethod
+    def dia_config():
+        from voicehub.architectures.dia.configuration import DiaArchitectureConfig, DiaDecoderConfig, DiaEncoderConfig
 
-    def to(self, device):
-        self.moved_to = device
-        return self
+        return DiaArchitectureConfig(
+            encoder_config=DiaEncoderConfig(
+                hidden_size=8,
+                intermediate_size=16,
+                num_hidden_layers=1,
+                num_attention_heads=2,
+                num_key_value_heads=2,
+                head_dim=4,
+                max_position_embeddings=64,
+                vocab_size=256,
+            ),
+            decoder_config=DiaDecoderConfig(
+                hidden_size=8,
+                intermediate_size=16,
+                num_hidden_layers=1,
+                num_attention_heads=2,
+                num_key_value_heads=1,
+                head_dim=4,
+                cross_hidden_size=8,
+                cross_num_attention_heads=2,
+                cross_num_key_value_heads=2,
+                cross_head_dim=4,
+                max_position_embeddings=64,
+                vocab_size=12,
+                num_channels=2,
+                bos_token_id=10,
+                eos_token_id=8,
+                pad_token_id=9,
+            ),
+            delay_pattern=(0, 1),
+        )
 
+    @staticmethod
+    def dac_config():
+        from voicehub.architectures.dac.configuration import DacConfig
 
-class FakeProcessor:
+        return DacConfig(
+            encoder_hidden_size=4,
+            downsampling_ratios=(2, 2),
+            decoder_hidden_size=16,
+            n_codebooks=2,
+            codebook_size=8,
+            codebook_dim=2,
+            sampling_rate=16_000,
+        )
 
-    def __init__(self, audio_tokenizer=None):
-        self.feature_extractor = SimpleNamespace(sampling_rate=44_100)
-        self.audio_tokenizer = audio_tokenizer
-        self.calls = []
-        self.saved_to = None
-        self.decode_calls = []
+    @classmethod
+    def write_artifact(cls, root: Path):
+        import torch
 
-    def __call__(self, **kwargs):
-        self.calls.append(kwargs)
-        return FakeBatch({
-            "input_ids": "input-ids",
-            "attention_mask": "attention-mask",
-            "decoder_input_ids": "decoder-input-ids",
-            "decoder_attention_mask": "decoder-attention-mask",
-            "labels": "labels",
-        })
+        from voicehub.architectures.dac.modeling import DacModel
+        from voicehub.architectures.dia.modeling import DiaForConditionalGeneration
+        from voicehub.checkpointing import save_safetensors
 
-    def get_audio_prompt_len(self, attention_mask):
-        self.prompt_mask = attention_mask
-        return 7
+        root.mkdir(parents=True, exist_ok=True)
+        dia_config = cls.dia_config()
+        model = DiaForConditionalGeneration(dia_config)
+        (root / "config.json").write_text(
+            json.dumps(dia_config.to_dict()),
+            encoding="utf-8",
+        )
+        save_safetensors(
+            model.state_dict(),
+            root / "model.safetensors",
+            metadata={"format": "pt"},
+        )
+        (root / "preprocessor_config.json").write_text(
+            json.dumps({
+                "sampling_rate": 16_000,
+                "hop_length": 4,
+            }),
+            encoding="utf-8",
+        )
+        (root / "tokenizer_config.json").write_text(
+            json.dumps({"max_length": 64}),
+            encoding="utf-8",
+        )
+        (root / "audio_tokenizer_config.json").write_text(
+            json.dumps({
+                "audio_tokenizer_name_or_path": "./audio_tokenizer",
+            }),
+            encoding="utf-8",
+        )
+        codec_root = root / "audio_tokenizer"
+        codec_root.mkdir()
+        dac_config = cls.dac_config()
+        codec = DacModel(dac_config)
+        codec_config = {
+            **dac_config.to_dict(),
+            "voicehub_checkpoint_format": "native-state-dict-v1",
+        }
+        (codec_root / "config.json").write_text(
+            json.dumps(codec_config),
+            encoding="utf-8",
+        )
+        save_safetensors(
+            codec.state_dict(),
+            codec_root / "model.safetensors",
+            metadata={"format": "pt"},
+        )
+        return model, codec
 
-    def batch_decode(self, sequences, **kwargs):
-        self.decode_calls.append((sequences, kwargs))
-        return [[0.25, -0.25]]
-
-    def save_pretrained(self, directory):
-        self.saved_to = Path(directory)
-
-
-class DiaTrainingInputTests(unittest.TestCase):
-
-    def test_training_module_keeps_heavy_dependencies_lazy(self):
-        command = (
-            "import sys; "
-            "import voicehub.models.dia.training; "
-            "print('torch' in sys.modules, 'transformers' in sys.modules)")
+    def test_modules_do_not_import_provider_frameworks(self):
+        code = """
+import sys
+import voicehub.models.dia
+import voicehub.models.dia.training
+print(*[
+    name in sys.modules
+    for name in ("transformers", "huggingface_hub", "torchaudio")
+])
+"""
         result = subprocess.run(
-            [sys.executable, "-c", command],
+            [sys.executable, "-c", code],
             cwd=PROJECT_ROOT,
             check=True,
             capture_output=True,
             text=True,
         )
-        self.assertEqual(result.stdout.strip(), "False False")
+        self.assertEqual(result.stdout.strip(), "False False False")
 
-    def test_collator_uses_official_training_processor_contract(self):
-        processor = FakeProcessor()
-        collator = DiaTrainingCollator(
-            processor,
-            processor_kwargs={
-                "truncation": True,
-            },
+    def test_public_checkpoint_inventory_is_exact(self):
+        from voicehub.architectures.dia.checkpoint import dia_header_fingerprint, native_dia_tensor_shapes
+        from voicehub.architectures.dia.configuration import DiaArchitectureConfig
+        from voicehub.architectures.dia.metadata import (
+            NARI_DIA_HEADER_FINGERPRINT,
+            NARI_DIA_PARAMETER_COUNT,
+            NARI_DIA_TENSOR_COUNT,
         )
 
-        batch = collator([
-            {
-                "text": "[S1] Hello.",
-                "audio": {
-                    "array": [0.0, 0.1],
-                    "sampling_rate": 44_100,
-                },
-            },
-            {
-                "text": "[S2] Hi.",
-                "audio": {
-                    "array": [0.2, 0.3],
-                    "sampling_rate": 44_100,
-                },
-            },
-        ])
+        shapes = native_dia_tensor_shapes(DiaArchitectureConfig())
 
-        self.assertEqual(batch["labels"], "labels")
+        self.assertEqual(len(shapes), NARI_DIA_TENSOR_COUNT)
         self.assertEqual(
-            processor.calls[0],
-            {
-                "text": ["[S1] Hello.", "[S2] Hi."],
-                "audio": [[0.0, 0.1], [0.2, 0.3]],
-                "generation": False,
-                "output_labels": True,
-                "padding": True,
-                "return_tensors": "pt",
-                "truncation": True,
-            },
+            sum(math.prod(shape) for shape in shapes.values()),
+            NARI_DIA_PARAMETER_COUNT,
+        )
+        self.assertEqual(
+            dia_header_fingerprint(shapes),
+            NARI_DIA_HEADER_FINGERPRINT,
         )
 
-    def test_collator_rejects_wrong_sample_rate(self):
-        collator = DiaTrainingCollator(FakeProcessor())
-        with self.assertRaisesRegex(ValueError, "resampled to 44100 Hz"):
-            collator([{
-                "text": "[S1] Wrong rate.",
-                "audio": {
-                    "array": [0.0],
-                    "sampling_rate": 24_000,
-                },
-            }])
+    def test_tokenizer_and_delay_protocol_are_deterministic(self):
+        import torch
 
-    def test_processor_controls_cannot_be_overridden(self):
-        with self.assertRaisesRegex(ValueError, "output_labels"):
-            DiaTrainingCollator(
-                FakeProcessor(),
-                processor_kwargs={
-                    "output_labels": False,
-                },
+        from voicehub.architectures.dia.processing import DiaByteTokenizer, DiaProcessor
+
+        tokenizer = DiaByteTokenizer(max_length=32)
+        self.assertEqual(
+            tokenizer.encode("[S1]Hi [S2]"),
+            [1, 72, 105, 32, 2],
+        )
+        self.assertEqual(
+            tokenizer.decode([1, 72, 105, 32, 2]),
+            "[S1]Hi [S2]",
+        )
+        audio = torch.tensor([[[1, 2], [3, 4], [5, 6]]])
+        indices = DiaProcessor.build_indices(1, 3, 2, (0, 1))
+        delayed = DiaProcessor.apply_audio_delay(
+            audio,
+            pad_token_id=9,
+            bos_token_id=10,
+            precomputed_indices=indices,
+        )
+        self.assertEqual(
+            delayed.tolist(),
+            [[[1, 10], [3, 2], [5, 4]]],
+        )
+        revert = DiaProcessor.build_indices(
+            1,
+            3,
+            2,
+            (0, 1),
+            revert=True,
+        )
+        restored = DiaProcessor.apply_audio_delay(
+            delayed,
+            pad_token_id=-1,
+            bos_token_id=-1,
+            precomputed_indices=revert,
+        )
+        self.assertEqual(
+            restored.tolist(),
+            [[[1, 2], [3, 4], [5, -1]]],
+        )
+
+    def test_full_teacher_forced_backward_reaches_every_parameter(self):
+        import torch
+
+        from voicehub.architectures.dia.modeling import DiaForConditionalGeneration
+
+        model = DiaForConditionalGeneration(self.dia_config())
+        output = model(
+            input_ids=torch.tensor([[1, 72, 2]]),
+            attention_mask=torch.ones(1, 3, dtype=torch.long),
+            decoder_input_ids=torch.tensor([[[10, 10], [1, 10], [2, 3], [8, 4]]]),
+            decoder_attention_mask=torch.ones(1, 4, dtype=torch.long),
+            labels=torch.tensor([[1, 2, 8, -100], [3, 4, 5, 8]]),
+        )
+        output.loss.backward()
+
+        self.assertEqual(output.logits.shape, (2, 4, 12))
+        self.assertEqual(output.loss.ndim, 0)
+        self.assertTrue(torch.isfinite(output.loss))
+        trainable = list(model.named_parameters())
+        self.assertTrue(trainable)
+        self.assertTrue(all(parameter.grad is not None for _, parameter in trainable))
+        self.assertTrue(all(torch.isfinite(parameter.grad).all() for _, parameter in trainable))
+
+    def test_strict_safetensors_load_export_and_reload(self):
+        import torch
+
+        from voicehub.architectures.dia.runtime import load_dia_runtime
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "source"
+            expected_model, expected_codec = self.write_artifact(root)
+            runtime = load_dia_runtime(
+                root,
+                device="cpu",
+                compute_dtype="float32",
+                for_training=True,
             )
 
-    def test_dataset_exposes_the_matching_collator(self):
-        processor = FakeProcessor()
-        dataset = DiaSFTDataset(
-            [{
-                "text": "[S1] Dataset.",
+            self.assertFalse(
+                any(parameter.requires_grad for parameter in runtime.processor.audio_tokenizer.parameters()))
+            for name, expected in expected_model.state_dict().items():
+                torch.testing.assert_close(
+                    runtime.model.state_dict()[name],
+                    expected,
+                )
+            for name, expected in expected_codec.state_dict().items():
+                torch.testing.assert_close(
+                    runtime.processor.audio_tokenizer.state_dict()[name],
+                    expected,
+                )
+
+            export = Path(directory) / "export"
+            runtime.save_pretrained(export)
+            codec_config = json.loads(
+                (export / "audio_tokenizer" / "config.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                codec_config["voicehub_checkpoint_format"],
+                "native-state-dict-v1",
+            )
+            restored = load_dia_runtime(
+                export,
+                device="cpu",
+                compute_dtype="float32",
+            )
+            for name, expected in runtime.model.state_dict().items():
+                torch.testing.assert_close(
+                    restored.model.state_dict()[name],
+                    expected,
+                )
+
+            batch = restored.processor(
+                text=["[S1] Hello."],
+                generation=True,
+            )
+            tokens = restored.model.generate(
+                **batch,
+                do_sample=False,
+                guidance_scale=None,
+                max_new_tokens=2,
+                top_k=None,
+                top_p=1.0,
+            )
+            self.assertEqual(tokens.ndim, 3)
+            self.assertEqual(tokens.shape[-1], 2)
+
+    def test_training_collator_encodes_audio_and_freezes_codec(self):
+        import torch
+
+        from voicehub.architectures.dia.runtime import load_dia_runtime
+        from voicehub.models.dia.training import DiaTrainingCollator
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_artifact(root)
+            runtime = load_dia_runtime(
+                root,
+                device="cpu",
+                compute_dtype="float32",
+                for_training=True,
+            )
+            collator = DiaTrainingCollator(runtime.processor)
+            batch = collator([{
+                "text": "[S1] Hello.",
                 "audio": {
-                    "array": [0.0, 0.1],
-                    "sampling_rate": 44_100,
+                    "array": torch.linspace(-0.2, 0.2, 64),
+                    "sampling_rate": 16_000,
                 },
-            }],
-            processor=processor,
-        )
+            }])
+            columnar_batch = runtime.prepare_inputs({
+                "text": ["[S1] Hello."],
+                "audio": [{
+                    "array": torch.linspace(-0.2, 0.2, 64),
+                    "sampling_rate": 16_000,
+                }],
+            })
+            loss = runtime.forward_loss(batch)
+            loss.backward()
 
-        item = dataset[0]
-        self.assertEqual(item["text"], "[S1] Dataset.")
-        self.assertEqual(dataset.collate_fn([item])["labels"], "labels")
+            self.assertEqual(
+                set(columnar_batch),
+                set(batch),
+            )
+            self.assertEqual(loss.ndim, 0)
+            self.assertTrue(torch.isfinite(loss))
+            self.assertTrue(all(parameter.grad is not None for parameter in runtime.model.parameters()))
+            self.assertTrue(
+                all(parameter.grad is None for parameter in runtime.processor.audio_tokenizer.parameters()))
 
+    def test_public_wrapper_is_native_and_rejects_legacy(self):
+        import torch
 
-class DiaWrapperTests(unittest.TestCase):
+        from voicehub.models.dia.inference import DiaConfig, DiaForTextToSpeech
 
-    def test_backend_selection_preserves_legacy_inference(self):
+        with self.assertRaisesRegex(ValueError, "native"):
+            DiaConfig(backend="transformers")
+        with self.assertRaisesRegex(ValueError, "InferenceStrategy"):
+            DiaConfig(use_torch_compile=True)
         legacy = DiaForTextToSpeech(
             model_path="nari-labs/Dia-1.6B",
             device="cpu",
         )
-        converted = DiaForTextToSpeech(
-            model_path="nari-labs/Dia-1.6B-0626",
-            device="cpu",
-        )
-
-        self.assertEqual(
-            legacy._select_backend(for_training=False),
-            "legacy",
-        )
-        self.assertEqual(
-            converted._select_backend(for_training=False),
-            "transformers",
-        )
-        self.assertEqual(
-            converted._select_backend(for_training=True),
-            "transformers",
-        )
-
-    def test_legacy_checkpoint_training_error_is_actionable(self):
-        model = DiaForTextToSpeech(
-            model_path="nari-labs/Dia-1.6B",
-            device="cpu",
-        )
         with self.assertRaisesRegex(ValueError, "Dia-1.6B-0626"):
-            model._validate_training_runtime()
+            legacy._validate_training_runtime()
 
-    def test_backend_configuration_is_validated(self):
-        with self.assertRaisesRegex(ValueError, "backend"):
-            DiaConfig(backend="fused")
+        class FakeProcessor:
 
-    def test_transformers_generation_uses_processor_decode(self):
-        processor = FakeProcessor()
+            def __call__(self, **kwargs):
+                self.prepared = kwargs
+                return SimpleNamespace(
+                    to=lambda device: {
+                        "input_ids": torch.tensor([[1]]),
+                        "decoder_input_ids": torch.tensor([[[10, 10]]]),
+                    })
+
+            def batch_decode(self, values, *, audio_prompt_len=None):
+                self.decoded = (values, audio_prompt_len)
+                return [torch.tensor([0.25, -0.25])]
 
         class FakeModel:
 
-            def __init__(self):
-                self.config = SimpleNamespace(use_cache=True)
-                self.calls = []
-
             def generate(self, **kwargs):
-                self.calls.append(kwargs)
-                return "generated-codes"
+                self.options = kwargs
+                return torch.tensor([[[10, 10], [8, 8]]])
 
-        runtime = FakeModel()
-        backend = DiaTrainingBackend(
-            model=runtime,
+        processor = FakeProcessor()
+        source_model = FakeModel()
+        runtime = SimpleNamespace(
+            artifacts=SimpleNamespace(revision="test-revision"),
+            model=source_model,
             processor=processor,
             sample_rate=44_100,
         )
-        model = DiaForTextToSpeech(
-            model_path="nari-labs/Dia-1.6B-0626",
-            device="cpu",
-        )
-        model.model = runtime
-        model._dia_backend = backend
-        model._loaded_backend = "transformers"
-
+        wrapper = DiaForTextToSpeech(device="cpu")
+        wrapper.model = source_model
+        wrapper._dia_runtime = runtime
+        wrapper._loaded_backend = "native"
         with patch(
                 "voicehub.models.dia.inference.seeded_inference",
-                return_value=nullcontext(13),
-        ) as seeded:
-            output = model._generate(
-                "[S1] Generate.",
-                max_tokens=16,
+                return_value=nullcontext(17),
+        ):
+            output = wrapper._generate(
+                "[S1] Test.",
+                max_tokens=4,
                 cfg_scale=2.5,
             )
 
-        seeded.assert_called_once_with(
-            None,
-            device="cpu",
-            model_type="dia",
-        )
-        self.assertEqual(output.audio, [0.25, -0.25])
-        self.assertEqual(output.metadata["backend"], "transformers")
-        self.assertEqual(
-            runtime.calls[0]["max_new_tokens"],
-            16,
-        )
-        self.assertEqual(
-            runtime.calls[0]["guidance_scale"],
-            2.5,
-        )
-        self.assertEqual(
-            processor.calls[0]["text"],
-            ["[S1] Generate."],
-        )
-        self.assertEqual(
-            processor.decode_calls[0],
-            ("generated-codes", {
-                "audio_prompt_len": None,
-            }),
-        )
+        self.assertEqual(output.metadata["backend"], "voicehub-native")
+        self.assertEqual(output.metadata["seed"], 17)
+        self.assertEqual(source_model.options["max_new_tokens"], 4)
+        self.assertEqual(source_model.options["guidance_scale"], 2.5)
 
-    def test_transformers_export_cannot_overwrite_voicehub_config(self):
-
-        class NativeBackend:
-
-            def save_pretrained(self, directory):
-                destination = Path(directory)
-                destination.mkdir(parents=True, exist_ok=True)
-                (destination / "config.json").write_text(
-                    json.dumps({
-                        "model_type": "dia-native",
-                    }),
-                    encoding="utf-8",
-                )
-
-        model = DiaForTextToSpeech(
-            model_path="nari-labs/Dia-1.6B-0626",
-            device="cpu",
-        )
-        model._loaded_backend = "transformers"
-        model._dia_backend = NativeBackend()
-        with tempfile.TemporaryDirectory() as directory:
-            model.save_pretrained(directory)
-            root_config = json.loads(Path(directory, "config.json").read_text(encoding="utf-8"))
-            native_config = json.loads(
-                Path(
-                    directory,
-                    NATIVE_EXPORT_DIR,
-                    "config.json",
-                ).read_text(encoding="utf-8"))
-
-        self.assertEqual(root_config["model_type"], "dia")
-        self.assertEqual(native_config["model_type"], "dia-native")
-
-
-@unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional Dia extra")
-class DiaTrainingBackendTests(unittest.TestCase):
-
-    def test_loader_uses_safetensors_and_freezes_dac(self):
+    def test_malformed_checkpoint_is_rejected_before_assignment(self):
         import torch
 
-        loaded = {}
-        processor = FakeProcessor(audio_tokenizer=torch.nn.Linear(1, 1))
+        from voicehub.architectures.dia.checkpoint import HuggingFaceDiaCheckpointAdapter
+        from voicehub.architectures.dia.modeling import DiaForConditionalGeneration
+        from voicehub.checkpointing.errors import CheckpointCompatibilityError
 
-        class FakeDiaModel(torch.nn.Module):
-
-            def __init__(self):
-                super().__init__()
-                self.scale = torch.nn.Parameter(torch.tensor(0.5))
-                self.config = SimpleNamespace(use_cache=True)
-
-            def forward(self, input_ids, labels, **kwargs):
-                del input_ids, kwargs
-                return SimpleNamespace(loss=(self.scale - labels.float().mean()).square(), )
-
-        class FakeModelFactory:
-
-            @classmethod
-            def from_pretrained(cls, name, **kwargs):
-                loaded["model_name"] = name
-                loaded["model_kwargs"] = kwargs
-                loaded["model"] = FakeDiaModel()
-                return loaded["model"]
-
-        class FakeProcessorFactory:
-
-            @classmethod
-            def from_pretrained(cls, name):
-                loaded["processor_name"] = name
-                return processor
-
-        transformers = SimpleNamespace(
-            __version__="4.57.0",
-            DiaForConditionalGeneration=FakeModelFactory,
-            AutoProcessor=FakeProcessorFactory,
-        )
-
-        def optional_dependency(name, **kwargs):
-            del kwargs
-            if name == "torch":
-                return torch
-            if name == "transformers":
-                return transformers
-            raise AssertionError(name)
-
-        with patch.object(
-                dia_training,
-                "import_optional",
-                side_effect=optional_dependency,
-        ):
-            backend = load_dia_transformers_backend(
-                "nari-labs/Dia-1.6B-0626",
+        config = self.dia_config()
+        source = DiaForConditionalGeneration(config)
+        checkpoint = dict(source.state_dict())
+        checkpoint.pop(next(iter(checkpoint)))
+        with torch.device("meta"):
+            target = DiaForConditionalGeneration(config)
+        with self.assertRaises(CheckpointCompatibilityError):
+            HuggingFaceDiaCheckpointAdapter().load_assign_streaming(
+                target,
+                checkpoint,
+                config.to_dict(),
                 device="cpu",
-                compute_dtype="bfloat16",
-                for_training=True,
+                strict=True,
             )
-
-        self.assertEqual(
-            loaded["model_name"],
-            "nari-labs/Dia-1.6B-0626",
-        )
-        self.assertEqual(
-            loaded["processor_name"],
-            "nari-labs/Dia-1.6B-0626",
-        )
-        self.assertTrue(loaded["model_kwargs"]["use_safetensors"])
-        self.assertIs(loaded["model_kwargs"]["torch_dtype"], torch.float32)
-        self.assertFalse(backend.model.config.use_cache)
-        self.assertFalse(processor.audio_tokenizer.training)
-        self.assertTrue(
-            all(not parameter.requires_grad for parameter in processor.audio_tokenizer.parameters()))
-
-        loss = backend.forward_loss(
-            input_ids=torch.tensor([[1, 2]]),
-            labels=torch.tensor([[1, 1]]),
-        )
-        loss.backward()
-        self.assertIsNotNone(backend.model.scale.grad)
-        self.assertTrue(all(parameter.grad is None for parameter in processor.audio_tokenizer.parameters()))
-
-    def test_native_adapter_backpropagates_official_loss(self):
-        import torch
-
-        class NativeDia(torch.nn.Module):
-
-            def __init__(self):
-                super().__init__()
-                self.scale = torch.nn.Parameter(torch.tensor(0.5))
-                self.config = SimpleNamespace(use_cache=False)
-
-            def forward(self, input_ids, labels, **kwargs):
-                del input_ids, kwargs
-                logits = self.scale.expand(1, 1, 2)
-                loss = (self.scale - labels.float().mean()).square()
-                return SimpleNamespace(loss=loss, logits=logits)
-
-        processor = FakeProcessor(audio_tokenizer=torch.nn.Linear(1, 1))
-        runtime = NativeDia()
-        backend = DiaTrainingBackend(
-            model=runtime,
-            processor=processor,
-            sample_rate=44_100,
-        )
-        wrapper = DiaForTextToSpeech(
-            model_path="nari-labs/Dia-1.6B-0626",
-            device="cpu",
-        )
-        wrapper.model = runtime
-        wrapper._dia_backend = backend
-        wrapper._loaded_backend = "transformers"
-        spec = ModelTrainingSpec(
-            model_type="dia",
-            family=TrainingFamily.SEQ2SEQ,
-            module_paths=("model", ),
-            support=TrainingSupport.NATIVE,
-            native_training=True,
-        )
-        adapter = DiaTrainingAdapter(wrapper, spec)
-        inputs = {
-            "input_ids": torch.tensor([[1, 2]]),
-            "attention_mask": torch.tensor([[1, 1]]),
-            "decoder_input_ids": torch.tensor([[[1026] * 9]]),
-            "decoder_attention_mask": torch.tensor([[1]]),
-            "labels": torch.tensor([[1]]),
-        }
-
-        output = adapter(**inputs)
-        output.loss.backward()
-
-        self.assertEqual(output.loss.ndim, 0)
-        self.assertIsNotNone(runtime.scale.grad)
-        self.assertTrue(all(parameter.grad is None for parameter in processor.audio_tokenizer.parameters()))
-
-    def test_backend_exports_transformers_safetensors(self):
-        import torch
-
-        class SaveableModel(torch.nn.Module):
-
-            def __init__(self):
-                super().__init__()
-                self.saved = None
-
-            def save_pretrained(
-                self,
-                directory,
-                *,
-                safe_serialization=False,
-            ):
-                self.saved = (Path(directory), safe_serialization)
-
-        model = SaveableModel()
-        processor = FakeProcessor(audio_tokenizer=torch.nn.Linear(1, 1), )
-        backend = DiaTrainingBackend(
-            model=model,
-            processor=processor,
-            sample_rate=44_100,
-            transformers_major_version=4,
-        )
-
-        with tempfile.TemporaryDirectory() as directory:
-            output = backend.save_pretrained(directory)
-            self.assertEqual(output, Path(directory))
-            self.assertEqual(
-                model.saved,
-                (Path(directory), True),
-            )
-            self.assertEqual(processor.saved_to, Path(directory))
 
 
 if __name__ == "__main__":

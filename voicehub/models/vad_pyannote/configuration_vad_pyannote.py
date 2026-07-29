@@ -1,4 +1,4 @@
-"""Configuration for pyannote.audio voice activity detection."""
+"""Configuration for VoiceHub's native PyanNet VAD provider."""
 
 from collections.abc import Mapping
 from pathlib import Path
@@ -20,6 +20,16 @@ _MANAGED_PIPELINE_OPTIONS = frozenset({
     "subfolder",
 })
 
+_OFFICIAL_PIPELINE_INFERENCE = {
+    "threshold": 0.5,
+    "onset": 0.8104268538848918,
+    "offset": 0.4806866463041527,
+    "min_speech_duration_ms": 55,
+    "min_silence_duration_ms": 98,
+    "speech_pad_ms": 0,
+    "return_frames": False,
+}
+
 
 def _secret_keys(value) -> set[str]:
     found = set()
@@ -36,7 +46,7 @@ def _secret_keys(value) -> set[str]:
 
 
 class PyannoteVADConfig(VoiceHubConfig):
-    """Configure a local or Hugging Face pyannote VAD pipeline."""
+    """Configure a local Safetensors or explicitly converted PyanNet model."""
 
     model_type = "vad_pyannote"
 
@@ -47,6 +57,8 @@ class PyannoteVADConfig(VoiceHubConfig):
         revision: str | None = None,
         subfolder: str | None = None,
         cache_dir: str | Path | None = None,
+        batch_size: int = 32,
+        local_files_only: bool = False,
         pipeline_kwargs: Mapping | None = None,
         inference_config=None,
         **kwargs,
@@ -66,6 +78,10 @@ class PyannoteVADConfig(VoiceHubConfig):
                 raise ValueError(f"`{name}` must be a non-empty string or None.")
         if cache_dir is not None and not isinstance(cache_dir, (str, Path)):
             raise TypeError("`cache_dir` must be a string, Path, or None.")
+        if (isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1):
+            raise ValueError("`batch_size` must be a positive integer.")
+        if not isinstance(local_files_only, bool):
+            raise TypeError("`local_files_only` must be a boolean.")
         if pipeline_kwargs is not None and not isinstance(
                 pipeline_kwargs,
                 Mapping,
@@ -82,12 +98,21 @@ class PyannoteVADConfig(VoiceHubConfig):
             raise ValueError(
                 "`pipeline_kwargs` cannot override VoiceHub-managed option(s): "
                 f"{', '.join(collisions)}.")
+        if pipeline_kwargs:
+            raise ValueError(
+                "`pipeline_kwargs` is not supported by VoiceHub's native "
+                "PyanNet runtime. Use VADInferenceConfig for threshold and "
+                "duration controls.")
+        if inference_config is None:
+            inference_config = dict(_OFFICIAL_PIPELINE_INFERENCE)
         super().__init__(
             sample_rate=sample_rate,
             revision=None if revision is None else revision.strip(),
             subfolder=None if subfolder is None else subfolder.strip(),
             cache_dir=cache_dir,
+            batch_size=batch_size,
+            local_files_only=local_files_only,
             pipeline_kwargs=pipeline_kwargs,
-            inference_config=inference_config or {},
+            inference_config=inference_config,
             **kwargs,
         )

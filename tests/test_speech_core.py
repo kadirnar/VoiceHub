@@ -67,7 +67,7 @@ class _CoreASRModel(PreTrainedASRModel):
             sampling_rate=sampling_rate,
             target_sampling_rate=self.sample_rate,
         )
-        self.calls.append((materialized.waveform.copy(), language, kwargs))
+        self.calls.append((materialized.waveform.clone(), language, kwargs))
         return ASROutput(
             text=f"request {len(self.calls)}",
             language=language,

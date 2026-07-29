@@ -1,9 +1,9 @@
+import math
+from itertools import accumulate
 from typing import Dict, List, Optional
 
-import numpy as np
 import torch
 import torch.nn.functional as F
-from scipy.signal import get_window
 from torch import nn, pow, sin
 from torch.distributions.uniform import Uniform
 from torch.nn import Conv1d, ConvTranspose1d, Parameter
@@ -168,8 +168,8 @@ class SineGen(torch.nn.Module):
         for i in range(self.harmonic_num + 1):
             F_mat[:, i:i + 1, :] = f0 * (i + 1) / self.sampling_rate
 
-        theta_mat = 2 * np.pi * (torch.cumsum(F_mat, dim=-1) % 1)
-        u_dist = Uniform(low=-np.pi, high=np.pi)
+        theta_mat = 2 * math.pi * (torch.cumsum(F_mat, dim=-1) % 1)
+        u_dist = Uniform(low=-math.pi, high=math.pi)
         phase_vec = u_dist.sample(sample_shape=(f0.size(0), self.harmonic_num + 1, 1)).to(F_mat.device)
         phase_vec[:, 0, :] = 0
 
@@ -287,12 +287,12 @@ class HiFTGenerator(nn.Module):
         self.num_upsamples = len(upsample_rates)
         self.m_source = SourceModuleHnNSF(
             sampling_rate=sampling_rate,
-            upsample_scale=np.prod(upsample_rates) * istft_params["hop_len"],
+            upsample_scale=math.prod(upsample_rates) * istft_params["hop_len"],
             harmonic_num=nb_harmonics,
             sine_amp=nsf_alpha,
             add_noise_std=nsf_sigma,
             voiced_threshod=nsf_voiced_threshold)
-        self.f0_upsamp = torch.nn.Upsample(scale_factor=np.prod(upsample_rates) * istft_params["hop_len"])
+        self.f0_upsamp = torch.nn.Upsample(scale_factor=math.prod(upsample_rates) * istft_params["hop_len"])
 
         self.conv_pre = weight_norm(Conv1d(in_channels, base_channels, 7, 1, padding=3))
 
@@ -313,7 +313,7 @@ class HiFTGenerator(nn.Module):
         self.source_downs = nn.ModuleList()
         self.source_resblocks = nn.ModuleList()
         downsample_rates = [1] + upsample_rates[::-1][:-1]
-        downsample_cum_rates = np.cumprod(downsample_rates)
+        downsample_cum_rates = list(accumulate(downsample_rates, lambda left, right: left * right))
         for i, (u, k, d) in enumerate(zip(downsample_cum_rates[::-1], source_resblock_kernel_sizes,
                                           source_resblock_dilation_sizes)):
             if u == 1:
@@ -336,8 +336,11 @@ class HiFTGenerator(nn.Module):
         self.ups.apply(init_weights)
         self.conv_post.apply(init_weights)
         self.reflection_pad = nn.ReflectionPad1d((1, 0))
-        self.stft_window = torch.from_numpy(
-            get_window("hann", istft_params["n_fft"], fftbins=True).astype(np.float32))
+        self.register_buffer(
+            "stft_window",
+            torch.hann_window(istft_params["n_fft"], periodic=True),
+            persistent=False,
+        )
         self.f0_predictor = f0_predictor
 
     def remove_weight_norm(self):

@@ -5,10 +5,12 @@ from .utils import *
 
 import torch
 import torch.nn as nn
-from einops import rearrange, reduce, repeat
-from einops.layers.torch import Rearrange
-from einops_exts import rearrange_many
 from torch import Tensor, einsum
+
+
+class _ChannelsFirst(nn.Module):
+    def forward(self, value: Tensor) -> Tensor:
+        return value.transpose(1, 2)
 
 
 """
@@ -73,7 +75,7 @@ class StyleTransformer1d(nn.Module):
         )
 
         self.to_out = nn.Sequential(
-            Rearrange("b t c -> b c t"),
+            _ChannelsFirst(),
             nn.Conv1d(
                 in_channels=channels + context_embedding_features,
                 out_channels=channels,
@@ -136,7 +138,7 @@ class StyleTransformer1d(nn.Module):
 
         # Compute joint mapping
         if self.use_context_time or self.use_context_features:
-            mapping = reduce(torch.stack(items), "n b m -> b m", "sum")
+            mapping = torch.stack(items).sum(dim=0)
             mapping = self.to_mapping(mapping)
 
         return mapping
@@ -315,7 +317,7 @@ class Transformer1d(nn.Module):
         )
 
         self.to_out = nn.Sequential(
-            Rearrange("b t c -> b c t"),
+            _ChannelsFirst(),
             nn.Conv1d(
                 in_channels=channels + context_embedding_features,
                 out_channels=channels,
@@ -378,7 +380,7 @@ class Transformer1d(nn.Module):
 
         # Compute joint mapping
         if self.use_context_time or self.use_context_features:
-            mapping = reduce(torch.stack(items), "n b m -> b m", "sum")
+            mapping = torch.stack(items).sum(dim=0)
             mapping = self.to_mapping(mapping)
 
         return mapping
@@ -470,14 +472,14 @@ class RelativePositionBias(nn.Module):
         i, j, device = num_queries, num_keys, self.relative_attention_bias.weight.device
         q_pos = torch.arange(j - i, j, dtype=torch.long, device=device)
         k_pos = torch.arange(j, dtype=torch.long, device=device)
-        rel_pos = rearrange(k_pos, "j -> 1 j") - rearrange(q_pos, "i -> i 1")
+        rel_pos = k_pos.unsqueeze(0) - q_pos.unsqueeze(1)
 
         relative_position_bucket = self._relative_position_bucket(
             rel_pos, num_buckets=self.num_buckets, max_distance=self.max_distance
         )
 
         bias = self.relative_attention_bias(relative_position_bucket)
-        bias = rearrange(bias, "m n h -> 1 h m n")
+        bias = bias.permute(2, 0, 1).unsqueeze(0)
         return bias
 
 
@@ -522,7 +524,18 @@ class AttentionBase(nn.Module):
 
     def forward(self, q: Tensor, k: Tensor, v: Tensor) -> Tensor:
         # Split heads
-        q, k, v = rearrange_many((q, k, v), "b n (h d) -> b h n d", h=self.num_heads)
+        def split_heads(value: Tensor) -> Tensor:
+            batch, steps, features = value.shape
+            if features % self.num_heads:
+                raise ValueError("Attention width must be divisible by heads.")
+            return value.reshape(
+                batch,
+                steps,
+                self.num_heads,
+                features // self.num_heads,
+            ).permute(0, 2, 1, 3)
+
+        q, k, v = tuple(split_heads(value) for value in (q, k, v))
         # Compute similarity matrix
         sim = einsum("... n d, ... m d -> ... n m", q, k)
         sim = (sim + self.rel_pos(*sim.shape[-2:])) if self.use_rel_pos else sim
@@ -531,7 +544,7 @@ class AttentionBase(nn.Module):
         attn = sim.softmax(dim=-1)
         # Compute values
         out = einsum("... n m, ... m d -> ... n d", attn, v)
-        out = rearrange(out, "b h n d -> b n (h d)")
+        out = out.permute(0, 2, 1, 3).flatten(2)
         return self.to_out(out)
 
 
@@ -650,7 +663,7 @@ class SinusoidalEmbedding(nn.Module):
         device, half_dim = x.device, self.dim // 2
         emb = torch.tensor(log(10000) / (half_dim - 1), device=device)
         emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
-        emb = rearrange(x, "i -> i 1") * rearrange(emb, "j -> 1 j")
+        emb = x.unsqueeze(1) * emb.unsqueeze(0)
         return torch.cat((emb.sin(), emb.cos()), dim=-1)
 
 
@@ -664,8 +677,8 @@ class LearnedPositionalEmbedding(nn.Module):
         self.weights = nn.Parameter(torch.randn(half_dim))
 
     def forward(self, x: Tensor) -> Tensor:
-        x = rearrange(x, "b -> b 1")
-        freqs = x * rearrange(self.weights, "d -> 1 d") * 2 * pi
+        x = x.unsqueeze(1)
+        freqs = x * self.weights.unsqueeze(0) * 2 * pi
         fouriered = torch.cat((freqs.sin(), freqs.cos()), dim=-1)
         fouriered = torch.cat((x, fouriered), dim=-1)
         return fouriered
@@ -689,5 +702,9 @@ class FixedEmbedding(nn.Module):
         assert length <= self.max_length, assert_message
         position = torch.arange(length, device=device)
         fixed_embedding = self.embedding(position)
-        fixed_embedding = repeat(fixed_embedding, "n d -> b n d", b=batch_size)
+        fixed_embedding = fixed_embedding.unsqueeze(0).expand(
+            batch_size,
+            -1,
+            -1,
+        )
         return fixed_embedding

@@ -1,5 +1,5 @@
-"""Stable configuration imports for xtts."""
+"""Stable configuration import for VoiceHub-native XTTS v2."""
 
-from voicehub.models.xtts.inference import XTTSConfig
+from voicehub.models.xtts_native.configuration_xtts import XTTSConfig
 
 __all__ = ["XTTSConfig"]

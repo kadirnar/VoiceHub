@@ -1,0 +1,64 @@
+{
+  "architecture": {
+    "license": "MIT",
+    "name": "Irodori-TTS",
+    "revision": "eaf74d6a19138f743acb5b71a445fd25a57db987",
+    "upstream": "https://github.com/Aratako/Irodori-TTS"
+  },
+  "codec": {
+    "checkpoint": {
+      "filename": "weights.pth",
+      "lfs_sha256": "db120339c5ee7eca1912cdf29bc612b947a0808e69c3cebfb4936b45a762c1d5",
+      "model_id": "Aratako/Semantic-DACVAE-Japanese-32dim",
+      "revision": "47376ee24834d7a05a48ebabfe3cde29b3c5e214"
+    },
+    "source": {
+      "license": "Apache-2.0",
+      "revision": "414c20785fc3a28373073ea8ef7a1316eeeaca6e",
+      "upstream": "https://github.com/facebookresearch/dacvae"
+    },
+    "weights_license": "MIT"
+  },
+  "implementation_policy": {
+    "external_runtime_dependencies": [],
+    "legacy_pickle": "codec only; exact SHA-256 gate plus torch.load(weights_only=True)",
+    "model_checkpoint_format": "Safetensors only",
+    "silentcipher": "not implemented and no parity claim",
+    "training": "all Irodori model parameters; fixed semantic codec"
+  },
+  "model_checkpoints": [
+    {
+      "filename": "model.safetensors",
+      "header_fingerprint": "d5b6315112155d53e249112f4e38e9fe58a5ff6bd3881c83607b918073c493cc",
+      "lfs_sha256": "c4b8e7e982697664f829b7fb6bea307a25bd7ee013ad0d6114efc3e326acbd54",
+      "model_id": "Aratako/Irodori-TTS-500M-v3",
+      "revision": "236c1e56591279fc24e3c1bf6609fc06e48dde28"
+    },
+    {
+      "filename": "model.safetensors",
+      "header_fingerprint": "4473942682ef97c9621456c681f8df6e3d98b1d24804f4c26dd68fbe446ef207",
+      "lfs_sha256": "93c1f8356857ab4297073f452d01c29015e0db5c83c62109800f8566900f4497",
+      "model_id": "Aratako/Irodori-TTS-600M-v3-VoiceDesign",
+      "revision": "e863a3a93e652e09afeff3e84823a206a0a60314"
+    },
+    {
+      "filename": "model.safetensors",
+      "header_fingerprint": "c5331ecf8b35c370a4b7556cf785d260fe84b1218d7cdc9adb795f99fa7528a8",
+      "lfs_sha256": "e5add885303babe328eae2c426475e41bc2f2aca2bcb010a2ceb6b6ddd1b8d9c",
+      "model_id": "Aratako/Irodori-TTS-500M-v2",
+      "revision": "8fd631cafb911dde466bc30dd558a0dc55e8ccae"
+    },
+    {
+      "filename": "model.safetensors",
+      "header_fingerprint": "6fe453fdd64ea1f1b3b7191124a7b3855503a7849e69a53dea63e0744f4fd376",
+      "lfs_sha256": "8b703c28e88f160dee0258b1136f8fe1ea68c063b45fc28375b5a134d6ce1131",
+      "model_id": "Aratako/Irodori-TTS-500M-v2-VoiceDesign",
+      "revision": "456e55708e7183f5c7faa1448209d54aa8991451"
+    }
+  ],
+  "tokenizer": {
+    "license": "Apache-2.0",
+    "model_id": "llm-jp/llm-jp-3-150m",
+    "revision": "b112feef602fff752e4dac4c30af6a2c2fa41c7a"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "architecture": "nemo-quartznet-ctc",
+  "implementation": "voicehub-native",
+  "main_library": {
+    "repository": "https://github.com/NVIDIA/NeMo",
+    "revision": "ddcb2d6935045a556329f1afa653b8d918c36479",
+    "version": "2.5.0",
+    "license": "Apache-2.0",
+    "reviewed_files": [
+      "nemo/collections/asr/models/ctc_models.py",
+      "nemo/collections/asr/modules/audio_preprocessing.py",
+      "nemo/collections/asr/modules/conv_asr.py",
+      "nemo/collections/asr/parts/preprocessing/features.py",
+      "nemo/collections/asr/parts/submodules/jasper.py",
+      "nemo/collections/asr/parts/submodules/spectr_augment.py",
+      "nemo/collections/asr/losses/ctc.py",
+      "examples/asr/conf/quartznet/quartznet_15x5.yaml"
+    ]
+  },
+  "checkpoint": {
+    "repository": "nvidia/nemo/stt_en_quartznet15x5",
+    "version": "1.0.0rc1",
+    "filename": "stt_en_quartznet15x5.nemo",
+    "license": "NVIDIA NGC Terms of Use",
+    "sha256": "1b9b7b87a9277e6fef164d8f99d1226f0511af154423bbf919b920421ac9602f",
+    "config_sha256": "1b986f096f5fc08435cce51c001968c9776bfa3ba538bb230f2bd080453d0fc7",
+    "weights_sha256": "489bcd4036716a1573391744cd0790ce613822407a106ba3209269e7b1617f2c",
+    "tensor_inventory_fingerprint": "47c098414f58e8380868692db82cf0e4cde3b2777be1cdfd557cb7c5865ef37e",
+    "tensors": 639,
+    "state_values": 19018554,
+    "dtype": "FP32"
+  },
+  "verified_scope": {
+    "inference": [
+      "16 kHz centered Hann STFT and published 64-bin Slaney mel buffers",
+      "per-feature normalization with NeMo logical frame masking",
+      "18-block QuartzNet15x5 depthwise-separable Jasper encoder",
+      "character CTC decoder with trailing blank",
+      "greedy transcript and word-offset decoding",
+      "portable native Safetensors export and reload"
+    ],
+    "training": [
+      "raw waveform and precomputed-feature inputs",
+      "strict character label preparation",
+      "published rectangular spectrogram cutout",
+      "NeMo mean-batch CTC reduction",
+      "full encoder and decoder backward pass"
+    ],
+    "limitations": [
+      "The NGC artifact is governed by NVIDIA NGC Terms of Use; VoiceHub does not redistribute it.",
+      "Only the hash-pinned QuartzNet15x5 character-CTC graph has been verified.",
+      "Parakeet TDT, RNN-T, Canary, Citrinet, Conformer, and FastConformer checkpoints are rejected explicitly.",
+      "No corpus-level WER benchmark was run, so no accuracy improvement over NVIDIA's published checkpoint is claimed."
+    ]
+  }
+}

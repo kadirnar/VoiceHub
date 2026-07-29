@@ -1,5 +1,8 @@
+"""Windowed attention used by the vendored VoiceHub SNAC graph."""
+
+from __future__ import annotations
+
 import torch
-from einops import rearrange
 from torch import nn
 
 
@@ -22,12 +25,25 @@ class LocalMHA(nn.Module):
         x = self.norm(x.transpose(1, 2))
         windows = T // self.window_size
         q, k, v = self.to_qkv(x).chunk(3, dim=-1)
-        q, k, v = map(lambda t: rearrange(t, "b (w n) (h d) -> b h w n d", w=windows, h=self.heads), (q, k, v))
+        q, k, v = (
+            value.reshape(
+                B,
+                windows,
+                self.window_size,
+                self.heads,
+                -1,
+            ).permute(0, 3, 1, 2, 4)
+            for value in (q, k, v)
+        )
         if self.rel_pos is not None:
             pos_emb, scale = self.rel_pos(k)
             q, k = apply_rotary_pos_emb(q, k, pos_emb, scale)
         out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
-        out = rearrange(out, "b h w n d -> b (w n) (h d)")
+        out = (
+            out.permute(0, 2, 3, 1, 4)
+            .contiguous()
+            .reshape(B, T, C)
+        )
         out = self.to_out(out)
         return out.transpose(1, 2) + residual
 
@@ -52,14 +68,14 @@ class SinusoidalEmbeddings(nn.Module):
         if not self.use_xpos:
             return freqs, torch.ones(1, device=device)
         power = (t - (seq_len // 2)) / self.scale_base
-        scale = self.scale ** rearrange(power, "n -> n 1")
+        scale = self.scale ** power.unsqueeze(-1)
         scale = torch.cat((scale, scale), dim=-1)
 
         return freqs, scale
 
 
 def rotate_half(x):
-    x = rearrange(x, "b ... (r d) -> b ... r d", r=2)
+    x = x.reshape(*x.shape[:-1], 2, x.shape[-1] // 2)
     x1, x2 = x.unbind(dim=-2)
     return torch.cat((-x2, x1), dim=-1)
 

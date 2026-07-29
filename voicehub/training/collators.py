@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass, replace
-from importlib import import_module
 from typing import Any
 
 from voicehub.dependencies import import_optional
@@ -455,9 +454,8 @@ class DataCollatorForAudioTraining:
             return values
         if all(hasattr(value, "dtype") and hasattr(value, "shape") for value in values):
             try:
-                numpy = import_module("numpy")
-                return [torch.as_tensor(numpy.asarray(value)) for value in values]
-            except (ModuleNotFoundError, TypeError, ValueError):
+                return [torch.as_tensor(value) for value in values]
+            except (TypeError, ValueError, RuntimeError):
                 return None
         if all(isinstance(value, (list, tuple)) for value in values):
             try:

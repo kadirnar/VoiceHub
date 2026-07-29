@@ -4,8 +4,8 @@ description: Register a future ASR or VAD provider without hard-coding model fam
 
 # Add an ASR or VAD provider
 
-Add a provider when a checkpoint family needs a distinct runtime, dependency
-set, input policy, output normalization, or training recipe. If a checkpoint
+Add a provider when a checkpoint family needs a distinct architecture, input
+policy, output normalization, or training recipe. If a checkpoint
 already conforms to `asr_transformers`, `vad_transformers`, or another native
 provider, use that existing registry key instead.
 
@@ -20,10 +20,9 @@ The integration must remain lazy, task-safe, and honest about fine-tuning.
 - File, array, tensor, mapping, and `AudioInput` inputs behave consistently.
 - Inference returns exactly one valid `ASROutput` or `VADOutput`.
 - Unsupported options fail before expensive checkpoint work where practical.
-- Runtime dependencies are added to the default package requirements, and
-  missing-dependency errors point to the complete runtime installation.
-- The training profile states the real native, upstream-custom, or
-  inference-only boundary.
+- The executable graph, tokenizer/checkpoint adapters, and signal processing
+  live inside VoiceHub; PyTorch remains the only default runtime dependency.
+- The training profile states the real native or inference-only boundary.
 - Tests cover lazy imports, wrong-task factory rejection, normalization, local
   artifacts, one concurrent/sequential lifecycle case, and training
   validation.
@@ -31,11 +30,18 @@ The integration must remain lazy, task-safe, and honest about fine-tuning.
 ## Package shape
 
 ```text
+voicehub/architectures/acme_asr/
+  configuration.py             # executable graph configuration
+  modeling.py                  # VoiceHub-owned PyTorch graph
+  processing.py                # waveform/features/tokenization
+  checkpoint.py                # strict import and portable export
+  training.py                  # native objective and adapter, when trainable
+  registration.py              # lazy ArchitectureSpec
 voicehub/models/acme_asr/
-  __init__.py
-  configuration_acme_asr.py
-  modeling_acme_asr.py
-  training.py                 # only for a specialized VoiceHub recipe
+  __init__.py                   # lazy public exports
+  configuration_acme_asr.py     # stable compatibility facade
+  modeling_acme_asr.py          # task wrapper
+  training.py                   # only for a specialized public adapter
 ```
 
 Use stable class names:
@@ -43,8 +49,10 @@ Use stable class names:
 - `AcmeASRConfig` and `AcmeASRForSpeechRecognition`; or
 - `AcmeVADConfig` and `AcmeVADForVoiceActivityDetection`.
 
-Provider modules may wrap an optional upstream package. Import it only inside
-the loading hook through `import_optional()`.
+Built-in providers never delegate execution to an upstream package. Port the
+reviewed graph and processing code into `voicehub.architectures`, record the
+immutable source revision and license, and keep the public model facade lazy.
+PyTorch is the only external runtime allowed inside this native boundary.
 
 ## Define the configuration
 
@@ -85,7 +93,6 @@ from typing import Any
 
 from voicehub.audio import load_audio
 from voicehub.audio_modeling_utils import PreTrainedASRModel
-from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import ASROutput, ASRSegment
 
 
@@ -94,11 +101,12 @@ class AcmeASRForSpeechRecognition(PreTrainedASRModel):
     default_model_name_or_path = "acme/asr-base"
 
     def _load_pretrained_model(self) -> None:
-        acme = import_optional(
-            "acme_speech",
-            model_type=self.config.model_type,
+        # Keep graph imports inside the loading hook so registry and
+        # configuration discovery remain PyTorch-lazy.
+        from voicehub.architectures.acme_asr.runtime import (
+            load_acme_asr_runtime,
         )
-        self.model = acme.load(
+        self.model = load_acme_asr_runtime(
             self.config.name_or_path or self.default_model_name_or_path,
             device=self.device,
         )
@@ -163,7 +171,14 @@ register_model_spec(
         class_name="AcmeASRForSpeechRecognition",
         default_model_path="acme/asr-base",
         install_extra=None,
-        capabilities=("timestamps", "multilingual"),
+        capabilities=(
+            "timestamps",
+            "multilingual",
+            "fine-tuning",
+            "safetensors",
+            "voicehub-native",
+            "native-runtime",
+        ),
         config_module="voicehub.models.acme_asr.configuration_acme_asr",
         config_class="AcmeASRConfig",
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
@@ -177,11 +192,13 @@ Task-specific factories reject a registry entry owned by another task before
 importing its model module. Keep `task` and the class suffix correct so an ASR
 provider cannot accidentally load through the VAD or TTS factory.
 
-Runtime registration is useful for external integrations and tests. Built-in
-providers should add the same metadata to VoiceHub's static registry and add
-their runtime distributions to `project.dependencies` so the entry is
-installable in a fresh process. Do not add a provider-specific ASR or VAD
-extra: `voicehub` is the single public inference dependency surface.
+Runtime registration is useful for separately distributed extensions and
+tests. Built-in providers add the same metadata to VoiceHub's static registry,
+register a lazy `ArchitectureSpec`, and include their active facade, graph,
+processor, objective, and checkpoint/export modules in the native dependency
+policy. They do not add an upstream runtime distribution to
+`project.dependencies` and do not create a provider-specific ASR or VAD extra:
+`voicehub` is the single public inference dependency surface.
 
 Built-in inference providers set `ModelSpec.install_extra=None`. The field
 remains available to separately distributed extensions that own a distinct
@@ -225,7 +242,8 @@ Choose the family that preserves the actual objective:
 | `tdt` | Backend-native token-and-duration loss |
 | `audio-classification` | Clip-level native loss or explicitly declared CE/BCE fallback |
 | `frame-classification` | Time-aligned native/fallback classification with an explicit padding mask |
-| `upstream-native` | Complete provider objective returned by the source runtime or specialized adapter |
+| `native-asr-dispatch` | Closed selection among registered VoiceHub-native ASR graphs; each graph retains its own native objective |
+| `upstream-native` | Complete source objective ported into a VoiceHub-owned runtime or specialized adapter |
 
 Use `TrainingSupport.CUSTOM` when the provider needs its own data module,
 multi-stage runner, optimizer topology, augmentation, distributed semantics,

@@ -1,0 +1,16 @@
+OuteTTS protocol and reference implementation
+Repository: https://github.com/edwko/OuteTTS
+Revision: f5eac6e70d792844c6a6959d900a47af2c061a5b
+License: Apache-2.0
+
+OuteAI/Llama-OuteTTS-1.0-1B weights
+Revision: f445d0d301c7fc9e47fd545eb9f9d2912afe7a77
+License: CC-BY-NC-SA-4.0
+
+OuteAI/OuteTTS-1.0-0.6B weights
+Revision: e7bcd87b0ca47fd8c46317c8f745a5e4e19c7b5c
+License: Apache-2.0
+
+IBM Research DAC.speech.v1.0 weights
+Revision: 1ea7f64cd0678415e2d8c32d67b190722cb9b149
+License: CDLA-Permissive-2.0

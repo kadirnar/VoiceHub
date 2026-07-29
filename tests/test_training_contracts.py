@@ -47,7 +47,7 @@ class TrainingContractValidationTests(unittest.TestCase):
 
     def test_support_introspection_and_filtering(self):
         inference_only = list_training_specs(support=TrainingSupport.INFERENCE_ONLY)
-        self.assertTrue(inference_only)
+        self.assertEqual(inference_only, ())
         self.assertTrue(all(not spec.is_turnkey for spec in inference_only))
         self.assertTrue(all(not spec.requires_custom_adapter for spec in inference_only))
 

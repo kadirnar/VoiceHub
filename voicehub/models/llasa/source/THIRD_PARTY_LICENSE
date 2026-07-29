@@ -1,10 +1,27 @@
-XCodec2 source snapshot
+LLaSA and XCodec2 notices
 
-Copyright belongs to the original XCodec2 contributors.
-Source: https://huggingface.co/HKUSTAudio/xcodec2
-Revision: e412427ed30f0cf9d5e3c95562113deb10a32d03
-License: Creative Commons Attribution-NonCommercial 4.0 International
+The LLaSA checkpoint/tokenizer, the authors' fine-tuning recipe, the
+self-contained XCodec2 checkpoint, and the legacy XCodec2 source snapshot
+are distributed under Creative Commons Attribution-NonCommercial 4.0
+International (CC BY-NC 4.0):
+
+- https://huggingface.co/HKUSTAudio/Llasa-1B-Multilingual
+  revision 7f094cb62b0a9779b334c60d039a61c5a6e04456
+- https://github.com/zhenye234/LLaSA_training
+  revision 479acd5277220f78a72093f63755c0892838d0c5
+- https://huggingface.co/HKUSTAudio/xcodec2-hf
+  revision 64bd034d12d441299cdd535b15c33efd6ccdf252
+- https://huggingface.co/HKUSTAudio/xcodec2
+  revision e412427ed30f0cf9d5e3c95562113deb10a32d03
+
 License URI: https://creativecommons.org/licenses/by-nc/4.0/legalcode
 
-This component is distributed under CC BY-NC 4.0, not VoiceHub's
-Apache-2.0 license. Review its non-commercial restriction before use.
+The native XCodec2 graph and frontend are adapted in part from Hugging Face
+Transformers source at revision
+7f5d5d1aaca3cc3d236c80ec8cb34d06f08a5fb8. That source is Copyright 2026
+The HuggingFace Inc. team and licensed under Apache License 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+
+These notices do not relicense the CC BY-NC 4.0 components under VoiceHub's
+Apache-2.0 license. Review the non-commercial restriction before using,
+fine-tuning, or redistributing LLaSA/XCodec2 artifacts.

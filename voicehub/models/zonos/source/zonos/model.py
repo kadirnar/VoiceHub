@@ -1,12 +1,12 @@
 import json
+import sys
 from typing import Callable
 
-import safetensors
 import torch
 import torch.nn as nn
-from huggingface_hub import hf_hub_download
-from tqdm import tqdm
 
+from voicehub.checkpointing import SafeTensorReader
+from voicehub.hub import resolve_pretrained_file
 from voicehub.models.zonos.source.zonos.autoencoder import DACAutoencoder
 from voicehub.models.zonos.source.zonos.backbone import BACKBONES
 from voicehub.models.zonos.source.zonos.codebook_pattern import apply_delay_pattern, revert_delay_pattern
@@ -17,6 +17,30 @@ from voicehub.models.zonos.source.zonos.speaker_cloning import SpeakerEmbeddingL
 from voicehub.models.zonos.source.zonos.utils import DEFAULT_DEVICE, find_multiple, pad_weight_
 
 DEFAULT_BACKBONE_CLS = next(iter(BACKBONES.values()))
+
+
+class _GenerationProgress:
+    """Tiny dependency-free progress reporter for interactive generation."""
+
+    def __init__(self, total: int, *, enabled: bool) -> None:
+        self.total = max(1, int(total))
+        self.current = 0
+        self.enabled = bool(enabled)
+
+    def update(self) -> None:
+        self.current += 1
+        if not self.enabled:
+            return
+        print(
+            f"\rGenerating {min(self.current, self.total)}/{self.total}",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    def close(self) -> None:
+        if self.enabled:
+            print(file=sys.stderr, flush=True)
 
 
 class Zonos(nn.Module):
@@ -58,15 +82,24 @@ class Zonos(nn.Module):
     def from_pretrained(
         cls, repo_id: str, revision: str | None = None, device: str = DEFAULT_DEVICE, **kwargs
     ) -> "Zonos":
-        config_path = hf_hub_download(repo_id=repo_id, filename="config.json", revision=revision)
-        model_path = hf_hub_download(repo_id=repo_id, filename="model.safetensors", revision=revision)
+        config_path = resolve_pretrained_file(
+            repo_id,
+            "config.json",
+            revision=revision,
+        )
+        model_path = resolve_pretrained_file(
+            repo_id,
+            "model.safetensors",
+            revision=revision,
+        )
         return cls.from_local(config_path, model_path, device, **kwargs)
 
     @classmethod
     def from_local(
         cls, config_path: str, model_path: str, device: str = DEFAULT_DEVICE, backbone: str | None = None
     ) -> "Zonos":
-        config = ZonosConfig.from_dict(json.load(open(config_path)))
+        with open(config_path, encoding="utf-8") as stream:
+            config = ZonosConfig.from_dict(json.load(stream))
         if backbone:
             backbone_cls = BACKBONES[backbone]
         else:
@@ -77,13 +110,40 @@ class Zonos(nn.Module):
                 backbone_cls = BACKBONES["torch"]
 
         model = cls(config, backbone_cls).to(device, torch.bfloat16)
-        model.autoencoder.dac.to(device)
+        model.autoencoder.to(device)
 
-        sd = model.state_dict()
-        with safetensors.safe_open(model_path, framework="pt") as f:
-            for k in f.keys():
-                sd[k] = f.get_tensor(k)
-        model.load_state_dict(sd)
+        expected_state = model.state_dict()
+        with SafeTensorReader(model_path) as reader:
+            checkpoint_names = set(reader.keys())
+            expected_names = set(expected_state)
+            missing = sorted(expected_names - checkpoint_names)
+            unexpected = sorted(checkpoint_names - expected_names)
+            mismatched = sorted(
+                name
+                for name in expected_names & checkpoint_names
+                if tuple(expected_state[name].shape) != reader.tensor_shape(name)
+            )
+            if missing or unexpected or mismatched:
+                details = []
+                if missing:
+                    details.append(f"missing={missing[:8]!r}")
+                if unexpected:
+                    details.append(f"unexpected={unexpected[:8]!r}")
+                if mismatched:
+                    details.append(f"shape_mismatch={mismatched[:8]!r}")
+                raise RuntimeError(
+                    "Zonos checkpoint does not match the native graph: "
+                    + ", ".join(details)
+                )
+            state = {
+                name: reader.get_tensor(
+                    name,
+                    device=device,
+                    dtype=expected_state[name].dtype,
+                )
+                for name in reader.keys()
+            }
+        model.load_state_dict(state, strict=True, assign=True)
 
         return model
 
@@ -391,7 +451,7 @@ class Zonos(nn.Module):
         stopping = torch.zeros(batch_size, dtype=torch.bool, device=device)
         max_steps = delayed_codes.shape[2] - offset
         remaining_steps = torch.full((batch_size,), max_steps, device=device)
-        progress = tqdm(total=max_steps, desc="Generating", disable=not progress_bar)
+        progress = _GenerationProgress(max_steps, enabled=progress_bar)
         cfg_scale = torch.tensor(cfg_scale)
 
         step = 0
@@ -433,5 +493,6 @@ class Zonos(nn.Module):
         out_codes = out_codes[..., : offset - 9]
 
         self._cg_graph = None  # reset cuda graph to avoid cache changes
+        progress.close()
 
         return out_codes

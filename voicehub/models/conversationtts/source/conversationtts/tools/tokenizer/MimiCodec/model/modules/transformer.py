@@ -13,7 +13,6 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 import typing as tp
 
-from einops import rearrange
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -391,8 +390,18 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             )
         else:
             projected = nn.functional.linear(query, self.in_proj_weight)
-        q, k, v = rearrange(
-            projected, "b t (p h d) -> p b h t d", p=3, h=self.num_heads
+        batch_size, time, _ = projected.shape
+        head_dimension = self.embed_dim // self.num_heads
+        q, k, v = (
+            projected.view(
+                batch_size,
+                time,
+                3,
+                self.num_heads,
+                head_dimension,
+            )
+            .permute(2, 0, 3, 1, 4)
+            .unbind(0)
         )
 
         if self.rope:
@@ -412,7 +421,11 @@ class StreamingMultiheadAttention(StreamingModule[_MHAState]):
             attn_bias = None
         x = F.scaled_dot_product_attention(q, k, v, attn_bias, dropout_p=0.0)
 
-        x = rearrange(x, "b h t d -> b t (h d)")
+        x = x.transpose(1, 2).contiguous().reshape(
+            batch_size,
+            time,
+            self.embed_dim,
+        )
         if self.weights_per_step:
             x = multi_linear(self.weights_per_step, self.out_proj.weight, x, offset_cpu)
         else:

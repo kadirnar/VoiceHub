@@ -1,92 +1,140 @@
-import torch
-import numpy as np
-from ..utils import metric_util
-import tqdm
+"""Native WavMark embedding helpers."""
+
+from __future__ import annotations
+
 import time
+from typing import Any
 
-# The pattern bits can be any random sequence.
-# But don't use all-zeros, all-ones, or any periodic sequence, which will seriously hurt decoding performance.
-fix_pattern = [1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0,
-               0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1,
-               1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1,
-               1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0,
-               0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0]
+import torch
+
+from voicehub.processing.waveform import normalize_waveform
+
+from ..utils import metric_util
+
+# The bits are the immutable synchronization pattern released by WavMark.
+fix_pattern = [
+    1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0,
+    0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0,
+    0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1,
+    0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0,
+    0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0,
+    0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+    0, 0, 1, 0,
+]
 
 
-def add_watermark(bit_arr, data, num_point, shift_range, device, model, min_snr, max_snr, show_progress):
-    t1 = time.time()
+def _progress(index: int, total: int, *, enabled: bool) -> None:
+    if enabled and (index == 0 or index + 1 == total):
+        print(f"WavMark embedding segment {index + 1}/{total}")
 
+
+def add_watermark(
+    bit_arr: Any,
+    data: Any,
+    num_point: int,
+    shift_range: float,
+    device: str | torch.device,
+    model,
+    min_snr: float,
+    max_snr: float,
+    show_progress: bool,
+):
+    """Embed one payload into every complete synchronization chunk."""
+    if not isinstance(show_progress, bool):
+        raise TypeError("`show_progress` must be a boolean.")
+    if not isinstance(num_point, int) or isinstance(num_point, bool) or num_point <= 0:
+        raise ValueError("`num_point` must be a positive integer.")
+    waveform = normalize_waveform(data)
+    started_at = time.monotonic()
     chunk_size = num_point + int(num_point * shift_range)
-    num_segments = int(len(data) / chunk_size)
-    len_remain = len(data) - num_segments * chunk_size
-
-    output_chunks = []
+    if chunk_size <= num_point:
+        raise ValueError("`shift_range` must reserve a positive shift area.")
+    num_segments = waveform.numel() // chunk_size
+    if num_segments == 0:
+        raise ValueError(
+            f"WavMark requires at least {chunk_size} samples for embedding."
+        )
+    remainder = waveform.numel() - num_segments * chunk_size
+    output_chunks: list[torch.Tensor] = []
     encoded_sections = 0
-    skip_sections = 0
+    skipped_sections = 0
 
-    the_iter = range(num_segments)
-    if show_progress:
-        the_iter = tqdm.tqdm(the_iter, desc="Processing")
-
-    for i in the_iter:
-        start_point = i * chunk_size
-        current_chunk = data[start_point:start_point + chunk_size].copy()
-        # [watermark_segment | shift_area ]
-        current_chunk_cover_area = current_chunk[0:num_point]
-        current_chunk_shift_area = current_chunk[num_point:]
-        current_chunk_cover_area_wmd, state = encode_trunck_with_snr_check(i, current_chunk_cover_area,
-                                                                           bit_arr,
-                                                                           device, model, min_snr, max_snr)
-
+    for index in range(num_segments):
+        _progress(index, num_segments, enabled=show_progress)
+        start = index * chunk_size
+        current = waveform[start:start + chunk_size].clone()
+        cover = current[:num_point]
+        shift = current[num_point:]
+        encoded, state = encode_chunk_with_snr_check(
+            index,
+            cover,
+            bit_arr,
+            device,
+            model,
+            min_snr,
+            max_snr,
+        )
         if state == "skip":
-            skip_sections += 1
+            skipped_sections += 1
         else:
             encoded_sections += 1
+        output_chunks.append(torch.cat((encoded, shift)))
 
-        output = np.concatenate([current_chunk_cover_area_wmd, current_chunk_shift_area])
-        assert output.shape == current_chunk.shape
-        output_chunks.append(output)
-
-    assert len(output_chunks) > 0
-    if len_remain > 0:
-        output_chunks.append(data[len(data) - len_remain:])
-
-    reconstructed_array = np.concatenate(output_chunks)
-
-    time_cost = time.time() - t1
-
-    info = {
-        "time_cost": time_cost,
+    if remainder:
+        output_chunks.append(waveform[-remainder:])
+    reconstructed = torch.cat(output_chunks).contiguous()
+    if reconstructed.shape != waveform.shape:
+        raise RuntimeError("WavMark embedding changed the waveform length.")
+    return reconstructed, {
+        "time_cost": time.monotonic() - started_at,
         "encoded_sections": encoded_sections,
-        "skip_sections": skip_sections,
+        "skip_sections": skipped_sections,
     }
-    return reconstructed_array, info
 
 
-def encode_trunck_with_snr_check(idx_trunck, signal, wm, device, model, min_snr, max_snr):
-    signal_for_encode = signal
-    encode_times = 0
-    while True:
-        encode_times += 1
-        signal_wmd = encode_trunck(signal_for_encode, wm, device, model)
-        snr = metric_util.signal_noise_ratio(signal, signal_wmd)
-        if encode_times == 1 and snr < min_snr:
-            print("skip section:%d, snr too low:%.1f" % (idx_trunck, min_snr))
-            return signal, "skip"
+def encode_chunk_with_snr_check(
+    chunk_index,
+    signal,
+    watermark,
+    device,
+    model,
+    min_snr,
+    max_snr,
+):
+    source = normalize_waveform(signal)
+    candidate = source
+    for attempt in range(1, 12):
+        encoded = encode_chunk(candidate, watermark, device, model)
+        snr = metric_util.signal_noise_ratio(source, encoded)
+        if attempt == 1 and snr < min_snr:
+            return source, "skip"
+        if snr < max_snr or attempt > 10:
+            return encoded, attempt
+        candidate = encoded
+    raise RuntimeError(f"WavMark embedding did not terminate for chunk {chunk_index}.")
 
-        if snr < max_snr:
-            return signal_wmd, encode_times
-        # snr is too hugh
-        signal_for_encode = signal_wmd
 
-        if encode_times > 10:
-            return signal_wmd, encode_times
+def encode_chunk(chunk, watermark, device, model):
+    with torch.inference_mode():
+        signal = normalize_waveform(chunk).to(device).unsqueeze(0)
+        message = torch.as_tensor(
+            watermark,
+            dtype=signal.dtype,
+            device=device,
+        ).flatten().unsqueeze(0)
+        return model.encode(signal, message).detach().cpu().squeeze(0)
 
 
-def encode_trunck(trunck, wm, device, model):
-    with torch.no_grad():
-        signal = torch.FloatTensor(trunck).to(device)[None]
-        message = torch.FloatTensor(np.array(wm)).to(device)[None]
-        signal_wmd_tensor = model.encode(signal, message)
-        signal_wmd = signal_wmd_tensor.detach().cpu().numpy().squeeze()
-        return signal_wmd
+# Preserve the misspelled upstream helper names as compatibility aliases.
+encode_trunck_with_snr_check = encode_chunk_with_snr_check
+encode_trunck = encode_chunk
+
+
+__all__ = [
+    "add_watermark",
+    "encode_chunk",
+    "encode_chunk_with_snr_check",
+    "encode_trunck",
+    "encode_trunck_with_snr_check",
+    "fix_pattern",
+]

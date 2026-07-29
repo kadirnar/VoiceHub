@@ -1,0 +1,29 @@
+NeuTTS architecture attribution
+================================
+
+The VoiceHub-owned NeuTTS graph follows the Neuphonic NeuTTS implementation
+at revision ac69851f28fc63a487917e7c2e27f0d75c759cba. NeuTTS code and applicable
+model releases use the NeuTTS Open License v1.0. The complete license text is
+distributed at:
+
+    voicehub/models/neutts/source/THIRD_PARTY_LICENSE
+
+That license permits research and limited commercial use and requires a
+separate paid license for commercial use by legal entities whose annual
+revenue reaches its USD 5,000,000 threshold. Consult the complete license
+before use or redistribution.
+
+The native NeuCodec graph follows:
+
+* neuphonic/neucodec at revision
+  ed3e6cd1bdc374ce14a21355e5eee66a777149ce; and
+* the Hugging Face Transformers NeuCodec reference at revision
+  91d0737eea53da41c98b45da1cd8116e518aad21.
+
+Those NeuCodec implementation sources and the official NeuCodec checkpoint
+are licensed under the Apache License, Version 2.0:
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Exact checkpoint revisions, hashes, tensor counts, and source boundaries are
+recorded in SOURCE.json and metadata.py.

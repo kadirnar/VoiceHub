@@ -200,92 +200,76 @@ class CSMTrainingInputTests(unittest.TestCase):
 @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional CSM extra")
 class CSMTrainingBackendTests(unittest.TestCase):
 
-    def test_loader_uses_safetensors_freezes_codec_and_returns_native_loss(self):
+    def test_loader_uses_native_runtime_freezes_codec_and_returns_loss(self):
         import torch
 
         processor = FakeProcessor()
 
-        class FakeCsmModel(torch.nn.Module):
+        codec = torch.nn.Linear(1, 1)
+
+        class FakeNativeModel(torch.nn.Module):
 
             def __init__(self):
                 super().__init__()
                 self.scale = torch.nn.Parameter(torch.tensor(0.5))
-                self.codec_model = torch.nn.Linear(1, 1)
-                self.config = SimpleNamespace(use_cache=True)
                 self.codec_training_during_forward = None
+                object.__setattr__(self, "codec_reference", codec)
 
-            def forward(self, input_ids, labels, **kwargs):
-                del input_ids, kwargs
-                self.codec_training_during_forward = self.codec_model.training
+            def forward(self, tokens, labels, **kwargs):
+                del tokens, kwargs
+                self.codec_training_during_forward = (self.codec_reference.training)
                 target = labels.float().mean()
                 return SimpleNamespace(loss=(self.scale - target).square())
 
-        loaded = {}
-
-        class FakeModelFactory:
-
-            @classmethod
-            def from_pretrained(cls, name, **kwargs):
-                loaded["model_name"] = name
-                loaded["model_kwargs"] = kwargs
-                loaded["model"] = FakeCsmModel()
-                return loaded["model"]
-
-        class FakeProcessorFactory:
-
-            @classmethod
-            def from_pretrained(cls, name):
-                loaded["processor_name"] = name
-                return processor
-
-        transformers = SimpleNamespace(
-            __version__="5.1.0",
-            CsmForConditionalGeneration=FakeModelFactory,
-            CsmProcessor=FakeProcessorFactory,
+        runtime = SimpleNamespace(
+            model=FakeNativeModel(),
+            processor=processor,
+            codec=codec,
+            sample_rate=24_000,
         )
 
-        def optional_dependency(name, **kwargs):
-            del kwargs
-            if name == "torch":
-                return torch
-            if name == "transformers":
-                return transformers
-            raise AssertionError(name)
-
-        with patch.object(
-                csm_training,
-                "import_optional",
-                side_effect=optional_dependency,
-        ):
+        with patch(
+                "voicehub.architectures.csm.runtime.load_csm_runtime",
+                return_value=runtime,
+        ) as loader:
             backend = csm_training.load_csm_training_backend(
                 "sesame/csm-1b",
                 device="cpu",
                 torch_dtype="bfloat16",
+                include_codec=False,
+                token="gated-token",
             )
 
-        self.assertEqual(loaded["model_name"], "sesame/csm-1b")
-        self.assertEqual(loaded["processor_name"], "sesame/csm-1b")
-        self.assertTrue(loaded["model_kwargs"]["use_safetensors"])
-        self.assertIs(loaded["model_kwargs"]["dtype"], torch.float32)
-        self.assertNotIn("torch_dtype", loaded["model_kwargs"])
-        self.assertFalse(backend.model.config.use_cache)
-        self.assertTrue(
-            all(not parameter.requires_grad for parameter in backend.model.codec_model.parameters()))
-        self.assertFalse(backend.model.codec_model.training)
+        loader.assert_called_once_with(
+            "sesame/csm-1b",
+            device="cpu",
+            dtype="bfloat16",
+            codec=None,
+            codec_path=None,
+            include_codec=False,
+            revision=None,
+            cache_dir=None,
+            token="gated-token",
+            local_files_only=False,
+            verify_integrity=False,
+            verify_checkpoint_integrity=False,
+        )
+        self.assertIs(backend.runtime, runtime)
+        self.assertTrue(all(not parameter.requires_grad for parameter in codec.parameters()))
+        self.assertFalse(codec.training)
 
-        backend.model.train()
-        self.assertTrue(backend.model.codec_model.training)
+        codec.train()
         loss = backend.forward_loss(
-            input_ids=torch.tensor([[1, 2]]),
+            tokens=torch.tensor([[1, 2]]),
             labels=torch.tensor([[2, 2]]),
         )
 
         self.assertEqual(loss.ndim, 0)
         self.assertFalse(backend.model.codec_training_during_forward)
-        self.assertFalse(backend.model.codec_model.training)
+        self.assertFalse(codec.training)
         loss.backward()
         self.assertIsNotNone(backend.model.scale.grad)
-        self.assertTrue(all(parameter.grad is None for parameter in backend.model.codec_model.parameters()))
+        self.assertTrue(all(parameter.grad is None for parameter in codec.parameters()))
 
     def test_scalar_loss_requires_exactly_one_native_value(self):
         import torch
@@ -519,59 +503,40 @@ class CSMWrapperBackendSelectionTests(unittest.TestCase):
         load.assert_called_once_with()
         self.assertIs(model.model, backend.model)
 
-    def test_normal_load_keeps_vendored_inference_generator(self):
-        half = object()
-        bfloat = object()
-        full = object()
-        fake_torch = SimpleNamespace(
-            float16=half,
-            bfloat16=bfloat,
-            float32=full,
+    def test_normal_load_uses_voicehub_native_runtime(self):
+        source_model = Mock()
+        runtime = SimpleNamespace(
+            model=source_model,
+            sample_rate=24_000,
+            codec=Mock(),
         )
-
-        class SourceModel:
-
-            def __init__(self):
-                self.to_call = None
-
-            def to(self, **kwargs):
-                self.to_call = kwargs
-
-        source_model = SourceModel()
-
-        class SourceModelFactory:
-
-            @classmethod
-            def from_pretrained(cls, name):
-                self.assertEqual(name, "sesame/csm-1b")
-                return source_model
-
-        generator = SimpleNamespace(sample_rate=24_000)
-        runtime = SimpleNamespace(Generator=Mock(return_value=generator))
-        modules = {
-            "torch": fake_torch,
-            "torchaudio": object(),
-            "voicehub.models.csm.source.csm.generator": runtime,
-            "voicehub.models.csm.source.csm.models": SimpleNamespace(Model=SourceModelFactory),
-        }
 
         model = CSMForTextToSpeech(device="cpu")
         with patch(
-                "voicehub.models.csm.inference.import_optional",
-                side_effect=lambda name, **kwargs: modules[name],
-        ):
+                "voicehub.models.csm.inference.load_csm_runtime",
+                return_value=runtime,
+        ) as loader:
             model._load_pretrained_model()
 
-        runtime.Generator.assert_called_once_with(source_model)
-        self.assertIs(model.model, generator)
-        self.assertIsNone(model.training_backend)
-        self.assertEqual(
-            source_model.to_call,
-            {
-                "device": "cpu",
-                "dtype": full,
-            },
+        loader.assert_called_once_with(
+            "sesame/csm-1b",
+            device="cpu",
+            dtype="bfloat16",
+            codec=None,
+            codec_path=None,
+            include_codec=True,
+            revision=None,
+            cache_dir=None,
+            token=None,
+            local_files_only=False,
+            verify_integrity=False,
+            verify_checkpoint_integrity=False,
+            audio_postprocessor=None,
         )
+        self.assertIs(model.model, source_model)
+        self.assertIs(model._runtime, runtime)
+        self.assertIsNone(model.training_backend)
+        self.assertEqual(model.sample_rate, 24_000)
 
 
 if __name__ == "__main__":

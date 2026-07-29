@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import pack, rearrange, repeat
 
 from voicehub.models.chatterbox.models.s3gen.matcha.decoder import (
     Block1D,
@@ -256,20 +255,20 @@ class ConditionalDecoder(nn.Module):
         t = self.time_embeddings(t).to(t.dtype)
         t = self.time_mlp(t)
 
-        x = pack([x, mu], "b * t")[0]
+        x = torch.cat([x, mu], dim=1)
 
         if spks is not None:
-            spks = repeat(spks, "b c -> b c t", t=x.shape[-1])
-            x = pack([x, spks], "b * t")[0]
+            spks = spks.unsqueeze(-1).expand(-1, -1, x.shape[-1])
+            x = torch.cat([x, spks], dim=1)
         if cond is not None:
-            x = pack([x, cond], "b * t")[0]
+            x = torch.cat([x, cond], dim=1)
 
         hiddens = []
         masks = [mask]
         for resnet, transformer_blocks, downsample in self.down_blocks:
             mask_down = masks[-1]
             x = resnet(x, mask_down, t)
-            x = rearrange(x, "b c t -> b t c").contiguous()
+            x = x.transpose(1, 2).contiguous()
             # attn_mask = torch.matmul(mask_down.transpose(1, 2).contiguous(), mask_down)
             attn_mask = add_optional_chunk_mask(
                 x, mask_down.bool(), False, False, 0, self.static_chunk_size, -1)
@@ -280,7 +279,7 @@ class ConditionalDecoder(nn.Module):
                     attention_mask=attn_mask,
                     timestep=t,
                 )
-            x = rearrange(x, "b t c -> b c t").contiguous()
+            x = x.transpose(1, 2).contiguous()
             hiddens.append(x)  # Save hidden states for skip connections
             x = downsample(x * mask_down)
             masks.append(mask_down[:, :, ::2])
@@ -289,7 +288,7 @@ class ConditionalDecoder(nn.Module):
 
         for resnet, transformer_blocks in self.mid_blocks:
             x = resnet(x, mask_mid, t)
-            x = rearrange(x, "b c t -> b t c").contiguous()
+            x = x.transpose(1, 2).contiguous()
             # attn_mask = torch.matmul(mask_mid.transpose(1, 2).contiguous(), mask_mid)
             attn_mask = add_optional_chunk_mask(
                 x, mask_mid.bool(), False, False, 0, self.static_chunk_size, -1)
@@ -300,14 +299,14 @@ class ConditionalDecoder(nn.Module):
                     attention_mask=attn_mask,
                     timestep=t,
                 )
-            x = rearrange(x, "b t c -> b c t").contiguous()
+            x = x.transpose(1, 2).contiguous()
 
         for resnet, transformer_blocks, upsample in self.up_blocks:
             mask_up = masks.pop()
             skip = hiddens.pop()
-            x = pack([x[:, :, :skip.shape[-1]], skip], "b * t")[0]
+            x = torch.cat([x[:, :, :skip.shape[-1]], skip], dim=1)
             x = resnet(x, mask_up, t)
-            x = rearrange(x, "b c t -> b t c").contiguous()
+            x = x.transpose(1, 2).contiguous()
             # attn_mask = torch.matmul(mask_up.transpose(1, 2).contiguous(), mask_up)
             attn_mask = add_optional_chunk_mask(
                 x, mask_up.bool(), False, False, 0, self.static_chunk_size, -1)
@@ -318,7 +317,7 @@ class ConditionalDecoder(nn.Module):
                     attention_mask=attn_mask,
                     timestep=t,
                 )
-            x = rearrange(x, "b t c -> b c t").contiguous()
+            x = x.transpose(1, 2).contiguous()
             x = upsample(x * mask_up)
         x = self.final_block(x, mask_up)
         output = self.final_proj(x * mask_up)

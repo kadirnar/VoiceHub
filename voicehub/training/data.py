@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from voicehub.dependencies import import_optional
+from voicehub.processing.waveform import load_native_audio
 
 
 def load_audio_tensor(
@@ -15,42 +16,13 @@ def load_audio_tensor(
     model_type: str,
     install_extra: str,
 ):
-    """Load a mono float waveform and resample it when necessary."""
-    numpy = import_optional(
-        "numpy",
-        model_type=model_type,
-        install_extra=install_extra,
-    )
-    soundfile = import_optional(
-        "soundfile",
-        model_type=model_type,
-        install_extra=install_extra,
-    )
-    torch = import_optional(
-        "torch",
-        model_type=model_type,
-        install_extra=install_extra,
-    )
-    audio, source_rate = soundfile.read(
+    """Load a PCM WAVE file through VoiceHub's native audio boundary."""
+    del model_type, install_extra
+    audio = load_native_audio(
         path,
-        dtype="float32",
-        always_2d=False,
+        target_sampling_rate=sample_rate,
     )
-    if audio.ndim > 1:
-        audio = numpy.mean(audio, axis=-1)
-    waveform = torch.from_numpy(numpy.asarray(audio, dtype=numpy.float32))
-    if int(source_rate) != int(sample_rate):
-        torchaudio = import_optional(
-            "torchaudio",
-            model_type=model_type,
-            install_extra=install_extra,
-        )
-        waveform = torchaudio.functional.resample(
-            waveform,
-            int(source_rate),
-            int(sample_rate),
-        )
-    return waveform.contiguous()
+    return audio.waveform.contiguous()
 
 
 class CausalTokenCollator:

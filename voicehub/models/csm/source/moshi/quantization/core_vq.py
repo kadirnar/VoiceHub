@@ -1,6 +1,7 @@
 # Copyright (c) Kyutai, all rights reserved.
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
+# Modified by VoiceHub: replace external reshape helpers with native PyTorch.
 
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
@@ -11,7 +12,6 @@
 import math
 import typing as tp
 
-from einops import rearrange, repeat
 import torch
 from torch import nn
 from torch import distributed
@@ -88,7 +88,11 @@ def _run_kmeans(samples: torch.Tensor, num_clusters: int, num_iters: int = 50) -
         bins.clamp_(min=1)
 
         new_means = torch.zeros_like(means)
-        new_means.scatter_add_(0, repeat(buckets, "n -> n d", d=dim), samples)
+        new_means.scatter_add_(
+            0,
+            buckets.unsqueeze(1).expand(-1, dim),
+            samples,
+        )
         new_means /= bins[..., None]
         resampled = _sample_vectors(samples, num_clusters)
         means = torch.where(zero_mask[..., None], resampled, new_means)
@@ -261,7 +265,7 @@ class EuclideanCodebook(nn.Module):
 
     def _reshape_input(self, x: torch.Tensor) -> torch.Tensor:
         # Flattens all the dimensions but the last one, e.g. return a vector of shape `[N, D]`.
-        x = rearrange(x, "... d -> (...) d")
+        x = x.reshape(-1, x.shape[-1])
         return x
 
     def _reshape_codes(self, codes: torch.Tensor, shape: torch.Size) -> torch.Tensor:
@@ -330,7 +334,11 @@ class EuclideanCodebook(nn.Module):
                 metrics['rvq_entropy'] = _compute_entropy(self.cluster_usage) / math.log(self.codebook_size)
 
             embedding_sum = torch.zeros_like(self.embedding_sum)
-            embedding_sum.scatter_add_(0, repeat(flat_codes, "n -> n d", d=self.dim), x)
+            embedding_sum.scatter_add_(
+                0,
+                flat_codes.unsqueeze(1).expand(-1, self.dim),
+                x,
+            )
             _ema_inplace(self.embedding_sum, embedding_sum, self.decay)
             self.register_buffer('_embedding', None)
 
@@ -397,11 +405,11 @@ class VectorQuantization(nn.Module):
         return self._codebook.initialized
 
     def _rearrange_input(self, x):
-        x = rearrange(x, "b d n -> b n d")
+        x = x.permute(0, 2, 1)
         return x
 
     def _rearrange_output(self, quantized):
-        quantized = rearrange(quantized, "b n d -> b d n")
+        quantized = quantized.permute(0, 2, 1)
         return quantized
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:

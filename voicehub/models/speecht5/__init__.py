@@ -1,4 +1,4 @@
-"""Hugging Face SpeechT5 support."""
+"""VoiceHub-native SpeechT5 inference and fine-tuning."""
 
 from voicehub.models.speecht5.configuration_speecht5 import SpeechT5Config
 from voicehub.models.speecht5.modeling_speecht5 import SpeechT5ForTextToSpeech

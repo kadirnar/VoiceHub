@@ -1,30 +1,38 @@
-"""SpeechBrain ASR inference provider."""
+"""VoiceHub-native SpeechBrain CRDNN ASR inference and fine-tuning."""
 
 from __future__ import annotations
 
-from importlib import import_module
+from collections.abc import Mapping
+from numbers import Integral
 from pathlib import Path
 from typing import Any
 
 from voicehub.audio_modeling_utils import PreTrainedASRModel
-from voicehub.dependencies import import_optional
+from voicehub.hub import read_json_file, write_json_file
 from voicehub.modeling_outputs import ASROutput
-from voicehub.models.asr_native._shared import (
-    materialized_audio_file_for_provider,
-    preferred_keyword,
-    reject_unsupported_options,
-    require_supported_kwargs,
-    resolve_cpu_cuda_device,
-)
 from voicehub.models.asr_native.configuration import SpeechBrainASRConfig
+from voicehub.models.native_utils import resolve_cpu_cuda_device
+
+_ENGLISH_ALIASES = frozenset({"en", "eng", "english"})
 
 
 class SpeechBrainASRForSpeechRecognition(PreTrainedASRModel):
-    """SpeechBrain EncoderDecoderASR provider with upstream recipe boundary."""
+    """Run the published CRDNN, attention decoder, and RNNLM natively.
+
+    VoiceHub owns the complete steady-state runtime: waveform features, global
+    normalization, CRDNN encoder, location-aware decoder, shallow-fusion beam
+    search, SentencePiece unigram tokenization, training objectives, and
+    Safetensors export.  Loading an original upstream checkpoint is a one-time,
+    explicit, hash-pinned conversion; inference never imports SpeechBrain,
+    HyperPyYAML, SentencePiece, protobuf, torchaudio, or Transformers.
+    """
 
     config_class = SpeechBrainASRConfig
     default_model_name_or_path = "speechbrain/asr-crdnn-rnnlm-librispeech"
-    training_support = "upstream-custom"
+    architecture_family = "speech-seq2seq"
+    native_checkpoint_format = "voicehub-speechbrain-crdnn-asr-v1"
+    training_support = "native"
+    supports_generic_finetuning = True
 
     def __init__(
         self,
@@ -34,109 +42,170 @@ class SpeechBrainASRForSpeechRecognition(PreTrainedASRModel):
         device: str = "auto",
         lazy_load: bool = True,
         token: str | bool | None = None,
-        **kwargs,
-    ):
-        if token is not None and (not isinstance(token, (str, bool)) or
-                                  isinstance(token, str) and not token.strip()):
-            raise ValueError("`token` must be a non-empty string, boolean, or None.")
-        config = self._coerce_config(config, model_path=model_path, **kwargs)
-        super().__init__(config, device=device, lazy_load=lazy_load)
-        self._token = token
+        trust_pickle_checkpoint: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        if token is not None and not isinstance(token, (str, bool)):
+            raise TypeError("`token` must be a string, boolean, or None.")
+        if isinstance(token, str) and not token.strip():
+            raise ValueError("String `token` values must be non-empty.")
+        if not isinstance(trust_pickle_checkpoint, bool):
+            raise TypeError("`trust_pickle_checkpoint` must be a boolean.")
+        self._hub_token = token
+        self._trust_pickle_checkpoint = trust_pickle_checkpoint
+        self.artifacts: Any | None = None
+        self.native_config: Any | None = None
+        self.tokenizer: Any | None = None
+        self.decoder: Any | None = None
+        self.checkpoint_adapter: str | None = None
+        resolved = self._coerce_config(
+            config,
+            model_path=model_path,
+            **kwargs,
+        )
+        super().__init__(
+            resolved,
+            device=device,
+            lazy_load=lazy_load,
+        )
 
     @staticmethod
     def _resolve_device(device: str) -> str:
-        return resolve_cpu_cuda_device(device, provider="SpeechBrain ASR")
-
-    def _hub_loader_options(self, loader) -> dict[str, Any]:
-        needs_hub_configuration = (
-            self._token is not None or self.config.revision is not None or
-            self.config.cache_dir is not None or self.config.local_files_only)
-        if not needs_hub_configuration:
-            return {}
-
-        try:
-            fetching = import_module("speechbrain.utils.fetching")
-        except ModuleNotFoundError:
-            fetch_config_class = None
-        else:
-            fetch_config_class = getattr(fetching, "FetchConfig", None)
-        if fetch_config_class is not None:
-            candidate = require_supported_kwargs(
-                loader,
-                {
-                    "fetch_config":
-                    fetch_config_class(
-                        token=False if self._token is None else self._token,
-                        revision=self.config.revision,
-                        huggingface_cache_dir=self.config.cache_dir,
-                        allow_network=not self.config.local_files_only,
-                    ),
-                },
-                provider="SpeechBrain",
-            )
-            if candidate:
-                return candidate
-
-        if self.config.cache_dir is not None or self.config.local_files_only:
-            raise RuntimeError(
-                "The installed SpeechBrain version cannot enforce cache-only "
-                "Hub loading. Upgrade SpeechBrain or load a local artifact.")
-        token_keyword = preferred_keyword(
-            loader,
-            ("use_auth_token", "token"),
-            fallback="use_auth_token",
+        return resolve_cpu_cuda_device(
+            device,
+            provider="native SpeechBrain ASR",
         )
-        requested = []
-        legacy = {
-            token_keyword: self._token,
-            "revision": self.config.revision,
-        }
-        if self._token is not None:
-            requested.append(token_keyword)
-        if self.config.revision is not None:
-            requested.append("revision")
-        return require_supported_kwargs(
-            loader,
-            legacy,
-            provider="SpeechBrain",
-            required=tuple(requested),
-        )
+
+    @staticmethod
+    def _validate_architecture(values: Mapping[str, Any]) -> None:
+        model_type = str(values.get("model_type", "")).strip().lower()
+        if model_type not in {
+                "asr_speechbrain",
+                "speechbrain-crdnn-asr",
+        }:
+            raise ValueError(
+                "Native SpeechBrain ASR requires a VoiceHub CRDNN ASR "
+                f"artifact; received model type {model_type or '<missing>'!r}.")
+        architecture = str(values.get("architecture", "speechbrain-crdnn-asr"), ).strip().lower()
+        if architecture != "speechbrain-crdnn-asr":
+            raise ValueError(
+                "SpeechBrain ASR artifact architecture mismatch: expected "
+                f"'speechbrain-crdnn-asr', found {architecture!r}.")
+        architectures = values.get("architectures", ())
+        if isinstance(architectures, str):
+            architectures = (architectures, )
+        if architectures and not any(str(name) in {
+                "SpeechBrainASRForSpeechRecognition",
+                "SpeechBrainCRDNNForASR",
+        } for name in architectures):
+            names = ", ".join(str(name) for name in architectures)
+            raise ValueError(
+                "Native SpeechBrain ASR does not support the declared "
+                f"architecture(s): {names}.")
 
     def _load_pretrained_model(self) -> None:
-        speechbrain_asr = import_optional(
-            "speechbrain.inference.ASR",
-            model_type=self.config.model_type,
-            install_extra=None,
+        import torch
+
+        from voicehub.architectures.speechbrain_asr.artifacts import resolve_speechbrain_asr_artifacts
+        from voicehub.architectures.speechbrain_asr.checkpoint import (
+            NATIVE_SPEECHBRAIN_ASR_FORMAT,
+            SpeechBrainASRSafeTensorsCheckpointAdapter,
         )
+        from voicehub.architectures.speechbrain_asr.configuration import SpeechBrainCRDNNASRConfig
+        from voicehub.architectures.speechbrain_asr.decoding import SpeechBrainRNNLMBeamSearch
+        from voicehub.architectures.speechbrain_asr.modeling import SpeechBrainCRDNNForASR
+        from voicehub.checkpointing import SafeTensorReader
+        from voicehub.tokenization import SentencePieceUnigramTokenizer
+
         source = self.config.name_or_path or self.default_model_name_or_path
-        asr_class = getattr(speechbrain_asr, "EncoderDecoderASR", None)
-        loader = getattr(asr_class, "from_hparams", None)
-        if not callable(loader):
-            raise RuntimeError(
-                "The installed SpeechBrain package does not expose "
-                "EncoderDecoderASR.from_hparams().")
-        options = dict(self.config.model_kwargs)
-        options.update({
-            "source": source,
-            "hparams_file": self.config.hparams_file,
-            "overrides": dict(self.config.overrides),
-            "run_opts": {
-                "device": self.device,
-            },
-        })
-        if self.config.savedir is not None:
-            options["savedir"] = self.config.savedir
-        options.update(self._hub_loader_options(loader))
-        required = ("overrides", ) if self.config.overrides else ()
-        options = require_supported_kwargs(
-            loader,
-            options,
-            provider="SpeechBrain",
-            required=(*tuple(self.config.model_kwargs), *required),
+        artifacts = resolve_speechbrain_asr_artifacts(
+            source,
+            revision=self.config.revision,
+            cache_dir=self.config.cache_dir,
+            token=self._hub_token,
+            local_files_only=self.config.local_files_only,
+            trust_pickle_checkpoint=self._trust_pickle_checkpoint,
         )
-        self.model = loader(**options)
-        if self.model is None:
-            raise RuntimeError(f"SpeechBrain could not load the ASR runtime from {source!r}.")
+        values = read_json_file(artifacts.config)
+        self._validate_architecture(values)
+        native_config = SpeechBrainCRDNNASRConfig.from_dict(values)
+        if native_config.sampling_rate != self.config.sample_rate:
+            raise ValueError(
+                "SpeechBrain ASR provider/model sample-rate mismatch: "
+                f"provider uses {self.config.sample_rate}, model expects "
+                f"{native_config.sampling_rate}.")
+        tokenizer = SentencePieceUnigramTokenizer.from_model_file(artifacts.tokenizer, )
+        if tokenizer.vocabulary_size != native_config.output_neurons:
+            raise ValueError(
+                "SpeechBrain tokenizer/model vocabulary mismatch: tokenizer "
+                f"contains {tokenizer.vocabulary_size} pieces, model expects "
+                f"{native_config.output_neurons}.")
+
+        model = SpeechBrainCRDNNForASR(native_config)
+        adapter = SpeechBrainASRSafeTensorsCheckpointAdapter()
+        with SafeTensorReader(artifacts.checkpoint) as reader:
+            declared_format = reader.metadata.get("format")
+            if (declared_format is not None and declared_format != NATIVE_SPEECHBRAIN_ASR_FORMAT):
+                raise ValueError(
+                    "SpeechBrain ASR Safetensors declares unsupported format "
+                    f"{declared_format!r}.")
+            adapter.load_streaming(
+                model,
+                reader,
+                values,
+                strict=True,
+            )
+        model.to(device=self.device, dtype=torch.float32)
+        self.artifacts = artifacts
+        self.native_config = native_config
+        self.tokenizer = tokenizer
+        self.decoder = SpeechBrainRNNLMBeamSearch(model, native_config)
+        self.checkpoint_adapter = adapter.qualified_id
+        self.model = model
+
+    @staticmethod
+    def _validate_inference_request(
+        *,
+        language: str | None,
+        task: str,
+        return_timestamps: bool | str,
+        chunk_length_s: float | None,
+        stride_length_s: Any,
+        batch_size: int | None,
+        num_beams: int | None,
+        max_new_tokens: int | None,
+        hotwords: Any,
+    ) -> tuple[str, int | None]:
+        if task != "transcribe":
+            raise ValueError(
+                "The published SpeechBrain CRDNN checkpoint supports "
+                "`task='transcribe'` only.")
+        if language is None or (isinstance(language, str) and language.strip().lower() in _ENGLISH_ALIASES):
+            resolved_language = "en"
+        else:
+            raise ValueError("The audited SpeechBrain LibriSpeech checkpoint is "
+                             "English-only.")
+        if return_timestamps is not False:
+            raise ValueError(
+                "The attention decoder does not expose calibrated token "
+                "timestamps; `return_timestamps` must be False.")
+        unsupported = {
+            "chunk_length_s": chunk_length_s,
+            "stride_length_s": stride_length_s,
+            "max_new_tokens": max_new_tokens,
+            "hotwords": hotwords,
+        }
+        active = [name for name, value in unsupported.items() if value is not None]
+        if active:
+            raise ValueError(
+                "Native SpeechBrain ASR does not support inference option(s): "
+                f"{', '.join(active)}.")
+        if batch_size not in (None, 1):
+            raise ValueError("One SpeechBrain ASR request requires `batch_size=1`.")
+        if num_beams is not None and (isinstance(num_beams, bool) or not isinstance(num_beams, Integral) or
+                                      num_beams < 1):
+            raise ValueError("`num_beams` must be a positive integer or None.")
+        return resolved_language, (None if num_beams is None else int(num_beams))
 
     def _transcribe(
         self,
@@ -147,15 +216,20 @@ class SpeechBrainASRForSpeechRecognition(PreTrainedASRModel):
         task: str = "transcribe",
         return_timestamps: bool | str = False,
         chunk_length_s: float | None = None,
-        stride_length_s=None,
+        stride_length_s: Any = None,
         batch_size: int | None = None,
         num_beams: int | None = None,
         max_new_tokens: int | None = None,
-        hotwords=None,
+        hotwords: Any = None,
     ) -> ASROutput:
-        reject_unsupported_options(
-            "SpeechBrain EncoderDecoderASR",
+        import torch
+
+        from voicehub.processing.waveform import load_native_audio
+
+        resolved_language, beam_size = self._validate_inference_request(
+            language=language,
             task=task,
+            return_timestamps=return_timestamps,
             chunk_length_s=chunk_length_s,
             stride_length_s=stride_length_s,
             batch_size=batch_size,
@@ -163,27 +237,139 @@ class SpeechBrainASRForSpeechRecognition(PreTrainedASRModel):
             max_new_tokens=max_new_tokens,
             hotwords=hotwords,
         )
-        if return_timestamps:
-            raise ValueError(
-                "SpeechBrain EncoderDecoderASR does not expose normalized "
-                "timestamps through `transcribe_file`.")
-        with materialized_audio_file_for_provider(
-                audio,
-                sampling_rate=sampling_rate,
-                target_sampling_rate=self.sample_rate,
-        ) as (audio_path, materialized):
-            text = self.model.transcribe_file(audio_path)
-        if isinstance(text, (tuple, list)) and text:
-            text = text[0]
+        if (self.model is None or self.native_config is None or self.tokenizer is None or
+                self.decoder is None):
+            raise RuntimeError("Native SpeechBrain ASR runtime is not loaded.")
+        materialized = load_native_audio(
+            audio,
+            sampling_rate=sampling_rate,
+            target_sampling_rate=self.native_config.sampling_rate,
+        )
+        waveform = materialized.waveform
+        minimum_samples = max(
+            self.native_config.win_length,
+            self.native_config.hop_length * (self.native_config.time_pooling_size - 1),
+        )
+        if waveform.numel() < minimum_samples:
+            waveform = torch.nn.functional.pad(
+                waveform,
+                (0, minimum_samples - waveform.numel()),
+            )
+        parameter = next(self.model.parameters())
+        waveforms = waveform.unsqueeze(0).to(
+            device=parameter.device,
+            dtype=torch.float32,
+        )
+        waveform_lengths = torch.tensor(
+            [waveform.numel()],
+            dtype=torch.long,
+            device=parameter.device,
+        )
+        with torch.inference_mode():
+            encoder_states, _, relative_lengths = self.model.encode(
+                waveforms,
+                waveform_lengths,
+                update_normalization=False,
+            )
+            decoded = self.decoder(
+                encoder_states,
+                relative_lengths,
+                beam_size=beam_size,
+            )
+        token_ids = decoded.token_ids[0]
+        text = self.tokenizer.decode_ids(token_ids)
         return ASROutput(
-            text=str(text),
-            language=language,
+            text=text,
+            segments=(),
+            language=resolved_language,
             duration=materialized.duration,
-            metadata={"backend": "speechbrain"},
+            metadata={
+                "architecture":
+                "speechbrain-crdnn-asr",
+                "architecture_family":
+                self.architecture_family,
+                "backend":
+                "voicehub-native",
+                "beam_score":
+                decoded.scores[0],
+                "beam_size": (self.native_config.beam_size if beam_size is None else beam_size),
+                "checkpoint_adapter":
+                self.checkpoint_adapter,
+                "checkpoint_format":
+                self.native_checkpoint_format,
+                "checkpoint_revision": (None if self.artifacts is None else self.artifacts.revision),
+                "converted_from_pickle":
+                (False if self.artifacts is None else self.artifacts.converted_from_pickle),
+                "generated_tokens":
+                len(token_ids),
+            },
+        )
+
+    def prepare_training_inputs(
+        self,
+        inputs: dict[str, Any],
+        *,
+        phase: str,
+    ) -> dict[str, Any]:
+        from voicehub.models.asr_native.speechbrain_training import prepare_speechbrain_asr_training_batch
+
+        if self.model is None:
+            self.load_for_training()
+        return prepare_speechbrain_asr_training_batch(
+            self,
+            inputs,
+            phase=phase,
         )
 
     def _validate_training_runtime(self) -> None:
-        raise ValueError(
-            "SpeechBrain ASR fine-tuning is orchestrated by an upstream Brain "
-            "recipe and HyperPyYAML configuration. Use the SpeechBrain native "
-            "training backend for exact optimizer and checkpointer semantics.")
+        return None
+
+    def _save_pretrained(self, save_directory: Path) -> None:
+        from voicehub.architectures.speechbrain_asr.checkpoint import (
+            NATIVE_SPEECHBRAIN_ASR_FILENAME,
+            NATIVE_SPEECHBRAIN_ASR_FORMAT,
+        )
+        from voicehub.architectures.speechbrain_asr.metadata import (
+            SPEECHBRAIN_ASR_REVISION,
+            SPEECHBRAIN_ASR_SOURCE_REVISION,
+        )
+        from voicehub.checkpointing import save_safetensors
+
+        if (self.model is None or self.native_config is None or self.tokenizer is None):
+            self.load()
+        save_directory.mkdir(parents=True, exist_ok=True)
+        save_safetensors(
+            self.model.state_dict(),
+            save_directory / NATIVE_SPEECHBRAIN_ASR_FILENAME,
+            metadata={
+                "architecture": "speechbrain-crdnn-asr",
+                "format": NATIVE_SPEECHBRAIN_ASR_FORMAT,
+                "sample_rate": str(self.sample_rate),
+            },
+        )
+        self.tokenizer.save_pretrained(save_directory)
+        values = self.native_config.to_dict()
+        values.update({
+            "architectures": [
+                "SpeechBrainASRForSpeechRecognition",
+                "SpeechBrainCRDNNForASR",
+            ],
+            "checkpoint_format": NATIVE_SPEECHBRAIN_ASR_FORMAT,
+            "model_type": self.config.model_type,
+            "name_or_path": str(save_directory),
+            "source_artifact_revision": SPEECHBRAIN_ASR_REVISION,
+            "source_training_revision": SPEECHBRAIN_ASR_SOURCE_REVISION,
+            "voicehub_provider": self.config.model_type,
+        })
+        write_json_file(save_directory / "config.json", values)
+
+    def export_native_pretrained(
+        self,
+        save_directory: str | Path,
+    ) -> Path:
+        destination = Path(save_directory).expanduser()
+        self._save_pretrained(destination)
+        return destination
+
+
+__all__ = ["SpeechBrainASRForSpeechRecognition"]

@@ -7,128 +7,335 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from voicehub import Trainer, TrainingArguments
+from voicehub.architectures.conversationtts.checkpoint import (
+    export_conversationtts_checkpoint,
+    load_conversationtts_checkpoint,
+)
+from voicehub.architectures.conversationtts.processing import (
+    ConversationTTSProtocol,
+    build_conversationtts_sequence,
+    collate_conversationtts_sequences,
+)
+from voicehub.checkpointing.errors import CheckpointCompatibilityError
 from voicehub.models.conversationtts.inference import ConversationTTSConfig, ConversationTTSForTextToSpeech
 from voicehub.models.conversationtts.runtime import resume_for_inference
+from voicehub.registry import get_model_spec
+from voicehub.training.contracts import TrainingSupport
+from voicehub.training.specs import get_training_spec
 
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 
 
+@unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")
 class ConversationTTSCheckpointTests(unittest.TestCase):
 
-    def test_checkpoint_uses_restricted_torch_loader(self):
-        torch = SimpleNamespace(
-            load=Mock(return_value={
-                "model": {
-                    "module.weight": 3,
-                },
-            }), )
-        model = Mock()
-        with patch(
-                "voicehub.models.conversationtts.runtime.import_optional",
-                return_value=torch,
-        ):
-            resume_for_inference("/checkpoint.pt", None, model, "cpu")
+    def setUp(self):
+        import torch
 
-        torch.load.assert_called_once_with(
-            "/checkpoint.pt",
+        self.torch = torch
+
+    def _model(self):
+        return self.torch.nn.Linear(1, 1, bias=False)
+
+    def test_checkpoint_uses_restricted_torch_loader(self):
+        model = self._model()
+        loader = Mock(return_value={
+            "model": {
+                "module.weight": self.torch.tensor([[3.0]]),
+            },
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "checkpoint.pt"
+            checkpoint.touch()
+            with patch(
+                    "voicehub.architectures.conversationtts.checkpoint.torch.load",
+                    loader,
+            ):
+                report = resume_for_inference(
+                    checkpoint,
+                    None,
+                    model,
+                    "cpu",
+                )
+
+        loader.assert_called_once_with(
+            checkpoint.resolve(),
             map_location="cpu",
             weights_only=True,
         )
-        model.load_state_dict.assert_called_once_with({"weight": 3})
+        self.assertEqual(report.format, "pytorch-weights-only")
+        self.assertEqual(model.weight.item(), 3.0)
 
-    def test_checkpoint_only_falls_back_for_unsupported_weights_only(self):
-        torch = SimpleNamespace(
-            load=Mock(side_effect=[
-                TypeError("weights_only is unsupported"),
-                {
-                    "model": {
-                        "weight": 4,
-                    },
-                },
-            ]), )
-        model = Mock()
-        with patch(
-                "voicehub.models.conversationtts.runtime.import_optional",
-                return_value=torch,
-        ), self.assertWarnsRegex(RuntimeWarning, "restricted checkpoint"):
-            resume_for_inference(
-                "/checkpoint.pt",
-                None,
-                model,
-                "cpu",
-            )
+    def test_legacy_checkpoint_is_validated_on_cpu_before_device_copy(self):
+        model = self._model()
+        loader = Mock(return_value={
+            "model": {
+                "weight": self.torch.tensor([[5.0]]),
+            },
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "checkpoint.pt"
+            checkpoint.touch()
+            with patch(
+                    "voicehub.architectures.conversationtts.checkpoint.torch.load",
+                    loader,
+            ):
+                report = load_conversationtts_checkpoint(
+                    model,
+                    checkpoint,
+                    device="cuda",
+                )
 
-        self.assertEqual(
-            torch.load.call_args_list,
-            [
-                unittest.mock.call(
-                    "/checkpoint.pt",
-                    map_location="cpu",
-                    weights_only=True,
-                ),
-                unittest.mock.call(
-                    "/checkpoint.pt",
-                    map_location="cpu",
-                ),
-            ],
+        loader.assert_called_once_with(
+            checkpoint.resolve(),
+            map_location="cpu",
+            weights_only=True,
         )
-        model.load_state_dict.assert_called_once_with({"weight": 4})
+        self.assertEqual(report.parameter_count, 1)
+        self.assertEqual(model.weight.item(), 5.0)
+
+    def test_checkpoint_refuses_unsafe_fallback_when_weights_only_is_unsupported(self, ):
+        model = self._model()
+        loader = Mock(side_effect=TypeError("weights_only is unsupported"))
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "checkpoint.pt"
+            checkpoint.touch()
+            with (
+                    patch(
+                        "voicehub.architectures.conversationtts.checkpoint."
+                        "torch.load",
+                        loader,
+                    ),
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "cannot load.*safely",
+                    ),
+            ):
+                resume_for_inference(
+                    checkpoint,
+                    None,
+                    model,
+                    "cpu",
+                )
+
+        self.assertEqual(loader.call_count, 1)
 
     def test_checkpoint_does_not_retry_unsafe_content_failures(self):
-        torch = SimpleNamespace(load=Mock(side_effect=RuntimeError("unsafe checkpoint")), )
-        with (
-                patch(
-                    "voicehub.models.conversationtts.runtime.import_optional",
-                    return_value=torch,
-                ),
-                self.assertRaisesRegex(RuntimeError, "unsafe checkpoint"),
-        ):
-            resume_for_inference(
-                "/checkpoint.pt",
-                None,
-                Mock(),
-                "cpu",
-            )
-        self.assertEqual(torch.load.call_count, 1)
+        loader = Mock(side_effect=RuntimeError("unsafe checkpoint"))
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "checkpoint.pt"
+            checkpoint.touch()
+            with (
+                    patch(
+                        "voicehub.architectures.conversationtts.checkpoint."
+                        "torch.load",
+                        loader,
+                    ),
+                    self.assertRaisesRegex(RuntimeError, "unsafe checkpoint"),
+            ):
+                resume_for_inference(
+                    checkpoint,
+                    None,
+                    self._model(),
+                    "cpu",
+                )
+        self.assertEqual(loader.call_count, 1)
 
     def test_checkpoint_does_not_retry_unrelated_type_errors(self):
-        torch = SimpleNamespace(load=Mock(side_effect=TypeError("invalid map_location")), )
-        with (
-                patch(
-                    "voicehub.models.conversationtts.runtime.import_optional",
-                    return_value=torch,
-                ),
-                self.assertRaisesRegex(TypeError, "invalid map_location"),
-        ):
-            resume_for_inference(
-                "/checkpoint.pt",
-                None,
-                Mock(),
-                "cpu",
-            )
-        self.assertEqual(torch.load.call_count, 1)
+        loader = Mock(side_effect=TypeError("invalid map_location"))
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "checkpoint.pt"
+            checkpoint.touch()
+            with (
+                    patch(
+                        "voicehub.architectures.conversationtts.checkpoint."
+                        "torch.load",
+                        loader,
+                    ),
+                    self.assertRaisesRegex(TypeError, "invalid map_location"),
+            ):
+                resume_for_inference(
+                    checkpoint,
+                    None,
+                    self._model(),
+                    "cpu",
+                )
+        self.assertEqual(loader.call_count, 1)
 
     def test_checkpoint_rejects_prefix_collisions(self):
-        torch = SimpleNamespace(
-            load=Mock(return_value={
+        loader = Mock(
+            return_value={
                 "model": {
-                    "weight": 1,
-                    "module.weight": 2,
+                    "weight": self.torch.tensor([[1.0]]),
+                    "module.weight": self.torch.tensor([[2.0]]),
                 },
-            }), )
-        with (
-                patch(
-                    "voicehub.models.conversationtts.runtime.import_optional",
-                    return_value=torch,
-                ),
-                self.assertRaisesRegex(ValueError, "colliding state keys"),
-        ):
-            resume_for_inference(
-                "/checkpoint.pt",
-                None,
-                Mock(),
-                "cpu",
+            })
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "checkpoint.pt"
+            checkpoint.touch()
+            with (
+                    patch(
+                        "voicehub.architectures.conversationtts.checkpoint."
+                        "torch.load",
+                        loader,
+                    ),
+                    self.assertRaisesRegex(
+                        CheckpointCompatibilityError,
+                        "colliding keys",
+                    ),
+            ):
+                resume_for_inference(
+                    checkpoint,
+                    None,
+                    self._model(),
+                    "cpu",
+                )
+
+    def test_safetensors_export_round_trips_exactly(self):
+        model = self._model()
+        model.weight.data.fill_(7.0)
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / "model.safetensors"
+            exported = export_conversationtts_checkpoint(model, checkpoint)
+            model.weight.data.zero_()
+            report = load_conversationtts_checkpoint(
+                model,
+                exported,
+                device="cpu",
             )
+
+        self.assertEqual(report.format, "safetensors")
+        self.assertEqual(report.tensor_count, 1)
+        self.assertEqual(model.weight.item(), 7.0)
+
+
+@unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")
+class ConversationTTSProcessingTests(unittest.TestCase):
+
+    def setUp(self):
+        import torch
+
+        self.torch = torch
+        self.protocol = ConversationTTSProtocol(
+            audio_num_codebooks=2,
+            audio_codebook_size=8,
+            audio_vocab_size=11,
+            text_vocab_size=32,
+            text_padding_token_id=30,
+            audio_padding_token_id=10,
+            maximum_sequence_length=16,
+        )
+
+    def test_sequence_matches_published_text_audio_framing(self):
+        sequence, mask = build_conversationtts_sequence(
+            [1, 2],
+            [[3, 4], [5, 6]],
+            protocol=self.protocol,
+        )
+
+        self.assertTrue(
+            self.torch.equal(
+                sequence,
+                self.torch.tensor([
+                    [0, 0, 1],
+                    [0, 0, 2],
+                    [3, 5, 0],
+                    [4, 6, 0],
+                    [0, 0, 0],
+                ]),
+            ))
+        self.assertTrue(
+            self.torch.equal(
+                mask,
+                self.torch.tensor([
+                    [False, False, True],
+                    [False, False, True],
+                    [True, True, False],
+                    [True, True, False],
+                    [True, True, False],
+                ]),
+            ))
+
+    def test_collator_shifts_labels_and_uses_source_padding_ids(self):
+        first = build_conversationtts_sequence(
+            [1, 2],
+            [[3, 4], [5, 6]],
+            protocol=self.protocol,
+        )
+        second = build_conversationtts_sequence(
+            [7],
+            [[1], [2]],
+            protocol=self.protocol,
+        )
+        batch = collate_conversationtts_sequences(
+            [first, second],
+            protocol=self.protocol,
+        )
+
+        self.assertEqual(tuple(batch["tokens"].shape), (2, 4, 3))
+        self.assertEqual(tuple(batch["labels"].shape), (2, 4, 2))
+        self.assertEqual(batch["ignore_id"], 10)
+        self.assertEqual(batch["residual_ignore_id"], 10)
+        self.assertEqual(batch["tokens"][1, 3].tolist(), [10, 10, 30])
+        self.assertEqual(batch["labels"][1, 3].tolist(), [10, 10])
+
+    def test_framed_batch_runs_through_the_native_two_level_objective(self):
+        from voicehub.architectures.conversationtts.decoder import build_llama32_decoder
+        from voicehub.models.conversationtts.source.conversationtts.models import model_new
+
+        def tiny_decoder():
+            return build_llama32_decoder(
+                vocabulary_size=1,
+                number_of_layers=1,
+                number_of_heads=2,
+                number_of_kv_heads=1,
+                embedding_dimension=8,
+                maximum_sequence_length=16,
+                intermediate_dimension=16,
+            )
+
+        sequence = build_conversationtts_sequence(
+            [1, 2],
+            [[3, 4], [5, 6]],
+            protocol=self.protocol,
+        )
+        batch = collate_conversationtts_sequences(
+            [sequence],
+            protocol=self.protocol,
+        )
+        with patch.dict(model_new.FLAVORS, {"tiny": tiny_decoder}):
+            model = model_new.Model(
+                model_new.ModelArgs(
+                    backbone_flavor="tiny",
+                    decoder_flavor="tiny",
+                    text_vocab_size=32,
+                    audio_vocab_size=11,
+                    audio_num_codebooks=2,
+                ))
+        model.random_type = "none"
+        c0_logits, residual_logits, residual_labels = model(
+            tokens=batch["tokens"],
+            labels=batch["labels"],
+            tokens_mask=batch["tokens_mask"],
+        )
+        zero_loss, _ = model_new.CrossEntropyAndAccuracy_zero(
+            c0_logits,
+            batch["labels"][..., 0],
+            batch["loss_mask"],
+            ignore_id=10,
+        )
+        residual_loss, _ = model_new.CrossEntropyAndAccuracy_residual(
+            residual_logits,
+            residual_labels,
+            loss_weights=[1.0],
+            ignore_id=10,
+        )
+        loss = zero_loss + residual_loss
+        loss.backward()
+
+        self.assertTrue(self.torch.isfinite(loss))
+        self.assertIsNotNone(model.codebook0_head.weight.grad)
+        self.assertIsNotNone(model.audio_head.grad)
 
 
 @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")
@@ -243,8 +450,8 @@ class ConversationTTSTrainingRuntimeTests(unittest.TestCase):
                 return self._model.weight.detach().reshape(1)
 
         self.model_module = SimpleNamespace(
-            Model=FakeModel,
-            ModelArgs=lambda **values: SimpleNamespace(**values),
+            ConversationTTSModel=FakeModel,
+            ConversationTTSArchitectureConfig=(lambda **values: SimpleNamespace(**values)),
         )
         self.generator_module = SimpleNamespace(
             Generator=FakeGenerator,
@@ -291,7 +498,7 @@ class ConversationTTSTrainingRuntimeTests(unittest.TestCase):
             imported.append(name)
             if name == "torch":
                 return self.torch
-            if name.endswith("models.model_new"):
+            if name == "voicehub.architectures.conversationtts.modeling":
                 return self.model_module
             if name.endswith("inference.generator"):
                 return self.generator_module
@@ -380,6 +587,101 @@ class ConversationTTSTrainingRuntimeTests(unittest.TestCase):
         runtime.text_tokenizer.assert_not_called()
         runtime.audio_tokenizer.assert_not_called()
         self.assertNotIn(("setup_caches", 1), self.events)
+
+    def test_registry_exposes_native_raw_and_preencoded_training(self):
+        model_spec = get_model_spec("conversationtts")
+        training_spec = get_training_spec("conversationtts")
+
+        self.assertTrue(model_spec.is_voicehub_native)
+        self.assertEqual(model_spec.architecture, "conversationtts")
+        self.assertIn(
+            "raw-audio-fine-tuning",
+            model_spec.capabilities,
+        )
+        self.assertIn(
+            "preencoded-code-fine-tuning",
+            model_spec.capabilities,
+        )
+        self.assertTrue(training_spec.native_training)
+        self.assertIs(training_spec.support, TrainingSupport.NATIVE)
+
+    def test_precomputed_ids_are_framed_without_loading_tokenizers(self):
+        model = self._model()
+        prepared = model.prepare_training_inputs(
+            {
+                "text_token_ids": [[1, 2], [1]],
+                "audio_codes": [
+                    [[1, 2], [2, 1]],
+                    [[1], [2]],
+                ],
+            },
+            phase="codec_language_model",
+        )
+
+        self.assertEqual(tuple(prepared["tokens"].shape), (2, 4, 3))
+        self.assertEqual(tuple(prepared["labels"].shape), (2, 4, 2))
+        self.assertEqual(prepared["ignore_id"], 3)
+
+    def test_collated_raw_audio_uses_each_unpadded_waveform_length(self):
+        encoded_lengths = []
+        torch = self.torch
+
+        class FakeCodecModel(torch.nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.anchor = torch.nn.Parameter(torch.zeros(()))
+
+            def encode(self, waveform):
+                encoded_lengths.append(int(waveform.shape[-1]))
+                return torch.zeros(
+                    (1, 2, 1),
+                    dtype=torch.long,
+                    device=waveform.device,
+                )
+
+        codec = SimpleNamespace(
+            device=torch.device("cpu"),
+            model=FakeCodecModel(),
+        )
+        tokenizer = SimpleNamespace(tokenize=lambda _text: [1, 2])
+        model = self._model()
+        adapter = model.get_training_adapter()
+        collated = adapter.data_collator([
+            {
+                "text": "first",
+                "audio": {
+                    "waveform": torch.tensor([0.1, 0.2, 0.3, 0.4]),
+                    "sampling_rate": 24_000,
+                },
+            },
+            {
+                "text": "second",
+                "audio": {
+                    "waveform": torch.tensor([0.1, 0.2]),
+                    "sampling_rate": 24_000,
+                },
+            },
+        ])
+        with (
+                patch.object(
+                    model,
+                    "_get_training_text_tokenizer",
+                    return_value=tokenizer,
+                ),
+                patch.object(
+                    model,
+                    "_get_training_audio_tokenizer",
+                    return_value=codec,
+                ),
+        ):
+            prepared = model.prepare_training_inputs(
+                collated,
+                phase="codec_language_model",
+            )
+
+        self.assertEqual(encoded_lengths, [4, 2])
+        self.assertEqual(tuple(prepared["tokens"].shape), (2, 3, 3))
 
     def test_lifecycle_preserves_weights_gradients_and_adapter_identity(self):
         model = self._model()

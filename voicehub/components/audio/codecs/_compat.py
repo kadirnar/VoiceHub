@@ -28,6 +28,12 @@ from typing import Any
 import torch
 from torch import nn
 
+from voicehub.processing.waveform import (
+    load_pcm_wave,
+    resample_waveform,
+    save_pcm_wave,
+)
+
 
 def _torch_load(path: str | Path, *, map_location: str | torch.device = "cpu") -> Any:
     """Load a legacy codec checkpoint across PyTorch's ``weights_only`` change."""
@@ -243,23 +249,196 @@ def _restore_audio_shape(audio: torch.Tensor, original_ndim: int) -> torch.Tenso
     return audio
 
 
+def _biquad_coefficients(
+    *,
+    sample_rate: int,
+    frequency: float,
+    filter_type: str,
+    gain_db: float = 0.0,
+    q: float = 1.0,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return normalized RBJ biquad coefficients in float64."""
+    omega = 2.0 * math.pi * frequency / sample_rate
+    cosine = math.cos(omega)
+    sine = math.sin(omega)
+    if filter_type == "high-pass":
+        alpha = sine / (2.0 * q)
+        numerator = (
+            (1.0 + cosine) / 2.0,
+            -(1.0 + cosine),
+            (1.0 + cosine) / 2.0,
+        )
+        denominator = (
+            1.0 + alpha,
+            -2.0 * cosine,
+            1.0 - alpha,
+        )
+    elif filter_type == "high-shelf":
+        amplitude = 10.0 ** (gain_db / 40.0)
+        alpha = sine / math.sqrt(2.0)
+        shelf_term = 2.0 * math.sqrt(amplitude) * alpha
+        numerator = (
+            amplitude
+            * (
+                amplitude
+                + 1.0
+                + (amplitude - 1.0) * cosine
+                + shelf_term
+            ),
+            -2.0
+            * amplitude
+            * (amplitude - 1.0 + (amplitude + 1.0) * cosine),
+            amplitude
+            * (
+                amplitude
+                + 1.0
+                + (amplitude - 1.0) * cosine
+                - shelf_term
+            ),
+        )
+        denominator = (
+            amplitude
+            + 1.0
+            - (amplitude - 1.0) * cosine
+            + shelf_term,
+            2.0
+            * (amplitude - 1.0 - (amplitude + 1.0) * cosine),
+            amplitude
+            + 1.0
+            - (amplitude - 1.0) * cosine
+            - shelf_term,
+        )
+    else:  # pragma: no cover - private call sites are exhaustive.
+        raise ValueError(f"Unknown biquad filter type {filter_type!r}.")
+    scale = denominator[0]
+    return (
+        torch.tensor(
+            tuple(value / scale for value in numerator),
+            dtype=torch.float64,
+        ),
+        torch.tensor(
+            (1.0, denominator[1] / scale, denominator[2] / scale),
+            dtype=torch.float64,
+        ),
+    )
+
+
+@torch.jit.script
+def _apply_biquad(
+    audio: torch.Tensor,
+    numerator: torch.Tensor,
+    denominator: torch.Tensor,
+) -> torch.Tensor:
+    """Apply a second-order IIR filter to ``[batch, channels, time]``."""
+    output = torch.zeros_like(audio)
+    sample_count = audio.shape[-1]
+    for index in range(sample_count):
+        value = numerator[0] * audio[..., index]
+        if index >= 1:
+            value = (
+                value
+                + numerator[1] * audio[..., index - 1]
+                - denominator[1] * output[..., index - 1]
+            )
+        if index >= 2:
+            value = (
+                value
+                + numerator[2] * audio[..., index - 2]
+                - denominator[2] * output[..., index - 2]
+            )
+        output[..., index] = value
+    return output
+
+
+def _k_weight(audio: torch.Tensor, sample_rate: int) -> torch.Tensor:
+    """Apply the two-stage BS.1770 K-weighting filter."""
+    shelf_b, shelf_a = _biquad_coefficients(
+        sample_rate=sample_rate,
+        frequency=1_500.0,
+        filter_type="high-shelf",
+        gain_db=4.0,
+    )
+    high_pass_b, high_pass_a = _biquad_coefficients(
+        sample_rate=sample_rate,
+        frequency=38.0,
+        filter_type="high-pass",
+        q=0.5,
+    )
+    coefficients = tuple(
+        coefficient.to(device=audio.device, dtype=audio.dtype)
+        for coefficient in (shelf_b, shelf_a, high_pass_b, high_pass_a)
+    )
+    weighted = _apply_biquad(audio, coefficients[0], coefficients[1])
+    return _apply_biquad(weighted, coefficients[2], coefficients[3])
+
+
 def integrated_loudness(audio: torch.Tensor, sample_rate: int) -> torch.Tensor:
-    """Measure ITU-R BS.1770-4 integrated loudness with TorchAudio."""
+    """Measure gated ITU-R BS.1770-style integrated loudness natively.
+
+    VoiceHub uses the standard K-weighting stages, 400 ms blocks with 75%
+    overlap, the -70 LUFS absolute gate, and the -10 LU relative gate. This
+    keeps codec normalization independent of TorchAudio and remains
+    differentiable with respect to the input waveform.
+    """
     if sample_rate <= 0:
         raise ValueError("sample_rate must be positive.")
     tensor, _ = _coerce_audio_tensor(audio)
     tensor = tensor.to(dtype=torch.float32)
-    minimum_samples = max(1, int(round(0.5 * sample_rate)))
-    if tensor.shape[-1] < minimum_samples:
+    block_samples = max(1, int(round(0.4 * sample_rate)))
+    if tensor.shape[-1] < block_samples:
         tensor = torch.nn.functional.pad(
-            tensor, (0, minimum_samples - tensor.shape[-1]))
-
-    import torchaudio
-
-    loudness = torchaudio.functional.loudness(tensor, sample_rate)
+            tensor,
+            (0, block_samples - tensor.shape[-1]),
+        )
+    filtered = _k_weight(tensor, sample_rate)
+    step_samples = max(1, block_samples // 4)
+    blocks = filtered.unfold(
+        dimension=-1,
+        size=block_samples,
+        step=step_samples,
+    )
+    channel_energy = blocks.square().mean(dim=-1)
+    channel_count = channel_energy.shape[1]
+    channel_gains = torch.ones(
+        channel_count,
+        dtype=channel_energy.dtype,
+        device=channel_energy.device,
+    )
+    if channel_count > 3:
+        channel_gains[3:min(channel_count, 5)] = math.sqrt(2.0)
+    block_energy = (
+        channel_energy
+        * channel_gains.view(1, channel_count, 1)
+    ).sum(dim=1)
+    epsilon = torch.finfo(block_energy.dtype).tiny
+    block_loudness = -0.691 + 10.0 * torch.log10(
+        block_energy.clamp_min(epsilon)
+    )
+    absolute_mask = block_loudness > -70.0
+    absolute_count = absolute_mask.sum(dim=-1).clamp_min(1)
+    absolute_energy = (
+        block_energy * absolute_mask
+    ).sum(dim=-1) / absolute_count
+    relative_threshold = (
+        -0.691
+        + 10.0 * torch.log10(absolute_energy.clamp_min(epsilon))
+        - 10.0
+    )
+    gated_mask = absolute_mask & (
+        block_loudness > relative_threshold.unsqueeze(-1)
+    )
+    gated_count = gated_mask.sum(dim=-1).clamp_min(1)
+    gated_energy = (
+        block_energy * gated_mask
+    ).sum(dim=-1) / gated_count
+    loudness = -0.691 + 10.0 * torch.log10(
+        gated_energy.clamp_min(epsilon)
+    )
     minimum = torch.full_like(loudness, -70.0)
-    return torch.maximum(torch.nan_to_num(loudness, nan=-70.0, neginf=-70.0),
-                         minimum)
+    return torch.maximum(
+        torch.nan_to_num(loudness, nan=-70.0, neginf=-70.0),
+        minimum,
+    )
 
 
 def normalize_loudness(
@@ -315,16 +494,18 @@ class AudioSignal:
 
     @classmethod
     def load_from_file_with_ffmpeg(cls, path: str | Path) -> AudioSignal:
-        """Load an audio file without requiring an external FFmpeg executable."""
-        import soundfile
-
-        audio, sample_rate = soundfile.read(
-            str(path),
-            always_2d=True,
-            dtype="float32",
+        """Load channel-preserving PCM WAVE without FFmpeg or SoundFile."""
+        source_path = Path(path).expanduser()
+        if source_path.suffix.lower() not in {".wav", ".wave"}:
+            raise ValueError(
+                "The native codec file boundary accepts uncompressed PCM "
+                "WAVE input. Decode other containers to a tensor first."
+            )
+        audio, sample_rate = load_pcm_wave(
+            source_path,
+            preserve_channels=True,
         )
-        tensor = torch.from_numpy(audio.T.copy())
-        return cls(tensor, int(sample_rate))
+        return cls(audio, sample_rate)
 
     @property
     def audio_data(self) -> torch.Tensor:
@@ -359,6 +540,20 @@ class AudioSignal:
     def clone(self) -> AudioSignal:
         return type(self)(self.audio_data.clone(), self.sample_rate)
 
+    def write(self, path: str | Path) -> AudioSignal:
+        """Write the first batch item as portable 16-bit PCM WAVE."""
+        if self.audio_data.shape[0] != 1:
+            raise ValueError(
+                "AudioSignal.write requires one batch item; index the "
+                "desired item first."
+            )
+        save_pcm_wave(
+            path,
+            self.audio_data[0],
+            self.sample_rate,
+        )
+        return self
+
     def to(self, *args: Any, **kwargs: Any) -> AudioSignal:
         self.audio_data = self.audio_data.to(*args, **kwargs)
         return self
@@ -380,12 +575,21 @@ class AudioSignal:
         if sample_rate == self.sample_rate:
             return self
 
-        import torchaudio
-
-        self.audio_data = torchaudio.functional.resample(
-            self.audio_data,
-            self.sample_rate,
-            sample_rate,
+        shape = self.audio_data.shape
+        flattened = self.audio_data.reshape(-1, shape[-1])
+        self.audio_data = torch.stack(
+            tuple(
+                resample_waveform(
+                    channel,
+                    self.sample_rate,
+                    sample_rate,
+                )
+                for channel in flattened
+            ),
+            dim=0,
+        ).reshape(
+            *shape[:-1],
+            -1,
         )
         self.sample_rate = sample_rate
         return self

@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from __future__ import annotations
 
 import torch
 from torch import nn
@@ -22,12 +22,14 @@ class ConvNeXtBlock(nn.Module):
         dim: int,
         intermediate_dim: int,
         layer_scale_init_value: float,
-        adanorm_num_embeddings: Optional[int] = None,
+        adanorm_num_embeddings: int | None = None,
     ):
         super().__init__()
+        if adanorm_num_embeddings is not None and adanorm_num_embeddings <= 0:
+            raise ValueError("`adanorm_num_embeddings` must be positive or None.")
         self.dwconv = nn.Conv1d(dim, dim, kernel_size=7, padding=3, groups=dim)  # depthwise conv
         self.adanorm = adanorm_num_embeddings is not None
-        if adanorm_num_embeddings:
+        if adanorm_num_embeddings is not None:
             self.norm = AdaLayerNorm(adanorm_num_embeddings, dim, eps=1e-6)
         else:
             self.norm = nn.LayerNorm(dim, eps=1e-6)
@@ -40,7 +42,11 @@ class ConvNeXtBlock(nn.Module):
             else None
         )
 
-    def forward(self, x: torch.Tensor, cond_embedding_id: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        cond_embedding_id: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         residual = x
         x = self.dwconv(x)
         x = x.transpose(1, 2)  # (B, C, T) -> (B, T, C)
@@ -79,8 +85,17 @@ class AdaLayerNorm(nn.Module):
         torch.nn.init.zeros_(self.shift.weight)
 
     def forward(self, x: torch.Tensor, cond_embedding_id: torch.Tensor) -> torch.Tensor:
+        if cond_embedding_id.ndim == 0:
+            cond_embedding_id = cond_embedding_id.unsqueeze(0)
         scale = self.scale(cond_embedding_id)
         shift = self.shift(cond_embedding_id)
+        if scale.ndim == 2:
+            scale = scale.unsqueeze(1)
+            shift = shift.unsqueeze(1)
+        if scale.shape[0] not in {1, x.shape[0]}:
+            raise ValueError(
+                "Adaptive-normalization IDs must be scalar or match the batch."
+            )
         x = nn.functional.layer_norm(x, (self.dim,), eps=self.eps)
         x = x * scale + shift
         return x
@@ -106,9 +121,9 @@ class ResBlock1(nn.Module):
         self,
         dim: int,
         kernel_size: int = 3,
-        dilation: Tuple[int, int, int] = (1, 3, 5),
+        dilation: tuple[int, int, int] = (1, 3, 5),
         lrelu_slope: float = 0.1,
-        layer_scale_init_value: Optional[float] = None,
+        layer_scale_init_value: float | None = None,
     ):
         super().__init__()
         self.lrelu_slope = lrelu_slope

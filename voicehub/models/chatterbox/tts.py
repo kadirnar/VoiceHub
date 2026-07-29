@@ -1,21 +1,29 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-import librosa
 import torch
 import torch.nn.functional as F
-from huggingface_hub import hf_hub_download
-from safetensors.torch import load_file
 
+from voicehub.hub_transport import download_hugging_face_snapshot
+from voicehub.models.chatterbox.checkpoint import (
+    CHECKPOINT_REPOSITORY,
+    CHECKPOINT_REVISION,
+    export_chatterbox_runtime,
+    inspect_t3_text_vocabulary_size,
+    load_module_safetensors,
+)
 from voicehub.models.chatterbox.models.s3gen import S3GEN_SR, S3Gen
 from voicehub.models.chatterbox.models.s3tokenizer import S3_SR, drop_invalid_tokens
 from voicehub.models.chatterbox.models.t3 import T3
 from voicehub.models.chatterbox.models.t3.modules.cond_enc import T3Cond
+from voicehub.models.chatterbox.models.t3.modules.t3_config import T3Config
 from voicehub.models.chatterbox.models.tokenizers import EnTokenizer
 from voicehub.models.chatterbox.models.voice_encoder import VoiceEncoder
-from voicehub.models.chatterbox.source import perth
+from voicehub.models.chatterbox.native_audio import load_waveform
+from voicehub.models.chatterbox.watermark import NativePerthWatermarker
+from voicehub.processing.waveform import resample_waveform
 
-REPO_ID = "ResembleAI/chatterbox"
+REPO_ID = CHECKPOINT_REPOSITORY
 
 
 def punc_norm(text: str) -> str:
@@ -83,7 +91,16 @@ class Conditionals:
 
     def save(self, fpath: Path):
         """Serialize conditioning data to a file."""
-        arg_dict = dict(t3=self.t3.__dict__, gen=self.gen)
+        arg_dict = {
+            "t3": {
+                name: (value.detach().cpu() if torch.is_tensor(value) else value)
+                for name, value in self.t3.__dict__.items()
+            },
+            "gen": {
+                name: (value.detach().cpu() if torch.is_tensor(value) else value)
+                for name, value in self.gen.items()
+            },
+        }
         torch.save(arg_dict, fpath)
 
     @classmethod
@@ -114,7 +131,7 @@ class ChatterboxTTS:
         ve: VoiceEncoder,
         tokenizer: EnTokenizer,
         device: str,
-        conds: Conditionals = None,
+        conds: Conditionals | None = None,
     ):
         self.sr = S3GEN_SR  # sample rate of synthesized audio
         self.t3 = t3
@@ -123,12 +140,21 @@ class ChatterboxTTS:
         self.tokenizer = tokenizer
         self.device = device
         self.conds = conds
-        self.watermarker = perth.PerthImplicitWatermarker()
+        self.watermarker = NativePerthWatermarker(device=device)
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
         """Load all sub-models from a local checkpoint directory."""
-        ckpt_dir = Path(ckpt_dir)
+        ckpt_dir = Path(ckpt_dir).expanduser().resolve()
+        required = (
+            "ve.safetensors",
+            "t3_cfg.safetensors",
+            "s3gen.safetensors",
+            "tokenizer.json",
+        )
+        missing = [name for name in required if not (ckpt_dir / name).is_file()]
+        if missing:
+            raise FileNotFoundError(f"Chatterbox checkpoint directory is incomplete: {', '.join(missing)}")
 
         # Always load to CPU first for non-CUDA devices to handle CUDA-saved models
         if device in ["cpu", "mps"]:
@@ -137,18 +163,17 @@ class ChatterboxTTS:
             map_location = None
 
         ve = VoiceEncoder()
-        ve.load_state_dict(load_file(ckpt_dir / "ve.safetensors"))
+        load_module_safetensors(ve, ckpt_dir / "ve.safetensors")
         ve.to(device).eval()
 
-        t3 = T3()
-        t3_state = load_file(ckpt_dir / "t3_cfg.safetensors")
-        if "model" in t3_state.keys():
-            t3_state = t3_state["model"][0]
-        t3.load_state_dict(t3_state)
+        t3_config = T3Config()
+        t3_config.text_tokens_dict_size = inspect_t3_text_vocabulary_size(ckpt_dir / "t3_cfg.safetensors")
+        t3 = T3(t3_config)
+        load_module_safetensors(t3, ckpt_dir / "t3_cfg.safetensors")
         t3.to(device).eval()
 
         s3gen = S3Gen()
-        s3gen.load_state_dict(load_file(ckpt_dir / "s3gen.safetensors"), strict=False)
+        load_module_safetensors(s3gen, ckpt_dir / "s3gen.safetensors")
         s3gen.to(device).eval()
 
         tokenizer = EnTokenizer(str(ckpt_dir / "tokenizer.json"))
@@ -164,6 +189,7 @@ class ChatterboxTTS:
         cls,
         device,
         repo_id: str = REPO_ID,
+        revision: str = CHECKPOINT_REVISION,
     ) -> 'ChatterboxTTS':
         """Download model weights from HuggingFace Hub and initialise the
         model."""
@@ -177,19 +203,29 @@ class ChatterboxTTS:
                 )
             device = "cpu"
 
-        for fpath in ["ve.safetensors", "t3_cfg.safetensors", "s3gen.safetensors", "tokenizer.json",
-                      "conds.pt"]:
-            local_path = hf_hub_download(repo_id=repo_id, filename=fpath)
-
-        return cls.from_local(Path(local_path).parent, device)
+        snapshot = download_hugging_face_snapshot(
+            repo_id,
+            revision=revision,
+            allow_patterns=(
+                "ve.safetensors",
+                "t3_cfg.safetensors",
+                "s3gen.safetensors",
+                "tokenizer.json",
+                "conds.pt",
+            ),
+        )
+        return cls.from_local(snapshot, device)
 
     def prepare_conditionals(self, wav_fpath, exaggeration=0.5):
         """Extract speaker and prosody conditioning from a reference audio
         file."""
         # Load reference wav
-        s3gen_ref_wav, _sr = librosa.load(wav_fpath, sr=S3GEN_SR)
-
-        ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
+        s3gen_ref_wav = load_waveform(
+            wav_fpath,
+            target_sample_rate=S3GEN_SR,
+            device=self.device,
+        )
+        ref_16k_wav = resample_waveform(s3gen_ref_wav, S3GEN_SR, S3_SR)
 
         s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
@@ -199,9 +235,15 @@ class ChatterboxTTS:
             s3_tokzr = self.s3gen.tokenizer
             t3_cond_prompt_tokens, _ = s3_tokzr.forward([ref_16k_wav[:self.ENC_COND_LEN]], max_len=plen)
             t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
+        else:
+            t3_cond_prompt_tokens = torch.empty(
+                (1, 0),
+                dtype=torch.long,
+                device=self.device,
+            )
 
         # Voice-encoder speaker embedding
-        ve_embed = torch.from_numpy(self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR))
+        ve_embed = self.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR)
         ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
 
         t3_cond = T3Cond(
@@ -226,8 +268,8 @@ class ChatterboxTTS:
         tensor."""
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
-        else:
-            assert self.conds is not None, "Please `prepare_conditionals` first or specify `audio_prompt_path`"
+        elif self.conds is None:
+            raise ValueError("Call prepare_conditionals() or provide audio_prompt_path.")
 
         # Update exaggeration if needed
         if exaggeration != self.conds.t3.emotion_adv[0, 0, 0]:
@@ -275,6 +317,10 @@ class ChatterboxTTS:
                 speech_tokens=speech_tokens,
                 ref_dict=self.conds.gen,
             )
-            wav = wav.squeeze(0).detach().cpu().numpy()
+            wav = wav.squeeze(0).detach()
             watermarked_wav = self.watermarker.apply_watermark(wav, sample_rate=self.sr)
-        return torch.from_numpy(watermarked_wav).unsqueeze(0)
+        return watermarked_wav.unsqueeze(0)
+
+    def save_pretrained(self, directory: str | Path) -> Path:
+        """Export a complete native artifact that ``from_local`` can reload."""
+        return export_chatterbox_runtime(self, directory)

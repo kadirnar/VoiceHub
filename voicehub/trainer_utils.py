@@ -22,6 +22,7 @@ RNG_STATE_NAME = "rng_state.pth"
 SCALER_STATE_NAME = "scaler.pt"
 TRAINING_RUNTIME_STATE_NAME = "training_runtime.pt"
 TRAINING_RECIPE_NAME = "training_recipe.json"
+OPTIMIZATION_MANIFEST_NAME = "optimization_manifest.json"
 NATIVE_EXPORT_DIR = "native_export"
 CHECKPOINT_MANIFEST_NAME = "checkpoint_manifest.json"
 CHECKPOINT_COMPLETE_NAME = ".complete"
@@ -165,14 +166,8 @@ class EpochRandomSampler:
 
 
 def set_seed(seed: int) -> None:
-    """Seed Python, NumPy, and installed compute backends."""
+    """Seed Python and the native PyTorch compute backend."""
     random.seed(seed)
-    try:
-        numpy = import_module("numpy")
-        numpy.random.seed(seed)
-    except ModuleNotFoundError:
-        pass
-
     try:
         torch = import_module("torch")
     except ModuleNotFoundError:
@@ -303,7 +298,7 @@ def get_scheduler_lambda(
 
 
 def denumpify_detensorize(metrics: dict[str, Any]) -> dict[str, Any]:
-    """Convert scalar tensors and NumPy values into JSON-compatible values."""
+    """Convert scalar tensor-like metric values into JSON-compatible values."""
     normalized = {}
     for key, value in metrics.items():
         if hasattr(value, "item") and callable(value.item):

@@ -13,7 +13,7 @@ from voicehub.inference_configuration import VADInferenceConfig
 
 
 class TransformersVADConfig(VoiceHubConfig):
-    """Configure clip- or frame-classification checkpoint dispatch."""
+    """Configure native Wav2Vec2 clip- or frame-classification dispatch."""
 
     model_type = "vad_transformers"
 
@@ -39,6 +39,8 @@ class TransformersVADConfig(VoiceHubConfig):
         cache_dir: str | Path | None = None,
         local_files_only: bool = False,
         use_safetensors: bool | None = None,
+        checkpoint_filename: str | None = None,
+        torch_dtype: str = "auto",
         model_kwargs: Mapping[str, Any] | None = None,
         processor_kwargs: Mapping[str, Any] | None = None,
         inference_config=None,
@@ -68,6 +70,8 @@ class TransformersVADConfig(VoiceHubConfig):
             cache_dir=cache_dir,
             local_files_only=local_files_only,
             use_safetensors=use_safetensors,
+            checkpoint_filename=checkpoint_filename,
+            torch_dtype=torch_dtype,
             model_kwargs=({} if model_kwargs is None else model_kwargs),
             processor_kwargs=({} if processor_kwargs is None else processor_kwargs),
             **kwargs,
@@ -146,6 +150,8 @@ class TransformersVADConfig(VoiceHubConfig):
             raise ValueError("VAD hop duration cannot exceed the window duration.")
         if not isinstance(self.trust_remote_code, bool):
             raise TypeError("`trust_remote_code` must be a boolean.")
+        if self.trust_remote_code:
+            raise ValueError("Native VoiceHub VAD does not execute remote architecture code.")
         if self.revision is not None:
             if not isinstance(self.revision, str) or not self.revision.strip():
                 raise ValueError("`revision` must be a non-empty string or None.")
@@ -161,6 +167,22 @@ class TransformersVADConfig(VoiceHubConfig):
                 bool,
         ):
             raise TypeError("`use_safetensors` must be a boolean or None.")
+        if self.use_safetensors is False:
+            raise ValueError("Native VoiceHub VAD requires a Safetensors checkpoint.")
+        if self.checkpoint_filename is not None:
+            if (not isinstance(self.checkpoint_filename, str) or not self.checkpoint_filename.strip()):
+                raise ValueError("`checkpoint_filename` must be a non-empty string or None.")
+            self.checkpoint_filename = self.checkpoint_filename.strip()
+        if not isinstance(self.torch_dtype, str):
+            raise TypeError("`torch_dtype` must be a string.")
+        self.torch_dtype = self.torch_dtype.strip().lower()
+        if self.torch_dtype not in {
+                "auto",
+                "bfloat16",
+                "float16",
+                "float32",
+        }:
+            raise ValueError("`torch_dtype` must be auto, float32, float16, or bfloat16.")
 
         self.model_kwargs = self._copy_mapping(
             self.model_kwargs,
@@ -181,6 +203,23 @@ class TransformersVADConfig(VoiceHubConfig):
             raise ValueError(f"`model_kwargs` cannot override provider-owned option(s): {names}.")
         if "trust_remote_code" in self.processor_kwargs:
             raise ValueError("`processor_kwargs` cannot override `trust_remote_code`.")
+        if self.config_name_or_path is not None:
+            raise ValueError(
+                "Native VoiceHub VAD resolves one coherent artifact set; "
+                "`config_name_or_path` overrides are unsupported.")
+        if self.processor_name_or_path is not None:
+            raise ValueError(
+                "Native VoiceHub VAD resolves one coherent artifact set; "
+                "`processor_name_or_path` overrides are unsupported.")
+        if self.model_kwargs:
+            names = ", ".join(sorted(self.model_kwargs))
+            raise ValueError(
+                "Native VoiceHub VAD does not accept external model loader "
+                f"options: {names}.")
+        if self.processor_kwargs:
+            names = ", ".join(sorted(self.processor_kwargs))
+            raise ValueError("Native VoiceHub VAD does not accept external processor "
+                             f"options: {names}.")
 
     def to_dict(self) -> dict[str, Any]:
         """Validate mutable overrides before serializing the provider."""

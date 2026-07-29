@@ -4,7 +4,6 @@ from typing import Any, Callable, List, Optional, Tuple, Type
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange, reduce
 from torch import Tensor
 
 from .utils import *
@@ -73,7 +72,7 @@ def clip(x: Tensor, dynamic_threshold: float = 0.0):
     else:
         # Dynamic thresholding
         # Find dynamic threshold quantile for each batch
-        x_flat = rearrange(x, "b ... -> b (...)")
+        x_flat = x.flatten(1)
         scale = torch.quantile(x_flat.abs(), dynamic_threshold, dim=-1)
         # Clamp to a min of 1.0
         scale.clamp_(min=1.0)
@@ -147,7 +146,7 @@ class VDiffusion(Diffusion):
 
         # Sample amount of noise to add for each batch element
         sigmas = self.sigma_distribution(num_samples=batch_size, device=device)
-        sigmas_padded = rearrange(sigmas, "b -> b 1 1")
+        sigmas_padded = sigmas[:, None, None]
 
         # Get noise
         noise = default(noise, lambda: torch.randn_like(x))
@@ -184,7 +183,7 @@ class KDiffusion(Diffusion):
     def get_scale_weights(self, sigmas: Tensor) -> Tuple[Tensor, ...]:
         sigma_data = self.sigma_data
         c_noise = torch.log(sigmas) * 0.25
-        sigmas = rearrange(sigmas, "b -> b 1 1")
+        sigmas = sigmas[:, None, None]
         c_skip = (sigma_data ** 2) / (sigmas ** 2 + sigma_data ** 2)
         c_out = sigmas * sigma_data * (sigma_data ** 2 + sigmas ** 2) ** -0.5
         c_in = (sigmas ** 2 + sigma_data ** 2) ** -0.5
@@ -213,11 +212,9 @@ class KDiffusion(Diffusion):
 
     def forward(self, x: Tensor, noise: Tensor = None, **kwargs) -> Tensor:
         batch_size, device = x.shape[0], x.device
-        from einops import rearrange, reduce
-
         # Sample amount of noise to add for each batch element
         sigmas = self.sigma_distribution(num_samples=batch_size, device=device)
-        sigmas_padded = rearrange(sigmas, "b -> b 1 1")
+        sigmas_padded = sigmas[:, None, None]
 
         # Add noise to input
         noise = default(noise, lambda: torch.randn_like(x))
@@ -228,7 +225,7 @@ class KDiffusion(Diffusion):
 
         # Compute weighted loss
         losses = F.mse_loss(x_denoised, x, reduction="none")
-        losses = reduce(losses, "b ... -> b", "mean")
+        losses = losses.flatten(1).mean(dim=1)
         losses = losses * self.loss_weight(sigmas)
         loss = losses.mean()
         return loss
@@ -245,7 +242,7 @@ class VKDiffusion(Diffusion):
 
     def get_scale_weights(self, sigmas: Tensor) -> Tuple[Tensor, ...]:
         sigma_data = 1.0
-        sigmas = rearrange(sigmas, "b -> b 1 1")
+        sigmas = sigmas[:, None, None]
         c_skip = (sigma_data ** 2) / (sigmas ** 2 + sigma_data ** 2)
         c_out = -sigmas * sigma_data * (sigma_data ** 2 + sigmas ** 2) ** -0.5
         c_in = (sigmas ** 2 + sigma_data ** 2) ** -0.5
@@ -278,7 +275,7 @@ class VKDiffusion(Diffusion):
 
         # Sample amount of noise to add for each batch element
         sigmas = self.sigma_distribution(num_samples=batch_size, device=device)
-        sigmas_padded = rearrange(sigmas, "b -> b 1 1")
+        sigmas_padded = sigmas[:, None, None]
 
         # Add noise to input
         noise = default(noise, lambda: torch.randn_like(x))

@@ -1,5 +1,31 @@
-"""MOSS-TTS model family."""
+"""MOSS-TTS public provider with dependency-light lazy exports."""
 
-from voicehub.models.mosstts.inference import MossTTSConfig, MossTTSForTextToSpeech
+from __future__ import annotations
 
-__all__ = ["MossTTSConfig", "MossTTSForTextToSpeech"]
+from importlib import import_module
+
+_EXPORTS = {
+    "MossTTS": "voicehub.models.mosstts.inference",
+    "MossTTSConfig": "voicehub.models.mosstts.inference",
+    "MossTTSForTextToSpeech": "voicehub.models.mosstts.inference",
+    "MossPreencodedDataset": "voicehub.architectures.mosstts.training",
+    "MossTTSDataset": "voicehub.architectures.mosstts.training",
+    "NativeMossAudioCodec": "voicehub.architectures.mosstts.codec",
+    "NativeMossTTSTrainingAdapter": "voicehub.architectures.mosstts.training",
+}
+
+__all__ = sorted(_EXPORTS)
+
+
+def __getattr__(name: str):
+    try:
+        module_name = _EXPORTS[name]
+    except KeyError:
+        raise AttributeError(name) from None
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted((*globals(), *_EXPORTS))

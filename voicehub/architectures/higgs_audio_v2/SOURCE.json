@@ -1,0 +1,54 @@
+{
+  "architecture": "higgs_audio_v2",
+  "audit_date": "2026-07-28",
+  "implementation": "voicehub-native",
+  "source": {
+    "repository": "https://github.com/boson-ai/higgs-audio",
+    "revision": "05a145bb490501b534563bf51bf2f7aa2326b271",
+    "license": "Apache-2.0"
+  },
+  "reference_runtime": {
+    "repository": "https://github.com/huggingface/transformers",
+    "revision": "af71155683b4d34dd92d8f037392fa6bf334035e",
+    "license": "Apache-2.0"
+  },
+  "checkpoint": {
+    "repository": "bosonai/higgs-tts-2-3b-base",
+    "revision": "d80c511612b3040ff2877ce3d408747df1739f11",
+    "filename": "model.safetensors",
+    "size": 11542613696,
+    "sha256": "9c896b019ec1a4fc950218e32797c30870d36ce1cd76f45b35de46495764a204",
+    "dtype": "BF16",
+    "tensor_count": 397,
+    "parameter_count": 5771283456,
+    "header_fingerprint": "3c94f5c8d9e1b52d5a280119f35cbd41d4c6aff41124dafac3bf065858ecbb72",
+    "license": "Boson Higgs Audio 2 Community License"
+  },
+  "audio_tokenizer": {
+    "repository": "bosonai/higgs-audio-v2-tokenizer",
+    "revision": "403fbacf2f60caaa102f893fdfabb694619b2417",
+    "filename": "model.safetensors",
+    "size": 805665628,
+    "sha256": "fe7c5e8785e0a05833e1bfc3e002ec7f55af21e306b2e7154a448c1f54ccfb0d",
+    "dtype": "F32",
+    "tensor_count": 527,
+    "parameter_count": 201400553,
+    "header_fingerprint": "a0a71d87bb2fad302425a582270371ccfbe3c2c158c146f96002cd98ee980da5",
+    "sample_rate": 24000,
+    "frame_rate": 25,
+    "num_quantizers": 8,
+    "license": "Boson Higgs Audio 2 Community License"
+  },
+  "training": {
+    "full_sft": true,
+    "objective": "sum of eight delayed-codebook causal cross-entropies plus optional text causal cross-entropy",
+    "codec_policy": "The published audio tokenizer remains frozen and is used for preprocessing and waveform decode.",
+    "published_recipe": false,
+    "scope_note": "The model forward objective is source-authored; VoiceHub owns the optimizer, batching, checkpoint, and distributed-training orchestration."
+  },
+  "limits": [
+    "The checkpoint license is not Apache-2.0 and must be reviewed separately from the native implementation code.",
+    "The official source does not publish a complete fine-tuning recipe, optimizer schedule, or accuracy claim.",
+    "Native inference implements the released greedy/sampling delay pattern and repetition-aware sampling; CUDA graph capture is intentionally outside the correctness boundary."
+  ]
+}

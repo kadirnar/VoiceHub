@@ -1,0 +1,29 @@
+Higgs Audio v2 native architecture attribution
+==============================================
+
+The architecture, chat protocol, delayed-codebook generation, and training
+objective in this directory were independently adapted from:
+
+  Boson AI Higgs Audio
+  https://github.com/boson-ai/higgs-audio
+  revision 05a145bb490501b534563bf51bf2f7aa2326b271
+  License: Apache License 2.0
+
+The model and audio-tokenizer graph definitions were also audited against:
+
+  Hugging Face Transformers
+  https://github.com/huggingface/transformers
+  revision af71155683b4d34dd92d8f037392fa6bf334035e
+  Copyright 2018-2026 The Hugging Face team
+  License: Apache License 2.0
+
+Apache License 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+
+The referenced Boson model and tokenizer weights are separate artifacts. They
+are distributed under the Boson Higgs Audio 2 Community License, not under
+Apache-2.0. VoiceHub does not redistribute those weights. Users must review
+and comply with the checkpoint license published with each Boson repository.
+
+Immutable source, checkpoint, artifact, and license identifiers are recorded
+in SOURCE.json.

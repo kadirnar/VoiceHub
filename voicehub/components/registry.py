@@ -28,6 +28,13 @@ _COMPONENT_SPECS = (
         "MIT",
     ),
     ComponentSpec(
+        "encodec",
+        "audio-codec",
+        "voicehub.components.audio.codecs.encodec",
+        "https://github.com/facebookresearch/encodec",
+        "MIT",
+    ),
+    ComponentSpec(
         "vocos",
         "vocoder",
         "voicehub.components.audio.vocoders.vocos",
@@ -55,6 +62,7 @@ COMPONENT_REGISTRY: Mapping[str,
                                                                for spec in _COMPONENT_SPECS})
 
 MODEL_COMPONENTS: Mapping[str, tuple[str, ...]] = MappingProxyType({
+    "bark": ("encodec", ),
     "chatterbox": ("conformer", ),
     "cosyvoice": ("conformer", ),
     "dia": ("dac", ),
@@ -63,6 +71,7 @@ MODEL_COMPONENTS: Mapping[str, tuple[str, ...]] = MappingProxyType({
     "openvoice": ("wavmark", ),
     "outetts": ("dac", ),
     "parlertts": ("dac", ),
+    "zonos": ("dac", ),
     "zonos2": ("dac", ),
 })
 

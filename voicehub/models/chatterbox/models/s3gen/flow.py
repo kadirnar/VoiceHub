@@ -219,6 +219,51 @@ class CausalMaskedDiffWithXvec(torch.nn.Module):
         # FIXME: this was missing - just putting it in as false
         self.fp16 = False
 
+    def compute_loss(
+        self,
+        batch: dict,
+        device: torch.device,
+    ) -> Dict[str, Optional[torch.Tensor]]:
+        """Compute the source-published causal S3Gen flow-matching loss.
+
+        ``speech_feat`` follows the released ``[batch, 80, frames]``
+        contract; speaker embeddings and S3 speech tokens are expected
+        to be precomputed by the frozen frontends.
+        """
+        token = batch["speech_token"].to(device)
+        token_len = batch["speech_token_len"].to(device)
+        feat = batch["speech_feat"].to(device)
+        feat_len = batch["speech_feat_len"].to(device)
+        embedding = batch["embedding"].to(device)
+        if feat.ndim != 3 or feat.shape[1] != self.output_size:
+            raise ValueError(f"speech_feat must have shape [batch, {self.output_size}, frames]")
+
+        embedding = F.normalize(embedding, dim=1)
+        embedding = self.spk_embed_affine_layer(embedding)
+        token_mask = (~make_pad_mask(token_len)).float().unsqueeze(-1).to(device)
+        token = self.input_embedding(torch.clamp(token, min=0)) * token_mask
+
+        hidden_states, hidden_mask = self.encoder(token, token_len)
+        hidden_states = self.encoder_proj(hidden_states)
+
+        conditions = torch.zeros_like(feat)
+        for batch_index, length in enumerate(feat_len):
+            if random.random() < 0.5:
+                continue
+            prompt_frames = random.randint(0, int(0.3 * int(length.item())))
+            conditions[batch_index, :, :prompt_frames] = feat[batch_index, :, :prompt_frames]
+
+        hidden_lengths = hidden_mask.sum(dim=-1).squeeze(dim=1)
+        mask = (~make_pad_mask(hidden_lengths)).to(hidden_states)
+        loss, _ = self.decoder.compute_loss(
+            feat.contiguous(),
+            mask.unsqueeze(1),
+            hidden_states.transpose(1, 2).contiguous(),
+            embedding,
+            cond=conditions,
+        )
+        return {"loss": loss}
+
     @torch.inference_mode()
     def inference(
             self, token, token_len, prompt_token, prompt_token_len, prompt_feat, prompt_feat_len, embedding,
