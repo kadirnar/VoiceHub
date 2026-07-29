@@ -1,15 +1,15 @@
 """Differentiable execution of allowlisted ONNX graphs with PyTorch.
 
-This is not a general ONNX runtime. It is a small, auditable execution layer
-for reviewed speech-model artifacts whose exact graph and digest are validated
-by a VoiceHub architecture adapter. Operators are implemented with PyTorch, so
-floating-point initializers remain ordinary parameters and gradients can flow
-through the imported graph.
+This is not a general ONNX runtime. It is a small, auditable execution
+layer for reviewed speech-model artifacts whose exact graph and digest
+are validated by a VoiceHub architecture adapter. Operators are
+implemented with PyTorch, so floating-point initializers remain ordinary
+parameters and gradients can flow through the imported graph.
 
 The runtime intentionally rejects custom domains, control-flow graphs,
-external tensor data, and operators outside its explicit allowlist. Those
-constraints keep imported model behavior reviewable and prevent a checkpoint
-format from becoming an arbitrary-code extension mechanism.
+external tensor data, and operators outside its explicit allowlist.
+Those constraints keep imported model behavior reviewable and prevent a
+checkpoint format from becoming an arbitrary-code extension mechanism.
 """
 
 from __future__ import annotations
@@ -24,13 +24,7 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
-from voicehub.checkpointing.onnx import (
-    ONNXAttribute,
-    ONNXModel,
-    ONNXNode,
-    ONNXTensor,
-    read_onnx_model,
-)
+from voicehub.checkpointing.onnx import ONNXAttribute, ONNXModel, ONNXNode, ONNXTensor, read_onnx_model
 
 _STANDARD_DOMAINS = frozenset({"", "ai.onnx"})
 _FLOAT_DTYPES = frozenset({
@@ -131,25 +125,21 @@ def _integer_attribute(
     if isinstance(value, bool) or not isinstance(value, int):
         raise ONNXExecutionError(
             f"Node {node.name or node.op_type!r} attribute {name!r} "
-            "must be an integer."
-        )
+            "must be an integer.")
     return value
 
 
 def _integers_attribute(
-    node: ONNXNode,
-    name: str,
-    default: tuple[int, ...] = (),
+        node: ONNXNode,
+        name: str,
+        default: tuple[int, ...] = (),
 ) -> tuple[int, ...]:
     value = _attribute(node, name, default)
-    if not isinstance(value, tuple) or any(
-        isinstance(item, bool) or not isinstance(item, int)
-        for item in value
-    ):
+    if not isinstance(value, tuple) or any(isinstance(item, bool) or not isinstance(item, int)
+                                           for item in value):
         raise ONNXExecutionError(
             f"Node {node.name or node.op_type!r} attribute {name!r} "
-            "must be an integer sequence."
-        )
+            "must be an integer sequence.")
     return value
 
 
@@ -162,14 +152,11 @@ def _float_attribute(
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ONNXExecutionError(
             f"Node {node.name or node.op_type!r} attribute {name!r} "
-            "must be numeric."
-        )
+            "must be numeric.")
     result = float(value)
     if not math.isfinite(result):
-        raise ONNXExecutionError(
-            f"Node {node.name or node.op_type!r} attribute {name!r} "
-            "must be finite."
-        )
+        raise ONNXExecutionError(f"Node {node.name or node.op_type!r} attribute {name!r} "
+                                 "must be finite.")
     return result
 
 
@@ -182,15 +169,13 @@ def _string_attribute(
     if not isinstance(value, bytes):
         raise ONNXExecutionError(
             f"Node {node.name or node.op_type!r} attribute {name!r} "
-            "must be a byte string."
-        )
+            "must be a byte string.")
     try:
         return value.decode("utf-8")
     except UnicodeDecodeError as error:
         raise ONNXExecutionError(
             f"Node {node.name or node.op_type!r} attribute {name!r} "
-            "is not UTF-8."
-        ) from error
+            "is not UTF-8.") from error
 
 
 def _tensor_values(value: Tensor, *, name: str) -> tuple[int, ...]:
@@ -211,17 +196,13 @@ def _optional_tensor(
 def _normalize_axis(axis: int, rank: int, *, name: str) -> int:
     normalized = axis + rank if axis < 0 else axis
     if not 0 <= normalized < rank:
-        raise ONNXExecutionError(
-            f"{name} axis {axis} is invalid for rank {rank}."
-        )
+        raise ONNXExecutionError(f"{name} axis {axis} is invalid for rank {rank}.")
     return normalized
 
 
 def _constant_tensor(attribute: ONNXAttribute, *, node: ONNXNode) -> Tensor:
     if not isinstance(attribute.value, ONNXTensor):
-        raise UnsupportedONNXGraphError(
-            f"Constant node {node.name!r} must contain a tensor value."
-        )
+        raise UnsupportedONNXGraphError(f"Constant node {node.name!r} must contain a tensor value.")
     return attribute.value.to_torch()
 
 
@@ -286,13 +267,10 @@ class NativeONNXGraph(nn.Module):
                 attribute = node.attributes["value"]
             except KeyError:
                 raise UnsupportedONNXGraphError(
-                    f"Constant node {_node_label(node)!r} has no tensor value."
-                ) from None
+                    f"Constant node {_node_label(node)!r} has no tensor value.") from None
             tensor = _constant_tensor(attribute, node=node)
             if len(node.outputs) != 1 or not node.outputs[0]:
-                raise UnsupportedONNXGraphError(
-                    f"Constant node {_node_label(node)!r} must have one output."
-                )
+                raise UnsupportedONNXGraphError(f"Constant node {_node_label(node)!r} must have one output.")
             slot = f"constant_{index:06d}"
             self.register_buffer(slot, tensor, persistent=False)
             constant_slots[node.outputs[0]] = slot
@@ -301,14 +279,9 @@ class NativeONNXGraph(nn.Module):
         self._trainable_slots = frozenset(trainable_slots)
         self._nodes = tuple(graph.nodes)
         self._input_names = tuple(
-            value.name
-            for value in graph.inputs
-            if value.name not in graph.initializers
-        )
+            value.name for value in graph.inputs if value.name not in graph.initializers)
         self._output_names = tuple(value.name for value in graph.outputs)
-        self._persistent_names = frozenset(
-            (*self._input_names, *initializer_names, *self._output_names)
-        )
+        self._persistent_names = frozenset((*self._input_names, *initializer_names, *self._output_names))
         self._use_counts = self._build_use_counts(self._nodes)
         self._initializer_names = initializer_names
 
@@ -319,7 +292,7 @@ class NativeONNXGraph(nn.Module):
         *,
         trainable: bool | Iterable[str] = True,
         max_file_bytes: int = 2 * 1024 * 1024 * 1024,
-    ) -> "NativeONNXGraph":
+    ) -> NativeONNXGraph:
         """Read and materialize an inline-data ONNX graph."""
         model = read_onnx_model(path, max_file_bytes=max_file_bytes)
         return cls(model, trainable=trainable)
@@ -329,70 +302,43 @@ class NativeONNXGraph(nn.Module):
         if not model.graph.outputs:
             raise UnsupportedONNXGraphError("ONNX graph has no outputs.")
         opsets = dict(model.opsets)
-        unsupported_domains = {
-            domain
-            for domain in opsets
-            if domain not in _STANDARD_DOMAINS
-        }
+        unsupported_domains = {domain for domain in opsets if domain not in _STANDARD_DOMAINS}
         unsupported_domains.update(
-            node.domain
-            for node in model.graph.nodes
-            if node.domain not in _STANDARD_DOMAINS
-        )
+            node.domain for node in model.graph.nodes if node.domain not in _STANDARD_DOMAINS)
         if unsupported_domains:
             names = ", ".join(sorted(unsupported_domains))
-            raise UnsupportedONNXGraphError(
-                f"Custom ONNX domains are unsupported: {names}."
-            )
+            raise UnsupportedONNXGraphError(f"Custom ONNX domains are unsupported: {names}.")
         default_opset = opsets.get("", opsets.get("ai.onnx", 0))
         if not 13 <= default_opset <= 19:
             raise UnsupportedONNXGraphError(
                 "Native ONNX execution supports standard opsets 13 through "
-                f"19; found {default_opset}."
-            )
-        unsupported_ops = sorted({
-            node.op_type
-            for node in model.graph.nodes
-            if node.op_type not in _SUPPORTED_OPERATORS
-        })
+                f"19; found {default_opset}.")
+        unsupported_ops = sorted(
+            {node.op_type
+             for node in model.graph.nodes if node.op_type not in _SUPPORTED_OPERATORS})
         if unsupported_ops:
             raise UnsupportedONNXGraphError(
                 "Unsupported ONNX operator(s): "
-                f"{', '.join(unsupported_ops)}."
-            )
-        available = {
-            value.name for value in model.graph.inputs
-        } | set(model.graph.initializers)
+                f"{', '.join(unsupported_ops)}.")
+        available = {value.name for value in model.graph.inputs} | set(model.graph.initializers)
         produced = set(available)
         for node in model.graph.nodes:
-            missing = [
-                name
-                for name in node.inputs
-                if name and name not in produced
-            ]
+            missing = [name for name in node.inputs if name and name not in produced]
             if missing:
                 raise UnsupportedONNXGraphError(
                     f"Node {_node_label(node)!r} reads unavailable value(s): "
-                    f"{', '.join(missing)}."
-                )
+                    f"{', '.join(missing)}.")
             for output in node.outputs:
                 if not output:
                     continue
                 if output in produced:
-                    raise UnsupportedONNXGraphError(
-                        f"ONNX value {output!r} is produced more than once."
-                    )
+                    raise UnsupportedONNXGraphError(f"ONNX value {output!r} is produced more than once.")
                 produced.add(output)
-        missing_outputs = [
-            value.name
-            for value in model.graph.outputs
-            if value.name not in produced
-        ]
+        missing_outputs = [value.name for value in model.graph.outputs if value.name not in produced]
         if missing_outputs:
             raise UnsupportedONNXGraphError(
                 "ONNX graph output(s) are unavailable: "
-                f"{', '.join(missing_outputs)}."
-            )
+                f"{', '.join(missing_outputs)}.")
 
     @staticmethod
     def _resolve_trainable_names(
@@ -402,46 +348,32 @@ class NativeONNXGraph(nn.Module):
     ) -> frozenset[str]:
         floating = {
             name
-            for name, value in model.graph.initializers.items()
-            if value.data_type in {1, 10, 11, 16}
+            for name, value in model.graph.initializers.items() if value.data_type in {1, 10, 11, 16}
         }
         batch_norm_statistics = {
             name
-            for node in model.graph.nodes
-            if node.op_type == "BatchNormalization"
-            for name in node.inputs[3:5]
+            for node in model.graph.nodes if node.op_type == "BatchNormalization" for name in node.inputs[3:5]
             if name
         }
         if isinstance(trainable, bool):
-            return (
-                frozenset(floating - batch_norm_statistics)
-                if trainable
-                else frozenset()
-            )
+            return (frozenset(floating - batch_norm_statistics) if trainable else frozenset())
         names = tuple(trainable)
         if any(not isinstance(name, str) or not name for name in names):
-            raise TypeError(
-                "`trainable` must contain non-empty initializer names."
-            )
+            raise TypeError("`trainable` must contain non-empty initializer names.")
         if len(names) != len(set(names)):
             raise ValueError("`trainable` cannot contain duplicate names.")
         unknown = sorted(set(names) - set(initializer_names))
         if unknown:
-            raise ValueError(
-                f"Unknown trainable initializer(s): {', '.join(unknown)}."
-            )
+            raise ValueError(f"Unknown trainable initializer(s): {', '.join(unknown)}.")
         non_floating = sorted(set(names) - floating)
         if non_floating:
             raise ValueError(
                 "Integer or boolean initializers cannot be trainable: "
-                f"{', '.join(non_floating)}."
-            )
+                f"{', '.join(non_floating)}.")
         return frozenset(names)
 
     @staticmethod
-    def _build_use_counts(
-        nodes: tuple[ONNXNode, ...],
-    ) -> Mapping[str, int]:
+    def _build_use_counts(nodes: tuple[ONNXNode, ...], ) -> Mapping[str, int]:
         counts: dict[str, int] = {}
         for node in nodes:
             for name in node.inputs:
@@ -463,11 +395,7 @@ class NativeONNXGraph(nn.Module):
 
     @property
     def trainable_initializer_names(self) -> tuple[str, ...]:
-        return tuple(
-            name
-            for name, slot in self._initializer_slots.items()
-            if slot in self._trainable_slots
-        )
+        return tuple(name for name, slot in self._initializer_slots.items() if slot in self._trainable_slots)
 
     def initializer_tensor(self, name: str) -> Tensor:
         """Return one initializer by its original ONNX name."""
@@ -477,21 +405,13 @@ class NativeONNXGraph(nn.Module):
             raise KeyError(f"Unknown ONNX initializer {name!r}.") from None
         return getattr(self, slot)
 
-    def named_onnx_initializers(
-        self,
-    ) -> tuple[tuple[str, Tensor], ...]:
+    def named_onnx_initializers(self, ) -> tuple[tuple[str, Tensor], ...]:
         """Return stable original names paired with live tensors."""
-        return tuple(
-            (name, getattr(self, slot))
-            for name, slot in self._initializer_slots.items()
-        )
+        return tuple((name, getattr(self, slot)) for name, slot in self._initializer_slots.items())
 
     def onnx_state_dict(self) -> dict[str, Tensor]:
         """Return a detached original-name state dictionary."""
-        return {
-            name: tensor.detach().clone()
-            for name, tensor in self.named_onnx_initializers()
-        }
+        return {name: tensor.detach().clone() for name, tensor in self.named_onnx_initializers()}
 
     def load_onnx_state_dict(
         self,
@@ -509,8 +429,7 @@ class NativeONNXGraph(nn.Module):
         if strict and (missing or unexpected):
             raise ValueError(
                 f"ONNX state mismatch: {len(missing)} missing, "
-                f"{len(unexpected)} unexpected."
-            )
+                f"{len(unexpected)} unexpected.")
         with torch.no_grad():
             for name in sorted(expected & provided):
                 source = state[name]
@@ -520,11 +439,8 @@ class NativeONNXGraph(nn.Module):
                 if source.shape != target.shape:
                     raise ValueError(
                         f"State tensor {name!r} has shape "
-                        f"{tuple(source.shape)}; expected {tuple(target.shape)}."
-                    )
-                target.copy_(
-                    source.to(device=target.device, dtype=target.dtype)
-                )
+                        f"{tuple(source.shape)}; expected {tuple(target.shape)}.")
+                target.copy_(source.to(device=target.device, dtype=target.dtype))
         return missing, unexpected
 
     def _environment(
@@ -543,23 +459,15 @@ class NativeONNXGraph(nn.Module):
                 details.append(f"missing {', '.join(missing)}")
             if unexpected:
                 details.append(f"unexpected {', '.join(unexpected)}")
-            raise ONNXExecutionError(
-                f"Invalid ONNX inputs ({'; '.join(details)})."
-            )
+            raise ONNXExecutionError(f"Invalid ONNX inputs ({'; '.join(details)}).")
         environment: dict[str, Tensor] = {}
         for name in self._input_names:
             value = inputs[name]
             if not isinstance(value, Tensor):
                 raise TypeError(f"ONNX input {name!r} must be a tensor.")
             environment[name] = value
-        environment.update({
-            name: getattr(self, slot)
-            for name, slot in self._initializer_slots.items()
-        })
-        environment.update({
-            name: getattr(self, slot)
-            for name, slot in self._constant_slots.items()
-        })
+        environment.update({name: getattr(self, slot) for name, slot in self._initializer_slots.items()})
+        environment.update({name: getattr(self, slot) for name, slot in self._constant_slots.items()})
         return environment
 
     def run(self, inputs: Mapping[str, Tensor]) -> dict[str, Tensor]:
@@ -569,10 +477,7 @@ class NativeONNXGraph(nn.Module):
         for node in self._nodes:
             if node.op_type == "Constant":
                 continue
-            values = tuple(
-                None if not name else environment[name]
-                for name in node.inputs
-            )
+            values = tuple(None if not name else environment[name] for name in node.inputs)
             try:
                 outputs = self._execute(node, values)
             except NativeONNXError:
@@ -580,35 +485,25 @@ class NativeONNXGraph(nn.Module):
             except Exception as error:
                 raise ONNXExecutionError(
                     f"Failed ONNX node {_node_label(node)!r} "
-                    f"({node.op_type}): {error}."
-                ) from error
+                    f"({node.op_type}): {error}.") from error
             if len(outputs) != len(node.outputs):
                 raise ONNXExecutionError(
                     f"Node {_node_label(node)!r} produced {len(outputs)} "
-                    f"value(s); graph declares {len(node.outputs)}."
-                )
+                    f"value(s); graph declares {len(node.outputs)}.")
             for name, value in zip(node.outputs, outputs):
                 if not name:
                     continue
                 if not isinstance(value, Tensor):
-                    raise ONNXExecutionError(
-                        f"Node {_node_label(node)!r} returned a non-tensor."
-                    )
+                    raise ONNXExecutionError(f"Node {_node_label(node)!r} returned a non-tensor.")
                 environment[name] = value
             for name in node.inputs:
                 if not name or name not in remaining_uses:
                     continue
                 remaining_uses[name] -= 1
-                if (
-                    remaining_uses[name] == 0
-                    and name not in self._persistent_names
-                    and name not in self._constant_slots
-                ):
+                if (remaining_uses[name] == 0 and name not in self._persistent_names and
+                        name not in self._constant_slots):
                     environment.pop(name, None)
-        return {
-            name: environment[name]
-            for name in self._output_names
-        }
+        return {name: environment[name] for name in self._output_names}
 
     def forward(
         self,
@@ -632,11 +527,9 @@ class NativeONNXGraph(nn.Module):
     ) -> tuple[Tensor, ...]:
         operation = getattr(self, f"_op_{node.op_type}", None)
         if operation is None:
-            raise UnsupportedONNXGraphError(
-                f"Operator {node.op_type!r} is not implemented."
-            )
+            raise UnsupportedONNXGraphError(f"Operator {node.op_type!r} is not implemented.")
         result = operation(node, values)
-        return result if isinstance(result, tuple) else (result,)
+        return result if isinstance(result, tuple) else (result, )
 
     def _op_Add(
         self,
@@ -811,30 +704,27 @@ class NativeONNXGraph(nn.Module):
         if spatial_rank not in {1, 2, 3}:
             raise ONNXExecutionError(
                 f"Conv supports one to three spatial dimensions, found "
-                f"{spatial_rank}."
-            )
+                f"{spatial_rank}.")
         strides = _integers_attribute(
             node,
             "strides",
-            (1,) * spatial_rank,
+            (1, ) * spatial_rank,
         )
         dilations = _integers_attribute(
             node,
             "dilations",
-            (1,) * spatial_rank,
+            (1, ) * spatial_rank,
         )
         pads = _integers_attribute(
             node,
             "pads",
-            (0,) * (2 * spatial_rank),
+            (0, ) * (2 * spatial_rank),
         )
         if len(pads) != 2 * spatial_rank:
             raise ONNXExecutionError("Conv `pads` has the wrong rank.")
         if any(pads):
             pytorch_padding = []
-            for begin, end in reversed(
-                tuple(zip(pads[:spatial_rank], pads[spatial_rank:]))
-            ):
+            for begin, end in reversed(tuple(zip(pads[:spatial_rank], pads[spatial_rank:]))):
                 pytorch_padding.extend((begin, end))
             data = functional.pad(data, tuple(pytorch_padding))
         group = _integer_attribute(node, "group", 1)
@@ -862,8 +752,7 @@ class NativeONNXGraph(nn.Module):
             raise UnsupportedONNXGraphError(
                 "ONNX BatchNormalization training mode is unsupported; "
                 "VoiceHub trains affine parameters against fixed published "
-                "running statistics."
-            )
+                "running statistics.")
         data, scale, bias, running_mean, running_variance = values
         return functional.batch_norm(
             data,
@@ -904,9 +793,7 @@ class NativeONNXGraph(nn.Module):
             dim=dimensions,
             keepdim=True,
         )
-        inverse_std = (
-            variance + _float_attribute(node, "epsilon", 1.0e-5)
-        ).rsqrt()
+        inverse_std = (variance + _float_attribute(node, "epsilon", 1.0e-5)).rsqrt()
         outputs = (normalized, mean, inverse_std)
         return outputs[:len(node.outputs)]
 
@@ -939,18 +826,14 @@ class NativeONNXGraph(nn.Module):
         data = values[0]
         minimum = _optional_tensor(values, 1)
         maximum = _optional_tensor(values, 2)
-        minimum_value = (
-            None if minimum is None else minimum.to(
-                device=data.device,
-                dtype=data.dtype,
-            )
-        )
-        maximum_value = (
-            None if maximum is None else maximum.to(
-                device=data.device,
-                dtype=data.dtype,
-            )
-        )
+        minimum_value = (None if minimum is None else minimum.to(
+            device=data.device,
+            dtype=data.dtype,
+        ))
+        maximum_value = (None if maximum is None else maximum.to(
+            device=data.device,
+            dtype=data.dtype,
+        ))
         if minimum_value is not None:
             data = torch.maximum(data, minimum_value)
         if maximum_value is not None:
@@ -966,9 +849,7 @@ class NativeONNXGraph(nn.Module):
         try:
             dtype = _ONNX_DTYPES[data_type]
         except KeyError:
-            raise UnsupportedONNXGraphError(
-                f"Cast target dtype {data_type} is unsupported."
-            ) from None
+            raise UnsupportedONNXGraphError(f"Cast target dtype {data_type} is unsupported.") from None
         return values[0].to(dtype=dtype)
 
     def _op_Shape(
@@ -999,8 +880,7 @@ class NativeONNXGraph(nn.Module):
                     if index >= data.ndim:
                         raise ONNXExecutionError(
                             "Reshape zero dimension cannot copy an absent "
-                            "input dimension."
-                        )
+                            "input dimension.")
                     shape[index] = data.shape[index]
         return data.reshape(tuple(shape))
 
@@ -1016,9 +896,7 @@ class NativeONNXGraph(nn.Module):
             tuple(reversed(range(data.ndim))),
         )
         if len(permutation) != data.ndim:
-            raise ONNXExecutionError(
-                "Transpose permutation does not match the input rank."
-            )
+            raise ONNXExecutionError("Transpose permutation does not match the input rank.")
         return data.permute(permutation)
 
     def _op_Concat(
@@ -1044,10 +922,7 @@ class NativeONNXGraph(nn.Module):
         data, axes_tensor = values
         axes = _tensor_values(axes_tensor, name="Unsqueeze axes")
         output_rank = data.ndim + len(axes)
-        normalized = sorted(
-            _normalize_axis(axis, output_rank, name="Unsqueeze")
-            for axis in axes
-        )
+        normalized = sorted(_normalize_axis(axis, output_rank, name="Unsqueeze") for axis in axes)
         if len(normalized) != len(set(normalized)):
             raise ONNXExecutionError("Unsqueeze axes cannot repeat.")
         result = data
@@ -1066,10 +941,7 @@ class NativeONNXGraph(nn.Module):
             return data.squeeze()
         axes = _tensor_values(axes_tensor, name="Squeeze axes")
         normalized = sorted(
-            (
-                _normalize_axis(axis, data.ndim, name="Squeeze")
-                for axis in axes
-            ),
+            (_normalize_axis(axis, data.ndim, name="Squeeze") for axis in axes),
             reverse=True,
         )
         result = data
@@ -1077,8 +949,7 @@ class NativeONNXGraph(nn.Module):
             if result.shape[axis] != 1:
                 raise ONNXExecutionError(
                     f"Cannot squeeze dimension {axis} with size "
-                    f"{result.shape[axis]}."
-                )
+                    f"{result.shape[axis]}.")
             result = result.squeeze(axis)
         return result
 
@@ -1094,8 +965,7 @@ class NativeONNXGraph(nn.Module):
         except RuntimeError as error:
             raise ONNXExecutionError(
                 f"Expand cannot broadcast shape {tuple(data.shape)} with "
-                f"{requested}."
-            ) from error
+                f"{requested}.") from error
         return torch.broadcast_to(data, shape)
 
     def _op_Tile(
@@ -1123,11 +993,7 @@ class NativeONNXGraph(nn.Module):
         flat = indices.to(device=data.device, dtype=torch.long).reshape(-1)
         flat = torch.where(flat < 0, flat + data.shape[axis], flat)
         selected = torch.index_select(data, axis, flat)
-        shape = (
-            tuple(data.shape[:axis])
-            + tuple(indices.shape)
-            + tuple(data.shape[axis + 1:])
-        )
+        shape = (tuple(data.shape[:axis]) + tuple(indices.shape) + tuple(data.shape[axis + 1:]))
         return selected.reshape(shape)
 
     def _op_Slice(
@@ -1141,39 +1007,25 @@ class NativeONNXGraph(nn.Module):
         starts = _tensor_values(starts_tensor, name="Slice starts")
         ends = _tensor_values(ends_tensor, name="Slice ends")
         axes = (
-            tuple(range(len(starts)))
-            if axes_tensor is None
-            else _tensor_values(axes_tensor, name="Slice axes")
-        )
-        steps = (
-            (1,) * len(starts)
-            if steps_tensor is None
-            else _tensor_values(steps_tensor, name="Slice steps")
-        )
-        if not (
-            len(starts) == len(ends) == len(axes) == len(steps)
-        ):
-            raise ONNXExecutionError(
-                "Slice controls must have identical lengths."
-            )
+            tuple(range(len(starts))) if axes_tensor is None else _tensor_values(
+                axes_tensor, name="Slice axes"))
+        steps = ((1, ) *
+                 len(starts) if steps_tensor is None else _tensor_values(steps_tensor, name="Slice steps"))
+        if not (len(starts) == len(ends) == len(axes) == len(steps)):
+            raise ONNXExecutionError("Slice controls must have identical lengths.")
         result = data
-        normalized_axes = [
-            _normalize_axis(axis, data.ndim, name="Slice")
-            for axis in axes
-        ]
+        normalized_axes = [_normalize_axis(axis, data.ndim, name="Slice") for axis in axes]
         if len(normalized_axes) != len(set(normalized_axes)):
             raise ONNXExecutionError("Slice axes cannot repeat.")
         for start, end, axis, step in zip(
-            starts,
-            ends,
-            normalized_axes,
-            steps,
+                starts,
+                ends,
+                normalized_axes,
+                steps,
         ):
             if step == 0:
                 raise ONNXExecutionError("Slice step cannot be zero.")
-            indices = tuple(range(result.shape[axis]))[
-                slice(start, end, step)
-            ]
+            indices = tuple(range(result.shape[axis]))[slice(start, end, step)]
             index = torch.tensor(
                 indices,
                 dtype=torch.long,
@@ -1196,9 +1048,7 @@ class NativeONNXGraph(nn.Module):
         split_tensor = _optional_tensor(values, 1)
         if split_tensor is None:
             if data.shape[axis] % len(node.outputs):
-                raise ONNXExecutionError(
-                    "Equal Split cannot divide the selected dimension."
-                )
+                raise ONNXExecutionError("Equal Split cannot divide the selected dimension.")
             size = data.shape[axis] // len(node.outputs)
             sections: int | tuple[int, ...] = size
         else:
@@ -1218,13 +1068,9 @@ class NativeONNXGraph(nn.Module):
         axes_tensor = _optional_tensor(values, 3)
         pads = _tensor_values(pads_tensor, name="Pad pads")
         axes = (
-            tuple(range(data.ndim))
-            if axes_tensor is None
-            else tuple(
+            tuple(range(data.ndim)) if axes_tensor is None else tuple(
                 _normalize_axis(axis, data.ndim, name="Pad")
-                for axis in _tensor_values(axes_tensor, name="Pad axes")
-            )
-        )
+                for axis in _tensor_values(axes_tensor, name="Pad axes")))
         if len(pads) != 2 * len(axes):
             raise ONNXExecutionError("Pad controls have incompatible lengths.")
         by_axis = {axis: [0, 0] for axis in range(data.ndim)}
@@ -1237,29 +1083,15 @@ class NativeONNXGraph(nn.Module):
         if mode == "edge":
             mode = "replicate"
         if mode not in {"constant", "reflect", "replicate"}:
-            raise UnsupportedONNXGraphError(
-                f"Pad mode {mode!r} is unsupported."
-            )
+            raise UnsupportedONNXGraphError(f"Pad mode {mode!r} is unsupported.")
         if mode != "constant":
-            padded_axes = {
-                axis
-                for axis, pair in by_axis.items()
-                if pair != [0, 0]
-            }
-            trailing = set(
-                range(data.ndim - len(padded_axes), data.ndim)
-            )
+            padded_axes = {axis for axis, pair in by_axis.items() if pair != [0, 0]}
+            trailing = set(range(data.ndim - len(padded_axes), data.ndim))
             if padded_axes and padded_axes != trailing:
-                raise UnsupportedONNXGraphError(
-                    "Reflect/edge Pad supports contiguous trailing axes only."
-                )
+                raise UnsupportedONNXGraphError("Reflect/edge Pad supports contiguous trailing axes only.")
             compact = pytorch_padding[:2 * len(padded_axes)]
             return functional.pad(data, compact, mode=mode)
-        fill = (
-            0.0
-            if constant_value is None
-            else float(constant_value.detach().cpu().reshape(()).item())
-        )
+        fill = (0.0 if constant_value is None else float(constant_value.detach().cpu().reshape(()).item()))
         return functional.pad(
             data,
             tuple(pytorch_padding),
@@ -1279,9 +1111,7 @@ class NativeONNXGraph(nn.Module):
         else:
             scalar = _constant_tensor(attribute, node=node)
         if scalar.numel() != 1:
-            raise ONNXExecutionError(
-                "ConstantOfShape value must contain one element."
-            )
+            raise ONNXExecutionError("ConstantOfShape value must contain one element.")
         return torch.full(
             shape,
             scalar.item(),
@@ -1316,22 +1146,15 @@ class NativeONNXGraph(nn.Module):
             axes = tuple(range(data.ndim))
         else:
             axes = tuple(
-                _normalize_axis(axis, data.ndim, name=node.op_type)
-                for axis in _tensor_values(
+                _normalize_axis(axis, data.ndim, name=node.op_type) for axis in _tensor_values(
                     axes_tensor,
                     name=f"{node.op_type} axes",
-                )
-            )
-            if (
-                not axes
-                and _integer_attribute(node, "noop_with_empty_axes", 0)
-            ):
+                ))
+            if (not axes and _integer_attribute(node, "noop_with_empty_axes", 0)):
                 return data
             if not axes:
                 axes = tuple(range(data.ndim))
-        keep_dimensions = bool(
-            _integer_attribute(node, "keepdims", 1)
-        )
+        keep_dimensions = bool(_integer_attribute(node, "keepdims", 1))
         function = torch.sum if reduction == "sum" else torch.mean
         return function(data, dim=axes, keepdim=keep_dimensions)
 

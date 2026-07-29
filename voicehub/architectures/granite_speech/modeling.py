@@ -2,9 +2,10 @@
 
 The executable graph is checkpoint-compatible with the released
 ``granite-speech-4.1-2b`` Safetensors inventory: a block-local Conformer
-encoder, a BLIP-2-style Q-Former projector, and a Granite causal language
-model.  The module hierarchy deliberately preserves the public checkpoint
-names ``encoder.*``, ``projector.*``, and ``language_model.*``.
+encoder, a BLIP-2-style Q-Former projector, and a Granite causal
+language model.  The module hierarchy deliberately preserves the public
+checkpoint names ``encoder.*``, ``projector.*``, and
+``language_model.*``.
 """
 
 from __future__ import annotations
@@ -18,10 +19,7 @@ from torch import Tensor, nn
 from torch.nn import functional
 from torch.utils.checkpoint import checkpoint
 
-from voicehub.architectures.causal_lm.modeling import (
-    CausalLMOutput,
-    GraniteForCausalLM,
-)
+from voicehub.architectures.causal_lm.modeling import CausalLMOutput, GraniteForCausalLM
 from voicehub.architectures.granite_speech.configuration import (
     GraniteSpeechArchitectureConfig,
     GraniteSpeechEncoderConfig,
@@ -160,9 +158,8 @@ class GraniteSpeechConformerAttention(nn.Module):
             )
             invalid[:remainder, :remainder] = False
             mask_value = -torch.finfo(positional_bias.dtype).max
-            positional_bias[
-                block_count - 1:positional_bias.shape[0]:block_count
-            ].masked_fill_(invalid, mask_value)
+            positional_bias[block_count - 1:positional_bias.shape[0]:block_count].masked_fill_(
+                invalid, mask_value)
 
         attended = functional.scaled_dot_product_attention(
             queries,
@@ -277,10 +274,7 @@ class GraniteSpeechCTCEncoder(nn.Module):
         self.config = config
         positions = torch.arange(config.context_size)
         distances = positions.view(-1, 1) - positions.view(1, -1)
-        attention_dists = (
-            distances.clamp(-config.context_size, config.context_size)
-            + config.max_pos_emb
-        )
+        attention_dists = (distances.clamp(-config.context_size, config.context_size) + config.max_pos_emb)
         self.register_buffer(
             "attention_dists",
             attention_dists,
@@ -291,10 +285,7 @@ class GraniteSpeechCTCEncoder(nn.Module):
             config.hidden_dim,
             bias=True,
         )
-        self.layers = nn.ModuleList(
-            GraniteSpeechConformerBlock(config)
-            for _ in range(config.num_layers)
-        )
+        self.layers = nn.ModuleList(GraniteSpeechConformerBlock(config) for _ in range(config.num_layers))
         self.out = nn.Linear(
             config.hidden_dim,
             config.output_dim,
@@ -308,11 +299,8 @@ class GraniteSpeechCTCEncoder(nn.Module):
         self.num_layers = config.num_layers
 
     def forward(self, hidden_states: Tensor) -> Tensor:
-        if (
-            not isinstance(hidden_states, Tensor)
-            or hidden_states.ndim != 3
-            or hidden_states.shape[-1] != self.config.input_dim
-        ):
+        if (not isinstance(hidden_states, Tensor) or hidden_states.ndim != 3 or
+                hidden_states.shape[-1] != self.config.input_dim):
             raise ValueError(
                 "`input_features` must have shape "
                 f"[batch, frames, {self.config.input_dim}].")
@@ -324,9 +312,7 @@ class GraniteSpeechCTCEncoder(nn.Module):
             )
             if index == self.num_layers // 2:
                 midpoint = self.out(hidden_states.clone())
-                hidden_states = hidden_states + self.out_mid(
-                    midpoint.softmax(dim=-1),
-                )
+                hidden_states = hidden_states + self.out_mid(midpoint.softmax(dim=-1), )
         return hidden_states
 
 
@@ -341,19 +327,11 @@ class GraniteSpeechQFormerMultiHeadAttention(nn.Module):
     ) -> None:
         super().__init__()
         self.num_attention_heads = config.num_attention_heads
-        self.attention_head_size = (
-            config.hidden_size // config.num_attention_heads
-        )
-        self.all_head_size = (
-            self.num_attention_heads * self.attention_head_size
-        )
+        self.attention_head_size = (config.hidden_size // config.num_attention_heads)
+        self.all_head_size = (self.num_attention_heads * self.attention_head_size)
         self.scaling = self.attention_head_size**-0.5
         self.attention_dropout = config.attention_probs_dropout_prob
-        key_value_size = (
-            config.encoder_hidden_size
-            if is_cross_attention
-            else config.hidden_size
-        )
+        key_value_size = (config.encoder_hidden_size if is_cross_attention else config.hidden_size)
         self.query = nn.Linear(
             config.hidden_size,
             self.all_head_size,
@@ -375,16 +353,8 @@ class GraniteSpeechQFormerMultiHeadAttention(nn.Module):
         encoder_hidden_states: Tensor | None = None,
         encoder_attention_mask: Tensor | None = None,
     ) -> Tensor:
-        current_states = (
-            encoder_hidden_states
-            if encoder_hidden_states is not None
-            else hidden_states
-        )
-        active_mask = (
-            encoder_attention_mask
-            if encoder_hidden_states is not None
-            else attention_mask
-        )
+        current_states = (encoder_hidden_states if encoder_hidden_states is not None else hidden_states)
+        active_mask = (encoder_attention_mask if encoder_hidden_states is not None else attention_mask)
         batch_size, query_length, _ = hidden_states.shape
         key_length = current_states.shape[1]
         queries = self.query(hidden_states).view(
@@ -407,9 +377,7 @@ class GraniteSpeechQFormerMultiHeadAttention(nn.Module):
         ).transpose(1, 2)
         if active_mask is not None:
             if active_mask.ndim == 2:
-                active_mask = active_mask[:, None, None, :].to(
-                    dtype=torch.bool,
-                )
+                active_mask = active_mask[:, None, None, :].to(dtype=torch.bool, )
             elif active_mask.ndim != 4:
                 raise ValueError("Q-Former attention masks must have rank two or four.")
             if active_mask.dtype == torch.bool:
@@ -432,11 +400,7 @@ class GraniteSpeechQFormerMultiHeadAttention(nn.Module):
             keys,
             values,
             attn_mask=active_mask,
-            dropout_p=(
-                self.attention_dropout
-                if self.training
-                else 0.0
-            ),
+            dropout_p=(self.attention_dropout if self.training else 0.0),
             scale=self.scaling,
         )
         return attended.transpose(1, 2).reshape(
@@ -447,6 +411,7 @@ class GraniteSpeechQFormerMultiHeadAttention(nn.Module):
 
 
 class GraniteSpeechQFormerSelfOutput(nn.Module):
+
     def __init__(self, config: GraniteSpeechProjectorConfig) -> None:
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
@@ -466,6 +431,7 @@ class GraniteSpeechQFormerSelfOutput(nn.Module):
 
 
 class GraniteSpeechQFormerAttention(nn.Module):
+
     def __init__(
         self,
         config: GraniteSpeechProjectorConfig,
@@ -497,6 +463,7 @@ class GraniteSpeechQFormerAttention(nn.Module):
 
 
 class GraniteSpeechQFormerIntermediate(nn.Module):
+
     def __init__(self, config: GraniteSpeechProjectorConfig) -> None:
         super().__init__()
         self.dense = nn.Linear(
@@ -509,6 +476,7 @@ class GraniteSpeechQFormerIntermediate(nn.Module):
 
 
 class GraniteSpeechQFormerOutput(nn.Module):
+
     def __init__(self, config: GraniteSpeechProjectorConfig) -> None:
         super().__init__()
         self.dense = nn.Linear(
@@ -531,6 +499,7 @@ class GraniteSpeechQFormerOutput(nn.Module):
 
 
 class GraniteSpeechQFormerLayer(nn.Module):
+
     def __init__(
         self,
         config: GraniteSpeechProjectorConfig,
@@ -572,12 +541,11 @@ class GraniteSpeechQFormerLayer(nn.Module):
 
 
 class GraniteSpeechQFormerEncoder(nn.Module):
+
     def __init__(self, config: GraniteSpeechProjectorConfig) -> None:
         super().__init__()
         self.layer = nn.ModuleList(
-            GraniteSpeechQFormerLayer(config, index)
-            for index in range(config.num_hidden_layers)
-        )
+            GraniteSpeechQFormerLayer(config, index) for index in range(config.num_hidden_layers))
 
     def forward(
         self,
@@ -650,9 +618,8 @@ class GraniteSpeechEncoderProjector(nn.Module):
 
     def forward(self, hidden_states: Tensor) -> Tensor:
         if not isinstance(hidden_states, Tensor) or hidden_states.ndim != 3:
-            raise ValueError(
-                "Granite Speech projector input must have shape "
-                "[batch, frames, hidden].")
+            raise ValueError("Granite Speech projector input must have shape "
+                             "[batch, frames, hidden].")
         batch_size, sequence_length, hidden_size = hidden_states.shape
         block_count = math.ceil(sequence_length / self.window_size)
         padding = block_count * self.window_size - sequence_length
@@ -694,10 +661,8 @@ class GraniteSpeechForConditionalGeneration(nn.Module):
     ) -> None:
         super().__init__()
         self.config = (
-            config
-            if isinstance(config, GraniteSpeechArchitectureConfig)
-            else GraniteSpeechArchitectureConfig.from_dict(config)
-        )
+            config if isinstance(config, GraniteSpeechArchitectureConfig) else
+            GraniteSpeechArchitectureConfig.from_dict(config))
         self.encoder = GraniteSpeechCTCEncoder(self.config.encoder_config)
         self.projector = GraniteSpeechEncoderProjector(self.config)
         self.language_model = GraniteForCausalLM(
@@ -800,21 +765,14 @@ class GraniteSpeechForConditionalGeneration(nn.Module):
             dtype=embeddings.dtype,
         )
         if input_features_mask is not None:
-            if (
-                not isinstance(input_features_mask, Tensor)
-                or input_features_mask.ndim != 2
-                or tuple(input_features_mask.shape)
-                != tuple(audio_features.shape[:2])
-            ):
-                raise ValueError(
-                    "`input_features_mask` must match projected audio "
-                    "[batch, frames].")
-            flattened_audio = audio_features[
-                input_features_mask.to(
-                    device=audio_features.device,
-                    dtype=torch.bool,
-                )
-            ]
+            if (not isinstance(input_features_mask, Tensor) or input_features_mask.ndim != 2 or
+                    tuple(input_features_mask.shape) != tuple(audio_features.shape[:2])):
+                raise ValueError("`input_features_mask` must match projected audio "
+                                 "[batch, frames].")
+            flattened_audio = audio_features[input_features_mask.to(
+                device=audio_features.device,
+                dtype=torch.bool,
+            )]
         else:
             flattened_audio = audio_features.reshape(
                 -1,
@@ -851,20 +809,14 @@ class GraniteSpeechForConditionalGeneration(nn.Module):
         ignore_index: int = -100,
     ) -> GraniteSpeechOutput:
         if audio_lengths is not None:
-            if (
-                not isinstance(audio_lengths, Tensor)
-                or audio_lengths.ndim != 1
-            ):
-                raise ValueError(
-                    "`audio_lengths` must be a rank-one tensor when "
-                    "provided.")
+            if (not isinstance(audio_lengths, Tensor) or audio_lengths.ndim != 1):
+                raise ValueError("`audio_lengths` must be a rank-one tensor when "
+                                 "provided.")
         if (input_ids is None) == (inputs_embeds is None):
-            raise ValueError(
-                "Specify exactly one of `input_ids` or `inputs_embeds`.")
+            raise ValueError("Specify exactly one of `input_ids` or `inputs_embeds`.")
         if input_features is not None and inputs_embeds is not None:
-            raise ValueError(
-                "`input_features` and precomputed `inputs_embeds` are "
-                "mutually exclusive.")
+            raise ValueError("`input_features` and precomputed `inputs_embeds` are "
+                             "mutually exclusive.")
         audio_hidden_states = None
         if inputs_embeds is None and input_features is not None:
             parameter = next(self.encoder.parameters())
@@ -905,14 +857,14 @@ class GraniteSpeechForConditionalGeneration(nn.Module):
         )
 
     def generate(
-        self,
-        input_ids: Tensor,
-        *,
-        input_features: Tensor,
-        input_features_mask: Tensor | None = None,
-        attention_mask: Tensor | None = None,
-        generation_config: GenerationConfig | None = None,
-        stopping_criteria: tuple[StoppingCriterion, ...] = (),
+            self,
+            input_ids: Tensor,
+            *,
+            input_features: Tensor,
+            input_features_mask: Tensor | None = None,
+            attention_mask: Tensor | None = None,
+            generation_config: GenerationConfig | None = None,
+            stopping_criteria: tuple[StoppingCriterion, ...] = (),
     ) -> GenerationOutput:
         """Generate text while presenting audio only on the first step."""
         if attention_mask is None:
@@ -921,8 +873,7 @@ class GraniteSpeechForConditionalGeneration(nn.Module):
                 dtype=torch.bool,
             )
         if tuple(attention_mask.shape) != tuple(input_ids.shape):
-            raise ValueError(
-                "`attention_mask` must have the same shape as `input_ids`.")
+            raise ValueError("`attention_mask` must have the same shape as `input_ids`.")
         generation = generation_config or GenerationConfig(
             eos_token_id=self.config.text_config.eos_token_id,
             pad_token_id=self.config.text_config.pad_token_id,
@@ -931,16 +882,11 @@ class GraniteSpeechForConditionalGeneration(nn.Module):
         prompt_mask = attention_mask.to(device=input_ids.device)
 
         def decoder_step(step: GenerationStepInput) -> GenerationStepOutput:
-            past_length = (
-                step.cache.sequence_length()
-                if isinstance(step.cache, DynamicKVCache)
-                else 0
-            )
+            past_length = (step.cache.sequence_length() if isinstance(step.cache, DynamicKVCache) else 0)
             key_length = past_length + step.token_ids.shape[1]
             generated = key_length - prompt_mask.shape[1]
             if generated < 0:
-                raise RuntimeError(
-                    "Decoder cache length is shorter than the prompt.")
+                raise RuntimeError("Decoder cache length is shorter than the prompt.")
             step_mask = prompt_mask
             if generated:
                 step_mask = torch.cat(
@@ -991,8 +937,7 @@ def materialize_granite_speech_nonpersistent_buffers(
 ) -> None:
     """Recreate relative-position and RoPE buffers after meta loading."""
     if not isinstance(model, GraniteSpeechForConditionalGeneration):
-        raise TypeError(
-            "`model` must be GraniteSpeechForConditionalGeneration.")
+        raise TypeError("`model` must be GraniteSpeechForConditionalGeneration.")
     from voicehub.neural.rotary import RotaryEmbedding
 
     target = torch.device(device)
@@ -1006,9 +951,7 @@ def materialize_granite_speech_nonpersistent_buffers(
         distances.clamp(
             -encoder.config.context_size,
             encoder.config.context_size,
-        )
-        + encoder.config.max_pos_emb
-    )
+        ) + encoder.config.max_pos_emb)
     for module in model.modules():
         if not isinstance(module, RotaryEmbedding):
             continue
@@ -1020,16 +963,14 @@ def materialize_granite_speech_nonpersistent_buffers(
             device=target,
         ) / module.dimension
         module.inverse_frequency = (
-            1.0
-            / torch.pow(
+            1.0 / torch.pow(
                 torch.tensor(
                     module.base,
                     dtype=torch.float32,
                     device=target,
                 ),
                 exponents,
-            )
-        )
+            ))
 
 
 __all__ = [

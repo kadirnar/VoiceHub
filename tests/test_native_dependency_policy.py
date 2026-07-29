@@ -406,7 +406,8 @@ class NativeDependencyPolicyTests(unittest.TestCase):
             )
 
         self.assertEqual(
-            {path.name for path in closure},
+            {path.name
+             for path in closure},
             {
                 "__init__.py",
                 "dynamic_helper.py",

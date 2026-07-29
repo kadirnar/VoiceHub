@@ -6,10 +6,7 @@ from dataclasses import dataclass
 from math import log, log10
 from typing import Any
 
-from voicehub.processing.graph import (
-    PROCESSING_OPERATIONS,
-    ProcessingOperation,
-)
+from voicehub.processing.graph import PROCESSING_OPERATIONS, ProcessingOperation
 
 
 def _torch():
@@ -18,8 +15,7 @@ def _torch():
     except ModuleNotFoundError as error:  # pragma: no cover - package invariant
         raise RuntimeError(
             "Native audio processing requires PyTorch, VoiceHub's compute "
-            "runtime."
-        ) from error
+            "runtime.") from error
     return torch
 
 
@@ -39,8 +35,7 @@ def _hz_to_mel(frequencies):
     log_step = log(6.4) / 27.0
     linear = frequencies / linear_spacing
     logarithmic = minimum_log_mel + torch.log(
-        torch.clamp(frequencies, min=minimum_log_hz) / minimum_log_hz
-    ) / log_step
+        torch.clamp(frequencies, min=minimum_log_hz) / minimum_log_hz) / log_step
     return torch.where(frequencies >= minimum_log_hz, logarithmic, linear)
 
 
@@ -52,9 +47,7 @@ def _mel_to_hz(mels):
     minimum_log_mel = minimum_log_hz / linear_spacing
     log_step = log(6.4) / 27.0
     linear = mels * linear_spacing
-    logarithmic = minimum_log_hz * torch.exp(
-        log_step * (mels - minimum_log_mel)
-    )
+    logarithmic = minimum_log_hz * torch.exp(log_step * (mels - minimum_log_mel))
     return torch.where(mels >= minimum_log_mel, logarithmic, linear)
 
 
@@ -73,16 +66,10 @@ def mel_filter_bank(
     sample_rate = _positive_integer(sample_rate, name="sample_rate")
     n_fft = _positive_integer(n_fft, name="n_fft")
     n_mels = _positive_integer(n_mels, name="n_mels")
-    maximum_frequency = (
-        sample_rate / 2.0
-        if maximum_frequency is None
-        else float(maximum_frequency)
-    )
+    maximum_frequency = (sample_rate / 2.0 if maximum_frequency is None else float(maximum_frequency))
     minimum_frequency = float(minimum_frequency)
     if not 0.0 <= minimum_frequency < maximum_frequency <= sample_rate / 2.0:
-        raise ValueError(
-            "Mel frequency bounds must satisfy 0 <= min < max <= Nyquist."
-        )
+        raise ValueError("Mel frequency bounds must satisfy 0 <= min < max <= Nyquist.")
     dtype = dtype or torch.float32
     frequency_bins = torch.linspace(
         0.0,
@@ -92,12 +79,8 @@ def mel_filter_bank(
         device=device,
     )
     mel_edges = torch.linspace(
-        _hz_to_mel(
-            torch.tensor(minimum_frequency, dtype=dtype, device=device)
-        ),
-        _hz_to_mel(
-            torch.tensor(maximum_frequency, dtype=dtype, device=device)
-        ),
+        _hz_to_mel(torch.tensor(minimum_frequency, dtype=dtype, device=device)),
+        _hz_to_mel(torch.tensor(maximum_frequency, dtype=dtype, device=device)),
         n_mels + 2,
         dtype=dtype,
         device=device,
@@ -126,23 +109,17 @@ def htk_mel_filter_bank(
 
     The returned layout is ``[frequency_bin, mel_bin]``.  This matches
     ``torchaudio.functional.melscale_fbanks(..., mel_scale="htk",
-    norm=None)`` and, importantly, the persistent ``mel_scale.fb`` tensor in
-    released Vocos checkpoints.
+    norm=None)`` and, importantly, the persistent ``mel_scale.fb``
+    tensor in released Vocos checkpoints.
     """
     torch = _torch()
     sample_rate = _positive_integer(sample_rate, name="sample_rate")
     n_fft = _positive_integer(n_fft, name="n_fft")
     n_mels = _positive_integer(n_mels, name="n_mels")
-    maximum_frequency = (
-        sample_rate / 2.0
-        if maximum_frequency is None
-        else float(maximum_frequency)
-    )
+    maximum_frequency = (sample_rate / 2.0 if maximum_frequency is None else float(maximum_frequency))
     minimum_frequency = float(minimum_frequency)
     if not 0.0 <= minimum_frequency < maximum_frequency <= sample_rate / 2.0:
-        raise ValueError(
-            "Mel frequency bounds must satisfy 0 <= min < max <= Nyquist."
-        )
+        raise ValueError("Mel frequency bounds must satisfy 0 <= min < max <= Nyquist.")
 
     dtype = dtype or torch.float32
     minimum_mel = 2_595.0 * log10(1.0 + minimum_frequency / 700.0)
@@ -158,9 +135,7 @@ def htk_mel_filter_bank(
         torch.pow(
             torch.tensor(10.0, dtype=dtype, device=device),
             mel_edges / 2_595.0,
-        )
-        - 1.0
-    )
+        ) - 1.0)
     frequency_bins = torch.linspace(
         0.0,
         sample_rate / 2.0,
@@ -198,7 +173,7 @@ class PadOrTrimAudio(ProcessingOperation):
 
     @property
     def inputs(self) -> tuple[str, ...]:
-        return (self.input_key,)
+        return (self.input_key, )
 
     @property
     def outputs(self) -> tuple[str, ...]:
@@ -218,7 +193,7 @@ class PadOrTrimAudio(ProcessingOperation):
         else:
             waveform = waveform[..., :self.length]
         lengths = torch.full(
-            (waveform.shape[0],) if waveform.ndim == 2 else (),
+            (waveform.shape[0], ) if waveform.ndim == 2 else (),
             original_length,
             dtype=torch.long,
             device=waveform.device,
@@ -258,22 +233,19 @@ class LogMelSpectrogram(ProcessingOperation):
             _positive_integer(getattr(self, name), name=name)
         if self.hop_length > self.n_fft:
             raise ValueError("`hop_length` cannot exceed `n_fft`.")
-        if (
-            isinstance(self.dynamic_range, bool)
-            or not isinstance(self.dynamic_range, (int, float))
-            or self.dynamic_range <= 0
-        ):
+        if (isinstance(self.dynamic_range, bool) or not isinstance(self.dynamic_range, (int, float)) or
+                self.dynamic_range <= 0):
             raise ValueError("`dynamic_range` must be positive.")
         if not isinstance(self.whisper_scaling, bool):
             raise TypeError("`whisper_scaling` must be a boolean.")
 
     @property
     def inputs(self) -> tuple[str, ...]:
-        return (self.input_key,)
+        return (self.input_key, )
 
     @property
     def outputs(self) -> tuple[str, ...]:
-        return (self.output_key,)
+        return (self.output_key, )
 
     def process(self, values):
         torch = _torch()

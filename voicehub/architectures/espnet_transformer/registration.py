@@ -9,14 +9,8 @@ from voicehub.architectures.espnet_transformer.metadata import (
     ESPNET_REVISION,
     ESPNET_SOURCE_REVISION,
 )
-from voicehub.architectures.registry import (
-    ARCHITECTURE_REGISTRY,
-    ArchitectureRegistry,
-)
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.tasks import SpeechTask
 
 DEFAULT_ESPNET_ALIASES = (
@@ -32,63 +26,46 @@ def create_espnet_architecture_spec() -> ArchitectureSpec:
         version="1",
         model_builder=(
             "voicehub.architectures.espnet_transformer.modeling:"
-            "ESPnetLibriSpeechTransformerForASR"
-        ),
+            "ESPnetLibriSpeechTransformerForASR"),
         config=(
             "voicehub.architectures.espnet_transformer.configuration:"
-            "ESPnetLibriSpeechTransformerConfig"
-        ),
-        decoder=(
-            "voicehub.architectures.espnet_transformer.decoding:"
-            "ESPnetJointBeamSearch"
-        ),
-        objective=(
-            "voicehub.architectures.espnet_transformer.modeling:"
-            "espnet_label_smoothed_loss"
-        ),
+            "ESPnetLibriSpeechTransformerConfig"),
+        decoder=("voicehub.architectures.espnet_transformer.decoding:"
+                 "ESPnetJointBeamSearch"),
+        objective=("voicehub.architectures.espnet_transformer.modeling:"
+                   "espnet_label_smoothed_loss"),
         checkpoint_adapter=(
             "voicehub.architectures.espnet_transformer.checkpoint:"
-            "ESPnetASRSafeTensorsCheckpointAdapter"
-        ),
+            "ESPnetASRSafeTensorsCheckpointAdapter"),
         components={
-            "frontend": (
-                "voicehub.architectures.espnet_transformer.frontend:"
-                "ESPnetDefaultFrontend"
-            ),
-            "global-mvn": (
-                "voicehub.architectures.espnet_transformer.frontend:"
-                "ESPnetGlobalMVN"
-            ),
-            "language-model": (
-                "voicehub.architectures.espnet_transformer.modeling:"
-                "ESPnetSequentialRNNLanguageModel"
-            ),
+            "frontend": ("voicehub.architectures.espnet_transformer.frontend:"
+                         "ESPnetDefaultFrontend"),
+            "global-mvn": ("voicehub.architectures.espnet_transformer.frontend:"
+                           "ESPnetGlobalMVN"),
+            "language-model":
+            ("voicehub.architectures.espnet_transformer.modeling:"
+             "ESPnetSequentialRNNLanguageModel"),
             "pickle-converter": (
                 "voicehub.architectures.espnet_transformer.checkpoint:"
-                "convert_espnet_librispeech_checkpoints"
-            ),
-            "specaugment": (
-                "voicehub.architectures.espnet_transformer.frontend:"
-                "ESPnetSpecAugment"
-            ),
-            "tokenizer": (
-                "voicehub.architectures.espnet_transformer.tokenization:"
-                "ESPnetLibriSpeechTokenizer"
-            ),
-            "training-adapter": (
-                "voicehub.architectures.espnet_transformer.training:"
-                "NativeESPnetASRTrainingAdapter"
-            ),
+                "convert_espnet_librispeech_checkpoints"),
+            "specaugment": ("voicehub.architectures.espnet_transformer.frontend:"
+                            "ESPnetSpecAugment"),
+            "tokenizer":
+            ("voicehub.architectures.espnet_transformer.tokenization:"
+             "ESPnetLibriSpeechTokenizer"),
+            "training-adapter":
+            ("voicehub.architectures.espnet_transformer.training:"
+             "NativeESPnetASRTrainingAdapter"),
         },
         capabilities=ArchitectureCapabilities(
-            tasks=(SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,),
+            tasks=(SpeechTask.AUTOMATIC_SPEECH_RECOGNITION, ),
             devices=("cpu", "cuda"),
-            dtypes=("float32",),
+            dtypes=("float32", ),
             checkpoint_formats=(
                 "safetensors",
                 "trusted-pickle-conversion",
             ),
-            export_formats=("safetensors",),
+            export_formats=("safetensors", ),
             training=True,
             streaming=False,
             batched_inference=True,
@@ -111,24 +88,28 @@ def create_espnet_architecture_spec() -> ArchitectureSpec:
         upstream_revision=ESPNET_SOURCE_REVISION,
         license_id="Apache-2.0",
         metadata={
-            "checkpoint_license": ESPNET_CHECKPOINT_LICENSE,
-            "family": "espnet-transformer-asr",
-            "implementation": "voicehub-native",
-            "language": "en",
-            "published_artifact_revision": ESPNET_REVISION,
-            "tensor_backend": "pytorch",
+            "checkpoint_license":
+            ESPNET_CHECKPOINT_LICENSE,
+            "family":
+            "espnet-transformer-asr",
+            "implementation":
+            "voicehub-native",
+            "language":
+            "en",
+            "published_artifact_revision":
+            ESPNET_REVISION,
+            "tensor_backend":
+            "pytorch",
             "training_boundary": (
                 "The graph, raw-waveform frontend, global MVN, SpecAugment, "
                 "hybrid 0.3 CTC/0.7 attention loss, Adam optimizer, and "
                 "25,000-step WarmupLR match the pinned recipe. Corpus "
                 "preparation and speed perturbation remain explicit dataset "
-                "operations."
-            ),
+                "operations."),
             "verified_scope": (
                 "Only the LibriSpeech Transformer e18 release is "
                 "checkpoint-compatible; other ESPnet graph families are "
-                "rejected."
-            ),
+                "rejected."),
         },
     )
 

@@ -108,7 +108,7 @@ class Qwen3TTSTextTokenizer:
         max_asset_bytes: int = DEFAULT_MAX_ASSET_BYTES,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         max_merges: int = DEFAULT_MAX_MERGES,
-    ) -> "Qwen3TTSTextTokenizer":
+    ) -> Qwen3TTSTextTokenizer:
         vocab = Path(vocab_path).expanduser().resolve()
         merges = Path(merges_path).expanduser().resolve()
         tokenizer_config = Path(tokenizer_config_path).expanduser().resolve()

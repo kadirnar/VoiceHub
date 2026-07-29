@@ -57,11 +57,11 @@ def _as_existing_file(value: str | Path, *, label: str) -> Path:
 
 
 def _find_local_file(
-    root: Path,
-    relative_name: str,
-    *,
-    alternatives: tuple[str, ...] = (),
-    label: str,
+        root: Path,
+        relative_name: str,
+        *,
+        alternatives: tuple[str, ...] = (),
+        label: str,
 ) -> Path:
     names = (relative_name, *alternatives)
     matches = [root / name for name in names if (root / name).is_file()]
@@ -70,8 +70,7 @@ def _find_local_file(
         found = ", ".join(str(path.relative_to(root)) for path in unique) or "none"
         raise FileNotFoundError(
             f"F5-TTS local artifact directory must resolve exactly one "
-            f"{label}; found {found}."
-        )
+            f"{label}; found {found}.")
     return unique[0]
 
 
@@ -81,8 +80,7 @@ def _native_checkpoint(path: Path) -> Path:
     if path.suffix.lower() not in {".pt", ".pth", ".ckpt", ".bin"}:
         raise ValueError(
             "F5-TTS checkpoints must be Safetensors or a supported legacy "
-            "PyTorch weight file."
-        )
+            "PyTorch weight file.")
     return convert_legacy_f5tts_checkpoint(
         path,
         path.with_suffix(".safetensors"),
@@ -93,10 +91,8 @@ def _native_vocoder(path: Path) -> Path:
     if path.suffix.lower() == ".safetensors":
         return path
     if path.suffix.lower() not in {".pt", ".pth", ".bin"}:
-        raise ValueError(
-            "Vocos checkpoints must be Safetensors or a legacy PyTorch "
-            "weight file."
-        )
+        raise ValueError("Vocos checkpoints must be Safetensors or a legacy PyTorch "
+                         "weight file.")
     return convert_legacy_vocos_checkpoint(
         path,
         path.with_suffix(".safetensors"),
@@ -172,7 +168,7 @@ def resolve_f5tts_artifacts(
             vocabulary = _find_local_file(
                 root,
                 official_layout[1],
-                alternatives=("vocab.txt",),
+                alternatives=("vocab.txt", ),
                 label="vocabulary",
             )
         else:
@@ -189,13 +185,10 @@ def resolve_f5tts_artifacts(
         if official_layout is None:
             raise ValueError(
                 "Remote custom F5-TTS checkpoints require a local converted "
-                "artifact directory; only pinned released layouts are inferred."
-            )
+                "artifact directory; only pinned released layouts are inferred.")
         repo_id = F5TTS_CHECKPOINT_REPOSITORY if alias_source else source_string
         resolved_revision = (
-            revision
-            or (F5TTS_CHECKPOINT_REVISION if repo_id == F5TTS_CHECKPOINT_REPOSITORY else None)
-        )
+            revision or (F5TTS_CHECKPOINT_REVISION if repo_id == F5TTS_CHECKPOINT_REPOSITORY else None))
         checkpoint_relative, vocabulary_relative = official_layout
         checkpoint = resolve_pretrained_file(
             repo_id,
@@ -216,10 +209,8 @@ def resolve_f5tts_artifacts(
             local_files_only=local_files_only,
         )
         checkpoint_official = (
-            repo_id == F5TTS_CHECKPOINT_REPOSITORY
-            and resolved_revision == F5TTS_CHECKPOINT_REVISION
-            and checkpoint_relative == F5TTS_V1_BASE_CHECKPOINT
-        )
+            repo_id == F5TTS_CHECKPOINT_REPOSITORY and resolved_revision == F5TTS_CHECKPOINT_REVISION and
+            checkpoint_relative == F5TTS_V1_BASE_CHECKPOINT)
     if verify_integrity and checkpoint_official:
         require_file_integrity(
             checkpoint,

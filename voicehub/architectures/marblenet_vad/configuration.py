@@ -50,13 +50,13 @@ class MarbleNetVADConfig:
 
     def __post_init__(self) -> None:
         for name in (
-            "sampling_rate",
-            "window_length",
-            "hop_length",
-            "n_fft",
-            "num_mel_bins",
-            "pad_to",
-            "spec_augment_frequency_width",
+                "sampling_rate",
+                "window_length",
+                "hop_length",
+                "n_fft",
+                "num_mel_bins",
+                "pad_to",
+                "spec_augment_frequency_width",
         ):
             object.__setattr__(
                 self,
@@ -68,18 +68,16 @@ class MarbleNetVADConfig:
         if self.window_length != 400 or self.hop_length != 160:
             raise ValueError(
                 "The published multilingual MarbleNet VAD requires a "
-                "400-sample window and 160-sample hop."
-            )
+                "400-sample window and 160-sample hop.")
         if self.n_fft != 512 or self.num_mel_bins != 80:
             raise ValueError(
                 "The published multilingual MarbleNet VAD requires a "
-                "512-point FFT and 80 mel bins."
-            )
+                "512-point FFT and 80 mel bins.")
         if self.pad_to != 2:
             raise ValueError("The released graph pads mel frames to a multiple of two.")
         for name in (
-            "spec_augment_frequency_masks",
-            "spec_augment_time_masks",
+                "spec_augment_frequency_masks",
+                "spec_augment_time_masks",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int):
@@ -99,11 +97,9 @@ class MarbleNetVADConfig:
             raise ValueError("`dither` cannot be negative.")
         if not 0.0 <= self.dropout < 1.0:
             raise ValueError("`dropout` must be in [0, 1).")
-        if (
-            isinstance(self.spec_augment_time_width, bool)
-            or not isinstance(self.spec_augment_time_width, (int, float))
-            or not 0.0 <= self.spec_augment_time_width <= 1.0
-        ):
+        if (isinstance(self.spec_augment_time_width, bool) or not isinstance(self.spec_augment_time_width,
+                                                                             (int, float)) or
+                not 0.0 <= self.spec_augment_time_width <= 1.0):
             raise ValueError("`spec_augment_time_width` must be in [0, 1].")
         object.__setattr__(
             self,
@@ -134,11 +130,7 @@ class MarbleNetVADConfig:
         source = copy.deepcopy(dict(values))
         canonical = {item.name for item in fields(cls) if item.name != "extra_config"}
         resolved = {name: source[name] for name in canonical if name in source}
-        extras = {
-            name: value
-            for name, value in source.items()
-            if name not in canonical | {"extra_config"}
-        }
+        extras = {name: value for name, value in source.items() if name not in canonical | {"extra_config"}}
         supplied_extras = source.get("extra_config")
         if supplied_extras is not None:
             if not isinstance(supplied_extras, Mapping):

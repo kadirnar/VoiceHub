@@ -37,20 +37,14 @@ class BarkWordPieceTokenizer:
         tokenize_chinese_chars: bool = True,
         max_input_chars_per_word: int = 100,
     ) -> None:
-        if (
-            isinstance(vocabulary, (str, bytes))
-            or not isinstance(vocabulary, Sequence)
-            or not vocabulary
-        ):
+        if (isinstance(vocabulary, (str, bytes)) or not isinstance(vocabulary, Sequence) or not vocabulary):
             raise ValueError("Bark vocabulary must be a non-empty token sequence.")
         if len(vocabulary) != len(set(vocabulary)):
             raise ValueError("Bark vocabulary contains duplicate tokens.")
         if any(not isinstance(token, str) or not token for token in vocabulary):
             raise ValueError("Bark vocabulary tokens must be non-empty strings.")
         self.vocabulary = tuple(vocabulary)
-        self.token_to_id = {
-            token: index for index, token in enumerate(self.vocabulary)
-        }
+        self.token_to_id = {token: index for index, token in enumerate(self.vocabulary)}
         for name, token in (("unk_token", unk_token), ("pad_token", pad_token)):
             if token not in self.token_to_id:
                 raise ValueError(f"Bark vocabulary is missing {name}={token!r}.")
@@ -103,16 +97,9 @@ class BarkWordPieceTokenizer:
         *,
         max_length: int = 256,
     ) -> tuple[list[int], list[int]]:
-        if (
-            isinstance(max_length, bool)
-            or not isinstance(max_length, int)
-            or max_length <= 0
-        ):
+        if (isinstance(max_length, bool) or not isinstance(max_length, int) or max_length <= 0):
             raise ValueError("Bark maximum token length must be positive.")
-        ids = [
-            self.token_to_id.get(token, self.unk_token_id)
-            for token in self.tokenize(text)
-        ][:max_length]
+        ids = [self.token_to_id.get(token, self.unk_token_id) for token in self.tokenize(text)][:max_length]
         attention = [1] * len(ids)
         padding = max_length - len(ids)
         ids.extend([self.pad_token_id] * padding)
@@ -133,23 +120,16 @@ class BarkWordPieceTokenizer:
     @staticmethod
     def _strip_accents(text: str) -> str:
         return "".join(
-            character
-            for character in unicodedata.normalize("NFD", text)
-            if unicodedata.category(character) != "Mn"
-        )
+            character for character in unicodedata.normalize("NFD", text)
+            if unicodedata.category(character) != "Mn")
 
     @staticmethod
     def _is_chinese(codepoint: int) -> bool:
         return (
-            0x4E00 <= codepoint <= 0x9FFF
-            or 0x3400 <= codepoint <= 0x4DBF
-            or 0x20000 <= codepoint <= 0x2A6DF
-            or 0x2A700 <= codepoint <= 0x2B73F
-            or 0x2B740 <= codepoint <= 0x2B81F
-            or 0x2B820 <= codepoint <= 0x2CEAF
-            or 0xF900 <= codepoint <= 0xFAFF
-            or 0x2F800 <= codepoint <= 0x2FA1F
-        )
+            0x4E00 <= codepoint <= 0x9FFF or 0x3400 <= codepoint <= 0x4DBF or
+            0x20000 <= codepoint <= 0x2A6DF or 0x2A700 <= codepoint <= 0x2B73F or
+            0x2B740 <= codepoint <= 0x2B81F or 0x2B820 <= codepoint <= 0x2CEAF or
+            0xF900 <= codepoint <= 0xFAFF or 0x2F800 <= codepoint <= 0x2FA1F)
 
     @classmethod
     def _tokenize_chinese(cls, text: str) -> str:
@@ -168,12 +148,8 @@ class BarkWordPieceTokenizer:
         for character in token:
             codepoint = ord(character)
             punctuation = (
-                33 <= codepoint <= 47
-                or 58 <= codepoint <= 64
-                or 91 <= codepoint <= 96
-                or 123 <= codepoint <= 126
-                or unicodedata.category(character).startswith("P")
-            )
+                33 <= codepoint <= 47 or 58 <= codepoint <= 64 or 91 <= codepoint <= 96 or
+                123 <= codepoint <= 126 or unicodedata.category(character).startswith("P"))
             if punctuation:
                 if current:
                     output.append("".join(current))
@@ -225,15 +201,13 @@ class BarkProcessor:
         if not isinstance(tokenizer, BarkWordPieceTokenizer):
             raise TypeError("Bark processor requires BarkWordPieceTokenizer.")
         if speaker_embeddings is not None and not isinstance(
-            speaker_embeddings,
-            Mapping,
+                speaker_embeddings,
+                Mapping,
         ):
             raise TypeError("Bark speaker index must be a mapping or None.")
         self.tokenizer = tokenizer
-        self.speaker_embeddings = (
-            None if speaker_embeddings is None else dict(speaker_embeddings))
-        self.speaker_source = (
-            None if speaker_source is None else str(speaker_source))
+        self.speaker_embeddings = (None if speaker_embeddings is None else dict(speaker_embeddings))
+        self.speaker_source = (None if speaker_source is None else str(speaker_source))
         self.revision = revision
         self.cache_dir = cache_dir
         self.token = token
@@ -322,12 +296,7 @@ class BarkProcessor:
     def available_voice_presets(self) -> tuple[str, ...]:
         if self.speaker_embeddings is None:
             return ()
-        return tuple(
-            sorted(
-                name
-                for name in self.speaker_embeddings
-                if name != "repo_or_path"
-            ))
+        return tuple(sorted(name for name in self.speaker_embeddings if name != "repo_or_path"))
 
     def __call__(
         self,
@@ -362,8 +331,7 @@ class BarkProcessor:
         if isinstance(value, Mapping):
             return _validate_preset(value)
         if not isinstance(value, str) or not value.strip():
-            raise ValueError(
-                "Bark voice preset must be a non-empty name or mapping.")
+            raise ValueError("Bark voice preset must be a non-empty name or mapping.")
         name = value.strip()
         if self.speaker_embeddings is None or name not in self.speaker_embeddings:
             choices = ", ".join(self.available_voice_presets[:12])
@@ -372,19 +340,14 @@ class BarkProcessor:
         descriptor = self.speaker_embeddings[name]
         if not isinstance(descriptor, Mapping):
             raise ValueError(f"Bark voice preset {name!r} has an invalid index entry.")
-        source = (
-            self.speaker_source
-            or self.speaker_embeddings.get("repo_or_path")
-        )
+        source = (self.speaker_source or self.speaker_embeddings.get("repo_or_path"))
         if not isinstance(source, (str, Path)) or not str(source).strip():
-            raise ValueError(
-                f"Bark voice preset {name!r} has no artifact source.")
+            raise ValueError(f"Bark voice preset {name!r} has no artifact source.")
         tensors: dict[str, Tensor] = {}
         for key in _PRESET_SHAPES:
             filename = descriptor.get(key)
             if not isinstance(filename, str) or not filename:
-                raise ValueError(
-                    f"Bark voice preset {name!r} is missing {key!r}.")
+                raise ValueError(f"Bark voice preset {name!r} is missing {key!r}.")
             _validate_relative_path(filename)
             path = resolve_pretrained_file(
                 source,
@@ -412,17 +375,15 @@ def _validate_preset(values: Mapping[str, Any]) -> dict[str, Tensor]:
             try:
                 value = torch.as_tensor(value)
             except (TypeError, ValueError) as error:
-                raise TypeError(
-                    f"Bark {name} must be tensor-compatible.") from error
+                raise TypeError(f"Bark {name} must be tensor-compatible.") from error
         if value.ndim != dimensions or value.numel() == 0:
-            raise ValueError(
-                f"Bark {name} must be a non-empty {dimensions}D tensor.")
+            raise ValueError(f"Bark {name} must be a non-empty {dimensions}D tensor.")
         if value.dtype not in {
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
+                torch.uint8,
+                torch.int8,
+                torch.int16,
+                torch.int32,
+                torch.int64,
         }:
             raise TypeError(f"Bark {name} must contain integer token IDs.")
         output[name] = value.long()
@@ -431,24 +392,18 @@ def _validate_preset(values: Mapping[str, Any]) -> dict[str, Tensor]:
     if output["fine_prompt"].shape[0] != 8:
         raise ValueError("Bark fine prompt must contain exactly eight codebooks.")
     if output["coarse_prompt"].shape[1] != output["fine_prompt"].shape[1]:
-        raise ValueError(
-            "Bark coarse and fine prompts must contain the same frame count.")
-    if bool(
-        (
-            (output["semantic_prompt"] < 0)
-            | (output["semantic_prompt"] >= 10_000)
-        ).any().item()
-    ):
+        raise ValueError("Bark coarse and fine prompts must contain the same frame count.")
+    if bool(((output["semantic_prompt"] < 0) | (output["semantic_prompt"] >= 10_000)).any().item()):
         raise ValueError("Bark semantic prompt tokens must be in [0, 10000).")
     for name in ("coarse_prompt", "fine_prompt"):
         if bool(((output[name] < 0) | (output[name] >= 1024)).any().item()):
-            raise ValueError(
-                f"Bark {name} codec tokens must be in [0, 1024).")
+            raise ValueError(f"Bark {name} codec tokens must be in [0, 1024).")
     return output
 
 
 def _read_npy_integer(path: str | Path) -> Tensor:
-    """Read a C-order integer NPY without importing NumPy or allowing pickle."""
+    """Read a C-order integer NPY without importing NumPy or allowing
+    pickle."""
     source = Path(path)
     if source.stat().st_size > _MAX_PRESET_BYTES:
         raise ValueError("Bark speaker prompt exceeds the safe size limit.")
@@ -469,8 +424,7 @@ def _read_npy_integer(path: str | Path) -> Tensor:
         raise ValueError("Truncated Bark speaker prompt header.")
     try:
         header = ast.literal_eval(
-            payload[header_start:header_end].decode(
-                "latin-1" if major < 3 else "utf-8"))
+            payload[header_start:header_end].decode("latin-1" if major < 3 else "utf-8"))
     except (SyntaxError, ValueError, UnicodeDecodeError) as error:
         raise ValueError("Invalid Bark speaker prompt header.") from error
     if not isinstance(header, dict) or header.get("fortran_order") is not False:
@@ -484,19 +438,10 @@ def _read_npy_integer(path: str | Path) -> Tensor:
         "<i8": (torch.int64, 8),
     }
     if descriptor not in dtype_map:
-        raise ValueError(
-            f"Unsupported Bark speaker prompt dtype {descriptor!r}.")
+        raise ValueError(f"Unsupported Bark speaker prompt dtype {descriptor!r}.")
     shape = header.get("shape")
-    if (
-        not isinstance(shape, tuple)
-        or not shape
-        or any(
-            isinstance(item, bool)
-            or not isinstance(item, int)
-            or item <= 0
-            for item in shape
-        )
-    ):
+    if (not isinstance(shape, tuple) or not shape or
+            any(isinstance(item, bool) or not isinstance(item, int) or item <= 0 for item in shape)):
         raise ValueError("Bark speaker prompt has an invalid shape.")
     dtype, item_size = dtype_map[descriptor]
     count = math_prod(shape)

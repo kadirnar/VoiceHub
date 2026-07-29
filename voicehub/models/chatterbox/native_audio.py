@@ -1,10 +1,11 @@
 """PyTorch-native audio frontends used by the Chatterbox architecture.
 
 The released English checkpoint was trained with three distinct feature
-contracts: librosa/Slaney mel features for S3Tokenizer and the voice encoder,
-HiFT's magnitude-mel frontend, and Kaldi filter banks for CAMPPlus.  Keeping
-those contracts explicit avoids silently substituting a generic frontend
-while removing librosa, SciPy, NumPy, and TorchAudio from the runtime.
+contracts: librosa/Slaney mel features for S3Tokenizer and the voice
+encoder, HiFT's magnitude-mel frontend, and Kaldi filter banks for
+CAMPPlus.  Keeping those contracts explicit avoids silently substituting
+a generic frontend while removing librosa, SciPy, NumPy, and TorchAudio
+from the runtime.
 """
 
 from __future__ import annotations
@@ -166,12 +167,10 @@ def hift_mel_spectrogram(
 def _preemphasis(waveform: Tensor, coefficient: float) -> Tensor:
     if coefficient <= 0.0:
         return waveform
-    emphasized = torch.cat(
-        (
-            waveform[:1],
-            waveform[1:] - coefficient * waveform[:-1],
-        ),
-    )
+    emphasized = torch.cat((
+        waveform[:1],
+        waveform[1:] - coefficient * waveform[:-1],
+    ), )
     return emphasized.clamp(-1.0, 1.0)
 
 
@@ -285,8 +284,7 @@ def resample_batch(
             as_mono_waveform(waveform),
             source_rate,
             target_rate,
-        )
-        for waveform in waveforms
+        ) for waveform in waveforms
     ]
 
 

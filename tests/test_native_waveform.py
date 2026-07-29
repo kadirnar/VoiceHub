@@ -11,8 +11,8 @@ from voicehub.models.llasa.inference import LlasaForTextToSpeech
 from voicehub.processing import (
     NativeAudio,
     decode_pcm_wave,
-    load_pcm_wave,
     load_native_audio,
+    load_pcm_wave,
     normalize_waveform,
     resample_waveform,
     resample_waveform_kaiser,
@@ -31,7 +31,7 @@ class NativeWaveformTests(unittest.TestCase):
 
         waveform = normalize_waveform(stereo)
 
-        self.assertEqual(tuple(waveform.shape), (3,))
+        self.assertEqual(tuple(waveform.shape), (3, ))
         self.assertEqual(waveform.dtype, torch.float32)
         self.assertTrue(torch.isfinite(waveform).all())
         self.assertLess(waveform.abs().max().item(), 0.26)
@@ -47,7 +47,7 @@ class NativeWaveformTests(unittest.TestCase):
             chunk_size=17,
         )
 
-        self.assertEqual(tuple(result.shape), (162,))
+        self.assertEqual(tuple(result.shape), (162, ))
         self.assertTrue(torch.isfinite(result).all())
         result.square().mean().backward()
         self.assertIsNotNone(waveform.grad)
@@ -87,11 +87,7 @@ class NativeWaveformTests(unittest.TestCase):
         def encode_24(value):
             return int(value % 2**24).to_bytes(3, "little", signed=False)
 
-        payload = b"".join(
-            encode_24(sample)
-            for frame in frames
-            for sample in frame
-        )
+        payload = b"".join(encode_24(sample) for frame in frames for sample in frame)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "stereo.wav"
             with wave.open(str(path), "wb") as stream:
@@ -205,7 +201,7 @@ class NativeWaveformTests(unittest.TestCase):
                 install_extra="training",
             )
 
-        self.assertEqual(loaded.shape, (160,))
+        self.assertEqual(loaded.shape, (160, ))
         self.assertEqual(loaded.dtype, torch.float32)
         self.assertTrue(torch.isfinite(loaded).all())
 

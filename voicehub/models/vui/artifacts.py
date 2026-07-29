@@ -14,14 +14,10 @@ VUI_REPO_ID = "fluxions/vui"
 VUI_REVISION = "8dc2bd9993a8118b6e2b71f3d9d92d1deb80e5f7"
 VUI_MODEL_FILENAME = "vui-abraham-100m.pt"
 VUI_MODEL_SIZE = 198_204_301
-VUI_MODEL_SHA256 = (
-    "28353f13788c353160efbfc4fa5f5db56844746d3de9a92531dfee704cc394ff"
-)
+VUI_MODEL_SHA256 = ("28353f13788c353160efbfc4fa5f5db56844746d3de9a92531dfee704cc394ff")
 VUI_CODEC_FILENAME = "fluac-22hz-22khz.pt"
 VUI_CODEC_SIZE = 306_573_425
-VUI_CODEC_SHA256 = (
-    "04d1ee6567b5eaade6720bf7cc0241fbbd3c0aaeca00ac37cd1656afa08f3c96"
-)
+VUI_CODEC_SHA256 = ("04d1ee6567b5eaade6720bf7cc0241fbbd3c0aaeca00ac37cd1656afa08f3c96")
 
 _OFFICIAL_MODEL_FILES = frozenset({
     "vui-100m-base.pt",
@@ -58,23 +54,17 @@ def _verify_official_file(
 ) -> None:
     actual_size = path.stat().st_size
     if actual_size != expected_size:
-        raise OSError(
-            f"{label} has size {actual_size}; expected {expected_size} bytes."
-        )
+        raise OSError(f"{label} has size {actual_size}; expected {expected_size} bytes.")
     actual_sha256 = _sha256(path)
     if actual_sha256 != expected_sha256:
-        raise OSError(
-            f"{label} has SHA-256 {actual_sha256}; expected "
-            f"{expected_sha256}."
-        )
+        raise OSError(f"{label} has SHA-256 {actual_sha256}; expected "
+                      f"{expected_sha256}.")
 
 
 def _require_local_file(root: Path, filename: str, *, label: str) -> Path:
     resolved = root / filename
     if not resolved.is_file():
-        raise FileNotFoundError(
-            f"Native Vui requires {label} {filename!r} in {root}."
-        )
+        raise FileNotFoundError(f"Native Vui requires {label} {filename!r} in {root}.")
     return resolved.resolve()
 
 
@@ -88,8 +78,7 @@ def _resolve_local(
         if source.name != model_filename:
             raise ValueError(
                 "A direct Vui checkpoint file must match "
-                f"`model_filename={model_filename!r}`."
-            )
+                f"`model_filename={model_filename!r}`.")
         root = source.parent
         model_checkpoint = source.resolve()
     else:
@@ -127,9 +116,10 @@ def resolve_vui_artifacts(
     """Resolve the acoustic model and codec from one immutable snapshot.
 
     The three historical checkpoint filenames remain supported as short
-    aliases. They resolve to the pinned official repository revision rather
-    than the moving ``main`` branch. Local directories must contain both
-    artifacts so a runtime can never mix unrelated snapshots.
+    aliases. They resolve to the pinned official repository revision
+    rather than the moving ``main`` branch. Local directories must
+    contain both artifacts so a runtime can never mix unrelated
+    snapshots.
     """
     if not isinstance(source, (str, Path)) or not str(source).strip():
         raise ValueError("Vui source must be a non-empty path or Hub ID.")
@@ -140,10 +130,7 @@ def resolve_vui_artifacts(
     selected_model = model_filename
     if selected_model is None:
         selected_model = (
-            local.name
-            if str(source) in _OFFICIAL_MODEL_FILES or local.is_file()
-            else VUI_MODEL_FILENAME
-        )
+            local.name if str(source) in _OFFICIAL_MODEL_FILES or local.is_file() else VUI_MODEL_FILENAME)
     if not isinstance(selected_model, str) or not selected_model.strip():
         raise ValueError("Vui model_filename must be a non-empty filename.")
     if Path(selected_model).name != selected_model:
@@ -187,12 +174,8 @@ def resolve_vui_artifacts(
         token=token,
         local_files_only=local_files_only,
     )
-    if (
-        verify_official_integrity
-        and official
-        and selected_model == VUI_MODEL_FILENAME
-        and codec_filename == VUI_CODEC_FILENAME
-    ):
+    if (verify_official_integrity and official and selected_model == VUI_MODEL_FILENAME and
+            codec_filename == VUI_CODEC_FILENAME):
         _verify_official_file(
             model_checkpoint,
             label="Official Vui model checkpoint",

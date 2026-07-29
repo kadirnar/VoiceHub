@@ -16,7 +16,6 @@ from voicehub.models.xtts.source.TTS.tts.layers.bark import inference_funcs
 from voicehub.models.xtts.source.TTS.tts.models import bark
 from voicehub.processing.waveform import save_pcm_wave
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 XTTS_SOURCE = PROJECT_ROOT / "voicehub" / "models" / "xtts" / "source" / "TTS"
 BARK_RUNTIME = (
@@ -66,11 +65,7 @@ def _absolute_imports(path: Path):
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             yield from (alias.name for alias in node.names)
-        elif (
-            isinstance(node, ast.ImportFrom)
-            and node.level == 0
-            and node.module is not None
-        ):
+        elif (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module is not None):
             yield node.module
 
 
@@ -96,13 +91,13 @@ class NativeXTTSBarkCodecTests(unittest.TestCase):
 
     def test_missing_safe_checkpoint_fails_before_network_download(self):
         with patch.object(
-            bark,
-            "load_encodec_model",
-            side_effect=FileNotFoundError("not cached"),
+                bark,
+                "load_encodec_model",
+                side_effect=FileNotFoundError("not cached"),
         ) as loader:
             with self.assertRaisesRegex(
-                PermissionError,
-                "Provide a converted.*safetensors",
+                    PermissionError,
+                    "Provide a converted.*safetensors",
             ):
                 bark.load_bark_encodec(_config())
 
@@ -117,13 +112,11 @@ class NativeXTTSBarkCodecTests(unittest.TestCase):
     def test_explicit_trust_is_forwarded_to_strict_native_loader(self):
         codec = _LoaderCodec()
         with patch.object(
-            bark,
-            "load_encodec_model",
-            return_value=codec,
+                bark,
+                "load_encodec_model",
+                return_value=codec,
         ) as loader:
-            result = bark.load_bark_encodec(
-                _config(TRUST_OFFICIAL_ENCODEC_PICKLE=True),
-            )
+            result = bark.load_bark_encodec(_config(TRUST_OFFICIAL_ENCODEC_PICKLE=True), )
 
         self.assertIs(result, codec)
         loader.assert_called_once_with(
@@ -139,13 +132,11 @@ class NativeXTTSBarkCodecTests(unittest.TestCase):
         codec = _LoaderCodec()
         checkpoint = Path("/model/encodec_24khz.safetensors")
         with patch.object(
-            bark,
-            "load_encodec_model",
-            return_value=codec,
+                bark,
+                "load_encodec_model",
+                return_value=codec,
         ) as loader:
-            bark.load_bark_encodec(
-                _config(ENCODEC_CHECKPOINT=str(checkpoint)),
-            )
+            bark.load_bark_encodec(_config(ENCODEC_CHECKPOINT=str(checkpoint)), )
 
         loader.assert_called_once_with(
             "encodec_24khz",
@@ -158,9 +149,7 @@ class NativeXTTSBarkCodecTests(unittest.TestCase):
     def test_pickle_trust_rejects_truthy_non_boolean_values(self):
         with patch.object(bark, "load_encodec_model") as loader:
             with self.assertRaisesRegex(TypeError, "must be a boolean"):
-                bark.load_bark_encodec(
-                    _config(TRUST_OFFICIAL_ENCODEC_PICKLE="false"),
-                )
+                bark.load_bark_encodec(_config(TRUST_OFFICIAL_ENCODEC_PICKLE="false"), )
         loader.assert_not_called()
 
     def test_pcm_wave_is_downmixed_and_resampled_for_native_codec(self):
@@ -169,12 +158,10 @@ class NativeXTTSBarkCodecTests(unittest.TestCase):
             encodec=codec,
             device=torch.device("cpu"),
         )
-        stereo = torch.stack(
-            (
-                torch.linspace(-0.75, 0.75, 120),
-                torch.linspace(0.75, -0.75, 120),
-            )
-        )
+        stereo = torch.stack((
+            torch.linspace(-0.75, 0.75, 120),
+            torch.linspace(0.75, -0.75, 120),
+        ))
         with tempfile.TemporaryDirectory() as directory:
             source = save_pcm_wave(
                 Path(directory) / "reference.wav",

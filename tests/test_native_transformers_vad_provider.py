@@ -16,10 +16,7 @@ from voicehub.architectures.wav2vec2 import (
     Wav2Vec2ForSequenceClassification,
 )
 from voicehub.checkpointing import save_safetensors
-from voicehub.models.vad_transformers import (
-    TransformersVADConfig,
-    TransformersVADForVoiceActivityDetection,
-)
+from voicehub.models.vad_transformers import TransformersVADConfig, TransformersVADForVoiceActivityDetection
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -113,8 +110,7 @@ class NativeTransformersVADProviderTests(unittest.TestCase):
             "from voicehub.models.vad_transformers import "
             "TransformersVADForVoiceActivityDetection;"
             "print(json.dumps({'torch': 'torch' in sys.modules, "
-            "'transformers': 'transformers' in sys.modules}))"
-        )
+            "'transformers': 'transformers' in sys.modules}))")
         result = subprocess.run(
             [sys.executable, "-c", code],
             cwd=PROJECT_ROOT,
@@ -164,7 +160,7 @@ class NativeTransformersVADProviderTests(unittest.TestCase):
             self.assertEqual(output.metadata["architecture"], "wav2vec2")
             self.assertEqual(output.metadata["speech_class_id"], 1)
             self.assertEqual(output.metadata["frame_hop_samples"], 4)
-            self.assertEqual(tuple(output.probabilities.shape), (7,))
+            self.assertEqual(tuple(output.probabilities.shape), (7, ))
             self.assertEqual(
                 [(segment.start, segment.end) for segment in output.segments],
                 [(0.0, 0.28)],
@@ -241,7 +237,7 @@ class NativeTransformersVADProviderTests(unittest.TestCase):
             wrapper.architecture_family,
             "audio-classification",
         )
-        self.assertEqual(tuple(output.probabilities.shape), (3,))
+        self.assertEqual(tuple(output.probabilities.shape), (3, ))
         self.assertEqual(output.metadata["frame_hop_samples"], 5)
         self.assertEqual(output.metadata["frame_length_samples"], 10)
         self.assertEqual(
@@ -257,7 +253,8 @@ class NativeTransformersVADProviderTests(unittest.TestCase):
             })
         with self.assertRaisesRegex(ValueError, "ASR head"):
             TransformersVADForVoiceActivityDetection._infer_architecture_family({
-                "model_type": "wav2vec2",
+                "model_type":
+                "wav2vec2",
                 "architectures": ["Wav2Vec2ForCTC"],
             })
 

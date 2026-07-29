@@ -32,34 +32,23 @@ def create_llasa_architecture_spec() -> ArchitectureSpec:
     return ArchitectureSpec(
         architecture_id="llasa",
         version="1",
-        model_builder=(
-            "voicehub.architectures.causal_lm.modeling:"
-            "LlamaForCausalLM"
-        ),
-        config=(
-            "voicehub.architectures.causal_lm.configuration:"
-            "LlamaConfig"
-        ),
+        model_builder=("voicehub.architectures.causal_lm.modeling:"
+                       "LlamaForCausalLM"),
+        config=("voicehub.architectures.causal_lm.configuration:"
+                "LlamaConfig"),
         processor="voicehub.models.llasa.tokenization_llasa:LlasaTokenizer",
         decoder="voicehub.models.llasa.xcodec2:XCodec2Model",
         objective="voicehub.models.llasa.training:LlasaTrainingAdapter",
         checkpoint_adapter=(
             "voicehub.architectures.causal_lm.checkpoint:"
-            "HuggingFaceCausalLMCheckpointAdapter"
-        ),
+            "HuggingFaceCausalLMCheckpointAdapter"),
         components={
-            "artifact-resolver":
-            "voicehub.models.llasa.artifacts:resolve_llasa_artifacts",
-            "audio-codec":
-            "voicehub.models.llasa.xcodec2:XCodec2Model",
-            "codec-artifact-resolver":
-            "voicehub.models.llasa.artifacts:resolve_xcodec2_artifacts",
-            "codec-checkpoint-adapter":
-            "voicehub.models.llasa.checkpoint:XCodec2CheckpointAdapter",
-            "runtime":
-            "voicehub.models.llasa.inference:LlasaForTextToSpeech",
-            "sft-dataset":
-            "voicehub.models.llasa.training:LlasaSFTDataset",
+            "artifact-resolver": "voicehub.models.llasa.artifacts:resolve_llasa_artifacts",
+            "audio-codec": "voicehub.models.llasa.xcodec2:XCodec2Model",
+            "codec-artifact-resolver": "voicehub.models.llasa.artifacts:resolve_xcodec2_artifacts",
+            "codec-checkpoint-adapter": "voicehub.models.llasa.checkpoint:XCodec2CheckpointAdapter",
+            "runtime": "voicehub.models.llasa.inference:LlasaForTextToSpeech",
+            "sft-dataset": "voicehub.models.llasa.training:LlasaSFTDataset",
         },
         capabilities=ArchitectureCapabilities(
             tasks=(SpeechTask.TEXT_TO_SPEECH, ),
@@ -123,8 +112,7 @@ def create_llasa_architecture_spec() -> ArchitectureSpec:
             "training_boundary": (
                 "The LLaSA language model is trainable with completion-only "
                 "cross-entropy. The separately pinned native XCodec2 graph "
-                "is frozen and may be bypassed with precomputed codes."
-            ),
+                "is frozen and may be bypassed with precomputed codes."),
         },
     )
 

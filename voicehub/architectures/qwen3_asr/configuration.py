@@ -1,9 +1,9 @@
 """Validated configuration for VoiceHub's native Qwen3-ASR graph.
 
-The public checkpoint schema is a composite ``thinker_config`` containing an
-audio encoder and a dense Qwen3 decoder.  This module keeps that schema intact
-while translating only the executable decoder fields into VoiceHub's shared
-causal-LM configuration.
+The public checkpoint schema is a composite ``thinker_config``
+containing an audio encoder and a dense Qwen3 decoder.  This module
+keeps that schema intact while translating only the executable decoder
+fields into VoiceHub's shared causal-LM configuration.
 """
 
 from __future__ import annotations

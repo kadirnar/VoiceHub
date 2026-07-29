@@ -1,8 +1,8 @@
 """Validated native configuration for the published Qwen3-TTS 12 Hz family.
 
 The schema mirrors the official ``config.json`` files without importing
-Transformers. Unknown keys are retained when round-tripping so checkpoints
-created by newer compatible releases remain loadable.
+Transformers. Unknown keys are retained when round-tripping so
+checkpoints created by newer compatible releases remain loadable.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ class Qwen3TTSSpeakerEncoderConfig:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, values: Mapping[str, Any] | None) -> "Qwen3TTSSpeakerEncoderConfig":
+    def from_dict(cls, values: Mapping[str, Any] | None) -> Qwen3TTSSpeakerEncoderConfig:
         source = _mapping(values, name="speaker_encoder_config")
         known = {
             name: source.pop(name)
@@ -111,7 +111,7 @@ class Qwen3TTSCodePredictorConfig:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, values: Mapping[str, Any] | None) -> "Qwen3TTSCodePredictorConfig":
+    def from_dict(cls, values: Mapping[str, Any] | None) -> Qwen3TTSCodePredictorConfig:
         source = _mapping(values, name="code_predictor_config")
         known = {
             name: source.pop(name)
@@ -188,7 +188,7 @@ class Qwen3TTSTalkerConfig:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, values: Mapping[str, Any] | None) -> "Qwen3TTSTalkerConfig":
+    def from_dict(cls, values: Mapping[str, Any] | None) -> Qwen3TTSTalkerConfig:
         source = _mapping(values, name="talker_config")
         predictor = Qwen3TTSCodePredictorConfig.from_dict(source.pop("code_predictor_config", None))
         known = {
@@ -305,7 +305,7 @@ class Qwen3TTSDecoderConfig:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, values: Mapping[str, Any] | None) -> "Qwen3TTSDecoderConfig":
+    def from_dict(cls, values: Mapping[str, Any] | None) -> Qwen3TTSDecoderConfig:
         source = _mapping(values, name="decoder_config")
         known = {
             name: source.pop(name)
@@ -379,7 +379,7 @@ class Qwen3TTSTokenizerConfig:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, values: Mapping[str, Any]) -> "Qwen3TTSTokenizerConfig":
+    def from_dict(cls, values: Mapping[str, Any]) -> Qwen3TTSTokenizerConfig:
         source = _mapping(values, name="speech tokenizer config")
         decoder = Qwen3TTSDecoderConfig.from_dict(source.pop("decoder_config", None))
         encoder = _mapping(source.pop("encoder_config", None), name="encoder_config")
@@ -438,7 +438,7 @@ class Qwen3TTSArchitectureConfig:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, values: Mapping[str, Any]) -> "Qwen3TTSArchitectureConfig":
+    def from_dict(cls, values: Mapping[str, Any]) -> Qwen3TTSArchitectureConfig:
         source = _mapping(values, name="Qwen3-TTS config")
         talker = Qwen3TTSTalkerConfig.from_dict(source.pop("talker_config", None))
         speaker = Qwen3TTSSpeakerEncoderConfig.from_dict(source.pop("speaker_encoder_config", None))

@@ -7,19 +7,10 @@ from types import MappingProxyType
 
 import torch
 
-from voicehub.architectures.supertonic.checkpoint import (
-    load_supertonic_native_weights,
-    save_supertonic_native_weights,
-)
-from voicehub.architectures.supertonic.configuration import (
-    SupertonicArchitectureConfig,
-)
-from voicehub.architectures.supertonic.frontend import (
-    SupertonicUnicodeProcessor,
-)
-from voicehub.architectures.supertonic.runtime import (
-    NativeSupertonicRuntime,
-)
+from voicehub.architectures.supertonic.checkpoint import load_supertonic_native_weights, save_supertonic_native_weights
+from voicehub.architectures.supertonic.configuration import SupertonicArchitectureConfig
+from voicehub.architectures.supertonic.frontend import SupertonicUnicodeProcessor
+from voicehub.architectures.supertonic.runtime import NativeSupertonicRuntime
 from voicehub.checkpointing import (
     ONNXAttribute,
     ONNXGraph,
@@ -29,16 +20,9 @@ from voicehub.checkpointing import (
     ONNXValueInfo,
     save_safetensors,
 )
-from voicehub.models.supertonic.configuration_supertonic import (
-    SUPERTONIC_SAMPLE_RATE,
-    SupertonicConfig,
-)
-from voicehub.models.supertonic.inference import (
-    SupertonicForTextToSpeech,
-)
-from voicehub.models.supertonic.training import (
-    SupertonicTrainingAdapter,
-)
+from voicehub.models.supertonic.configuration_supertonic import SUPERTONIC_SAMPLE_RATE, SupertonicConfig
+from voicehub.models.supertonic.inference import SupertonicForTextToSpeech
+from voicehub.models.supertonic.training import SupertonicTrainingAdapter
 from voicehub.training.contracts import TrainingSupport
 from voicehub.training.specs import get_training_spec
 
@@ -52,9 +36,9 @@ def _value(name: str, shape: tuple[int | str | None, ...]) -> ONNXValueInfo:
 
 
 def _tensor(
-    name: str,
-    values: tuple[float, ...],
-    shape: tuple[int, ...] = (),
+        name: str,
+        values: tuple[float, ...],
+        shape: tuple[int, ...] = (),
 ) -> ONNXTensor:
     return ONNXTensor(
         name=name,
@@ -69,7 +53,7 @@ def _axes(name: str, values: tuple[int, ...]) -> ONNXTensor:
     return ONNXTensor(
         name=name,
         data_type=7,
-        dimensions=(len(values),),
+        dimensions=(len(values), ),
         raw_data=b"",
         int64_data=values,
     )
@@ -98,12 +82,12 @@ def _model(
         producer_version="1",
         domain="",
         model_version=1,
-        opsets=(("", 19),),
+        opsets=(("", 19), ),
         metadata=MappingProxyType({}),
         graph=ONNXGraph(
             name="supertonic-test",
             inputs=tuple(_value(name, ()) for name in inputs),
-            outputs=(_value(output, ()),),
+            outputs=(_value(output, ()), ),
             nodes=nodes,
             initializers=MappingProxyType(initializers),
         ),
@@ -119,19 +103,19 @@ def _runtime() -> NativeSupertonicRuntime:
                 op_type="ReduceMean",
                 domain="",
                 inputs=("style_dp", "duration_axes"),
-                outputs=("duration_mean",),
+                outputs=("duration_mean", ),
                 attributes=_keep_dimensions(False),
             ),
             ONNXNode(
                 op_type="Add",
                 domain="",
                 inputs=("duration_mean", "duration_bias"),
-                outputs=("duration",),
+                outputs=("duration", ),
             ),
         ),
         initializers={
             "duration_axes": _axes("duration_axes", (1, 2)),
-            "duration_bias": _tensor("duration_bias", (0.5,)),
+            "duration_bias": _tensor("duration_bias", (0.5, )),
         },
     )
     text_encoder = _model(
@@ -142,11 +126,10 @@ def _runtime() -> NativeSupertonicRuntime:
                 op_type="Add",
                 domain="",
                 inputs=("style_ttl", "text_bias"),
-                outputs=("text_emb",),
-            ),
-        ),
+                outputs=("text_emb", ),
+            ), ),
         initializers={
-            "text_bias": _tensor("text_bias", (0.1,)),
+            "text_bias": _tensor("text_bias", (0.1, )),
         },
     )
     vector = _model(
@@ -165,48 +148,48 @@ def _runtime() -> NativeSupertonicRuntime:
                 op_type="ReduceMean",
                 domain="",
                 inputs=("text_emb", "text_axes"),
-                outputs=("text_condition",),
+                outputs=("text_condition", ),
                 attributes=_keep_dimensions(True),
             ),
             ONNXNode(
                 op_type="Add",
                 domain="",
                 inputs=("noisy_latent", "text_condition"),
-                outputs=("conditioned",),
+                outputs=("conditioned", ),
             ),
             ONNXNode(
                 op_type="Mul",
                 domain="",
                 inputs=("conditioned", "vector_scale"),
-                outputs=("denoised_latent",),
+                outputs=("denoised_latent", ),
             ),
         ),
         initializers={
             "text_axes": _axes("text_axes", (1, 2)),
-            "vector_scale": _tensor("vector_scale", (0.5,)),
+            "vector_scale": _tensor("vector_scale", (0.5, )),
         },
     )
     vocoder = _model(
-        inputs=("latent",),
+        inputs=("latent", ),
         output="wav_tts",
         nodes=(
             ONNXNode(
                 op_type="Mul",
                 domain="",
                 inputs=("latent", "vocoder_scale"),
-                outputs=("scaled",),
+                outputs=("scaled", ),
             ),
             ONNXNode(
                 op_type="ReduceMean",
                 domain="",
                 inputs=("scaled", "channel_axis"),
-                outputs=("wav_tts",),
+                outputs=("wav_tts", ),
                 attributes=_keep_dimensions(False),
             ),
         ),
         initializers={
-            "channel_axis": _axes("channel_axis", (1,)),
-            "vocoder_scale": _tensor("vocoder_scale", (1.0,)),
+            "channel_axis": _axes("channel_axis", (1, )),
+            "vocoder_scale": _tensor("vocoder_scale", (1.0, )),
         },
     )
     processor = SupertonicUnicodeProcessor(tuple(range(128)))
@@ -254,8 +237,8 @@ class NativeSupertonicRuntimeTests(unittest.TestCase):
         self.assertEqual(config.language, "tr")
         self.assertFalse(config.enable_preprocessed_training)
         with self.assertRaisesRegex(
-            ValueError,
-            "Unsupported Supertonic language",
+                ValueError,
+                "Unsupported Supertonic language",
         ):
             SupertonicConfig(language="xx")
 
@@ -267,9 +250,7 @@ class NativeSupertonicRuntimeTests(unittest.TestCase):
         self.assertEqual(maximum, 1)
         torch.testing.assert_close(mask, torch.ones(1, 1, 1))
 
-    def test_published_graph_objective_backpropagates_through_all_components(
-        self,
-    ):
+    def test_published_graph_objective_backpropagates_through_all_components(self, ):
         runtime = _runtime()
         text_ids = torch.tensor([[1, 2, 3]], dtype=torch.int64)
         text_mask = torch.ones(1, 1, 3)
@@ -310,9 +291,7 @@ class NativeSupertonicRuntimeTests(unittest.TestCase):
             (runtime.vocoder, "vocoder_scale"),
         ):
             with self.subTest(name=name):
-                self.assertIsNotNone(
-                    graph.initializer_tensor(name).grad,
-                )
+                self.assertIsNotNone(graph.initializer_tensor(name).grad, )
 
     def test_native_weight_export_strictly_round_trips_original_names(self):
         runtime = _runtime()
@@ -357,8 +336,8 @@ class NativeSupertonicRuntimeTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(
-                ValueError,
-                "structural initializer",
+                    ValueError,
+                    "structural initializer",
             ):
                 load_supertonic_native_weights(runtime, paths)
 

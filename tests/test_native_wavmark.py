@@ -36,14 +36,7 @@ class _DeterministicWatermarkModel(nn.Module):
 class NativeWavMarkTests(unittest.TestCase):
 
     def test_runtime_uses_only_torch_stdlib_and_voicehub(self):
-        root = (
-            PROJECT_ROOT
-            / "voicehub"
-            / "components"
-            / "audio"
-            / "watermarking"
-            / "wavmark"
-        )
+        root = (PROJECT_ROOT / "voicehub" / "components" / "audio" / "watermarking" / "wavmark")
         forbidden = {
             "librosa",
             "numpy",
@@ -60,11 +53,7 @@ class NativeWavMarkTests(unittest.TestCase):
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     names = [alias.name for alias in node.names]
-                elif (
-                    isinstance(node, ast.ImportFrom)
-                    and node.level == 0
-                    and node.module
-                ):
+                elif (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module):
                     names = [node.module]
                 else:
                     names = []
@@ -77,7 +66,7 @@ class NativeWavMarkTests(unittest.TestCase):
         pattern = wavmark.wm_add_util.fix_pattern[:16]
         payload = [index % 2 for index in range(16)]
         model = _DeterministicWatermarkModel(pattern + payload)
-        waveform = torch.full((17_600,), 0.1)
+        waveform = torch.full((17_600, ), 0.1)
 
         watermarked, encode_info = wavmark.encode_watermark(
             model,
@@ -138,9 +127,7 @@ class NativeWavMarkTests(unittest.TestCase):
                 stream.setframerate(8_000)
                 stream.writeframes(b"".join(frames))
 
-            waveform, rate, duration = file_reader.read_as_single_channel_16k(
-                path,
-            )
+            waveform, rate, duration = file_reader.read_as_single_channel_16k(path, )
 
         self.assertEqual(rate, 16_000)
         self.assertEqual(waveform.numel(), 1_600)
@@ -153,12 +140,12 @@ class NativeWavMarkTests(unittest.TestCase):
         fake_model.eval.return_value = fake_model
         with tempfile.NamedTemporaryFile(suffix=".pkl") as stream:
             with (
-                patch.object(wavmark.my_model, "Model", return_value=fake_model),
-                patch.object(
-                    torch,
-                    "load",
-                    return_value={"weight": torch.ones(1)},
-                ) as load,
+                    patch.object(wavmark.my_model, "Model", return_value=fake_model),
+                    patch.object(
+                        torch,
+                        "load",
+                        return_value={"weight": torch.ones(1)},
+                    ) as load,
             ):
                 loaded = wavmark.load_model(stream.name)
 

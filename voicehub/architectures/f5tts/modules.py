@@ -1,7 +1,8 @@
 """PyTorch-only F5-TTS DiT building blocks.
 
 The module hierarchy intentionally mirrors the released F5-TTS graph so
-official ``ema_model.transformer.*`` tensors load without name rewriting.
+official ``ema_model.transformer.*`` tensors load without name
+rewriting.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from torch import nn
 
 
 class SinusPositionEmbedding(nn.Module):
+
     def __init__(self, dim: int) -> None:
         super().__init__()
         self.dim = dim
@@ -21,15 +23,13 @@ class SinusPositionEmbedding(nn.Module):
     def forward(self, value: torch.Tensor, scale: float = 1_000.0) -> torch.Tensor:
         half_dim = self.dim // 2
         exponent = math.log(10_000.0) / (half_dim - 1)
-        frequencies = torch.exp(
-            torch.arange(half_dim, device=value.device, dtype=torch.float32)
-            * -exponent
-        )
+        frequencies = torch.exp(torch.arange(half_dim, device=value.device, dtype=torch.float32) * -exponent)
         angles = scale * value.unsqueeze(1) * frequencies.unsqueeze(0)
         return torch.cat((angles.sin(), angles.cos()), dim=-1)
 
 
 class TimestepEmbedding(nn.Module):
+
     def __init__(self, dim: int, frequency_embedding_dim: int = 256) -> None:
         super().__init__()
         self.time_embed = SinusPositionEmbedding(frequency_embedding_dim)
@@ -45,6 +45,7 @@ class TimestepEmbedding(nn.Module):
 
 
 class ConvPositionEmbedding(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -73,10 +74,7 @@ class ConvPositionEmbedding(nn.Module):
             nn.Mish(),
         )
         self.layer_need_mask_idx = tuple(
-            index
-            for index, layer in enumerate(self.conv1d)
-            if isinstance(layer, nn.Conv1d)
-        )
+            index for index, layer in enumerate(self.conv1d) if isinstance(layer, nn.Conv1d))
 
     def forward(
         self,
@@ -100,16 +98,15 @@ def precompute_freqs_cis(
     theta: float = 10_000.0,
     theta_rescale_factor: float = 1.0,
 ) -> torch.Tensor:
-    theta *= theta_rescale_factor ** (dim / (dim - 2))
-    frequencies = 1.0 / (
-        theta ** (torch.arange(0, dim, 2, dtype=torch.float32)[: dim // 2] / dim)
-    )
+    theta *= theta_rescale_factor**(dim / (dim - 2))
+    frequencies = 1.0 / (theta**(torch.arange(0, dim, 2, dtype=torch.float32)[:dim // 2] / dim))
     positions = torch.arange(end, dtype=torch.float32)
     angles = torch.outer(positions, frequencies)
     return torch.cat((angles.cos(), angles.sin()), dim=-1)
 
 
 class GRN(nn.Module):
+
     def __init__(self, dim: int) -> None:
         super().__init__()
         self.gamma = nn.Parameter(torch.zeros(1, 1, dim))
@@ -122,6 +119,7 @@ class GRN(nn.Module):
 
 
 class ConvNeXtV2Block(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -156,6 +154,7 @@ class ConvNeXtV2Block(nn.Module):
 
 
 class RMSNorm(nn.Module):
+
     def __init__(self, dim: int, eps: float) -> None:
         super().__init__()
         self.eps = eps
@@ -169,6 +168,7 @@ class RMSNorm(nn.Module):
 
 
 class AdaLayerNorm(nn.Module):
+
     def __init__(self, dim: int) -> None:
         super().__init__()
         self.silu = nn.SiLU()
@@ -181,17 +181,13 @@ class AdaLayerNorm(nn.Module):
         embedding: torch.Tensor,
     ) -> tuple[torch.Tensor, ...]:
         modulation = self.linear(self.silu(embedding))
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
-            modulation.chunk(6, dim=1)
-        )
-        normalized = (
-            self.norm(hidden_states) * (1 + scale_msa[:, None])
-            + shift_msa[:, None]
-        )
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (modulation.chunk(6, dim=1))
+        normalized = (self.norm(hidden_states) * (1 + scale_msa[:, None]) + shift_msa[:, None])
         return normalized, gate_msa, shift_mlp, scale_mlp, gate_mlp
 
 
 class AdaLayerNormFinal(nn.Module):
+
     def __init__(self, dim: int) -> None:
         super().__init__()
         self.silu = nn.SiLU()
@@ -204,13 +200,11 @@ class AdaLayerNormFinal(nn.Module):
         embedding: torch.Tensor,
     ) -> torch.Tensor:
         scale, shift = self.linear(self.silu(embedding)).chunk(2, dim=1)
-        return (
-            self.norm(hidden_states) * (1 + scale[:, None, :])
-            + shift[:, None, :]
-        )
+        return (self.norm(hidden_states) * (1 + scale[:, None, :]) + shift[:, None, :])
 
 
 class FeedForward(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -257,9 +251,7 @@ def apply_rotary_position_embedding(
     while frequencies.ndim < rotary.ndim:
         frequencies = frequencies.unsqueeze(0)
     rotated = (
-        rotary * frequencies.cos() * scale
-        + _rotate_half_interleaved(rotary) * frequencies.sin() * scale
-    )
+        rotary * frequencies.cos() * scale + _rotate_half_interleaved(rotary) * frequencies.sin() * scale)
     return torch.cat((rotated, remainder), dim=-1).to(hidden_states.dtype)
 
 
@@ -268,9 +260,7 @@ class RotaryEmbedding(nn.Module):
 
     def __init__(self, dim: int, base: float = 10_000.0) -> None:
         super().__init__()
-        inv_freq = 1.0 / (
-            base ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim)
-        )
+        inv_freq = 1.0 / (base**(torch.arange(0, dim, 2, dtype=torch.float32) / dim))
         self.register_buffer("inv_freq", inv_freq)
 
     def forward_from_seq_len(
@@ -288,6 +278,7 @@ class RotaryEmbedding(nn.Module):
 
 
 class Attention(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -315,9 +306,7 @@ class Attention(nn.Module):
         else:
             self.q_norm = None
             self.k_norm = None
-        self.to_out = nn.ModuleList(
-            (nn.Linear(self.inner_dim, dim), nn.Dropout(dropout))
-        )
+        self.to_out = nn.ModuleList((nn.Linear(self.inner_dim, dim), nn.Dropout(dropout)))
 
     def forward(
         self,
@@ -330,11 +319,7 @@ class Attention(nn.Module):
         head_dim = self.inner_dim // self.heads
 
         def project(layer: nn.Linear) -> torch.Tensor:
-            return (
-                layer(hidden_states)
-                .view(batch, sequence_length, self.heads, head_dim)
-                .transpose(1, 2)
-            )
+            return (layer(hidden_states).view(batch, sequence_length, self.heads, head_dim).transpose(1, 2))
 
         query = project(self.to_q)
         key = project(self.to_k)
@@ -390,6 +375,7 @@ class Attention(nn.Module):
 
 
 class DiTBlock(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -432,14 +418,12 @@ class DiTBlock(nn.Module):
             mask=mask,
             rope=rope,
         )
-        normalized = (
-            self.ff_norm(hidden_states) * (1 + scale_mlp[:, None])
-            + shift_mlp[:, None]
-        )
+        normalized = (self.ff_norm(hidden_states) * (1 + scale_mlp[:, None]) + shift_mlp[:, None])
         return hidden_states + gate_mlp.unsqueeze(1) * self.ff(normalized)
 
 
 class TextEmbedding(nn.Module):
+
     def __init__(
         self,
         text_num_embeds: int,
@@ -464,11 +448,7 @@ class TextEmbedding(nn.Module):
                 persistent=False,
             )
             self.text_blocks = nn.Sequential(
-                *(
-                    ConvNeXtV2Block(text_dim, text_dim * conv_mult)
-                    for _ in range(conv_layers)
-                )
-            )
+                *(ConvNeXtV2Block(text_dim, text_dim * conv_mult) for _ in range(conv_layers)))
 
     @staticmethod
     def _average_upsample(
@@ -485,7 +465,7 @@ class TextEmbedding(nn.Module):
                 continue
             base_repeat, remainder = divmod(audio_length, text_length)
             repeats = torch.full(
-                (text_length,),
+                (text_length, ),
                 base_repeat,
                 device=hidden_states.device,
                 dtype=torch.long,
@@ -520,7 +500,7 @@ class TextEmbedding(nn.Module):
         else:
             maximum_length = int(sequence_length)
             target_lengths = torch.full(
-                (token_ids.shape[0],),
+                (token_ids.shape[0], ),
                 maximum_length,
                 device=token_ids.device,
                 dtype=torch.long,
@@ -547,10 +527,7 @@ class TextEmbedding(nn.Module):
         if self.extra_modeling:
             positions = self.freqs_cis[:maximum_length]
             if valid_positions is not None:
-                positions = (
-                    positions.unsqueeze(0)
-                    * valid_positions.unsqueeze(-1).to(positions.dtype)
-                )
+                positions = (positions.unsqueeze(0) * valid_positions.unsqueeze(-1).to(positions.dtype))
             hidden_states = hidden_states + positions
             if self.mask_padding:
                 mask = padding_mask.unsqueeze(-1)
@@ -569,6 +546,7 @@ class TextEmbedding(nn.Module):
 
 
 class InputEmbedding(nn.Module):
+
     def __init__(self, mel_dim: int, text_dim: int, out_dim: int) -> None:
         super().__init__()
         self.proj = nn.Linear(mel_dim * 2 + text_dim, out_dim)
@@ -585,9 +563,7 @@ class InputEmbedding(nn.Module):
     ) -> torch.Tensor:
         if drop_audio_cond:
             conditioning = torch.zeros_like(conditioning)
-        projected = self.proj(
-            torch.cat((hidden_states, conditioning, text_embedding), dim=-1)
-        )
+        projected = self.proj(torch.cat((hidden_states, conditioning, text_embedding), dim=-1))
         return self.conv_pos_embed(projected, mask=audio_mask) + projected
 
 

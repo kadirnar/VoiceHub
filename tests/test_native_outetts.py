@@ -286,9 +286,7 @@ class NativeOuteTTSBoundaryTests(unittest.TestCase):
         self.assertIs(adapter.primary_model, language_model)
         self.assertEqual(adapter.primary_path, "model.language_model")
         self.assertTrue(all(not parameter.requires_grad for parameter in codec.parameters()))
-        self.assertTrue(
-            all(parameter.requires_grad for parameter in language_model.parameters())
-        )
+        self.assertTrue(all(parameter.requires_grad for parameter in language_model.parameters()))
 
     def test_external_and_quantized_backends_fail_before_loading(self):
         external = OuteTTSForTextToSpeech(

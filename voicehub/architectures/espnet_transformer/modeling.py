@@ -9,9 +9,7 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
-from voicehub.architectures.espnet_transformer.configuration import (
-    ESPnetLibriSpeechTransformerConfig,
-)
+from voicehub.architectures.espnet_transformer.configuration import ESPnetLibriSpeechTransformerConfig
 from voicehub.architectures.espnet_transformer.frontend import (
     ESPnetDefaultFrontend,
     ESPnetGlobalMVN,
@@ -58,9 +56,7 @@ class ESPnetPositionalEncoding(nn.Module):
                 2,
                 device=device,
                 dtype=torch.float32,
-            )
-            * -(math.log(10_000.0) / self.dimension)
-        )
+            ) * -(math.log(10_000.0) / self.dimension))
         values = torch.zeros(
             length,
             self.dimension,
@@ -78,7 +74,7 @@ class ESPnetPositionalEncoding(nn.Module):
                 device=values.device,
                 dtype=values.dtype,
             )
-        positions = self._pe[:, : values.shape[1]].to(
+        positions = self._pe[:, :values.shape[1]].to(
             device=values.device,
             dtype=values.dtype,
         )
@@ -180,10 +176,7 @@ class ESPnetConv2dSubsampling6(nn.Module):
             ),
             nn.ReLU(),
         )
-        flattened = (
-            output_dimension
-            * (((input_dimension - 1) // 2 - 1) // 3)
-        )
+        flattened = (output_dimension * (((input_dimension - 1) // 2 - 1) // 3))
         self.out = nn.Sequential(
             nn.Linear(flattened, output_dimension),
             ESPnetPositionalEncoding(output_dimension, dropout_rate),
@@ -196,13 +189,11 @@ class ESPnetConv2dSubsampling6(nn.Module):
     ) -> tuple[Tensor, Tensor | None]:
         values = self.conv(values.unsqueeze(1))
         batch, channels, time, features = values.shape
-        values = self.out(
-            values.transpose(1, 2).contiguous().view(
-                batch,
-                time,
-                channels * features,
-            )
-        )
+        values = self.out(values.transpose(1, 2).contiguous().view(
+            batch,
+            time,
+            channels * features,
+        ))
         if mask is not None:
             mask = mask[:, :, :-2:2][:, :, :-4:3]
         return values, mask
@@ -240,9 +231,7 @@ class ESPnetEncoderLayer(nn.Module):
         residual = values
         if self.normalize_before:
             values = self.norm1(values)
-        values = residual + self.dropout(
-            self.self_attn(values, values, values, mask)
-        )
+        values = residual + self.dropout(self.self_attn(values, values, values, mask))
         if not self.normalize_before:
             values = self.norm1(values)
         residual = values
@@ -268,10 +257,7 @@ class ESPnetTransformerEncoder(nn.Module):
             config.encoder_dimension,
             config.positional_dropout_rate,
         )
-        self.encoders = nn.ModuleList(
-            ESPnetEncoderLayer(config)
-            for _ in range(config.encoder_blocks)
-        )
+        self.encoders = nn.ModuleList(ESPnetEncoderLayer(config) for _ in range(config.encoder_blocks))
         self.after_norm = nn.LayerNorm(config.encoder_dimension)
 
     def forward(
@@ -279,35 +265,23 @@ class ESPnetTransformerEncoder(nn.Module):
         features: Tensor,
         feature_lengths: Tensor,
     ) -> tuple[Tensor, Tensor]:
-        if (
-            features.ndim != 3
-            or features.shape[-1] != self.config.n_mels
-        ):
+        if (features.ndim != 3 or features.shape[-1] != self.config.n_mels):
             raise ValueError(
                 "ESPnet encoder features must have shape "
-                f"[batch, frames, {self.config.n_mels}]."
-            )
+                f"[batch, frames, {self.config.n_mels}].")
         lengths = torch.as_tensor(
             feature_lengths,
             dtype=torch.long,
             device=features.device,
         )
-        if (
-            lengths.ndim != 1
-            or lengths.shape[0] != features.shape[0]
-            or torch.any(lengths > features.shape[1])
-        ):
-            raise ValueError(
-                "ESPnet feature lengths must describe the padded batch."
-            )
-        if (
-            features.shape[1] < self.config.minimum_feature_frames
-            or torch.any(lengths < self.config.minimum_feature_frames)
-        ):
+        if (lengths.ndim != 1 or lengths.shape[0] != features.shape[0] or
+                torch.any(lengths > features.shape[1])):
+            raise ValueError("ESPnet feature lengths must describe the padded batch.")
+        if (features.shape[1] < self.config.minimum_feature_frames or
+                torch.any(lengths < self.config.minimum_feature_frames)):
             raise ValueError(
                 "ESPnet conv2d6 requires at least "
-                f"{self.config.minimum_feature_frames} feature frames."
-            )
+                f"{self.config.minimum_feature_frames} feature frames.")
         mask = ~make_pad_mask(
             lengths,
             features.shape[1],
@@ -319,7 +293,7 @@ class ESPnetTransformerEncoder(nn.Module):
             values = self.after_norm(values)
         if mask is None:
             lengths = torch.full(
-                (values.shape[0],),
+                (values.shape[0], ),
                 values.shape[1],
                 dtype=torch.long,
                 device=values.device,
@@ -375,17 +349,13 @@ class ESPnetDecoderLayer(nn.Module):
         residual = target
         if self.normalize_before:
             target = self.norm1(target)
-        values = residual + self.dropout(
-            self.self_attn(target, target, target, target_mask)
-        )
+        values = residual + self.dropout(self.self_attn(target, target, target, target_mask))
         if not self.normalize_before:
             values = self.norm1(values)
         residual = values
         if self.normalize_before:
             values = self.norm2(values)
-        values = residual + self.dropout(
-            self.src_attn(values, memory, memory, memory_mask)
-        )
+        values = residual + self.dropout(self.src_attn(values, memory, memory, memory_mask))
         if not self.normalize_before:
             values = self.norm2(values)
         residual = values
@@ -416,10 +386,7 @@ class ESPnetTransformerDecoder(nn.Module):
                 config.positional_dropout_rate,
             ),
         )
-        self.decoders = nn.ModuleList(
-            ESPnetDecoderLayer(config)
-            for _ in range(config.decoder_blocks)
-        )
+        self.decoders = nn.ModuleList(ESPnetDecoderLayer(config) for _ in range(config.decoder_blocks))
         self.after_norm = nn.LayerNorm(config.encoder_dimension)
         self.output_layer = nn.Linear(
             config.encoder_dimension,
@@ -506,8 +473,7 @@ class ESPnetCTC(nn.Module):
                 encoder_states,
                 p=self.config.ctc_dropout_rate,
                 training=self.training,
-            )
-        )
+            ))
 
     def forward(
         self,
@@ -518,11 +484,7 @@ class ESPnetCTC(nn.Module):
     ) -> tuple[Tensor, Tensor]:
         logits = self.logits(encoder_states)
         targets = torch.cat(
-            [
-                labels[index, : int(length.item())]
-                for index, length in enumerate(label_lengths)
-            ]
-        )
+            [labels[index, :int(length.item())] for index, length in enumerate(label_lengths)])
         loss = self.loss(
             logits.log_softmax(dim=-1).transpose(0, 1),
             targets,
@@ -622,11 +584,7 @@ def espnet_label_smoothed_loss(
         distribution,
         reduction="none",
     )
-    denominator = (
-        int((~ignore).sum().item())
-        if normalize_length
-        else batch_size
-    )
+    denominator = (int((~ignore).sum().item()) if normalize_length else batch_size)
     return values.masked_fill(ignore.unsqueeze(1), 0.0).sum() / max(
         denominator,
         1,
@@ -673,9 +631,7 @@ class ESPnetLibriSpeechTransformerForASR(nn.Module):
     ) -> tuple[Tensor, Tensor]:
         augmented = (
             self.training and self.config.apply_spec_augment
-            if apply_augmentation is None
-            else apply_augmentation
-        )
+            if apply_augmentation is None else apply_augmentation)
         if augmented:
             features, feature_lengths = self.specaug(
                 features,
@@ -721,7 +677,7 @@ class ESPnetLibriSpeechTransformerForASR(nn.Module):
         )
         for index, length in enumerate(label_lengths):
             size = int(length.item())
-            decoder_inputs[index, 1 : size + 1] = labels[index, :size]
+            decoder_inputs[index, 1:size + 1] = labels[index, :size]
             decoder_targets[index, :size] = labels[index, :size]
             decoder_targets[index, size] = self.config.sos_eos_token_id
         return decoder_inputs, decoder_targets, label_lengths + 1
@@ -748,7 +704,7 @@ class ESPnetLibriSpeechTransformerForASR(nn.Module):
         else:
             if feature_lengths is None:
                 feature_lengths = torch.full(
-                    (features.shape[0],),
+                    (features.shape[0], ),
                     features.shape[1],
                     dtype=torch.long,
                     device=features.device,
@@ -783,15 +739,11 @@ class ESPnetLibriSpeechTransformerForASR(nn.Module):
                 dtype=torch.long,
                 device=labels.device,
             )
-        if (
-            label_lengths.ndim != 1
-            or label_lengths.shape[0] != labels.shape[0]
-            or torch.any(label_lengths <= 0)
-            or torch.any(label_lengths > labels.shape[1])
-        ):
+        if (label_lengths.ndim != 1 or label_lengths.shape[0] != labels.shape[0] or
+                torch.any(label_lengths <= 0) or torch.any(label_lengths > labels.shape[1])):
             raise ValueError("Label lengths must describe non-empty padded rows.")
         for index, length in enumerate(label_lengths):
-            row = labels[index, : int(length.item())]
+            row = labels[index, :int(length.item())]
             if torch.any(row < 0) or torch.any(row >= self.config.vocabulary_size):
                 raise ValueError("Valid ESPnet labels must be vocabulary IDs.")
             if torch.any(row == self.config.blank_token_id):
@@ -799,18 +751,14 @@ class ESPnetLibriSpeechTransformerForASR(nn.Module):
             if torch.any(row == self.config.sos_eos_token_id):
                 raise ValueError("Transcript labels must not include SOS/EOS.")
         if torch.any(label_lengths > encoder_lengths):
-            raise ValueError(
-                "CTC transcript length exceeds the subsampled acoustic sequence."
-            )
+            raise ValueError("CTC transcript length exceeds the subsampled acoustic sequence.")
         ctc_loss, ctc_logits = self.ctc(
             encoder_states,
             encoder_lengths,
             labels,
             label_lengths,
         )
-        decoder_inputs, decoder_targets, decoder_lengths = (
-            self._attention_targets(labels, label_lengths)
-        )
+        decoder_inputs, decoder_targets, decoder_lengths = (self._attention_targets(labels, label_lengths))
         logits, _ = self.decoder(
             encoder_states,
             encoder_lengths,
@@ -824,10 +772,7 @@ class ESPnetLibriSpeechTransformerForASR(nn.Module):
             smoothing=self.config.label_smoothing,
             normalize_length=self.config.length_normalized_loss,
         )
-        loss = (
-            self.config.ctc_weight * ctc_loss
-            + (1.0 - self.config.ctc_weight) * attention_loss
-        )
+        loss = (self.config.ctc_weight * ctc_loss + (1.0 - self.config.ctc_weight) * attention_loss)
         return ESPnetASRModelOutput(
             loss=loss,
             logits=logits,

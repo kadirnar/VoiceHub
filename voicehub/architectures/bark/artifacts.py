@@ -74,8 +74,9 @@ def resolve_bark_artifacts(
 ) -> BarkArtifacts:
     """Resolve one internally consistent Bark artifact set.
 
-    The official release has no Safetensors file. Its legacy checkpoint is
-    resolved only when the caller explicitly opts into the conversion path.
+    The official release has no Safetensors file. Its legacy checkpoint
+    is resolved only when the caller explicitly opts into the conversion
+    path.
     """
     if not isinstance(source, (str, Path)) or not str(source).strip():
         raise ValueError("Bark source must be a non-empty path or Hub ID.")
@@ -83,8 +84,7 @@ def resolve_bark_artifacts(
     if local.exists():
         if local.is_file():
             if local.suffix.lower() not in {".safetensors", ".bin"}:
-                raise ValueError(
-                    "Bark checkpoint files must use `.safetensors` or `.bin`.")
+                raise ValueError("Bark checkpoint files must use `.safetensors` or `.bin`.")
             if local.suffix.lower() == ".bin" and not allow_legacy_checkpoint:
                 raise PermissionError(
                     "Loading a Bark `.bin` checkpoint requires explicit legacy "
@@ -116,15 +116,13 @@ def resolve_bark_artifacts(
             speaker_index=_required(root, _SPEAKER_INDEX),
             checkpoint=checkpoint,
             official_snapshot=False,
-            legacy_checkpoint=(
-                checkpoint is not None and checkpoint.suffix.lower() == ".bin"),
+            legacy_checkpoint=(checkpoint is not None and checkpoint.suffix.lower() == ".bin"),
         )
     else:
         if is_explicit_local_path(source):
             raise FileNotFoundError(f"Bark model path was not found: {local}.")
         repo_id = str(source)
-        pinned_revision = revision or (
-            BARK_CHECKPOINT_REVISION if repo_id == BARK_CHECKPOINT else None)
+        pinned_revision = revision or (BARK_CHECKPOINT_REVISION if repo_id == BARK_CHECKPOINT else None)
 
         def resolve(name: str) -> Path:
             return resolve_pretrained_file(
@@ -136,9 +134,7 @@ def resolve_bark_artifacts(
                 local_files_only=local_files_only,
             )
 
-        official = (
-            repo_id == BARK_CHECKPOINT
-            and pinned_revision == BARK_CHECKPOINT_REVISION)
+        official = (repo_id == BARK_CHECKPOINT and pinned_revision == BARK_CHECKPOINT_REVISION)
         checkpoint = None
         legacy = False
         if allow_legacy_checkpoint:
@@ -175,9 +171,8 @@ def resolve_bark_artifacts(
         for path, digest in expected.items():
             actual = _sha256(path)
             if actual != digest:
-                raise ValueError(
-                    f"Bark artifact {path.name!r} has SHA-256 {actual}, "
-                    f"expected {digest}.")
+                raise ValueError(f"Bark artifact {path.name!r} has SHA-256 {actual}, "
+                                 f"expected {digest}.")
     return artifacts
 
 

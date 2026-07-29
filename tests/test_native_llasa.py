@@ -12,11 +12,7 @@ import torch
 from torch import nn
 
 from voicehub.architectures.causal_lm import LlamaConfig, LlamaForCausalLM
-from voicehub.models.llasa.artifacts import (
-    LLASA_MULTILINGUAL_REVISION,
-    XCODEC2_HF_REVISION,
-    resolve_xcodec2_artifacts,
-)
+from voicehub.models.llasa.artifacts import LLASA_MULTILINGUAL_REVISION, XCODEC2_HF_REVISION, resolve_xcodec2_artifacts
 from voicehub.models.llasa.checkpoint import (
     REFERENCE_LLASSA_CHECKPOINT,
     REFERENCE_XCODEC2_CHECKPOINT,
@@ -35,10 +31,7 @@ from voicehub.models.llasa.tokenization_llasa import (
     START_HEADER_TOKEN,
     LlasaTokenizer,
 )
-from voicehub.models.llasa.training import (
-    LLASA_TRAINING_SOURCE_REVISION,
-    LlasaSFTDataset,
-)
+from voicehub.models.llasa.training import LLASA_TRAINING_SOURCE_REVISION, LlasaSFTDataset
 from voicehub.models.llasa.xcodec2 import (
     XCODEC2_TRANSFORMERS_SOURCE_REVISION,
     Wav2Vec2BertSemanticConfig,
@@ -99,10 +92,7 @@ class _FakeLlasaTokenizer:
         if return_tensors == "pt":
             return torch.tensor([[10, 11]], dtype=torch.long)
         assistant = messages[-1]["content"]
-        codes = [
-            int(value)
-            for value in re.findall(r"<\|s_(\d+)\|>", assistant)
-        ]
+        codes = [int(value) for value in re.findall(r"<\|s_(\d+)\|>", assistant)]
         return [
             10,
             11,
@@ -127,9 +117,7 @@ class _FakeLlasaTokenizer:
             if token_id == 128_261:
                 output.append(SPEECH_GENERATION_END)
             elif LLASA_SPEECH_TOKEN_OFFSET <= token_id < LLASA_VOCABULARY_SIZE:
-                output.append(
-                    f"<|s_{token_id - LLASA_SPEECH_TOKEN_OFFSET}|>"
-                )
+                output.append(f"<|s_{token_id - LLASA_SPEECH_TOKEN_OFFSET}|>")
             else:
                 output.append(f"<token_{token_id}>")
         return output
@@ -185,9 +173,7 @@ class _FakeLanguageModel:
             dtype=torch.long,
             device=input_ids.device,
         )
-        return SimpleNamespace(
-            sequences=torch.cat((input_ids, continuation), dim=-1)
-        )
+        return SimpleNamespace(sequences=torch.cat((input_ids, continuation), dim=-1))
 
 
 class LlasaDependencyAndProvenanceTests(unittest.TestCase):
@@ -257,19 +243,9 @@ class LlasaDependencyAndProvenanceTests(unittest.TestCase):
         self.assertEqual(findings, [])
 
     def test_pinned_sources_and_noncommercial_license_are_explicit(self):
-        source = json.loads(
-            (
-                PROJECT_ROOT
-                / "voicehub"
-                / "models"
-                / "llasa"
-                / "source"
-                / "SOURCE.json"
-            ).read_text(encoding="utf-8")
-        )
-        revisions = {
-            component["revision"] for component in source["components"]
-        }
+        source = json.loads((PROJECT_ROOT / "voicehub" / "models" / "llasa" / "source" /
+                             "SOURCE.json").read_text(encoding="utf-8"))
+        revisions = {component["revision"] for component in source["components"]}
         self.assertEqual(source["license"], "CC-BY-NC-4.0")
         self.assertIn(LLASA_MULTILINGUAL_REVISION, revisions)
         self.assertIn(XCODEC2_HF_REVISION, revisions)
@@ -305,31 +281,27 @@ class LlasaProtocolTests(unittest.TestCase):
     def test_chat_rendering_preserves_the_published_llama32_template(self):
         rendered = LlasaTokenizer.format_chat(
             [
-                {"role": "user", "content": " request "},
-                {"role": "assistant", "content": " answer "},
+                {
+                    "role": "user",
+                    "content": " request "
+                },
+                {
+                    "role": "assistant",
+                    "content": " answer "
+                },
             ],
             continue_final_message=True,
         )
         self.assertTrue(
             rendered.startswith(
-                BOS_TOKEN
-                + START_HEADER_TOKEN
-                + "system"
-                + END_HEADER_TOKEN
-                + "\n\n"
-                + "Cutting Knowledge Date: December 2023\n"
-                + "Today Date: 26 Jul 2024\n\n"
-                + EOT_TOKEN
-            )
-        )
+                BOS_TOKEN + START_HEADER_TOKEN + "system" + END_HEADER_TOKEN + "\n\n" +
+                "Cutting Knowledge Date: December 2023\n" + "Today Date: 26 Jul 2024\n\n" + EOT_TOKEN))
         self.assertTrue(rendered.endswith("\n\nanswer"))
-        self.assertNotIn(EOT_TOKEN, rendered[-len(EOT_TOKEN) :])
+        self.assertNotIn(EOT_TOKEN, rendered[-len(EOT_TOKEN):])
 
     def test_malformed_and_out_of_range_speech_tokens_fail_closed(self):
         with self.assertRaisesRegex(RuntimeError, "malformed speech token"):
-            LlasaForTextToSpeech._extract_speech_ids(
-                ["<|s_not-an-integer|>"]
-            )
+            LlasaForTextToSpeech._extract_speech_ids(["<|s_not-an-integer|>"])
         with self.assertRaisesRegex(RuntimeError, "out-of-range"):
             LlasaForTextToSpeech._extract_speech_ids(["<|s_65536|>"])
 
@@ -425,12 +397,10 @@ class XCodec2NativeGraphTests(unittest.TestCase):
     def test_incompatible_frontend_metadata_fails_closed(self):
         model = XCodec2Model(_tiny_xcodec_config()).eval()
         with self.assertRaisesRegex(ValueError, "frontend metadata"):
-            model.feature_extractor.validate_preprocessor_config(
-                {
-                    "sampling_rate": 24_000,
-                    "hop_length": 320,
-                }
-            )
+            model.feature_extractor.validate_preprocessor_config({
+                "sampling_rate": 24_000,
+                "hop_length": 320,
+            })
 
     def test_tiny_safetensors_export_reloads_strictly(self):
         model = XCodec2Model(_tiny_xcodec_config()).eval()
@@ -445,8 +415,7 @@ class XCodec2NativeGraphTests(unittest.TestCase):
             torch.equal(
                 model.quantizer.project_in.weight,
                 restored.quantizer.project_in.weight,
-            )
-        )
+            ))
 
 
 class LlasaTrainingAndInferenceTests(unittest.TestCase):
@@ -454,13 +423,11 @@ class LlasaTrainingAndInferenceTests(unittest.TestCase):
     def test_precomputed_recipe_masks_text_and_preserves_speaker_prefix(self):
         tokenizer = _FakeLlasaTokenizer()
         dataset = LlasaSFTDataset(
-            [
-                {
-                    "text": "hello",
-                    "speaker": "Paimon",
-                    "audio_codes": [2, 3],
-                }
-            ],
+            [{
+                "text": "hello",
+                "speaker": "Paimon",
+                "audio_codes": [2, 3],
+            }],
             tokenizer=tokenizer,
             codec=None,
         )
@@ -472,22 +439,17 @@ class LlasaTrainingAndInferenceTests(unittest.TestCase):
             example["input_ids"][speech_start:],
         )
         self.assertTrue(
-            tokenizer.last_messages[-1]["content"].startswith(
-                "Speaker Paimon" + SPEECH_GENERATION_START
-            )
-        )
+            tokenizer.last_messages[-1]["content"].startswith("Speaker Paimon" + SPEECH_GENERATION_START))
 
     def test_raw_audio_recipe_resamples_and_freezes_xcodec(self):
         tokenizer = _FakeLlasaTokenizer()
         codec = _FakeCodec()
         dataset = LlasaSFTDataset(
-            [
-                {
-                    "text": "hello",
-                    "waveform": torch.linspace(-0.5, 0.5, 80),
-                    "sampling_rate": 8_000,
-                }
-            ],
+            [{
+                "text": "hello",
+                "waveform": torch.linspace(-0.5, 0.5, 80),
+                "sampling_rate": 8_000,
+            }],
             tokenizer=tokenizer,
             codec=codec,
         )
@@ -502,7 +464,10 @@ class LlasaTrainingAndInferenceTests(unittest.TestCase):
         tokenizer = _FakeLlasaTokenizer()
         codec = _FakeCodec()
         dataset = LlasaSFTDataset(
-            [{"text": "hello", "audio_codes": [2, 3]}],
+            [{
+                "text": "hello",
+                "audio_codes": [2, 3]
+            }],
             tokenizer=tokenizer,
             codec=codec,
         )
@@ -551,7 +516,7 @@ class LlasaTrainingAndInferenceTests(unittest.TestCase):
                 max_new_tokens=4,
                 seed=123,
             )
-        self.assertEqual(tuple(output.audio.shape), (320,))
+        self.assertEqual(tuple(output.audio.shape), (320, ))
         self.assertEqual(output.metadata["prompt_audio_tokens"], 2)
         self.assertEqual(output.metadata["audio_tokens"], 1)
         self.assertEqual(language_model.generation_config.max_new_tokens, 4)

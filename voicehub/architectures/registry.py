@@ -19,11 +19,11 @@ class ArchitectureRegistrationError(ValueError, ArchitectureError):
 
 
 class ArchitectureRegistry:
-    """
-    Mutable architecture catalogue with immutable, live public views.
+    """Mutable architecture catalogue with immutable, live public views.
 
-    Registration and alias updates are atomic.  Listing uses a stable insertion order, including when an
-    existing specification is deliberately replaced.
+    Registration and alias updates are atomic.  Listing uses a stable
+    insertion order, including when an existing specification is
+    deliberately replaced.
     """
 
     def __init__(self) -> None:
@@ -234,11 +234,11 @@ class ArchitectureRegistry:
                 raise KeyError(f"No architecture alias is registered for {alias!r}.") from None
 
     def clear(self) -> None:
-        """
-        Remove all entries.
+        """Remove all entries.
 
-        This method primarily supports isolated registries in tests and plugin hosts.  Production callers
-        should normally unregister targeted entries.
+        This method primarily supports isolated registries in tests and
+        plugin hosts.  Production callers should normally unregister
+        targeted entries.
         """
         with self._lock:
             self._specs.clear()

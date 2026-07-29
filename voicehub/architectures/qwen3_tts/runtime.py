@@ -195,7 +195,7 @@ class Qwen3TTSProcessor:
 
 class _SpeechDecoderExporter:
 
-    def __init__(self, runtime: "NativeQwen3TTSRuntime") -> None:
+    def __init__(self, runtime: NativeQwen3TTSRuntime) -> None:
         self.runtime = runtime
 
     def save_pretrained(
@@ -225,7 +225,7 @@ class _SpeechDecoderExporter:
 
 class _SpeechFeatureExporter:
 
-    def __init__(self, runtime: "NativeQwen3TTSRuntime") -> None:
+    def __init__(self, runtime: NativeQwen3TTSRuntime) -> None:
         self.runtime = runtime
 
     def save_pretrained(self, directory: str | Path) -> Path:
@@ -239,7 +239,7 @@ class _SpeechFeatureExporter:
 
 class _SpeechTokenizerExportFacade:
 
-    def __init__(self, runtime: "NativeQwen3TTSRuntime") -> None:
+    def __init__(self, runtime: NativeQwen3TTSRuntime) -> None:
         self.model = _SpeechDecoderExporter(runtime)
         self.feature_extractor = _SpeechFeatureExporter(runtime)
 

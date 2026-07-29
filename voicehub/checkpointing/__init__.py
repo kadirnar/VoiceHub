@@ -1,10 +1,6 @@
 """Native checkpoint parsing, adaptation, and integrity verification."""
 
-from voicehub.checkpointing.adapters import (
-    CheckpointAdapter,
-    CheckpointCompatibilityReport,
-    TensorShapeMismatch,
-)
+from voicehub.checkpointing.adapters import CheckpointAdapter, CheckpointCompatibilityReport, TensorShapeMismatch
 from voicehub.checkpointing.errors import (
     CheckpointCompatibilityError,
     CheckpointError,

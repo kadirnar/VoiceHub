@@ -30,62 +30,41 @@ def create_irodori_architecture_spec() -> ArchitectureSpec:
     return ArchitectureSpec(
         architecture_id="irodoritts-rf-dit",
         version="3",
-        model_builder=(
-            "voicehub.architectures.irodoritts.modeling:"
-            "TextToLatentRFDiT"
-        ),
-        config=(
-            "voicehub.architectures.irodoritts.configuration:"
-            "IrodoriModelConfig"
-        ),
-        processor=(
-            "voicehub.architectures.irodoritts.training:"
-            "IrodoriBatchProcessor"
-        ),
-        decoder=(
-            "voicehub.architectures.irodoritts.codec:"
-            "IrodoriDACVAECodec"
-        ),
-        objective=(
-            "voicehub.architectures.irodoritts.training:"
-            "irodori_training_step"
-        ),
-        checkpoint_adapter=(
-            "voicehub.architectures.irodoritts.checkpoint:"
-            "IrodoriCheckpointAdapter"
-        ),
+        model_builder=("voicehub.architectures.irodoritts.modeling:"
+                       "TextToLatentRFDiT"),
+        config=("voicehub.architectures.irodoritts.configuration:"
+                "IrodoriModelConfig"),
+        processor=("voicehub.architectures.irodoritts.training:"
+                   "IrodoriBatchProcessor"),
+        decoder=("voicehub.architectures.irodoritts.codec:"
+                 "IrodoriDACVAECodec"),
+        objective=("voicehub.architectures.irodoritts.training:"
+                   "irodori_training_step"),
+        checkpoint_adapter=("voicehub.architectures.irodoritts.checkpoint:"
+                            "IrodoriCheckpointAdapter"),
         components={
-            "checkpoint-exporter": (
-                "voicehub.architectures.irodoritts.checkpoint:"
-                "save_irodori_safetensors"
-            ),
-            "duration-predictor": (
-                "voicehub.architectures.irodoritts.modeling:"
-                "DurationPredictor"
-            ),
-            "runtime": (
-                "voicehub.architectures.irodoritts.runtime:"
-                "InferenceRuntime"
-            ),
-            "text-tokenizer": (
-                "voicehub.architectures.irodoritts.tokenization:"
-                "IrodoriTokenizer"
-            ),
-            "trainer-adapter": (
-                "voicehub.models.irodoritts.training:"
-                "NativeIrodoriTrainingAdapter"
-            ),
+            "checkpoint-exporter":
+            ("voicehub.architectures.irodoritts.checkpoint:"
+             "save_irodori_safetensors"),
+            "duration-predictor": ("voicehub.architectures.irodoritts.modeling:"
+                                   "DurationPredictor"),
+            "runtime": ("voicehub.architectures.irodoritts.runtime:"
+                        "InferenceRuntime"),
+            "text-tokenizer": ("voicehub.architectures.irodoritts.tokenization:"
+                               "IrodoriTokenizer"),
+            "trainer-adapter": ("voicehub.models.irodoritts.training:"
+                                "NativeIrodoriTrainingAdapter"),
         },
         capabilities=ArchitectureCapabilities(
-            tasks=(SpeechTask.TEXT_TO_SPEECH,),
+            tasks=(SpeechTask.TEXT_TO_SPEECH, ),
             devices=("cpu", "cuda", "mps"),
             dtypes=("float32", "bfloat16"),
-            checkpoint_formats=("safetensors",),
+            checkpoint_formats=("safetensors", ),
             training=True,
             streaming=False,
             batched_inference=True,
             distributed_training=True,
-            export_formats=("safetensors",),
+            export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
                 "48-khz-waveform",
@@ -105,34 +84,44 @@ def create_irodori_architecture_spec() -> ArchitectureSpec:
         upstream_revision=IRODORI_SOURCE_REVISION,
         license_id=IRODORI_SOURCE_LICENSE,
         metadata={
-            "implementation": "voicehub-native",
-            "tensor_backend": "pytorch",
-            "source": "https://github.com/Aratako/Irodori-TTS",
-            "source_revision": IRODORI_SOURCE_REVISION,
-            "reference_checkpoint": default_checkpoint["model_id"],
-            "reference_checkpoint_revision": default_checkpoint["revision"],
-            "reference_checkpoint_sha256": default_checkpoint["lfs_sha256"],
-            "reference_tensor_count": default_checkpoint["tensors"],
-            "reference_parameter_count": default_checkpoint["parameters"],
-            "reference_safetensors_header_fingerprint": (
-                default_checkpoint["header_fingerprint"]
-            ),
-            "codec_checkpoint": IRODORI_CODEC_ID,
-            "codec_checkpoint_revision": IRODORI_CODEC_REVISION,
-            "text_tokenizer": IRODORI_TOKENIZER_ID,
-            "text_tokenizer_revision": IRODORI_TOKENIZER_REVISION,
-            "full_finetuning_ready": True,
+            "implementation":
+            "voicehub-native",
+            "tensor_backend":
+            "pytorch",
+            "source":
+            "https://github.com/Aratako/Irodori-TTS",
+            "source_revision":
+            IRODORI_SOURCE_REVISION,
+            "reference_checkpoint":
+            default_checkpoint["model_id"],
+            "reference_checkpoint_revision":
+            default_checkpoint["revision"],
+            "reference_checkpoint_sha256":
+            default_checkpoint["lfs_sha256"],
+            "reference_tensor_count":
+            default_checkpoint["tensors"],
+            "reference_parameter_count":
+            default_checkpoint["parameters"],
+            "reference_safetensors_header_fingerprint": (default_checkpoint["header_fingerprint"]),
+            "codec_checkpoint":
+            IRODORI_CODEC_ID,
+            "codec_checkpoint_revision":
+            IRODORI_CODEC_REVISION,
+            "text_tokenizer":
+            IRODORI_TOKENIZER_ID,
+            "text_tokenizer_revision":
+            IRODORI_TOKENIZER_REVISION,
+            "full_finetuning_ready":
+            True,
             "training_boundary": (
                 "All RF-DiT and optional duration-predictor parameters are "
                 "trainable with the released rectified-flow objective. The "
                 "Semantic-DACVAE remains frozen and supplies raw-audio "
-                "targets; pre-encoded continuous latents are also accepted."
-            ),
+                "targets; pre-encoded continuous latents are also accepted."),
             "inference_boundary": (
                 "The native runtime covers v2, v3, and VoiceDesign "
                 "safetensors checkpoints. SilentCipher watermark parity is "
-                "not claimed."
-            ),
+                "not claimed."),
         },
     )
 

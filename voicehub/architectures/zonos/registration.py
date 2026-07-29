@@ -4,14 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from voicehub.architectures.registry import (
-    ARCHITECTURE_REGISTRY,
-    ArchitectureRegistry,
-)
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.architectures.zonos.metadata import (
     NATIVE_ZONOS_FORMAT,
     ZONOS_DAC_REPOSITORY,
@@ -41,45 +35,25 @@ def create_zonos_architecture_spec() -> ArchitectureSpec:
     return ArchitectureSpec(
         architecture_id="zonos",
         version="1",
-        model_builder=(
-            "voicehub.architectures.zonos.modeling:ZonosForCausalLM"
-        ),
-        config=(
-            "voicehub.architectures.zonos.configuration:"
-            "ZonosArchitectureConfig"
-        ),
-        processor=(
-            "voicehub.architectures.zonos.frontend:tokenize_phonemes"
-        ),
+        model_builder=("voicehub.architectures.zonos.modeling:ZonosForCausalLM"),
+        config=("voicehub.architectures.zonos.configuration:"
+                "ZonosArchitectureConfig"),
+        processor=("voicehub.architectures.zonos.frontend:tokenize_phonemes"),
         decoder="voicehub.architectures.zonos.codec:ZonosDACCodec",
-        objective=(
-            "voicehub.models.zonos.training:ZonosTrainingAdapter"
-        ),
-        checkpoint_adapter=(
-            "voicehub.architectures.zonos.checkpoint:"
-            "load_zonos_checkpoint"
-        ),
+        objective=("voicehub.models.zonos.training:ZonosTrainingAdapter"),
+        checkpoint_adapter=("voicehub.architectures.zonos.checkpoint:"
+                            "load_zonos_checkpoint"),
         components={
-            "artifact-resolver": (
-                "voicehub.architectures.zonos.artifacts:"
-                "resolve_zonos_artifacts"
-            ),
-            "checkpoint-exporter": (
-                "voicehub.architectures.zonos.checkpoint:"
-                "export_zonos_checkpoint"
-            ),
-            "conditioning": (
-                "voicehub.architectures.zonos.frontend:"
-                "make_condition_dict"
-            ),
-            "runtime": (
-                "voicehub.architectures.zonos.runtime:"
-                "NativeZonosRuntime"
-            ),
-            "sampler": (
-                "voicehub.architectures.zonos.sampling:"
-                "generate_zonos_codes"
-            ),
+            "artifact-resolver": ("voicehub.architectures.zonos.artifacts:"
+                                  "resolve_zonos_artifacts"),
+            "checkpoint-exporter": ("voicehub.architectures.zonos.checkpoint:"
+                                    "export_zonos_checkpoint"),
+            "conditioning": ("voicehub.architectures.zonos.frontend:"
+                             "make_condition_dict"),
+            "runtime": ("voicehub.architectures.zonos.runtime:"
+                        "NativeZonosRuntime"),
+            "sampler": ("voicehub.architectures.zonos.sampling:"
+                        "generate_zonos_codes"),
         },
         capabilities=ArchitectureCapabilities(
             tasks=(SpeechTask.TEXT_TO_SPEECH, ),
@@ -142,13 +116,11 @@ def create_zonos_architecture_spec() -> ArchitectureSpec:
             "hybrid_boundary": (
                 "The hybrid checkpoint contains a distinct Mamba-2 graph. "
                 "VoiceHub rejects it rather than claiming Transformer "
-                "checkpoint compatibility."
-            ),
+                "checkpoint compatibility."),
             "text_frontend_boundary": (
                 "The checkpoint consumes eSpeak-compatible phonemes. "
                 "VoiceHub accepts precomputed phonemes or an injected "
-                "frontend and does not depend on an external G2P runtime."
-            ),
+                "frontend and does not depend on an external G2P runtime."),
             "training_objective":
             "reconstructed-delayed-codebook-causal-cross-entropy",
             "training_objective_author_verified":
@@ -169,9 +141,7 @@ def register_zonos_architecture(
 ) -> ArchitectureSpec:
     target = ARCHITECTURE_REGISTRY if registry is None else registry
     if not isinstance(target, ArchitectureRegistry):
-        raise TypeError(
-            "`registry` must be an ArchitectureRegistry or None."
-        )
+        raise TypeError("`registry` must be an ArchitectureRegistry or None.")
     spec = create_zonos_architecture_spec()
     target.register(
         spec,

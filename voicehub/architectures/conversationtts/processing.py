@@ -25,19 +25,17 @@ class ConversationTTSProtocol:
 
     def __post_init__(self) -> None:
         for name in (
-            "audio_num_codebooks",
-            "audio_codebook_size",
-            "audio_vocab_size",
-            "text_vocab_size",
-            "maximum_sequence_length",
+                "audio_num_codebooks",
+                "audio_codebook_size",
+                "audio_vocab_size",
+                "text_vocab_size",
+                "maximum_sequence_length",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"`{name}` must be a positive integer.")
         if self.audio_codebook_size > self.audio_vocab_size:
-            raise ValueError(
-                "`audio_codebook_size` cannot exceed `audio_vocab_size`."
-            )
+            raise ValueError("`audio_codebook_size` cannot exceed `audio_vocab_size`.")
         for name, upper_bound in (
             ("text_empty_token_id", self.text_vocab_size),
             ("text_padding_token_id", self.text_vocab_size),
@@ -45,14 +43,8 @@ class ConversationTTSProtocol:
             ("audio_padding_token_id", self.audio_vocab_size),
         ):
             value = getattr(self, name)
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, int)
-                or not 0 <= value < upper_bound
-            ):
-                raise ValueError(
-                    f"`{name}` must be an integer in [0, {upper_bound})."
-                )
+            if (isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < upper_bound):
+                raise ValueError(f"`{name}` must be an integer in [0, {upper_bound}).")
 
 
 def _integer_tensor(
@@ -65,8 +57,7 @@ def _integer_tensor(
     if tensor.ndim != dimensions:
         raise ValueError(
             f"`{name}` must have {dimensions} dimensions, found "
-            f"shape {tuple(tensor.shape)!r}."
-        )
+            f"shape {tuple(tensor.shape)!r}.")
     if tensor.dtype == torch.bool or tensor.is_floating_point():
         raise TypeError(f"`{name}` must use an integer dtype.")
     return tensor.long()
@@ -96,21 +87,14 @@ def build_conversationtts_sequence(
         raise ValueError(
             "ConversationTTS audio codes must have shape "
             f"[{layout.audio_num_codebooks}, time], found "
-            f"{tuple(codes.shape)!r}."
-        )
+            f"{tuple(codes.shape)!r}.")
     if codes.shape[-1] == 0:
         raise ValueError("ConversationTTS audio codes cannot be empty.")
     if bool((text < 0).any()) or bool((text >= layout.text_vocab_size).any()):
-        raise ValueError(
-            "ConversationTTS text token IDs are outside the configured "
-            "vocabulary."
-        )
-    if bool((codes < 0).any()) or bool(
-        (codes >= layout.audio_codebook_size).any()
-    ):
-        raise ValueError(
-            "ConversationTTS audio codes are outside the Mimi codebook."
-        )
+        raise ValueError("ConversationTTS text token IDs are outside the configured "
+                         "vocabulary.")
+    if bool((codes < 0).any()) or bool((codes >= layout.audio_codebook_size).any()):
+        raise ValueError("ConversationTTS audio codes are outside the Mimi codebook.")
 
     number_of_streams = layout.audio_num_codebooks + 1
     text_frames = torch.zeros(
@@ -147,8 +131,7 @@ def build_conversationtts_sequence(
         raise ValueError(
             "ConversationTTS sequence exceeds the released "
             f"{layout.maximum_sequence_length}-frame context: "
-            f"{sequence.shape[0]} frames."
-        )
+            f"{sequence.shape[0]} frames.")
     return sequence, mask
 
 
@@ -179,12 +162,9 @@ def collate_conversationtts_sequences(
         if sequence.ndim != 2 or sequence.shape[-1] != number_of_streams:
             raise ValueError(
                 "ConversationTTS sequence examples must have shape "
-                f"[time, {number_of_streams}]."
-            )
+                f"[time, {number_of_streams}].")
         if mask.shape != sequence.shape:
-            raise ValueError(
-                "ConversationTTS sequence masks must match their sequence."
-            )
+            raise ValueError("ConversationTTS sequence masks must match their sequence.")
         length = sequence.shape[0]
         sequences[index, :length] = sequence.to(device="cpu")
         masks[index, :length] = mask.to(device="cpu", dtype=torch.bool)

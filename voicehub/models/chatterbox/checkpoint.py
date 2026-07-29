@@ -27,24 +27,17 @@ def inspect_t3_text_vocabulary_size(path: str | Path) -> int:
             embedding_shape = reader.tensor_shape("text_emb.weight")
             head_shape = reader.tensor_shape("text_head.weight")
     except KeyError as error:
-        raise ValueError(
-            "Chatterbox T3 checkpoint is missing its text vocabulary "
-            "matrices."
-        ) from error
+        raise ValueError("Chatterbox T3 checkpoint is missing its text vocabulary "
+                         "matrices.") from error
     if len(embedding_shape) != 2 or len(head_shape) != 2:
-        raise ValueError(
-            "Chatterbox T3 text embedding and head must both be matrices."
-        )
+        raise ValueError("Chatterbox T3 text embedding and head must both be matrices.")
     if embedding_shape != head_shape:
         raise ValueError(
             "Chatterbox T3 text embedding and head shapes do not match: "
-            f"{embedding_shape!r} != {head_shape!r}."
-        )
+            f"{embedding_shape!r} != {head_shape!r}.")
     vocabulary_size = int(embedding_shape[0])
     if vocabulary_size <= 0:
-        raise ValueError(
-            "Chatterbox T3 checkpoint declares an invalid text vocabulary."
-        )
+        raise ValueError("Chatterbox T3 checkpoint declares an invalid text vocabulary.")
     return vocabulary_size
 
 
@@ -55,36 +48,24 @@ def read_safetensors(path: str | Path) -> dict[str, Tensor]:
 
 
 def load_module_safetensors(
-    module: nn.Module,
-    path: str | Path,
-    *,
-    allowed_missing: Iterable[str] = (),
-    allowed_unexpected: Iterable[str] = (),
+        module: nn.Module,
+        path: str | Path,
+        *,
+        allowed_missing: Iterable[str] = (),
+        allowed_unexpected: Iterable[str] = (),
 ) -> None:
     """Load a module while enforcing a reviewed tensor inventory."""
     state = read_safetensors(path)
     allowed_missing = frozenset(allowed_missing)
     allowed_unexpected = frozenset(allowed_unexpected)
     expected = module.state_dict()
-    missing = tuple(
-        name for name in expected
-        if name not in state
-        if name not in allowed_missing
-    )
-    unexpected = tuple(
-        name for name in state
-        if name not in expected
-        if name not in allowed_unexpected
-    )
-    shape_mismatches = tuple(
-        (
-            name,
-            tuple(state[name].shape),
-            tuple(expected[name].shape),
-        )
-        for name in state.keys() & expected.keys()
-        if tuple(state[name].shape) != tuple(expected[name].shape)
-    )
+    missing = tuple(name for name in expected if name not in state if name not in allowed_missing)
+    unexpected = tuple(name for name in state if name not in expected if name not in allowed_unexpected)
+    shape_mismatches = tuple((
+        name,
+        tuple(state[name].shape),
+        tuple(expected[name].shape),
+    ) for name in state.keys() & expected.keys() if tuple(state[name].shape) != tuple(expected[name].shape))
     if missing or unexpected or shape_mismatches:
         details = []
         if missing:
@@ -93,29 +74,17 @@ def load_module_safetensors(
             details.append("unexpected: " + ", ".join(unexpected[:20]))
         if shape_mismatches:
             details.append(
-                "shape mismatches: "
-                + ", ".join(
+                "shape mismatches: " + ", ".join(
                     f"{name}={actual!r}, expected {wanted!r}"
-                    for name, actual, wanted in shape_mismatches[:20]
-                )
-            )
+                    for name, actual, wanted in shape_mismatches[:20]))
         raise ValueError(
-            f"Chatterbox checkpoint inventory mismatch for {Path(path).name}: "
-            + "; ".join(details)
-        )
+            f"Chatterbox checkpoint inventory mismatch for {Path(path).name}: " + "; ".join(details))
     incompatible = module.load_state_dict(state, strict=False)
-    unresolved_missing = tuple(
-        name for name in incompatible.missing_keys
-        if name not in allowed_missing
-    )
+    unresolved_missing = tuple(name for name in incompatible.missing_keys if name not in allowed_missing)
     unresolved_unexpected = tuple(
-        name for name in incompatible.unexpected_keys
-        if name not in allowed_unexpected
-    )
+        name for name in incompatible.unexpected_keys if name not in allowed_unexpected)
     if unresolved_missing or unresolved_unexpected:
-        raise RuntimeError(
-            "Chatterbox checkpoint changed during validated loading."
-        )
+        raise RuntimeError("Chatterbox checkpoint changed during validated loading.")
 
 
 def export_module_safetensors(
@@ -127,10 +96,7 @@ def export_module_safetensors(
 ) -> Path:
     """Write a deterministic component checkpoint with provenance metadata."""
     source_state = module.state_dict() if state_dict is None else state_dict
-    state = {
-        name: value.detach().cpu().contiguous()
-        for name, value in source_state.items()
-    }
+    state = {name: value.detach().cpu().contiguous() for name, value in source_state.items()}
     return save_safetensors(
         state,
         path,
@@ -198,9 +164,7 @@ def export_chatterbox_runtime(
             "watermark": "native-perth-implicit",
         },
         "t3": {
-            "text_vocabulary_size": int(
-                runtime.t3.text_emb.num_embeddings
-            ),
+            "text_vocabulary_size": int(runtime.t3.text_emb.num_embeddings),
         },
         "training_boundary": {
             "author_recipe_published": False,

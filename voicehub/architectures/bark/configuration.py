@@ -1,8 +1,9 @@
 """Typed configuration for the VoiceHub-native Bark runtime.
 
-The defaults mirror ``suno/bark-small`` at the immutable revision recorded in
-``metadata.py``.  These objects deliberately contain no Hugging Face runtime
-types; config JSON remains an interchange format, not executable code.
+The defaults mirror ``suno/bark-small`` at the immutable revision
+recorded in ``metadata.py``.  These objects deliberately contain no
+Hugging Face runtime types; config JSON remains an interchange format,
+not executable code.
 """
 
 from __future__ import annotations
@@ -10,10 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from voicehub.components.audio.codecs.encodec import (
-    EncodecConfig,
-    encodec_24khz_config,
-)
+from voicehub.components.audio.codecs.encodec import EncodecConfig, encodec_24khz_config
 
 
 @dataclass(slots=True)
@@ -49,11 +47,8 @@ class BarkSubModelConfig:
         if not isinstance(self.dropout, (int, float)) or not 0 <= self.dropout < 1:
             raise ValueError("Bark dropout must be in [0, 1).")
         self.dropout = float(self.dropout)
-        if (
-            isinstance(self.initializer_range, bool)
-            or not isinstance(self.initializer_range, (int, float))
-            or self.initializer_range <= 0
-        ):
+        if (isinstance(self.initializer_range, bool) or
+                not isinstance(self.initializer_range, (int, float)) or self.initializer_range <= 0):
             raise ValueError("Bark initializer range must be positive.")
         self.initializer_range = float(self.initializer_range)
         if not isinstance(self.bias, bool) or not isinstance(self.use_cache, bool):
@@ -83,20 +78,13 @@ class BarkFineConfig(BarkSubModelConfig):
 
     def __post_init__(self) -> None:
         BarkSubModelConfig.__post_init__(self)
-        if (
-            isinstance(self.n_codes_total, bool)
-            or not isinstance(self.n_codes_total, int)
-            or self.n_codes_total <= 1
-        ):
+        if (isinstance(self.n_codes_total, bool) or not isinstance(self.n_codes_total, int) or
+                self.n_codes_total <= 1):
             raise ValueError("Bark fine `n_codes_total` must exceed one.")
-        if (
-            isinstance(self.n_codes_given, bool)
-            or not isinstance(self.n_codes_given, int)
-            or not 0 < self.n_codes_given < self.n_codes_total
-        ):
-            raise ValueError(
-                "Bark fine `n_codes_given` must be between zero and "
-                "`n_codes_total`.")
+        if (isinstance(self.n_codes_given, bool) or not isinstance(self.n_codes_given, int) or
+                not 0 < self.n_codes_given < self.n_codes_total):
+            raise ValueError("Bark fine `n_codes_given` must be between zero and "
+                             "`n_codes_total`.")
 
 
 @dataclass(slots=True)
@@ -124,14 +112,14 @@ class BarkSemanticGenerationConfig:
             top_p=self.top_p,
         )
         for name in (
-            "max_input_semantic_length",
-            "max_new_tokens",
-            "semantic_infer_token",
-            "semantic_pad_token",
-            "semantic_vocab_size",
-            "text_encoding_offset",
-            "text_pad_token",
-            "eos_token_id",
+                "max_input_semantic_length",
+                "max_new_tokens",
+                "semantic_infer_token",
+                "semantic_pad_token",
+                "semantic_vocab_size",
+                "text_encoding_offset",
+                "text_pad_token",
+                "eos_token_id",
         ):
             _nonnegative_integer(getattr(self, name), name=name)
         if self.max_input_semantic_length == 0 or self.max_new_tokens == 0:
@@ -163,19 +151,19 @@ class BarkCoarseGenerationConfig:
             top_p=self.top_p,
         )
         for name in (
-            "coarse_infer_token",
-            "coarse_semantic_pad_token",
-            "max_coarse_history",
-            "max_coarse_input_length",
-            "n_coarse_codebooks",
-            "sliding_window_len",
+                "coarse_infer_token",
+                "coarse_semantic_pad_token",
+                "max_coarse_history",
+                "max_coarse_input_length",
+                "n_coarse_codebooks",
+                "sliding_window_len",
         ):
             _nonnegative_integer(getattr(self, name), name=name)
         if min(
-            self.max_coarse_history,
-            self.max_coarse_input_length,
-            self.n_coarse_codebooks,
-            self.sliding_window_len,
+                self.max_coarse_history,
+                self.max_coarse_input_length,
+                self.n_coarse_codebooks,
+                self.sliding_window_len,
         ) <= 0:
             raise ValueError("Bark coarse sizes must be positive.")
         _positive_float(self.coarse_rate_hz, name="coarse_rate_hz")
@@ -190,23 +178,19 @@ class BarkFineGenerationConfig:
 
     def __post_init__(self) -> None:
         for name in (
-            "max_fine_history_length",
-            "max_fine_input_length",
-            "n_fine_codebooks",
+                "max_fine_history_length",
+                "max_fine_input_length",
+                "n_fine_codebooks",
         ):
             _nonnegative_integer(getattr(self, name), name=name)
         if min(
-            self.max_fine_history_length,
-            self.max_fine_input_length,
-            self.n_fine_codebooks,
+                self.max_fine_history_length,
+                self.max_fine_input_length,
+                self.n_fine_codebooks,
         ) <= 0:
             raise ValueError("Bark fine sizes must be positive.")
-        if (
-            self.max_fine_input_length
-            < self.max_fine_history_length
-        ):
-            raise ValueError(
-                "Bark fine input length cannot be shorter than its history.")
+        if (self.max_fine_input_length < self.max_fine_history_length):
+            raise ValueError("Bark fine input length cannot be shorter than its history.")
         if self.temperature is not None:
             _positive_float(self.temperature, name="temperature")
 
@@ -217,12 +201,9 @@ class BarkGenerationConfig:
 
     sample_rate: int = 24_000
     codebook_size: int = 1024
-    semantic: BarkSemanticGenerationConfig = field(
-        default_factory=BarkSemanticGenerationConfig)
-    coarse: BarkCoarseGenerationConfig = field(
-        default_factory=BarkCoarseGenerationConfig)
-    fine: BarkFineGenerationConfig = field(
-        default_factory=BarkFineGenerationConfig)
+    semantic: BarkSemanticGenerationConfig = field(default_factory=BarkSemanticGenerationConfig)
+    coarse: BarkCoarseGenerationConfig = field(default_factory=BarkCoarseGenerationConfig)
+    fine: BarkFineGenerationConfig = field(default_factory=BarkFineGenerationConfig)
 
     def __post_init__(self) -> None:
         _nonnegative_integer(self.sample_rate, name="sample_rate")
@@ -292,14 +273,11 @@ class BarkArchitectureConfig:
         )
         fine = values.get("fine_acoustics_config", values.get("fine", {}))
         codec = values.get("codec_config", values.get("codec", {}))
-        if not all(isinstance(item, dict)
-                   for item in (semantic, coarse, fine, codec)):
+        if not all(isinstance(item, dict) for item in (semantic, coarse, fine, codec)):
             raise TypeError("Every Bark sub-configuration must be an object.")
         return cls(
-            semantic=BarkSemanticConfig(
-                **_known(semantic, BarkSemanticConfig)),
-            coarse=BarkCoarseConfig(
-                **_known(coarse, BarkCoarseConfig)),
+            semantic=BarkSemanticConfig(**_known(semantic, BarkSemanticConfig)),
+            coarse=BarkCoarseConfig(**_known(coarse, BarkCoarseConfig)),
             fine=BarkFineConfig(**_known(fine, BarkFineConfig)),
             codec=_codec_from_hugging_face(codec),
             initializer_range=float(values.get("initializer_range", 0.02)),
@@ -344,11 +322,8 @@ def _nonnegative_integer(value: Any, *, name: str) -> None:
 
 
 def _positive_float(value: Any, *, name: str) -> None:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not 0 < float(value) < float("inf")
-    ):
+    if (isinstance(value, bool) or not isinstance(value, (int, float)) or
+            not 0 < float(value) < float("inf")):
         raise ValueError(f"Bark `{name}` must be finite and positive.")
 
 
@@ -363,11 +338,7 @@ def _validate_sampling(
         raise TypeError("Bark `do_sample` must be a boolean.")
     _positive_float(temperature, name="temperature")
     _nonnegative_integer(top_k, name="top_k")
-    if (
-        isinstance(top_p, bool)
-        or not isinstance(top_p, (int, float))
-        or not 0 < float(top_p) <= 1
-    ):
+    if (isinstance(top_p, bool) or not isinstance(top_p, (int, float)) or not 0 < float(top_p) <= 1):
         raise ValueError("Bark `top_p` must be in (0, 1].")
 
 
@@ -379,21 +350,18 @@ def _codec_from_hugging_face(values: dict[str, Any]) -> EncodecConfig:
         native_fields = set(EncodecConfig.__dataclass_fields__)
         return EncodecConfig.from_dict({
             name: value
-            for name, value in values.items()
-            if name in native_fields
+            for name, value in values.items() if name in native_fields
         })
     return EncodecConfig(
         sample_rate=int(values.get("sampling_rate", values.get("sample_rate", 24_000))),
         channels=int(values.get("audio_channels", values.get("channels", 1))),
         dimension=int(values.get("codebook_dim", values.get("dimension", 128))),
         n_filters=int(values.get("num_filters", values.get("n_filters", 32))),
-        n_residual_layers=int(
-            values.get("num_residual_layers", values.get("n_residual_layers", 1))),
-        ratios=tuple(
-            values.get(
-                "upsampling_ratios",
-                values.get("ratios", (8, 5, 4, 2)),
-            )),
+        n_residual_layers=int(values.get("num_residual_layers", values.get("n_residual_layers", 1))),
+        ratios=tuple(values.get(
+            "upsampling_ratios",
+            values.get("ratios", (8, 5, 4, 2)),
+        )),
         model_norm=str(values.get("norm_type", values.get("model_norm", "weight_norm"))),
         kernel_size=int(values.get("kernel_size", 7)),
         last_kernel_size=int(values.get("last_kernel_size", 7)),
@@ -404,15 +372,12 @@ def _codec_from_hugging_face(values: dict[str, Any]) -> EncodecConfig:
         # native Encodec's `true_skip` means the inverse.
         true_skip=(
             bool(values["true_skip"])
-            if "true_skip" in values
-            else not bool(values.get("use_conv_shortcut", True))
-        ),
+            if "true_skip" in values else not bool(values.get("use_conv_shortcut", True))),
         compress=int(values.get("compress", 2)),
         lstm=int(values.get("num_lstm_layers", values.get("lstm", 2))),
         bins=int(values.get("codebook_size", values.get("bins", 1024))),
         target_bandwidths=tuple(
-            float(item)
-            for item in values.get(
+            float(item) for item in values.get(
                 "target_bandwidths",
                 (1.5, 3.0, 6.0, 12.0, 24.0),
             )),

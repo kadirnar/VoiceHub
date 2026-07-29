@@ -1,8 +1,8 @@
 """Immutable provenance for VoiceHub's native F5-TTS runtime.
 
-F5-TTS source code and released model weights use different licenses.  Keep
-those facts separate so callers never infer checkpoint usage rights from the
-source license.
+F5-TTS source code and released model weights use different licenses.
+Keep those facts separate so callers never infer checkpoint usage rights
+from the source license.
 """
 
 F5TTS_SOURCE_REVISION = "9c614e9657089213efc6a7421b30630be138a3f5"

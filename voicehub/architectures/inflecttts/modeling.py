@@ -430,9 +430,7 @@ class MultiPeriodDiscriminator(torch.nn.Module):
 
 
 class SynthesizerTrn(nn.Module):
-    """
-  Synthesizer for Training
-  """
+    """Synthesizer for Training."""
 
     def __init__(
             self,

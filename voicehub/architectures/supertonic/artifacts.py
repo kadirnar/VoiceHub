@@ -17,11 +17,7 @@ from voicehub.architectures.supertonic.metadata import (
     SUPERTONIC_PROCESSOR_INTEGRITY,
     SUPERTONIC_STYLE_INTEGRITY,
 )
-from voicehub.checkpointing import (
-    ONNXModel,
-    onnx_semantic_fingerprint,
-    read_onnx_model,
-)
+from voicehub.checkpointing import ONNXModel, onnx_semantic_fingerprint, read_onnx_model
 from voicehub.hub import resolve_pretrained_file
 from voicehub.path_utils import is_explicit_local_path
 
@@ -42,7 +38,7 @@ class SupertonicArtifacts:
     local_root: Path | None
     official_snapshot: bool
 
-    def without_materialized_graphs(self) -> "SupertonicArtifacts":
+    def without_materialized_graphs(self) -> SupertonicArtifacts:
         """Drop parsed initializer bytes after native modules own the state."""
         return SupertonicArtifacts(
             source=self.source,
@@ -74,15 +70,11 @@ def _require_integrity(
 ) -> None:
     actual_size = path.stat().st_size
     if actual_size != size:
-        raise ValueError(
-            f"{label} has {actual_size} bytes; expected {size}."
-        )
+        raise ValueError(f"{label} has {actual_size} bytes; expected {size}.")
     actual_sha = _sha256(path)
     if actual_sha != sha256:
-        raise ValueError(
-            f"{label} SHA-256 mismatch: expected {sha256}, "
-            f"found {actual_sha}."
-        )
+        raise ValueError(f"{label} SHA-256 mismatch: expected {sha256}, "
+                         f"found {actual_sha}.")
 
 
 def _local_layout(source: Path) -> tuple[Path, Path]:
@@ -92,20 +84,13 @@ def _local_layout(source: Path) -> tuple[Path, Path]:
     )
     for root in candidates:
         onnx = root / "onnx"
-        if all(
-            (onnx / filename).is_file()
-            for filename in SUPERTONIC_GRAPH_FILES.values()
-        ):
+        if all((onnx / filename).is_file() for filename in SUPERTONIC_GRAPH_FILES.values()):
             return root, onnx
-        if all(
-            (root / filename).is_file()
-            for filename in SUPERTONIC_GRAPH_FILES.values()
-        ):
+        if all((root / filename).is_file() for filename in SUPERTONIC_GRAPH_FILES.values()):
             return root, root
     raise FileNotFoundError(
         "A local Supertonic artifact must contain all four reviewed ONNX "
-        "graphs under `onnx/` (or directly in the artifact root)."
-    )
+        "graphs under `onnx/` (or directly in the artifact root).")
 
 
 def _native_weight_paths(root: Path) -> dict[str, Path]:
@@ -125,8 +110,7 @@ def _native_weight_paths(root: Path) -> dict[str, Path]:
         missing = ", ".join(sorted(set(SUPERTONIC_GRAPH_FILES) - set(result)))
         raise FileNotFoundError(
             "A fine-tuned Supertonic artifact must contain a native "
-            f"Safetensors file for every graph; missing: {missing}."
-        )
+            f"Safetensors file for every graph; missing: {missing}.")
     return result
 
 
@@ -149,8 +133,7 @@ def _review_graph(
     if actual_semantic != semantic:
         raise ValueError(
             f"Supertonic {role} graph semantics differ from the reviewed "
-            f"release: expected {semantic}, found {actual_semantic}."
-        )
+            f"release: expected {semantic}, found {actual_semantic}.")
     return model
 
 
@@ -182,27 +165,19 @@ def resolve_supertonic_artifacts(
             (unicode_indexer, "unicode_indexer.json"),
         ):
             if not path.is_file():
-                raise FileNotFoundError(
-                    f"Local Supertonic artifact is missing {label}: {path}."
-                )
+                raise FileNotFoundError(f"Local Supertonic artifact is missing {label}: {path}.")
         native_weights = _native_weight_paths(local_root)
         resolved_revision = None
         official_snapshot = False
     else:
         if is_explicit_local_path(source):
-            raise FileNotFoundError(
-                f"Local Supertonic path was not found: {source_path}."
-            )
+            raise FileNotFoundError(f"Local Supertonic path was not found: {source_path}.")
         resolved_revision = (
-            revision
-            or (
-                SUPERTONIC_CHECKPOINT_REVISION
-                if source_string == SUPERTONIC_CHECKPOINT_REPOSITORY
-                else None
-            )
-        )
+            revision or
+            (SUPERTONIC_CHECKPOINT_REVISION if source_string == SUPERTONIC_CHECKPOINT_REPOSITORY else None))
         graphs = {
-            role: resolve_pretrained_file(
+            role:
+            resolve_pretrained_file(
                 source_string,
                 filename,
                 subfolder="onnx",
@@ -233,19 +208,12 @@ def resolve_supertonic_artifacts(
         )
         native_weights = {}
         official_snapshot = (
-            source_string == SUPERTONIC_CHECKPOINT_REPOSITORY
-            and resolved_revision == SUPERTONIC_CHECKPOINT_REVISION
-        )
+            source_string == SUPERTONIC_CHECKPOINT_REPOSITORY and
+            resolved_revision == SUPERTONIC_CHECKPOINT_REVISION)
     require_bytes = verify_integrity or official_snapshot
     if require_bytes:
-        for filename, (size, digest) in (
-            SUPERTONIC_PROCESSOR_INTEGRITY.items()
-        ):
-            path = (
-                architecture_config
-                if filename == "tts.json"
-                else unicode_indexer
-            )
+        for filename, (size, digest) in (SUPERTONIC_PROCESSOR_INTEGRITY.items()):
+            path = (architecture_config if filename == "tts.json" else unicode_indexer)
             _require_integrity(
                 path,
                 size=size,
@@ -288,31 +256,17 @@ def resolve_supertonic_style(
         return candidate.resolve()
     voice_id = str(voice).strip()
     if not _VOICE_ID.fullmatch(voice_id):
-        raise ValueError(
-            "`voice` must be a released ID or an existing style JSON path."
-        )
+        raise ValueError("`voice` must be a released ID or an existing style JSON path.")
     if artifacts.local_root is not None:
         roots = (
             artifacts.local_root / "voice_styles",
             artifacts.local_root.parent / "voice_styles",
         )
-        matches = [
-            (root / f"{voice_id}.json").resolve()
-            for root in roots
-            if (root / f"{voice_id}.json").is_file()
-        ]
+        matches = [(root / f"{voice_id}.json").resolve() for root in roots
+                   if (root / f"{voice_id}.json").is_file()]
         if not matches:
-            available = sorted({
-                path.stem
-                for root in roots
-                if root.is_dir()
-                for path in root.glob("*.json")
-            })
-            suffix = (
-                f" Available voices: {', '.join(available)}."
-                if available
-                else ""
-            )
+            available = sorted({path.stem for root in roots if root.is_dir() for path in root.glob("*.json")})
+            suffix = (f" Available voices: {', '.join(available)}." if available else "")
             raise ValueError(f"Unknown Supertonic voice {voice_id!r}.{suffix}")
         path = matches[0]
     else:
@@ -326,10 +280,7 @@ def resolve_supertonic_style(
             local_files_only=local_files_only,
         )
     expected = SUPERTONIC_STYLE_INTEGRITY.get(voice_id)
-    if (
-        expected is not None
-        and (verify_integrity or artifacts.official_snapshot)
-    ):
+    if (expected is not None and (verify_integrity or artifacts.official_snapshot)):
         _require_integrity(
             path,
             size=expected[0],

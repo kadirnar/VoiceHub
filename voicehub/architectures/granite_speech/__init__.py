@@ -1,8 +1,8 @@
 """VoiceHub-native Granite Speech architecture.
 
-Only lightweight source metadata is imported from this package root. Graph,
-processor, and checkpoint modules remain lazy through the architecture
-catalogue.
+Only lightweight source metadata is imported from this package root.
+Graph, processor, and checkpoint modules remain lazy through the
+architecture catalogue.
 """
 
 from voicehub.architectures.granite_speech.metadata import (

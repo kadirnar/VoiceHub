@@ -290,16 +290,9 @@ def resolve_wav2vec2_classification_artifacts(
     """Resolve one coherent native Wav2Vec2 classifier artifact set."""
     if not isinstance(source, (str, Path)) or not str(source).strip():
         raise ValueError("Wav2Vec2 `source` must be a non-empty path or Hub ID.")
-    if (
-        checkpoint_filename is not None
-        and (
-            not isinstance(checkpoint_filename, str)
-            or not checkpoint_filename.strip()
-        )
-    ):
-        raise ValueError(
-            "`checkpoint_filename` must be a non-empty string or None."
-        )
+    if (checkpoint_filename is not None and
+        (not isinstance(checkpoint_filename, str) or not checkpoint_filename.strip())):
+        raise ValueError("`checkpoint_filename` must be a non-empty string or None.")
 
     source_path = Path(source).expanduser()
     if source_path.exists():
@@ -333,9 +326,7 @@ def resolve_wav2vec2_classification_artifacts(
             ),
         )
     if is_explicit_local_path(source):
-        raise FileNotFoundError(
-            f"Wav2Vec2 model path was not found: {source_path}."
-        )
+        raise FileNotFoundError(f"Wav2Vec2 model path was not found: {source_path}.")
 
     repo_id = str(source)
     requested_revision = revision or "main"
@@ -354,11 +345,8 @@ def resolve_wav2vec2_classification_artifacts(
         revision=requested_revision,
     )
     resolved_revision = pinned_revision or requested_revision
-    candidates = (
-        (checkpoint_filename,)
-        if checkpoint_filename is not None
-        else (_SINGLE_CHECKPOINT_NAME, _SHARDED_CHECKPOINT_NAME)
-    )
+    candidates = ((checkpoint_filename, ) if checkpoint_filename is not None else
+                  (_SINGLE_CHECKPOINT_NAME, _SHARDED_CHECKPOINT_NAME))
     checkpoint = None
     for candidate in candidates:
         checkpoint = _resolve_optional_remote(
@@ -373,10 +361,8 @@ def resolve_wav2vec2_classification_artifacts(
             break
     if checkpoint is None:
         names = ", ".join(repr(name) for name in candidates)
-        raise FileNotFoundError(
-            "Native Wav2Vec2 could not find a checkpoint among: "
-            f"{names}."
-        )
+        raise FileNotFoundError("Native Wav2Vec2 could not find a checkpoint among: "
+                                f"{names}.")
     if checkpoint.name.endswith(".safetensors.index.json"):
         for shard in _safe_shard_names(checkpoint):
             resolve_pretrained_file(

@@ -1,8 +1,8 @@
 """Native short-term-energy activity detection.
 
-The energy definition and automatic threshold estimators follow Auditok at
-revision ``833ae725aef73a489366cc5940b831e16223059f``. VoiceHub owns this
-implementation and does not import Auditok or NumPy at runtime.
+The energy definition and automatic threshold estimators follow Auditok
+at revision ``833ae725aef73a489366cc5940b831e16223059f``. VoiceHub owns
+this implementation and does not import Auditok or NumPy at runtime.
 """
 
 from __future__ import annotations
@@ -30,17 +30,11 @@ class EnergyRegion:
     end_sample: int
 
     def __post_init__(self) -> None:
-        if (
-            isinstance(self.start_sample, bool)
-            or not isinstance(self.start_sample, int)
-            or self.start_sample < 0
-        ):
+        if (isinstance(self.start_sample, bool) or not isinstance(self.start_sample, int) or
+                self.start_sample < 0):
             raise ValueError("`start_sample` must be a non-negative integer.")
-        if (
-            isinstance(self.end_sample, bool)
-            or not isinstance(self.end_sample, int)
-            or self.end_sample <= self.start_sample
-        ):
+        if (isinstance(self.end_sample, bool) or not isinstance(self.end_sample, int) or
+                self.end_sample <= self.start_sample):
             raise ValueError("`end_sample` must be greater than `start_sample`.")
 
 
@@ -54,16 +48,10 @@ class EnergyDetection:
     window_samples: int
 
     def __post_init__(self) -> None:
-        if (
-            not isinstance(self.frame_energies_db, Tensor)
-            or self.frame_energies_db.ndim != 1
-        ):
+        if (not isinstance(self.frame_energies_db, Tensor) or self.frame_energies_db.ndim != 1):
             raise ValueError("`frame_energies_db` must be a rank-one tensor.")
-        if (
-            isinstance(self.window_samples, bool)
-            or not isinstance(self.window_samples, int)
-            or self.window_samples <= 0
-        ):
+        if (isinstance(self.window_samples, bool) or not isinstance(self.window_samples, int) or
+                self.window_samples <= 0):
             raise ValueError("`window_samples` must be a positive integer.")
 
 
@@ -74,20 +62,14 @@ def _window_energies(waveform: Tensor, window_samples: int) -> Tensor:
         raise TypeError("`waveform` must use a floating-point dtype.")
     if waveform.numel() == 0:
         raise ValueError("`waveform` cannot be empty.")
-    if (
-        isinstance(window_samples, bool)
-        or not isinstance(window_samples, int)
-        or window_samples <= 0
-    ):
+    if (isinstance(window_samples, bool) or not isinstance(window_samples, int) or window_samples <= 0):
         raise ValueError("`window_samples` must be a positive integer.")
 
     waveform = waveform.float()
     complete_frames = waveform.numel() // window_samples
     energies: list[Tensor] = []
     if complete_frames:
-        frames = waveform[
-            :complete_frames * window_samples
-        ].reshape(complete_frames, window_samples)
+        frames = waveform[:complete_frames * window_samples].reshape(complete_frames, window_samples)
         energies.append(frames.square().mean(dim=-1).sqrt())
     remainder = waveform[complete_frames * window_samples:]
     if remainder.numel():
@@ -120,14 +102,8 @@ def _otsu_threshold(energies: Tensor) -> float:
     valid = (weight_0 > 0) & (weight_1 > 0)
     between_variance = torch.full_like(weight_0, -1.0)
     mean_0 = cumulative_mass[valid] / weight_0[valid]
-    mean_1 = (
-        total_mass - cumulative_mass[valid]
-    ) / weight_1[valid]
-    between_variance[valid] = (
-        weight_0[valid]
-        * weight_1[valid]
-        * (mean_0 - mean_1).square()
-    )
+    mean_1 = (total_mass - cumulative_mass[valid]) / weight_1[valid]
+    between_variance[valid] = (weight_0[valid] * weight_1[valid] * (mean_0 - mean_1).square())
     candidates = torch.nonzero(
         between_variance == between_variance.max(),
         as_tuple=False,
@@ -158,10 +134,8 @@ def estimate_energy_threshold(
     if normalized.startswith("p") and normalized[1:].isdigit():
         percentile = float(normalized[1:])
     elif normalized != "percentile":
-        raise ValueError(
-            "Energy threshold method must be 'otsu', 'percentile', or "
-            "'p1' through 'p99'."
-        )
+        raise ValueError("Energy threshold method must be 'otsu', 'percentile', or "
+                         "'p1' through 'p99'.")
     if not 1.0 <= percentile <= 99.0:
         raise ValueError("Energy percentile must be between 1 and 99.")
     quantile = torch.quantile(
@@ -239,11 +213,7 @@ class EnergyVoiceActivityDetector:
         strict_min_duration: bool,
         window_size_samples: int | None = None,
     ) -> EnergyDetection:
-        if (
-            isinstance(sampling_rate, bool)
-            or not isinstance(sampling_rate, int)
-            or sampling_rate <= 0
-        ):
+        if (isinstance(sampling_rate, bool) or not isinstance(sampling_rate, int) or sampling_rate <= 0):
             raise ValueError("`sampling_rate` must be a positive integer.")
         if window_size_samples is None:
             window_samples = max(1, round(analysis_window_s * sampling_rate))
@@ -259,8 +229,7 @@ class EnergyVoiceActivityDetector:
             if threshold_energies.numel() == 0:
                 raise ValueError(
                     "Automatic energy calibration requires at least one "
-                    "complete analysis window."
-                )
+                    "complete analysis window.")
             threshold = max(
                 float(minimum_energy_threshold_db),
                 estimate_energy_threshold(
@@ -271,12 +240,7 @@ class EnergyVoiceActivityDetector:
         decisions = energies >= threshold
         maximum_gap_frames = max(
             0,
-            math.floor(
-                min_silence_duration_ms
-                * sampling_rate
-                / 1_000
-                / window_samples
-            ),
+            math.floor(min_silence_duration_ms * sampling_rate / 1_000 / window_samples),
         )
         runs = _join_runs(
             _speech_runs(decisions),
@@ -289,15 +253,11 @@ class EnergyVoiceActivityDetector:
         )
         padding = round(speech_pad_ms * sampling_rate / 1_000)
         maximum_samples = (
-            None
-            if max_speech_duration_s is None
-            else round(max_speech_duration_s * sampling_rate)
-        )
+            None if max_speech_duration_s is None else round(max_speech_duration_s * sampling_rate))
         if maximum_samples is not None and maximum_samples < minimum_samples:
             raise ValueError(
                 "`max_speech_duration_s` cannot be shorter than the "
-                "effective minimum speech duration."
-            )
+                "effective minimum speech duration.")
         regions: list[EnergyRegion] = []
         for start_frame, end_frame in runs:
             raw_start = start_frame * window_samples
@@ -313,8 +273,7 @@ class EnergyVoiceActivityDetector:
                     maximum_samples=maximum_samples,
                     minimum_samples=minimum_samples,
                     strict_minimum=strict_min_duration,
-                )
-            )
+                ))
         return EnergyDetection(
             regions=tuple(regions),
             frame_energies_db=energies,

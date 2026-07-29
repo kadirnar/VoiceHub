@@ -105,8 +105,7 @@ def native_wav2vec2_tensor_names(config: Wav2Vec2Config | Mapping[str, Any], ) -
 
 
 def _native_wav2vec2_base_tensor_shapes(
-    config: Wav2Vec2Config | Mapping[str, Any],
-) -> tuple[Wav2Vec2Config, TensorShapes]:
+    config: Wav2Vec2Config | Mapping[str, Any], ) -> tuple[Wav2Vec2Config, TensorShapes]:
     resolved = Wav2Vec2Config.coerce(config)
     shapes = native_wav2vec2_tensor_shapes(resolved)
     del shapes["lm_head.weight"]
@@ -115,37 +114,35 @@ def _native_wav2vec2_base_tensor_shapes(
 
 
 def native_wav2vec2_sequence_classification_tensor_shapes(
-    config: Wav2Vec2Config | Mapping[str, Any],
-) -> TensorShapes:
+    config: Wav2Vec2Config | Mapping[str, Any], ) -> TensorShapes:
     """Return the official clip-classification checkpoint namespace."""
     resolved, shapes = _native_wav2vec2_base_tensor_shapes(config)
     if resolved.use_weighted_layer_sum:
-        shapes["layer_weights"] = (resolved.num_hidden_layers + 1,)
+        shapes["layer_weights"] = (resolved.num_hidden_layers + 1, )
     shapes["projector.weight"] = (
         resolved.classifier_proj_size,
         resolved.hidden_size,
     )
-    shapes["projector.bias"] = (resolved.classifier_proj_size,)
+    shapes["projector.bias"] = (resolved.classifier_proj_size, )
     shapes["classifier.weight"] = (
         resolved.num_labels,
         resolved.classifier_proj_size,
     )
-    shapes["classifier.bias"] = (resolved.num_labels,)
+    shapes["classifier.bias"] = (resolved.num_labels, )
     return shapes
 
 
 def native_wav2vec2_frame_classification_tensor_shapes(
-    config: Wav2Vec2Config | Mapping[str, Any],
-) -> TensorShapes:
+    config: Wav2Vec2Config | Mapping[str, Any], ) -> TensorShapes:
     """Return the official frame-classification checkpoint namespace."""
     resolved, shapes = _native_wav2vec2_base_tensor_shapes(config)
     if resolved.use_weighted_layer_sum:
-        shapes["layer_weights"] = (resolved.num_hidden_layers + 1,)
+        shapes["layer_weights"] = (resolved.num_hidden_layers + 1, )
     shapes["classifier.weight"] = (
         resolved.num_labels,
         resolved.hidden_size,
     )
-    shapes["classifier.bias"] = (resolved.num_labels,)
+    shapes["classifier.bias"] = (resolved.num_labels, )
     return shapes
 
 
@@ -258,7 +255,7 @@ class HuggingFaceWav2Vec2ClassificationCheckpointAdapter(CheckpointAdapter):
             return "frame-classification"
         architectures = config.get("architectures", ())
         if isinstance(architectures, str):
-            architectures = (architectures,)
+            architectures = (architectures, )
         names = frozenset(str(name) for name in architectures)
         if names.intersection(cls._SEQUENCE_ARCHITECTURES):
             return "sequence-classification"
@@ -266,8 +263,7 @@ class HuggingFaceWav2Vec2ClassificationCheckpointAdapter(CheckpointAdapter):
             return "frame-classification"
         raise ValueError(
             "Wav2Vec2 classification checkpoints must declare a sequence- "
-            "or frame-classification architecture."
-        )
+            "or frame-classification architecture.")
 
     def probe(
         self,
@@ -281,10 +277,7 @@ class HuggingFaceWav2Vec2ClassificationCheckpointAdapter(CheckpointAdapter):
         except ValueError:
             return False
         return any(
-            path.suffix == ".safetensors"
-            or path.name.endswith(".safetensors.index.json")
-            for path in files
-        )
+            path.suffix == ".safetensors" or path.name.endswith(".safetensors.index.json") for path in files)
 
     def tensor_plan(self, config: Mapping[str, Any]) -> TensorPlan:
         family = self.architecture_family(config)
@@ -296,10 +289,7 @@ class HuggingFaceWav2Vec2ClassificationCheckpointAdapter(CheckpointAdapter):
         if not isinstance(source_prefix, str):
             raise TypeError("`_checkpoint_prefix` must be a string.")
         return TensorPlan(
-            rules=tuple(
-                CopyTensor(f"{source_prefix}{name}", name)
-                for name in sorted(shapes)
-            ),
+            rules=tuple(CopyTensor(f"{source_prefix}{name}", name) for name in sorted(shapes)),
             ignored_source_patterns=(
                 "*position_ids",
                 "*wav2vec2.masked_spec_embed",

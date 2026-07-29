@@ -67,8 +67,7 @@ def provider_to_internal_names(model: BarkModel) -> dict[str, str]:
     for internal_name in model.state_dict():
         provider_name = _provider_name(internal_name)
         if provider_name in mapping:
-            raise RuntimeError(
-                f"Bark checkpoint mapping collides at {provider_name!r}.")
+            raise RuntimeError(f"Bark checkpoint mapping collides at {provider_name!r}.")
         mapping[provider_name] = internal_name
     return mapping
 
@@ -78,8 +77,7 @@ def provider_state_dict(model: BarkModel) -> dict[str, Tensor]:
     state = model.state_dict()
     return {
         provider_name: state[internal_name]
-        for provider_name, internal_name in provider_to_internal_names(
-            model).items()
+        for provider_name, internal_name in provider_to_internal_names(model).items()
     }
 
 
@@ -94,8 +92,7 @@ def tensor_inventory_fingerprint(tensors: Mapping[str, Tensor]) -> str:
         try:
             dtype = _DTYPES[tensor.dtype]
         except KeyError as error:
-            raise TypeError(
-                f"Unsupported Bark tensor dtype {tensor.dtype}.") from error
+            raise TypeError(f"Unsupported Bark tensor dtype {tensor.dtype}.") from error
         shape = "x".join(str(item) for item in tensor.shape)
         rows.append(f"{name}|{dtype}|{shape}")
     return hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest()
@@ -107,11 +104,8 @@ def verify_native_graph_contract(model: BarkModel) -> None:
     count = len(state)
     values = sum(tensor.numel() for tensor in state.values())
     fingerprint = tensor_inventory_fingerprint(state)
-    if (
-        count != BARK_TENSOR_COUNT
-        or values != BARK_STATE_VALUES
-        or fingerprint != BARK_INVENTORY_FINGERPRINT
-    ):
+    if (count != BARK_TENSOR_COUNT or values != BARK_STATE_VALUES or
+            fingerprint != BARK_INVENTORY_FINGERPRINT):
         raise RuntimeError(
             "The native Bark graph no longer matches the pinned checkpoint "
             f"contract (count={count}, values={values}, "
@@ -207,16 +201,21 @@ def save_bark_safetensors(
     if path.suffix.lower() != ".safetensors":
         raise ValueError("Bark export path must end with `.safetensors`.")
     values = {
-        "architecture": "bark",
-        "format": BARK_NATIVE_FORMAT,
-        "source_revision": BARK_CHECKPOINT_REVISION,
-        _CONFIG_METADATA: json.dumps(
+        "architecture":
+        "bark",
+        "format":
+        BARK_NATIVE_FORMAT,
+        "source_revision":
+        BARK_CHECKPOINT_REVISION,
+        _CONFIG_METADATA:
+        json.dumps(
             model.config.to_dict(),
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
         ),
-        _GENERATION_METADATA: json.dumps(
+        _GENERATION_METADATA:
+        json.dumps(
             model.generation_config.to_dict(),
             ensure_ascii=False,
             separators=(",", ":"),
@@ -226,9 +225,8 @@ def save_bark_safetensors(
     extra = dict(metadata or {})
     conflicts = set(values) & set(extra)
     if conflicts:
-        raise ValueError(
-            "Bark export metadata cannot override reserved keys "
-            f"{sorted(conflicts)!r}.")
+        raise ValueError("Bark export metadata cannot override reserved keys "
+                         f"{sorted(conflicts)!r}.")
     values.update(extra)
     output = save_safetensors(
         {
@@ -261,24 +259,20 @@ def load_bark_model_from_safetensors(
         if config is None:
             encoded = reader.metadata.get(_CONFIG_METADATA)
             if encoded is None:
-                raise ValueError(
-                    "Bark Safetensors is missing its construction config.")
+                raise ValueError("Bark Safetensors is missing its construction config.")
             try:
                 raw_config = json.loads(encoded)
             except json.JSONDecodeError as error:
-                raise ValueError(
-                    "Bark Safetensors contains invalid config JSON.") from error
+                raise ValueError("Bark Safetensors contains invalid config JSON.") from error
             config = BarkArchitectureConfig.from_dict(raw_config)
         if generation_config is None:
             encoded_generation = reader.metadata.get(_GENERATION_METADATA)
             if encoded_generation is None:
-                raise ValueError(
-                    "Bark Safetensors is missing its generation config.")
+                raise ValueError("Bark Safetensors is missing its generation config.")
             try:
                 raw_generation = json.loads(encoded_generation)
             except json.JSONDecodeError as error:
-                raise ValueError(
-                    "Bark Safetensors contains invalid generation JSON.") from error
+                raise ValueError("Bark Safetensors contains invalid generation JSON.") from error
             generation_config = BarkGenerationConfig.from_dict(raw_generation)
     model = BarkModel(config, generation_config=generation_config)
     if dtype is not None:
@@ -290,9 +284,8 @@ def load_bark_model_from_safetensors(
 def _verify_official_file(path: Path) -> str:
     size = path.stat().st_size
     if size != BARK_CHECKPOINT_SIZE:
-        raise ValueError(
-            f"Pinned Bark checkpoint size is {size}, expected "
-            f"{BARK_CHECKPOINT_SIZE}.")
+        raise ValueError(f"Pinned Bark checkpoint size is {size}, expected "
+                         f"{BARK_CHECKPOINT_SIZE}.")
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         while block := stream.read(4 * 1024 * 1024):
@@ -333,10 +326,7 @@ def convert_official_bark_checkpoint(
         raise ValueError("Could not read the pinned Bark tensor archive.") from error
     if not isinstance(state, Mapping) or not state:
         raise ValueError("Pinned Bark archive did not contain a state mapping.")
-    if any(
-        not isinstance(name, str) or not isinstance(value, Tensor)
-        for name, value in state.items()
-    ):
+    if any(not isinstance(name, str) or not isinstance(value, Tensor) for name, value in state.items()):
         raise TypeError("Pinned Bark archive must map names to tensors only.")
     with torch.device("meta"):
         graph = BarkModel(config, generation_config=generation_config)
@@ -348,23 +338,31 @@ def convert_official_bark_checkpoint(
     )
     fingerprint = tensor_inventory_fingerprint(state)
     if fingerprint != BARK_INVENTORY_FINGERPRINT:
-        raise ValueError(
-            "Pinned Bark archive tensor inventory fingerprint mismatch.")
+        raise ValueError("Pinned Bark archive tensor inventory fingerprint mismatch.")
     return save_safetensors(
-        {name: tensor.detach() for name, tensor in state.items()},
+        {
+            name: tensor.detach()
+            for name, tensor in state.items()
+        },
         destination,
         metadata={
-            "architecture": "bark",
-            "format": BARK_NATIVE_FORMAT,
-            "source_revision": BARK_CHECKPOINT_REVISION,
-            "source_sha256": BARK_CHECKPOINT_SHA256,
-            _CONFIG_METADATA: json.dumps(
+            "architecture":
+            "bark",
+            "format":
+            BARK_NATIVE_FORMAT,
+            "source_revision":
+            BARK_CHECKPOINT_REVISION,
+            "source_sha256":
+            BARK_CHECKPOINT_SHA256,
+            _CONFIG_METADATA:
+            json.dumps(
                 config.to_dict(),
                 ensure_ascii=False,
                 separators=(",", ":"),
                 sort_keys=True,
             ),
-            _GENERATION_METADATA: json.dumps(
+            _GENERATION_METADATA:
+            json.dumps(
                 generation_config.to_dict(),
                 ensure_ascii=False,
                 separators=(",", ":"),
@@ -400,10 +398,7 @@ def load_official_bark_checkpoint(
         raise ValueError("Could not read the pinned Bark tensor archive.") from error
     if not isinstance(state, Mapping) or not state:
         raise ValueError("Pinned Bark archive did not contain a state mapping.")
-    if any(
-        not isinstance(name, str) or not isinstance(value, Tensor)
-        for name, value in state.items()
-    ):
+    if any(not isinstance(name, str) or not isinstance(value, Tensor) for name, value in state.items()):
         raise TypeError("Pinned Bark archive must map names to tensors only.")
     mapping = _validate_shapes(
         set(state),
@@ -413,12 +408,8 @@ def load_official_bark_checkpoint(
     )
     fingerprint = tensor_inventory_fingerprint(state)
     if fingerprint != BARK_INVENTORY_FINGERPRINT:
-        raise ValueError(
-            "Pinned Bark archive tensor inventory fingerprint mismatch.")
-    internal = {
-        mapping[name]: tensor
-        for name, tensor in state.items()
-    }
+        raise ValueError("Pinned Bark archive tensor inventory fingerprint mismatch.")
+    internal = {mapping[name]: tensor for name, tensor in state.items()}
     model.load_state_dict(internal, strict=True)
     return model
 

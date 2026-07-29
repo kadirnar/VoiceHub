@@ -1,11 +1,12 @@
 """Checkpoint-compatible Zonos phoneme tokenization and conditioning.
 
-Zonos v0.1 was trained on eSpeak phonemes.  A grapheme-to-phoneme engine is a
-linguistic runtime, not part of the acoustic checkpoint.  VoiceHub therefore
-keeps that boundary explicit: callers may provide phonemes directly or inject
-a frontend implementing :class:`ZonosPhonemeFrontend`.  Raw text is never
-silently treated as phonemes, which would produce valid tensor shapes but
-degrade synthesis quality.
+Zonos v0.1 was trained on eSpeak phonemes.  A grapheme-to-phoneme engine
+is a linguistic runtime, not part of the acoustic checkpoint.  VoiceHub
+therefore keeps that boundary explicit: callers may provide phonemes
+directly or inject a frontend implementing
+:class:`ZonosPhonemeFrontend`.  Raw text is never silently treated as
+phonemes, which would produce valid tensor shapes but degrade synthesis
+quality.
 """
 
 from __future__ import annotations
@@ -27,8 +28,7 @@ LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 IPA_LETTERS = (
     "ɑɐɒæɓʙβɔɕçɗɖðʤəɘɚɛɜɝɞɟʄɡɠɢʛɦɧħɥʜɨɪʝɭɬɫɮʟɱɯɰŋɳɲɴøɵɸ"
     "θœɶʘɹɺɾɻʀʁɽʂʃʈʧʉʊʋⱱʌɣɤʍχʎʏʑʐʒʔʡʕʢǀǁǂǃˈˌːˑʼʴʰʱʲʷ"
-    "ˠˤ˞↓↑→↗↘'̩'ᵻ"
-)
+    "ˠˤ˞↓↑→↗↘'̩'ᵻ")
 PHONEME_SYMBOLS = tuple((*PUNCTUATION, *LETTERS, *IPA_LETTERS))
 PHONEME_SYMBOL_TO_ID = {
     symbol: index
@@ -39,23 +39,117 @@ PHONEME_SYMBOL_TO_ID = {
 }
 
 SUPPORTED_LANGUAGE_CODES = (
-    "af", "am", "an", "ar", "as", "az", "ba", "bg", "bn", "bpy", "bs",
-    "ca", "cmn", "cs", "cy", "da", "de", "el", "en-029", "en-gb",
-    "en-gb-scotland", "en-gb-x-gbclan", "en-gb-x-gbcwmd", "en-gb-x-rp",
-    "en-us", "eo", "es", "es-419", "et", "eu", "fa", "fa-latn", "fi",
-    "fr-be", "fr-ch", "fr-fr", "ga", "gd", "gn", "grc", "gu", "hak",
-    "hi", "hr", "ht", "hu", "hy", "hyw", "ia", "id", "is", "it", "ja",
-    "jbo", "ka", "kk", "kl", "kn", "ko", "kok", "ku", "ky", "la",
-    "lfn", "lt", "lv", "mi", "mk", "ml", "mr", "ms", "mt", "my", "nb",
-    "nci", "ne", "nl", "om", "or", "pa", "pap", "pl", "pt", "pt-br",
-    "py", "quc", "ro", "ru", "ru-lv", "sd", "shn", "si", "sk", "sl",
-    "sq", "sr", "sv", "sw", "ta", "te", "tn", "tr", "tt", "ur", "uz",
-    "vi", "vi-vn-x-central", "vi-vn-x-south", "yue",
+    "af",
+    "am",
+    "an",
+    "ar",
+    "as",
+    "az",
+    "ba",
+    "bg",
+    "bn",
+    "bpy",
+    "bs",
+    "ca",
+    "cmn",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "el",
+    "en-029",
+    "en-gb",
+    "en-gb-scotland",
+    "en-gb-x-gbclan",
+    "en-gb-x-gbcwmd",
+    "en-gb-x-rp",
+    "en-us",
+    "eo",
+    "es",
+    "es-419",
+    "et",
+    "eu",
+    "fa",
+    "fa-latn",
+    "fi",
+    "fr-be",
+    "fr-ch",
+    "fr-fr",
+    "ga",
+    "gd",
+    "gn",
+    "grc",
+    "gu",
+    "hak",
+    "hi",
+    "hr",
+    "ht",
+    "hu",
+    "hy",
+    "hyw",
+    "ia",
+    "id",
+    "is",
+    "it",
+    "ja",
+    "jbo",
+    "ka",
+    "kk",
+    "kl",
+    "kn",
+    "ko",
+    "kok",
+    "ku",
+    "ky",
+    "la",
+    "lfn",
+    "lt",
+    "lv",
+    "mi",
+    "mk",
+    "ml",
+    "mr",
+    "ms",
+    "mt",
+    "my",
+    "nb",
+    "nci",
+    "ne",
+    "nl",
+    "om",
+    "or",
+    "pa",
+    "pap",
+    "pl",
+    "pt",
+    "pt-br",
+    "py",
+    "quc",
+    "ro",
+    "ru",
+    "ru-lv",
+    "sd",
+    "shn",
+    "si",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "ta",
+    "te",
+    "tn",
+    "tr",
+    "tt",
+    "ur",
+    "uz",
+    "vi",
+    "vi-vn-x-central",
+    "vi-vn-x-south",
+    "yue",
 )
-LANGUAGE_CODE_TO_ID = {
-    language: index
-    for index, language in enumerate(SUPPORTED_LANGUAGE_CODES)
-}
+LANGUAGE_CODE_TO_ID = {language: index for index, language in enumerate(SUPPORTED_LANGUAGE_CODES)}
 
 DEFAULT_EMOTION = (
     0.3077,
@@ -120,8 +214,7 @@ def normalize_language_code(language: str) -> str:
     if normalized not in LANGUAGE_CODE_TO_ID:
         raise ValueError(
             f"Unsupported Zonos language {language!r}. Supported language "
-            f"codes: {', '.join(SUPPORTED_LANGUAGE_CODES)}."
-        )
+            f"codes: {', '.join(SUPPORTED_LANGUAGE_CODES)}.")
     return normalized
 
 
@@ -135,8 +228,7 @@ def validate_phonemes(phonemes: str) -> str:
     if unsupported:
         raise ValueError(
             "Zonos phonemes contain symbols outside the published "
-            f"vocabulary: {unsupported!r}."
-        )
+            f"vocabulary: {unsupported!r}.")
     return normalized
 
 
@@ -157,16 +249,11 @@ def resolve_phonemes(
             "`phonemes=...`, configure `PrecomputedPhonemeFrontend` when the "
             "text argument already contains phonemes, or inject a "
             "`ZonosPhonemeFrontend`. VoiceHub does not silently substitute "
-            "raw graphemes for the checkpoint's phoneme input."
-        )
+            "raw graphemes for the checkpoint's phoneme input.")
     if not isinstance(frontend, ZonosPhonemeFrontend):
-        raise TypeError(
-            "Zonos `frontend` must implement phonemize(text, *, language)."
-        )
+        raise TypeError("Zonos `frontend` must implement phonemize(text, *, language).")
     return (
-        validate_phonemes(
-            frontend.phonemize(text, language=normalized_language),
-        ),
+        validate_phonemes(frontend.phonemize(text, language=normalized_language), ),
         frontend.frontend_id,
     )
 
@@ -193,8 +280,8 @@ def batch_phoneme_ids(
 ) -> tuple[Tensor, Tensor]:
     """Left-pad phoneme IDs exactly like the released Zonos frontend."""
     if isinstance(phonemes, (str, bytes)) or not isinstance(
-        phonemes,
-        Sequence,
+            phonemes,
+            Sequence,
     ):
         raise TypeError("Zonos phoneme batch must be a sequence of strings.")
     if not phonemes:
@@ -252,9 +339,7 @@ def _batch_languages(
             raise TypeError("Zonos language must be a string or string sequence.")
         values = tuple(normalize_language_code(item) for item in language)
         if len(values) != batch_size:
-            raise ValueError(
-                "Zonos language batch size must match phoneme batch size."
-            )
+            raise ValueError("Zonos language batch size must match phoneme batch size.")
     return values
 
 
@@ -278,38 +363,28 @@ def _batch_float_feature(
         elif tensor.numel() == width:
             tensor = tensor.reshape(1, 1, width).expand(batch_size, -1, -1)
         else:
-            raise ValueError(
-                f"Zonos `{name}` cannot be broadcast to "
-                f"[{batch_size}, 1, {width}]."
-            )
+            raise ValueError(f"Zonos `{name}` cannot be broadcast to "
+                             f"[{batch_size}, 1, {width}].")
     elif tensor.ndim == 2:
         if tensor.shape == (batch_size, width):
             tensor = tensor.unsqueeze(1)
         elif tensor.shape == (1, width):
             tensor = tensor.unsqueeze(1).expand(batch_size, -1, -1)
         else:
-            raise ValueError(
-                f"Zonos `{name}` must have shape [batch, {width}]."
-            )
+            raise ValueError(f"Zonos `{name}` must have shape [batch, {width}].")
     elif tensor.ndim == 3:
         if tensor.shape[1:] != (1, width) or tensor.shape[0] not in {
-            1,
-            batch_size,
+                1,
+                batch_size,
         }:
-            raise ValueError(
-                f"Zonos `{name}` must have shape [batch, 1, {width}]."
-            )
+            raise ValueError(f"Zonos `{name}` must have shape [batch, 1, {width}].")
         tensor = tensor.expand(batch_size, -1, -1)
     else:
-        raise ValueError(
-            f"Zonos `{name}` must have at most three dimensions."
-        )
+        raise ValueError(f"Zonos `{name}` must have at most three dimensions.")
     if not bool(torch.isfinite(tensor).all()):
         raise ValueError(f"Zonos `{name}` must contain finite values.")
     if bool(((tensor < minimum) | (tensor > maximum)).any()):
-        raise ValueError(
-            f"Zonos `{name}` values must be in [{minimum:g}, {maximum:g}]."
-        )
+        raise ValueError(f"Zonos `{name}` values must be in [{minimum:g}, {maximum:g}].")
     return tensor
 
 
@@ -331,13 +406,10 @@ def _speaker_feature(
     if speaker.ndim != 3 or speaker.shape[1:] != (1, 128):
         raise ValueError(
             "Zonos speaker embedding must have shape [128], [batch, 128], "
-            "or [batch, 1, 128]."
-        )
+            "or [batch, 1, 128].")
     if speaker.shape[0] not in {1, batch_size}:
-        raise ValueError(
-            "Zonos speaker embedding batch size must be one or match the "
-            "phoneme batch."
-        )
+        raise ValueError("Zonos speaker embedding batch size must be one or match the "
+                         "phoneme batch.")
     speaker = speaker.to(device=device, dtype=torch.float32)
     if not bool(torch.isfinite(speaker).all()):
         raise ValueError("Zonos speaker embedding must contain finite values.")
@@ -370,19 +442,21 @@ def make_condition_dict(
     )
     emotion_sum = emotion_tensor.sum(dim=-1, keepdim=True)
     if bool((emotion_sum <= 0).any()):
-        raise ValueError(
-            "Every Zonos emotion vector must contain a positive value."
-        )
+        raise ValueError("Every Zonos emotion vector must contain a positive value.")
     emotion_tensor = emotion_tensor / emotion_sum
     return {
-        "espeak": ids,
-        "speaker": _speaker_feature(
+        "espeak":
+        ids,
+        "speaker":
+        _speaker_feature(
             speaker_embedding,
             batch_size=batch_size,
             device=device,
         ),
-        "emotion": emotion_tensor,
-        "fmax": _batch_float_feature(
+        "emotion":
+        emotion_tensor,
+        "fmax":
+        _batch_float_feature(
             fmax,
             name="fmax",
             batch_size=batch_size,
@@ -391,7 +465,8 @@ def make_condition_dict(
             maximum=24_000.0,
             device=device,
         ),
-        "pitch_std": _batch_float_feature(
+        "pitch_std":
+        _batch_float_feature(
             pitch_std,
             name="pitch_std",
             batch_size=batch_size,
@@ -400,7 +475,8 @@ def make_condition_dict(
             maximum=400.0,
             device=device,
         ),
-        "speaking_rate": _batch_float_feature(
+        "speaking_rate":
+        _batch_float_feature(
             speaking_rate,
             name="speaking_rate",
             batch_size=batch_size,
@@ -409,7 +485,8 @@ def make_condition_dict(
             maximum=40.0,
             device=device,
         ),
-        "language_id": torch.tensor(
+        "language_id":
+        torch.tensor(
             [LANGUAGE_CODE_TO_ID[item] for item in languages],
             dtype=torch.long,
             device=device,

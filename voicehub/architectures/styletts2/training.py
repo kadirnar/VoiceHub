@@ -1,11 +1,12 @@
 """Preprocessed, teacher-forced StyleTTS 2 fine-tuning objectives.
 
-The upstream raw-data recipe delegates phonemization, monotonic alignment,
-pitch extraction, and WavLM features to separately released runtimes. Native
-VoiceHub fine-tuning therefore accepts those targets explicitly and optimizes
-the complete deployable generator, including PL-BERT, duration/prosody,
-style diffusion, style encoders, and HiFi-GAN. The MPD/MSD discriminators are
-fresh training-only modules and are never represented as pretrained weights.
+The upstream raw-data recipe delegates phonemization, monotonic
+alignment, pitch extraction, and WavLM features to separately released
+runtimes. Native VoiceHub fine-tuning therefore accepts those targets
+explicitly and optimizes the complete deployable generator, including
+PL-BERT, duration/prosody, style diffusion, style encoders, and HiFi-
+GAN. The MPD/MSD discriminators are fresh training-only modules and are
+never represented as pretrained weights.
 """
 
 from __future__ import annotations

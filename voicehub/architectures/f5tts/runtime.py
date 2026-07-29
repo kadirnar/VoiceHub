@@ -10,11 +10,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from voicehub.architectures.f5tts.audio import (
-    cross_fade,
-    normalize_reference_rms,
-    trim_silence,
-)
+from voicehub.architectures.f5tts.audio import cross_fade, normalize_reference_rms, trim_silence
 from voicehub.architectures.f5tts.frontend import NativeF5TextFrontend, TokenSequence
 from voicehub.architectures.f5tts.modeling import F5ConditionalFlowMatcher
 from voicehub.architectures.f5tts.vocoder import NativeVocos
@@ -32,11 +28,7 @@ def chunk_text(text: str, *, maximum_bytes: int) -> tuple[str, ...]:
     for sentence in _SENTENCE_BOUNDARY.split(text):
         if not sentence:
             continue
-        suffix = (
-            " "
-            if sentence and len(sentence[-1].encode("utf-8")) == 1
-            else ""
-        )
+        suffix = (" " if sentence and len(sentence[-1].encode("utf-8")) == 1 else "")
         candidate = current + sentence + suffix
         if not current or len(candidate.encode("utf-8")) <= maximum_bytes:
             current = candidate
@@ -56,8 +48,7 @@ def normalize_reference_text(text: str) -> str:
         raise ValueError(
             "`reference_text` is required by the native F5-TTS runtime. "
             "Automatic ASR is a separate VoiceHub task and is not hidden "
-            "inside synthesis."
-        )
+            "inside synthesis.")
     if normalized.endswith("."):
         return normalized + " "
     if normalized.endswith("。"):
@@ -87,8 +78,7 @@ class NativeF5TTSRuntime(nn.Module):
             if flow_model.num_channels != input_channels:
                 raise ValueError(
                     "F5-TTS flow/vocoder mel dimensions differ: "
-                    f"{flow_model.num_channels} != {input_channels}."
-                )
+                    f"{flow_model.num_channels} != {input_channels}.")
             self.vocoder.requires_grad_(False)
 
     @property
@@ -116,21 +106,19 @@ class NativeF5TTSRuntime(nn.Module):
         waveform = waveform[:maximum_samples]
         trimmed = trim_silence(
             waveform,
-            threshold=10 ** (-50 / 20),
+            threshold=10**(-50 / 20),
             padding=self.target_sample_rate // 20,
         )
         if trimmed.numel() == 0:
             raise ValueError("F5-TTS reference audio contains no audible speech.")
-        waveform = torch.cat(
-            (
-                trimmed,
-                torch.zeros(
-                    self.target_sample_rate // 20,
-                    dtype=trimmed.dtype,
-                    device=trimmed.device,
-                ),
-            )
-        )
+        waveform = torch.cat((
+            trimmed,
+            torch.zeros(
+                self.target_sample_rate // 20,
+                dtype=trimmed.dtype,
+                device=trimmed.device,
+            ),
+        ))
         return normalize_reference_rms(waveform)
 
     @torch.no_grad()
@@ -149,15 +137,10 @@ class NativeF5TTSRuntime(nn.Module):
         remove_silence: bool = False,
     ) -> tuple[torch.Tensor, int, torch.Tensor]:
         if self.vocoder is None:
-            raise RuntimeError(
-                "F5-TTS waveform inference requires a loaded native Vocos "
-                "decoder."
-            )
+            raise RuntimeError("F5-TTS waveform inference requires a loaded native Vocos "
+                               "decoder.")
         reference_text = (
-            normalize_reference_text(ref_text)
-            if isinstance(ref_text, str)
-            else tuple(ref_text)
-        )
+            normalize_reference_text(ref_text) if isinstance(ref_text, str) else tuple(ref_text))
         if isinstance(gen_text, str):
             if not gen_text.strip():
                 raise ValueError("F5-TTS generation text cannot be empty.")
@@ -180,24 +163,17 @@ class NativeF5TTSRuntime(nn.Module):
             maximum_bytes = max(
                 1,
                 int(
-                    len(reference_text.encode("utf-8"))
-                    / reference_seconds
-                    * max(1.0, 22.0 - reference_seconds)
-                    * speed
-                ),
+                    len(reference_text.encode("utf-8")) / reference_seconds *
+                    max(1.0, 22.0 - reference_seconds) * speed),
             )
             chunks: tuple[str | TokenSequence, ...] = chunk_text(
                 generated_text,
                 maximum_bytes=maximum_bytes,
             )
         else:
-            chunks = (generated_text,)
+            chunks = (generated_text, )
 
-        resolved_seed = (
-            secrets.randbelow(2**31)
-            if seed is None
-            else int(seed)
-        )
+        resolved_seed = (secrets.randbelow(2**31) if seed is None else int(seed))
         self.seed = resolved_seed
         generated_waves: list[torch.Tensor] = []
         generated_mels: list[torch.Tensor] = []
@@ -214,13 +190,9 @@ class NativeF5TTSRuntime(nn.Module):
                 generated_units = len(generated_tokens)
             local_speed = 0.3 if generated_units < 10 else speed
             duration = reference_frames + int(
-                reference_frames
-                / max(reference_units, 1)
-                * generated_units
-                / local_speed
-            )
+                reference_frames / max(reference_units, 1) * generated_units / local_speed)
             token_ids = self.frontend.encode_batch(
-                (combined,),
+                (combined, ),
                 device=self.device,
             )
             sampled, _ = self.ema_model.sample(
@@ -228,7 +200,7 @@ class NativeF5TTSRuntime(nn.Module):
                 token_ids,
                 duration,
                 lengths=torch.tensor(
-                    (reference_frames,),
+                    (reference_frames, ),
                     device=self.device,
                     dtype=torch.long,
                 ),
@@ -251,7 +223,7 @@ class NativeF5TTSRuntime(nn.Module):
         if remove_silence:
             trimmed = trim_silence(
                 output,
-                threshold=10 ** (-50 / 20),
+                threshold=10**(-50 / 20),
                 padding=self.target_sample_rate // 2,
             )
             if trimmed.numel():

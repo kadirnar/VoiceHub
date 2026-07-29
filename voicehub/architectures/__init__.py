@@ -1,9 +1,6 @@
 """Native architecture contracts and discovery for VoiceHub models."""
 
-from voicehub.architectures.catalog import (
-    BUILTIN_ARCHITECTURE_REGISTRARS,
-    register_builtin_architectures,
-)
+from voicehub.architectures.catalog import BUILTIN_ARCHITECTURE_REGISTRARS, register_builtin_architectures
 from voicehub.architectures.registry import (
     ARCHITECTURE_ALIASES,
     ARCHITECTURE_REGISTRY,

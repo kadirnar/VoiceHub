@@ -67,15 +67,12 @@ class CosyVoiceTrainingAdapter(CompositeTrainingAdapter):
             )
         phase = (
             self.spec.get_phase(self.selected_component)
-            if training_phase is None
-            else super().select_training_phase(training_phase)
-        )
+            if training_phase is None else super().select_training_phase(training_phase))
         if phase.name != self.selected_component:
             raise ValueError(
                 "This CosyVoice runtime was configured for "
                 f"{self.selected_component!r}, not {phase.name!r}. Start a "
-                "separate job with the other `training_component`."
-            )
+                "separate job with the other `training_component`.")
         return phase
 
     def plan_training_phases(self, step: int):

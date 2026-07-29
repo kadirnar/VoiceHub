@@ -4,21 +4,12 @@ from pathlib import Path
 
 import torch
 
-from voicehub.architectures.conversationtts.decoder import (
-    ConversationRMSNorm,
-    build_llama32_decoder,
-)
-from voicehub.models.conversationtts.configuration_conversationtts import (
-    ConversationTTSConfig,
-)
-from voicehub.models.conversationtts.source.conversationtts.tools.tokenizer.Text2ID.text_tokenizer import (
-    TextTokenizer,
-)
+from voicehub.architectures.conversationtts.decoder import ConversationRMSNorm, build_llama32_decoder
+from voicehub.models.conversationtts.configuration_conversationtts import ConversationTTSConfig
+from voicehub.models.conversationtts.source.conversationtts.tools.tokenizer.Text2ID.text_tokenizer import TextTokenizer
 
 PROJECT_ROOT = Path(__file__).parents[1]
-CONVERSATION_SOURCE = (
-    PROJECT_ROOT / "voicehub/models/conversationtts/source/conversationtts"
-)
+CONVERSATION_SOURCE = (PROJECT_ROOT / "voicehub/models/conversationtts/source/conversationtts")
 
 
 class NativeConversationDecoderTests(unittest.TestCase):
@@ -94,7 +85,7 @@ class NativeConversationDecoderTests(unittest.TestCase):
         self.assertEqual(output.dtype, inputs.dtype)
         expected = torch.nn.functional.rms_norm(
             inputs.float(),
-            (4,),
+            (4, ),
             layer.scale.float(),
             1e-5,
         ).to(dtype=inputs.dtype)
@@ -104,11 +95,8 @@ class NativeConversationDecoderTests(unittest.TestCase):
         runtime_files = (
             CONVERSATION_SOURCE / "models/model_new.py",
             CONVERSATION_SOURCE / "inference/generator.py",
-            CONVERSATION_SOURCE
-            / "tools/tokenizer/Text2ID/text_tokenizer.py",
-            *(
-                CONVERSATION_SOURCE / "tools/tokenizer/MimiCodec"
-            ).rglob("*.py"),
+            CONVERSATION_SOURCE / "tools/tokenizer/Text2ID/text_tokenizer.py",
+            *(CONVERSATION_SOURCE / "tools/tokenizer/MimiCodec").rglob("*.py"),
         )
         forbidden = {
             "einops",
@@ -131,11 +119,8 @@ class NativeConversationDecoderTests(unittest.TestCase):
                     imports.update(alias.name for alias in node.names)
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     imports.add(node.module)
-            violations.extend(
-                (path.relative_to(PROJECT_ROOT), name)
-                for name in imports
-                if name.split(".", 1)[0] in forbidden
-            )
+            violations.extend((path.relative_to(PROJECT_ROOT), name) for name in imports
+                              if name.split(".", 1)[0] in forbidden)
         self.assertEqual(violations, [])
 
 

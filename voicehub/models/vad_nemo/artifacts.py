@@ -18,14 +18,12 @@ from voicehub.architectures.marblenet_vad.metadata import (
 from voicehub.hub import resolve_pretrained_file
 from voicehub.path_utils import is_explicit_local_path
 
-_OFFICIAL_ALIASES = frozenset(
-    {
-        "vad_multilingual_marblenet",
-        "vad_multilingual_frame_marblenet",
-        "nemo-marblenet-vad",
-        MARBLENET_VAD_REPOSITORY,
-    }
-)
+_OFFICIAL_ALIASES = frozenset({
+    "vad_multilingual_marblenet",
+    "vad_multilingual_frame_marblenet",
+    "nemo-marblenet-vad",
+    MARBLENET_VAD_REPOSITORY,
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,9 +38,7 @@ class MarbleNetVADArtifacts:
         for name in ("checkpoint", "config"):
             path = Path(getattr(self, name)).expanduser().resolve()
             if not path.is_file():
-                raise FileNotFoundError(
-                    f"MarbleNet VAD {name} was not found: {path}."
-                )
+                raise FileNotFoundError(f"MarbleNet VAD {name} was not found: {path}.")
             object.__setattr__(self, name, path)
 
 
@@ -53,10 +49,8 @@ def _local_artifacts(
 ) -> MarbleNetVADArtifacts:
     root = source if source.is_dir() else source.parent
     checkpoint = (
-        source
-        if source.is_file() and source.suffix.lower() == ".safetensors"
-        else root / NATIVE_MARBLENET_VAD_FILENAME
-    )
+        source if source.is_file() and source.suffix.lower() == ".safetensors" else root /
+        NATIVE_MARBLENET_VAD_FILENAME)
     config = root / "config.json"
     if checkpoint.is_file() and config.is_file():
         return MarbleNetVADArtifacts(
@@ -71,33 +65,24 @@ def _local_artifacts(
         legacy = source
     elif source.is_dir():
         candidates = sorted(
-            path
-            for path in source.iterdir()
-            if path.is_file() and path.suffix.lower() in {".nemo", ".ckpt"}
-        )
+            path for path in source.iterdir() if path.is_file() and path.suffix.lower() in {".nemo", ".ckpt"})
         if len(candidates) > 1:
             raise ValueError(
                 "A local MarbleNet directory may contain at most one "
-                "top-level `.nemo` or `.ckpt` source."
-            )
+                "top-level `.nemo` or `.ckpt` source.")
         legacy = candidates[0] if candidates else None
     if legacy is not None:
         if trust_pickle_checkpoint is not True:
             raise ValueError(
                 "The local NeMo artifact contains a pickle-based checkpoint. "
                 "Review it and pass `trust_pickle_checkpoint=True` for "
-                "one-time conversion."
-            )
+                "one-time conversion.")
         destination = root / ".voicehub-native" / "marblenet-vad"
         convert_nemo_marblenet_checkpoint(
             legacy,
             destination,
             trust_pickle_checkpoint=True,
-            expected_sha256=(
-                MARBLENET_VAD_SHA256
-                if legacy.name == MARBLENET_VAD_FILENAME
-                else None
-            ),
+            expected_sha256=(MARBLENET_VAD_SHA256 if legacy.name == MARBLENET_VAD_FILENAME else None),
         )
         return MarbleNetVADArtifacts(
             checkpoint=destination / NATIVE_MARBLENET_VAD_FILENAME,
@@ -109,8 +94,7 @@ def _local_artifacts(
     raise FileNotFoundError(
         f"No complete native MarbleNet VAD artifact was found in {root}. "
         "Expected `model.safetensors` plus `config.json`, or one reviewed "
-        "`.nemo`/`.ckpt` file for explicit conversion."
-    )
+        "`.nemo`/`.ckpt` file for explicit conversion.")
 
 
 def resolve_marblenet_vad_artifacts(
@@ -130,9 +114,7 @@ def resolve_marblenet_vad_artifacts(
             trust_pickle_checkpoint=trust_pickle_checkpoint,
         )
     if is_explicit_local_path(source):
-        raise FileNotFoundError(
-            f"Local MarbleNet VAD model path was not found: {source_path}."
-        )
+        raise FileNotFoundError(f"Local MarbleNet VAD model path was not found: {source_path}.")
 
     source_name = str(source)
     if source_name not in _OFFICIAL_ALIASES:
@@ -163,15 +145,13 @@ def resolve_marblenet_vad_artifacts(
         raise ValueError(
             "Official MarbleNet aliases are pinned to immutable revision "
             f"{MARBLENET_VAD_REVISION}; use a custom native repository for "
-            "another revision."
-        )
+            "another revision.")
     if trust_pickle_checkpoint is not True:
         raise ValueError(
             "The official NeMo release publishes a pickle-based `.nemo` "
             "archive. Review its Apache-2.0 terms and pass "
             "`trust_pickle_checkpoint=True` once; subsequent loads use the "
-            "snapshot-local Safetensors conversion."
-        )
+            "snapshot-local Safetensors conversion.")
     source_checkpoint = resolve_pretrained_file(
         MARBLENET_VAD_REPOSITORY,
         MARBLENET_VAD_FILENAME,

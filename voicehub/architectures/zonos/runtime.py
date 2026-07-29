@@ -10,21 +10,10 @@ from typing import Any
 import torch
 from torch import Tensor
 
-from voicehub.architectures.zonos.artifacts import (
-    ZonosArtifacts,
-    resolve_zonos_artifacts,
-)
-from voicehub.architectures.zonos.checkpoint import (
-    load_zonos_checkpoint,
-    save_zonos_pretrained,
-)
-from voicehub.architectures.zonos.codec import (
-    ZonosCodec,
-    ZonosDACCodec,
-)
-from voicehub.architectures.zonos.configuration import (
-    ZonosArchitectureConfig,
-)
+from voicehub.architectures.zonos.artifacts import ZonosArtifacts, resolve_zonos_artifacts
+from voicehub.architectures.zonos.checkpoint import load_zonos_checkpoint, save_zonos_pretrained
+from voicehub.architectures.zonos.codec import ZonosCodec, ZonosDACCodec
+from voicehub.architectures.zonos.configuration import ZonosArchitectureConfig
 from voicehub.architectures.zonos.frontend import (
     ZonosPhonemeFrontend,
     batch_phoneme_ids,
@@ -33,10 +22,7 @@ from voicehub.architectures.zonos.frontend import (
     resolve_phonemes,
 )
 from voicehub.architectures.zonos.modeling import ZonosForCausalLM
-from voicehub.architectures.zonos.sampling import (
-    ZonosSamplingOptions,
-    generate_zonos_codes,
-)
+from voicehub.architectures.zonos.sampling import ZonosSamplingOptions, generate_zonos_codes
 from voicehub.hub import read_json_file
 from voicehub.processing.waveform import load_native_audio
 
@@ -65,16 +51,13 @@ def resolve_zonos_dtype(
     elif isinstance(value, torch.dtype):
         dtype = value
     else:
-        raise TypeError(
-            "Zonos dtype must be a string, torch.dtype, or None."
-        )
+        raise TypeError("Zonos dtype must be a string, torch.dtype, or None.")
     if not dtype.is_floating_point:
         raise ValueError("Zonos compute dtype must be floating-point.")
     if device.type == "cpu" and dtype == torch.float16:
         raise ValueError(
             "Native Zonos does not support float16 execution on CPU; use "
-            "float32 or bfloat16."
-        )
+            "float32 or bfloat16.")
     return dtype
 
 
@@ -137,9 +120,7 @@ class NativeZonosRuntime:
             local_files_only=local_files_only,
             verify_integrity=verify_artifacts,
         )
-        config = ZonosArchitectureConfig.from_dict(
-            read_json_file(artifacts.config),
-        )
+        config = ZonosArchitectureConfig.from_dict(read_json_file(artifacts.config), )
         with torch.device("meta"):
             model = ZonosForCausalLM(config)
         load_zonos_checkpoint(
@@ -184,10 +165,10 @@ class NativeZonosRuntime:
         if not isinstance(codec, ZonosCodec):
             raise TypeError("`codec` must implement the ZonosCodec contract.")
         if (
-            codec.sample_rate,
-            codec.hop_length,
-            codec.num_codebooks,
-            codec.codebook_size,
+                codec.sample_rate,
+                codec.hop_length,
+                codec.num_codebooks,
+                codec.codebook_size,
         ) != (44_100, 512, 9, 1_024):
             raise ValueError("Injected codec is incompatible with Zonos v0.1.")
         if hasattr(codec, "to"):
@@ -219,41 +200,32 @@ class NativeZonosRuntime:
         language: str | Sequence[str],
         phonemes: str | Sequence[str] | None,
     ) -> tuple[tuple[str, ...], tuple[str, ...], str]:
-        text_values = (texts,) if isinstance(texts, str) else tuple(texts)
-        if not text_values or any(
-            not isinstance(value, str) or not value.strip()
-            for value in text_values
-        ):
+        text_values = (texts, ) if isinstance(texts, str) else tuple(texts)
+        if not text_values or any(not isinstance(value, str) or not value.strip() for value in text_values):
             raise ValueError("Zonos texts must be non-empty strings.")
         if isinstance(language, str):
             languages = (language, ) * len(text_values)
         else:
             languages = tuple(language)
             if len(languages) != len(text_values):
-                raise ValueError(
-                    "Zonos language batch must match the text batch."
-                )
+                raise ValueError("Zonos language batch must match the text batch.")
         if phonemes is None:
             phoneme_values: tuple[str | None, ...] = (None, ) * len(text_values)
         elif isinstance(phonemes, str):
             if len(text_values) != 1:
-                raise ValueError(
-                    "A single phoneme string can condition one text only."
-                )
+                raise ValueError("A single phoneme string can condition one text only.")
             phoneme_values = (phonemes, )
         else:
             phoneme_values = tuple(phonemes)
             if len(phoneme_values) != len(text_values):
-                raise ValueError(
-                    "Zonos phoneme batch must match the text batch."
-                )
+                raise ValueError("Zonos phoneme batch must match the text batch.")
         resolved: list[str] = []
         normalized_languages: list[str] = []
         frontend_ids: list[str] = []
         for text, item_language, item_phonemes in zip(
-            text_values,
-            languages,
-            phoneme_values,
+                text_values,
+                languages,
+                phoneme_values,
         ):
             value, frontend_id = resolve_phonemes(
                 text,
@@ -262,15 +234,9 @@ class NativeZonosRuntime:
                 frontend=self.phoneme_frontend,
             )
             resolved.append(value)
-            normalized_languages.append(
-                normalize_language_code(item_language),
-            )
+            normalized_languages.append(normalize_language_code(item_language), )
             frontend_ids.append(frontend_id)
-        frontend_id = (
-            frontend_ids[0]
-            if len(set(frontend_ids)) == 1
-            else "mixed"
-        )
+        frontend_id = (frontend_ids[0] if len(set(frontend_ids)) == 1 else "mixed")
         return (
             tuple(resolved),
             tuple(normalized_languages),
@@ -301,10 +267,8 @@ class NativeZonosRuntime:
         audio_code_lengths: Tensor | None = None,
     ) -> dict[str, Tensor]:
         if not isinstance(audio_codes, Tensor) or audio_codes.ndim != 3:
-            raise ValueError(
-                "Zonos audio codes must have shape "
-                "[batch, codebook, time]."
-            )
+            raise ValueError("Zonos audio codes must have shape "
+                             "[batch, codebook, time].")
         resolved, languages, _ = self._resolve_batch_phonemes(
             texts,
             language=language,
@@ -315,13 +279,11 @@ class NativeZonosRuntime:
             device=self.device,
         )
         if audio_codes.shape[:2] != (
-            phoneme_ids.shape[0],
-            self.config.num_codebooks,
+                phoneme_ids.shape[0],
+                self.config.num_codebooks,
         ):
-            raise ValueError(
-                "Zonos audio-code batch/codebook dimensions do not match "
-                "the phoneme batch."
-            )
+            raise ValueError("Zonos audio-code batch/codebook dimensions do not match "
+                             "the phoneme batch.")
         conditioning = make_condition_dict(
             phoneme_ids,
             language=languages,

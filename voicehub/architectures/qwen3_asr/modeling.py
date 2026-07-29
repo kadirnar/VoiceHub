@@ -2,8 +2,8 @@
 
 The graph follows the official Qwen3-ASR implementation reviewed at
 ``7c6daf77a2421100f5fb066495372c00129d39ff``.  It uses PyTorch and
-VoiceHub's shared Qwen3 decoder, generation cache, and sequence objective;
-no upstream model runtime is imported.
+VoiceHub's shared Qwen3 decoder, generation cache, and sequence
+objective; no upstream model runtime is imported.
 """
 
 from __future__ import annotations
@@ -36,9 +36,9 @@ from voicehub.objectives.sequence import sequence_cross_entropy
 def qwen3_asr_audio_output_lengths(input_lengths: Tensor | int) -> Tensor:
     """Return audio-token counts after the three stride-two convolutions.
 
-    Qwen3-ASR first partitions mel frames into 100-frame convolution chunks;
-    each full chunk produces 13 tokens.  The tail is transformed with the
-    exact three-layer convolution length equation.
+    Qwen3-ASR first partitions mel frames into 100-frame convolution
+    chunks; each full chunk produces 13 tokens.  The tail is transformed
+    with the exact three-layer convolution length equation.
     """
     lengths = torch.as_tensor(input_lengths)
     if lengths.dtype == torch.bool or lengths.is_floating_point():

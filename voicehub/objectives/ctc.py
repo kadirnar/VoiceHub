@@ -68,9 +68,9 @@ def ctc_loss(
 ) -> Tensor:
     """Compute CTC loss from unnormalized logits.
 
-    Log-softmax is always evaluated in float32 for half and bfloat16 inputs.
-    Both padded targets shaped ``[batch, target_time]`` and concatenated
-    one-dimensional targets are supported.
+    Log-softmax is always evaluated in float32 for half and bfloat16
+    inputs. Both padded targets shaped ``[batch, target_time]`` and
+    concatenated one-dimensional targets are supported.
     """
     if not isinstance(logits, Tensor):
         raise TypeError("`logits` must be a PyTorch tensor.")

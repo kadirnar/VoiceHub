@@ -29,10 +29,7 @@ from voicehub.architectures.styletts2.registration import create_styletts2_archi
 from voicehub.architectures.styletts2.training import StyleTTS2LossWeights, StyleTTS2TrainingModel
 from voicehub.models.styletts2.inference import StyleTTS2ForTextToSpeech
 from voicehub.models.styletts2.source.styletts2.models import StyleTTS2Modules
-from voicehub.models.styletts2.training import (
-    StyleTTS2TrainingAdapter,
-    StyleTTS2TrainingCollator,
-)
+from voicehub.models.styletts2.training import StyleTTS2TrainingAdapter, StyleTTS2TrainingCollator
 from voicehub.training.contracts import TrainingSupport
 from voicehub.training.specs import get_training_spec
 
@@ -185,8 +182,7 @@ class NativeStyleTTS2Tests(unittest.TestCase):
                     "print(*(int(name in sys.modules) for name in ("
                     "'voicehub.models.styletts2.inference', "
                     "'voicehub.architectures.styletts2.modeling', "
-                    "'voicehub.architectures.styletts2.training')))"
-                ),
+                    "'voicehub.architectures.styletts2.training')))"),
             ],
             cwd=ROOT,
             check=True,
@@ -487,8 +483,8 @@ class NativeStyleTTS2Tests(unittest.TestCase):
             ("generator", ),
         )
         with self.assertRaisesRegex(
-            ValueError,
-            "discriminator training is disabled",
+                ValueError,
+                "discriminator training is disabled",
         ):
             adapter.select_training_phase("discriminator")
 

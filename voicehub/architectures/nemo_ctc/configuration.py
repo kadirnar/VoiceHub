@@ -166,9 +166,9 @@ class NeMoQuartzNetCTCConfig:
     """Complete native graph for NVIDIA's English QuartzNet15x5 release.
 
     ``variant="quartznet15x5"`` is intentionally locked to the audited
-    checkpoint. ``variant="custom"`` enables shape-reduced research graphs
-    and VoiceHub-native checkpoints without claiming compatibility with an
-    arbitrary NeMo archive.
+    checkpoint. ``variant="custom"`` enables shape-reduced research
+    graphs and VoiceHub-native checkpoints without claiming
+    compatibility with an arbitrary NeMo archive.
     """
 
     variant: str = "quartznet15x5"

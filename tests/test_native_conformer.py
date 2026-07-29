@@ -6,24 +6,14 @@ from pathlib import Path
 
 import torch
 
-from voicehub.components.neural.conformer.conformer import (
-    Attention,
-    Conformer,
-    ConformerConvModule,
-)
+from voicehub.components.neural.conformer.conformer import Attention, Conformer, ConformerConvModule
 
 
 class NativeConformerTests(unittest.TestCase):
 
     def test_shared_conformer_uses_only_torch_and_the_standard_library(self):
         source = (
-            Path(__file__).parents[1]
-            / "voicehub"
-            / "components"
-            / "neural"
-            / "conformer"
-            / "conformer.py"
-        )
+            Path(__file__).parents[1] / "voicehub" / "components" / "neural" / "conformer" / "conformer.py")
         tree = ast.parse(source.read_text(encoding="utf-8"))
         imports = []
         for node in ast.walk(tree):
@@ -31,13 +21,7 @@ class NativeConformerTests(unittest.TestCase):
                 imports.extend(alias.name for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imports.append(node.module)
-        self.assertTrue(
-            all(
-                name == "__future__"
-                or name.split(".", 1)[0] in {"torch"}
-                for name in imports
-            )
-        )
+        self.assertTrue(all(name == "__future__" or name.split(".", 1)[0] in {"torch"} for name in imports))
 
     def test_attention_supports_masked_self_and_cross_attention(self):
         torch.manual_seed(7)
@@ -49,19 +33,15 @@ class NativeConformerTests(unittest.TestCase):
             max_pos_emb=8,
         )
         values = torch.randn(2, 5, 12, requires_grad=True)
-        mask = torch.tensor(
-            [
-                [True, True, True, False, False],
-                [True, True, True, True, True],
-            ]
-        )
+        mask = torch.tensor([
+            [True, True, True, False, False],
+            [True, True, True, True, True],
+        ])
         self_output = attention(values, mask=mask)
         self.assertEqual(self_output.shape, values.shape)
 
         context = torch.randn(2, 3, 12)
-        context_mask = torch.tensor(
-            [[True, True, False], [True, True, True]]
-        )
+        context_mask = torch.tensor([[True, True, False], [True, True, True]])
         cross_output = attention(
             values,
             context=context,
@@ -96,12 +76,10 @@ class NativeConformerTests(unittest.TestCase):
             conv_kernel_size=5,
         )
         values = torch.randn(2, 7, 8, requires_grad=True)
-        mask = torch.tensor(
-            [
-                [True, True, True, True, False, False, False],
-                [True, True, True, True, True, True, True],
-            ]
-        )
+        mask = torch.tensor([
+            [True, True, True, True, False, False, False],
+            [True, True, True, True, True, True, True],
+        ])
         output = model(values, mask=mask)
         self.assertEqual(output.shape, values.shape)
         output.square().mean().backward()

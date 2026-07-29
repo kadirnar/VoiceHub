@@ -18,14 +18,8 @@ from voicehub.architectures.chatterbox.metadata import (
     CHATTERBOX_SOURCE_REVISION,
     CHATTERBOX_TENSOR_COUNT,
 )
-from voicehub.architectures.registry import (
-    ARCHITECTURE_REGISTRY,
-    ArchitectureRegistry,
-)
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.tasks import SpeechTask
 
 DEFAULT_CHATTERBOX_ALIASES = (
@@ -36,60 +30,43 @@ DEFAULT_CHATTERBOX_ALIASES = (
 
 
 def create_chatterbox_architecture_spec() -> ArchitectureSpec:
-    """Describe the verified English Chatterbox runtime without importing it."""
+    """Describe the verified English Chatterbox runtime without importing
+    it."""
     return ArchitectureSpec(
         architecture_id="chatterbox",
         version="1",
-        model_builder=(
-            "voicehub.models.chatterbox.inference:"
-            "ChatterboxForTextToSpeech"
-        ),
-        config=(
-            "voicehub.models.chatterbox.inference:"
-            "ChatterboxConfig"
-        ),
-        processor=(
-            "voicehub.models.chatterbox.models.tokenizers:"
-            "EnTokenizer"
-        ),
+        model_builder=("voicehub.models.chatterbox.inference:"
+                       "ChatterboxForTextToSpeech"),
+        config=("voicehub.models.chatterbox.inference:"
+                "ChatterboxConfig"),
+        processor=("voicehub.models.chatterbox.models.tokenizers:"
+                   "EnTokenizer"),
         decoder="voicehub.models.chatterbox.models.s3gen:S3Gen",
-        objective=(
-            "voicehub.models.chatterbox.training:"
-            "ChatterboxTrainingAdapter"
-        ),
-        checkpoint_adapter=(
-            "voicehub.models.chatterbox.checkpoint:"
-            "load_module_safetensors"
-        ),
+        objective=("voicehub.models.chatterbox.training:"
+                   "ChatterboxTrainingAdapter"),
+        checkpoint_adapter=("voicehub.models.chatterbox.checkpoint:"
+                            "load_module_safetensors"),
         components={
             "t3": "voicehub.models.chatterbox.models.t3:T3",
-            "s3tokenizer": (
-                "voicehub.models.chatterbox.models.s3tokenizer:"
-                "S3Tokenizer"
-            ),
-            "voice-encoder": (
-                "voicehub.models.chatterbox.models.voice_encoder:"
-                "VoiceEncoder"
-            ),
-            "watermark": (
-                "voicehub.models.chatterbox.watermark:"
-                "NativePerthWatermarker"
-            ),
-            "checkpoint-exporter": (
-                "voicehub.models.chatterbox.checkpoint:"
-                "export_chatterbox_runtime"
-            ),
+            "s3tokenizer": ("voicehub.models.chatterbox.models.s3tokenizer:"
+                            "S3Tokenizer"),
+            "voice-encoder": ("voicehub.models.chatterbox.models.voice_encoder:"
+                              "VoiceEncoder"),
+            "watermark": ("voicehub.models.chatterbox.watermark:"
+                          "NativePerthWatermarker"),
+            "checkpoint-exporter": ("voicehub.models.chatterbox.checkpoint:"
+                                    "export_chatterbox_runtime"),
         },
         capabilities=ArchitectureCapabilities(
-            tasks=(SpeechTask.TEXT_TO_SPEECH,),
+            tasks=(SpeechTask.TEXT_TO_SPEECH, ),
             devices=("cpu", "cuda", "mps"),
             dtypes=("float32", "float16", "bfloat16"),
-            checkpoint_formats=("safetensors",),
+            checkpoint_formats=("safetensors", ),
             training=True,
             streaming=False,
             batched_inference=False,
             distributed_training=True,
-            export_formats=("safetensors",),
+            export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
                 "zero-shot-voice-cloning",
@@ -106,36 +83,37 @@ def create_chatterbox_architecture_spec() -> ArchitectureSpec:
         upstream_revision=CHATTERBOX_SOURCE_REVISION,
         license_id=CHATTERBOX_SOURCE_LICENSE,
         metadata={
-            "implementation": "voicehub-native",
-            "tensor_backend": "pytorch",
-            "source": CHATTERBOX_SOURCE,
-            "reference_checkpoint": CHATTERBOX_CHECKPOINT,
-            "reference_checkpoint_revision": (
-                CHATTERBOX_CHECKPOINT_REVISION
-            ),
-            "checkpoint_license": CHATTERBOX_CHECKPOINT_LICENSE,
-            "reference_tensor_count": CHATTERBOX_TENSOR_COUNT,
-            "reference_parameter_count": CHATTERBOX_PARAMETER_COUNT,
-            "component_inventories": CHATTERBOX_COMPONENT_INVENTORIES,
-            "community_training_source": (
-                CHATTERBOX_COMMUNITY_TRAINING_SOURCE
-            ),
-            "community_training_revision": (
-                CHATTERBOX_COMMUNITY_TRAINING_REVISION
-            ),
-            "community_training_license": (
-                CHATTERBOX_COMMUNITY_TRAINING_LICENSE
-            ),
+            "implementation":
+            "voicehub-native",
+            "tensor_backend":
+            "pytorch",
+            "source":
+            CHATTERBOX_SOURCE,
+            "reference_checkpoint":
+            CHATTERBOX_CHECKPOINT,
+            "reference_checkpoint_revision": (CHATTERBOX_CHECKPOINT_REVISION),
+            "checkpoint_license":
+            CHATTERBOX_CHECKPOINT_LICENSE,
+            "reference_tensor_count":
+            CHATTERBOX_TENSOR_COUNT,
+            "reference_parameter_count":
+            CHATTERBOX_PARAMETER_COUNT,
+            "component_inventories":
+            CHATTERBOX_COMPONENT_INVENTORIES,
+            "community_training_source": (CHATTERBOX_COMMUNITY_TRAINING_SOURCE),
+            "community_training_revision": (CHATTERBOX_COMMUNITY_TRAINING_REVISION),
+            "community_training_license": (CHATTERBOX_COMMUNITY_TRAINING_LICENSE),
             "training_boundary": (
                 "T3 token cross-entropy and S3Gen conditional flow matching "
                 "are separate optimizer jobs. The released objectives and "
                 "community data contract are integrated, with VoiceHub "
                 "corrections for causal shifting, prompt masking, padded "
                 "attention keys, and frozen frontend evaluation. Resemble AI "
-                "did not publish a complete end-to-end optimizer recipe."
-            ),
-            "author_end_to_end_recipe_published": False,
-            "full_finetuning_ready": True,
+                "did not publish a complete end-to-end optimizer recipe."),
+            "author_end_to_end_recipe_published":
+            False,
+            "full_finetuning_ready":
+            True,
         },
     )
 

@@ -11,10 +11,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from voicehub.architectures.f5tts.metadata import (
-    F5TTS_NATIVE_FORMAT,
-    VOCOS_NATIVE_FORMAT,
-)
+from voicehub.architectures.f5tts.metadata import F5TTS_NATIVE_FORMAT, VOCOS_NATIVE_FORMAT
 from voicehub.checkpointing import SafeTensorReader, save_safetensors
 
 
@@ -47,23 +44,18 @@ def require_file_integrity(
     if size is not None and source.stat().st_size != size:
         raise ValueError(
             f"Checkpoint size mismatch for {source.name}: expected {size}, "
-            f"found {source.stat().st_size}."
-        )
+            f"found {source.stat().st_size}.")
     if sha256 is not None:
         actual = file_sha256(source)
         if actual.lower() != sha256.lower():
             raise ValueError(
                 f"Checkpoint SHA-256 mismatch for {source.name}: expected "
-                f"{sha256}, found {actual}."
-            )
+                f"{sha256}, found {actual}.")
     return source
 
 
 def _state_shapes(module: nn.Module) -> dict[str, tuple[int, ...]]:
-    return {
-        name: tuple(tensor.shape)
-        for name, tensor in module.state_dict().items()
-    }
+    return {name: tuple(tensor.shape) for name, tensor in module.state_dict().items()}
 
 
 def _resolve_prefix(
@@ -76,15 +68,12 @@ def _resolve_prefix(
     for prefix in dict.fromkeys(candidates):
         names = {
             name.removeprefix(prefix)
-            for name in reader.keys()
-            if (not prefix or name.startswith(prefix))
+            for name in reader.keys() if (not prefix or name.startswith(prefix))
         }
         if set(expected).issubset(names):
             return prefix
-    raise ValueError(
-        "F5-TTS checkpoint does not contain a complete compatible model "
-        "namespace."
-    )
+    raise ValueError("F5-TTS checkpoint does not contain a complete compatible model "
+                     "namespace.")
 
 
 def load_f5tts_checkpoint(
@@ -100,13 +89,9 @@ def load_f5tts_checkpoint(
     if source.suffix.lower() != ".safetensors":
         raise ValueError(
             "Native F5-TTS loads Safetensors only. Convert legacy weights "
-            "once with `convert_legacy_f5tts_checkpoint`."
-        )
+            "once with `convert_legacy_f5tts_checkpoint`.")
     targets = model.state_dict(keep_vars=True)
-    expected = {
-        name: tuple(tensor.shape)
-        for name, tensor in targets.items()
-    }
+    expected = {name: tuple(tensor.shape) for name, tensor in targets.items()}
     with SafeTensorReader(source) as reader:
         prefix = _resolve_prefix(
             reader,
@@ -123,20 +108,14 @@ def load_f5tts_checkpoint(
             if actual_shape != shape:
                 raise ValueError(
                     f"F5-TTS tensor {checkpoint_name!r} has shape "
-                    f"{actual_shape}, expected {shape}."
-                )
+                    f"{actual_shape}, expected {shape}.")
         selected = {f"{prefix}{name}" for name in expected}
         ignored = {"step", "initted"}
-        unexpected = tuple(
-            name
-            for name in reader.keys()
-            if name not in selected and name not in ignored
-        )
+        unexpected = tuple(name for name in reader.keys() if name not in selected and name not in ignored)
     if strict and (missing or unexpected):
         raise ValueError(
             "F5-TTS checkpoint namespace mismatch: "
-            f"missing={missing!r}, unexpected={list(unexpected)!r}."
-        )
+            f"missing={missing!r}, unexpected={list(unexpected)!r}.")
     with torch.no_grad(), SafeTensorReader(source) as reader:
         for name, target in targets.items():
             checkpoint_name = f"{prefix}{name}"
@@ -166,17 +145,10 @@ def _unwrap_legacy_state(value: Any) -> Mapping[str, torch.Tensor]:
             value = nested
             break
     if "ema_model" in value and isinstance(value["ema_model"], Mapping):
-        value = {
-            f"ema_model.{name}": tensor
-            for name, tensor in value["ema_model"].items()
-        }
-    if not value or any(
-        not isinstance(name, str) or not isinstance(tensor, torch.Tensor)
-        for name, tensor in value.items()
-    ):
-        raise TypeError(
-            "Legacy checkpoint state must map tensor names to PyTorch tensors."
-        )
+        value = {f"ema_model.{name}": tensor for name, tensor in value["ema_model"].items()}
+    if not value or any(not isinstance(name, str) or not isinstance(tensor, torch.Tensor)
+                        for name, tensor in value.items()):
+        raise TypeError("Legacy checkpoint state must map tensor names to PyTorch tensors.")
     return value
 
 
@@ -200,8 +172,7 @@ def convert_legacy_f5tts_checkpoint(
     except TypeError as error:
         raise RuntimeError(
             "Legacy F5-TTS conversion requires PyTorch with safe "
-            "`weights_only` loading."
-        ) from error
+            "`weights_only` loading.") from error
     state = _unwrap_legacy_state(payload)
     return save_safetensors(
         state,
@@ -221,10 +192,7 @@ def export_f5tts_checkpoint(
     state_override: Mapping[str, torch.Tensor] | None = None,
 ) -> Path:
     state = model.state_dict() if state_override is None else state_override
-    tensors = {
-        f"{prefix}{name}": tensor.detach().cpu().contiguous()
-        for name, tensor in state.items()
-    }
+    tensors = {f"{prefix}{name}": tensor.detach().cpu().contiguous() for name, tensor in state.items()}
     return save_safetensors(
         tensors,
         path,
@@ -252,8 +220,7 @@ def convert_legacy_vocos_checkpoint(
     except TypeError as error:
         raise RuntimeError(
             "Vocos conversion requires PyTorch with safe `weights_only` "
-            "loading."
-        ) from error
+            "loading.") from error
     state = _unwrap_legacy_state(payload)
     return save_safetensors(
         state,
@@ -275,25 +242,19 @@ def load_vocos_checkpoint(
     if source.suffix.lower() != ".safetensors":
         raise ValueError("Native Vocos loads converted Safetensors only.")
     targets = model.state_dict(keep_vars=True)
-    expected = {
-        name: tuple(tensor.shape)
-        for name, tensor in targets.items()
-    }
+    expected = {name: tuple(tensor.shape) for name, tensor in targets.items()}
     with SafeTensorReader(source) as reader:
         missing = tuple(name for name in expected if name not in reader)
         unexpected = tuple(name for name in reader.keys() if name not in expected)
         if missing or unexpected:
             raise ValueError(
                 "Vocos checkpoint namespace mismatch: "
-                f"missing={list(missing)!r}, unexpected={list(unexpected)!r}."
-            )
+                f"missing={list(missing)!r}, unexpected={list(unexpected)!r}.")
         for name, shape in expected.items():
             actual_shape = reader.tensor_shape(name)
             if actual_shape != shape:
-                raise ValueError(
-                    f"Vocos tensor {name!r} has shape {actual_shape}, "
-                    f"expected {shape}."
-                )
+                raise ValueError(f"Vocos tensor {name!r} has shape {actual_shape}, "
+                                 f"expected {shape}.")
     with torch.no_grad(), SafeTensorReader(source) as reader:
         for name, target in targets.items():
             tensor = reader.get_tensor(

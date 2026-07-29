@@ -46,28 +46,18 @@ class ESPnetASRTrainingDataset(SpeechDataset):
                         value["text"] = value[alias]
                         break
             if "audio" not in value:
-                raise ValueError(
-                    f"ESPnet ASR record {index} requires `audio` or `audio_path`."
-                )
+                raise ValueError(f"ESPnet ASR record {index} requires `audio` or `audio_path`.")
             text = value.get("text")
             if not isinstance(text, str) or not text.strip():
-                raise ValueError(
-                    f"ESPnet ASR record {index} requires a non-empty transcript."
-                )
+                raise ValueError(f"ESPnet ASR record {index} requires a non-empty transcript.")
             normalized.append(value)
         super().__init__(normalized, transform=transform)
 
 
 def _is_numeric_waveform(value: Any) -> bool:
     return (
-        isinstance(value, Sequence)
-        and not isinstance(value, (str, bytes))
-        and bool(value)
-        and all(
-            isinstance(item, (int, float)) and not isinstance(item, bool)
-            for item in value
-        )
-    )
+        isinstance(value, Sequence) and not isinstance(value, (str, bytes)) and bool(value) and
+        all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in value))
 
 
 def _audio_rows(value: Any) -> tuple[Any, ...]:
@@ -75,17 +65,17 @@ def _audio_rows(value: Any) -> tuple[Any, ...]:
 
     if isinstance(value, torch.Tensor):
         if value.ndim == 1:
-            return (value,)
+            return (value, )
         if value.ndim == 2:
             return tuple(value[index] for index in range(value.shape[0]))
         raise ValueError("ESPnet audio must have shape [samples] or [batch, samples].")
     if _is_numeric_waveform(value):
-        return (value,)
+        return (value, )
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         if not value:
             raise ValueError("ESPnet audio batches cannot be empty.")
         return tuple(value)
-    return (value,)
+    return (value, )
 
 
 def _batch_values(
@@ -97,21 +87,19 @@ def _batch_values(
     import torch
 
     if value is None or isinstance(value, (str, bytes)):
-        return (value,) * batch_size
+        return (value, ) * batch_size
     if isinstance(value, torch.Tensor):
         if value.ndim == 0:
-            return (value.item(),) * batch_size
+            return (value.item(), ) * batch_size
         if value.ndim != 1:
             raise ValueError(f"`{name}` must be scalar or one-dimensional.")
         rows = tuple(value.tolist())
     elif isinstance(value, Sequence):
         rows = tuple(value)
     else:
-        return (value,) * batch_size
+        return (value, ) * batch_size
     if len(rows) != batch_size:
-        raise ValueError(
-            f"`{name}` contains {len(rows)} values for batch size {batch_size}."
-        )
+        raise ValueError(f"`{name}` contains {len(rows)} values for batch size {batch_size}.")
     return rows
 
 
@@ -121,17 +109,12 @@ def _transcripts(inputs: Mapping[str, Any]) -> tuple[str, ...]:
         inputs.get("transcription", inputs.get("transcript")),
     )
     if isinstance(value, str):
-        rows = (value,)
+        rows = (value, )
     elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         rows = tuple(value)
     else:
-        raise TypeError(
-            "ESPnet training requires `text`, `transcription`, or `transcript`."
-        )
-    if not rows or any(
-        not isinstance(text, str) or not text.strip()
-        for text in rows
-    ):
+        raise TypeError("ESPnet training requires `text`, `transcription`, or `transcript`.")
+    if not rows or any(not isinstance(text, str) or not text.strip() for text in rows):
         raise ValueError("ESPnet transcripts must be non-empty strings.")
     return rows
 
@@ -152,7 +135,7 @@ def _prepare_labels(wrapper: Any, texts: tuple[str, ...]):
         dtype=torch.long,
     )
     for index, row in enumerate(encoded):
-        labels[index, : len(row)] = torch.tensor(row, dtype=torch.long)
+        labels[index, :len(row)] = torch.tensor(row, dtype=torch.long)
     return labels, lengths
 
 
@@ -174,10 +157,8 @@ def prepare_espnet_training_batch(
         raise ValueError("ESPnet training `phase` must be non-empty.")
     if wrapper.native_config is None or wrapper.tokenizer is None:
         raise RuntimeError("ESPnet must be loaded before preprocessing.")
-    if {"labels", "label_lengths"} <= set(inputs) and (
-        {"waveforms", "waveform_lengths"} <= set(inputs)
-        or {"features", "feature_lengths"} <= set(inputs)
-    ):
+    if {"labels", "label_lengths"} <= set(inputs) and ({"waveforms", "waveform_lengths"} <= set(inputs) or
+                                                       {"features", "feature_lengths"} <= set(inputs)):
         return dict(inputs)
 
     texts = _transcripts(inputs)
@@ -193,39 +174,25 @@ def prepare_espnet_training_batch(
         )
         if features.ndim == 2:
             features = features.unsqueeze(0)
-        if (
-            features.ndim != 3
-            or features.shape[0] != len(texts)
-            or features.shape[-1] != wrapper.native_config.n_mels
-        ):
+        if (features.ndim != 3 or features.shape[0] != len(texts) or
+                features.shape[-1] != wrapper.native_config.n_mels):
             raise ValueError(
                 "ESPnet features must have shape "
-                f"[batch, frames, {wrapper.native_config.n_mels}]."
-            )
+                f"[batch, frames, {wrapper.native_config.n_mels}].")
         raw_lengths = inputs.get("feature_lengths")
         feature_lengths = (
             torch.full(
-                (features.shape[0],),
+                (features.shape[0], ),
                 features.shape[1],
                 dtype=torch.long,
-            )
-            if raw_lengths is None
-            else torch.as_tensor(raw_lengths, dtype=torch.long)
-        )
-        if (
-            feature_lengths.ndim != 1
-            or feature_lengths.shape[0] != features.shape[0]
-            or torch.any(
-                feature_lengths
-                < wrapper.native_config.minimum_feature_frames
-            )
-            or torch.any(feature_lengths > features.shape[1])
-        ):
+            ) if raw_lengths is None else torch.as_tensor(raw_lengths, dtype=torch.long))
+        if (feature_lengths.ndim != 1 or feature_lengths.shape[0] != features.shape[0] or
+                torch.any(feature_lengths < wrapper.native_config.minimum_feature_frames) or
+                torch.any(feature_lengths > features.shape[1])):
             raise ValueError(
                 "ESPnet feature lengths must fit the padded batch and contain "
                 f"at least {wrapper.native_config.minimum_feature_frames} "
-                "frames for conv2d6."
-            )
+                "frames for conv2d6.")
         prepared.update({
             "features": features,
             "feature_lengths": feature_lengths,
@@ -236,14 +203,10 @@ def prepare_espnet_training_batch(
         elif "audio_path" in inputs:
             raw_audio = inputs["audio_path"]
         else:
-            raise ValueError(
-                "ESPnet training requires `audio`, `audio_path`, or `features`."
-            )
+            raise ValueError("ESPnet training requires `audio`, `audio_path`, or `features`.")
         sources = _audio_rows(raw_audio)
         if len(sources) != len(texts):
-            raise ValueError(
-                "ESPnet training requires one transcript per waveform."
-            )
+            raise ValueError("ESPnet training requires one transcript per waveform.")
         raw_lengths = _batch_values(
             inputs.get("audio_lengths"),
             batch_size=len(sources),
@@ -254,33 +217,17 @@ def prepare_espnet_training_batch(
             batch_size=len(sources),
             name="sampling_rate",
         )
-        maximum_samples = round(
-            wrapper.config.training_max_duration_s * wrapper.sample_rate
-        )
+        maximum_samples = round(wrapper.config.training_max_duration_s * wrapper.sample_rate)
         minimum_samples = wrapper.native_config.minimum_waveform_samples
         waveforms = []
-        for index, (source, length, sampling_rate) in enumerate(
-            zip(sources, raw_lengths, sample_rates)
-        ):
+        for index, (source, length, sampling_rate) in enumerate(zip(sources, raw_lengths, sample_rates)):
             if length is not None:
-                if (
-                    isinstance(length, bool)
-                    or not isinstance(length, Integral)
-                    or length <= 0
-                ):
-                    raise ValueError(
-                        "`audio_lengths` must contain positive integers."
-                    )
-                tensor = (
-                    source
-                    if isinstance(source, torch.Tensor)
-                    else torch.as_tensor(source)
-                )
+                if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
+                    raise ValueError("`audio_lengths` must contain positive integers.")
+                tensor = (source if isinstance(source, torch.Tensor) else torch.as_tensor(source))
                 if tensor.ndim != 1 or length > tensor.shape[-1]:
-                    raise ValueError(
-                        "`audio_lengths` exceeds a waveform's sample count."
-                    )
-                source = tensor[: int(length)]
+                    raise ValueError("`audio_lengths` exceeds a waveform's sample count.")
+                source = tensor[:int(length)]
             materialized = load_native_audio(
                 source,
                 sampling_rate=sampling_rate,
@@ -291,8 +238,7 @@ def prepare_espnet_training_batch(
                 raise ValueError(
                     f"ESPnet example {index} is longer than "
                     f"{wrapper.config.training_max_duration_s:g} seconds. "
-                    "Segment it with aligned text instead of truncating it."
-                )
+                    "Segment it with aligned text instead of truncating it.")
             if waveform.numel() < minimum_samples:
                 waveform = functional.pad(
                     waveform,
@@ -305,16 +251,14 @@ def prepare_espnet_training_batch(
         )
         maximum = int(waveform_lengths.max().item())
         prepared.update({
-            "waveforms": torch.stack(
-                [
-                    functional.pad(
-                        waveform,
-                        (0, maximum - waveform.numel()),
-                    )
-                    for waveform in waveforms
-                ]
-            ),
-            "waveform_lengths": waveform_lengths,
+            "waveforms":
+            torch.stack(
+                [functional.pad(
+                    waveform,
+                    (0, maximum - waveform.numel()),
+                ) for waveform in waveforms]),
+            "waveform_lengths":
+            waveform_lengths,
         })
     for name, value in inputs.items():
         if name not in _RAW_FIELDS and name not in prepared:
@@ -331,13 +275,9 @@ class NativeESPnetASRTrainingAdapter(SpeechSeq2SeqTrainingAdapter):
     def setup(self) -> NativeESPnetASRTrainingAdapter:
         super().setup()
         if getattr(self.model, "architecture_family", None) != "speech-seq2seq":
-            raise ValueError(
-                "Native ESPnet fine-tuning requires the speech-seq2seq runtime."
-            )
+            raise ValueError("Native ESPnet fine-tuning requires the speech-seq2seq runtime.")
         if self.primary_model is not getattr(self.model, "model", None):
-            raise ValueError(
-                "Native ESPnet fine-tuning must target the wrapper's exact graph."
-            )
+            raise ValueError("Native ESPnet fine-tuning must target the wrapper's exact graph.")
         return self
 
     def create_dataset(self, records, **kwargs):
@@ -364,18 +304,12 @@ class NativeESPnetASRTrainingAdapter(SpeechSeq2SeqTrainingAdapter):
             "waveform_lengths",
             "waveforms",
         }
-        return {
-            name: value
-            for name, value in prepared.items()
-            if name in accepted
-        }
+        return {name: value for name, value in prepared.items() if name in accepted}
 
     def recipe_resume_configuration(self) -> Mapping[str, Any]:
         values = dict(super().recipe_resume_configuration())
         values.update({
-            "checkpoint_format": (
-                "voicehub-espnet-librispeech-transformer-e18-v1"
-            ),
+            "checkpoint_format": ("voicehub-espnet-librispeech-transformer-e18-v1"),
             "gradient_accumulation_steps": 6,
             "gradient_clip_norm": 5.0,
             "learning_rate": 0.002,
@@ -396,14 +330,8 @@ class NativeESPnetASRTrainingAdapter(SpeechSeq2SeqTrainingAdapter):
         import torch
 
         if name not in {"default", "model"}:
-            raise ValueError(
-                f"Native ESPnet declares only the `model` optimizer, found {name!r}."
-            )
-        trainable = [
-            parameter
-            for _, parameter in parameters
-            if parameter.requires_grad
-        ]
+            raise ValueError(f"Native ESPnet declares only the `model` optimizer, found {name!r}.")
+        trainable = [parameter for _, parameter in parameters if parameter.requires_grad]
         if not trainable:
             raise ValueError("Native ESPnet has no trainable parameters.")
         return torch.optim.Adam(
@@ -428,14 +356,8 @@ class NativeESPnetASRTrainingAdapter(SpeechSeq2SeqTrainingAdapter):
 
         del num_training_steps
         if name not in {"default", "model"}:
-            raise ValueError(
-                f"Native ESPnet declares only the `model` scheduler, found {name!r}."
-            )
-        warmup_steps = (
-            training_args.warmup_steps
-            if training_args.warmup_steps > 0
-            else 25_000
-        )
+            raise ValueError(f"Native ESPnet declares only the `model` scheduler, found {name!r}.")
+        warmup_steps = (training_args.warmup_steps if training_args.warmup_steps > 0 else 25_000)
         scale = warmup_steps**0.5
 
         def schedule(current_step: int) -> float:
@@ -450,12 +372,8 @@ class NativeESPnetASRTrainingAdapter(SpeechSeq2SeqTrainingAdapter):
     def artifact_manifest(self) -> dict[str, Any]:
         manifest = super().artifact_manifest()
         manifest.update({
-            "checkpoint_format": (
-                "voicehub-espnet-librispeech-transformer-e18-v1"
-            ),
-            "native_architecture_family": (
-                "espnet-librispeech-transformer-e18"
-            ),
+            "checkpoint_format": ("voicehub-espnet-librispeech-transformer-e18-v1"),
+            "native_architecture_family": ("espnet-librispeech-transformer-e18"),
             "native_objective": "hybrid-ctc-attention",
             "processor_runtime": "voicehub-native",
         })

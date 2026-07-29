@@ -16,8 +16,8 @@ if torch is not None:
         FACEBOOK_WAV2VEC2_BASE_960H_HEADER_FINGERPRINT,
         FACEBOOK_WAV2VEC2_BASE_960H_REVISION,
         TRANSFORMERS_WAV2VEC2_REVISION,
-        HuggingFaceWav2Vec2ClassificationCheckpointAdapter,
         HuggingFaceWav2Vec2CheckpointAdapter,
+        HuggingFaceWav2Vec2ClassificationCheckpointAdapter,
         Wav2Vec2Config,
         Wav2Vec2ForAudioFrameClassification,
         Wav2Vec2ForCTC,
@@ -341,9 +341,7 @@ class Wav2Vec2ModelTests(unittest.TestCase):
                 name: tuple(value.shape)
                 for name, value in sequence.state_dict().items()
             },
-            native_wav2vec2_sequence_classification_tensor_shapes(
-                sequence_config
-            ),
+            native_wav2vec2_sequence_classification_tensor_shapes(sequence_config),
         )
         self.assertEqual(
             {
@@ -431,10 +429,7 @@ class Wav2Vec2CheckpointTests(unittest.TestCase):
             "architectures": ["Wav2Vec2ForAudioFrameClassification"],
         }
         reference = Wav2Vec2ForAudioFrameClassification(config)
-        source = {
-            name: value.detach().clone()
-            for name, value in reference.state_dict().items()
-        }
+        source = {name: value.detach().clone() for name, value in reference.state_dict().items()}
         restored = Wav2Vec2ForAudioFrameClassification(config)
 
         report = (
@@ -443,8 +438,7 @@ class Wav2Vec2CheckpointTests(unittest.TestCase):
                 source,
                 config_values,
                 strict=True,
-            )
-        )
+            ))
 
         self.assertTrue(report.is_compatible, report.summary())
         for name, expected in source.items():

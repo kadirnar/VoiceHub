@@ -47,8 +47,7 @@ class TensorPlanTests(unittest.TestCase):
                 SqueezeTensor("singleton", "squeezed", (0, 2)),
                 ReshapeTensor("flat", "reshaped", (2, 3)),
                 CastTensor("integer", "floating", torch.float32),
-            ),
-        )
+            ), )
 
         converted, consumed = plan.materialize(source)
 
@@ -56,7 +55,7 @@ class TensorPlanTests(unittest.TestCase):
         self.assertEqual(tuple(converted["q"].shape), (2, 2))
         self.assertEqual(tuple(converted["joined"].shape), (2, 2))
         self.assertEqual(tuple(converted["transposed"].shape), (3, 2))
-        self.assertEqual(tuple(converted["squeezed"].shape), (2,))
+        self.assertEqual(tuple(converted["squeezed"].shape), (2, ))
         self.assertEqual(tuple(converted["reshaped"].shape), (2, 3))
         self.assertEqual(converted["floating"].dtype, torch.float32)
 
@@ -66,8 +65,7 @@ class TensorPlanTests(unittest.TestCase):
                 rules=(
                     CopyTensor("a", "same"),
                     CopyTensor("b", "same"),
-                ),
-            )
+                ), )
 
 
 @unittest.skipUnless(torch is not None, "Native checkpoint adapters use PyTorch")
@@ -94,7 +92,7 @@ class CheckpointAdapterTests(unittest.TestCase):
                     CopyTensor("upstream.weight", "weight"),
                     CopyTensor("upstream.scale", "scale"),
                 ),
-                ignored_source_patterns=("optimizer.*",),
+                ignored_source_patterns=("optimizer.*", ),
             )
 
     def test_strict_load_requires_total_explained_coverage(self):
@@ -108,7 +106,7 @@ class CheckpointAdapterTests(unittest.TestCase):
         report = self._Adapter().load(model, source, {}, strict=True)
 
         self.assertTrue(report.is_compatible)
-        self.assertEqual(report.ignored_sources, ("optimizer.step",))
+        self.assertEqual(report.ignored_sources, ("optimizer.step", ))
         torch.testing.assert_close(model.weight, torch.ones(2, 2))
         torch.testing.assert_close(model.scale, torch.ones(1))
 
@@ -138,7 +136,7 @@ class CheckpointAdapterTests(unittest.TestCase):
         self.assertFalse(report.is_compatible)
         self.assertEqual(
             tuple(item.name for item in report.shape_mismatches),
-            ("weight",),
+            ("weight", ),
         )
         torch.testing.assert_close(model.weight, torch.zeros(2, 2))
         torch.testing.assert_close(model.scale, torch.ones(1))
@@ -197,7 +195,7 @@ class CheckpointAdapterTests(unittest.TestCase):
                 return ("upstream.weight", "upstream.scale")
 
             def tensor_shape(self, name):
-                return (3, 2) if name == "upstream.weight" else (1,)
+                return (3, 2) if name == "upstream.weight" else (1, )
 
             def get_tensor(self, name):
                 raise AssertionError(f"read incompatible payload {name}")

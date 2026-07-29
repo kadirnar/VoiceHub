@@ -27,10 +27,11 @@ STYLETTS2_SYMBOL_TO_ID = {symbol: index for index, symbol in enumerate(STYLETTS2
 class NativeStyleTTS2Frontend:
     """Tokenize caller-supplied upstream-compatible phoneme strings.
 
-    VoiceHub intentionally does not guess phonemes from orthographic text.
-    The released frontend relies on eSpeak and NLTK behavior that is not part
-    of the checkpoint. Callers must run their chosen licensed G2P explicitly
-    and pass the resulting, already word-separated phoneme string.
+    VoiceHub intentionally does not guess phonemes from orthographic
+    text. The released frontend relies on eSpeak and NLTK behavior that
+    is not part of the checkpoint. Callers must run their chosen
+    licensed G2P explicitly and pass the resulting, already word-
+    separated phoneme string.
     """
 
     vocabulary_size = len(STYLETTS2_SYMBOLS)

@@ -1,20 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates. All Rights Reserved\n
 
 import math
-from typing import List, Optional
-from typing import Union
+from typing import List, Optional, Union
 
 import torch
 from torch import nn
 
 from .codec_bottleneck import VAEBottleneck
-from .codec_layers import (
-    MsgProcessor,
-    NormConv1d,
-    NormConvTranspose1d,
-    Snake1d,
-    activation,
-)
+from .codec_layers import MsgProcessor, NormConv1d, NormConvTranspose1d, Snake1d, activation
+
 
 def init_weights(m):
     if isinstance(m, nn.Conv1d):
@@ -23,6 +17,7 @@ def init_weights(m):
 
 
 class ResidualUnit(nn.Module):
+
     def __init__(
         self,
         dim: int = 16,
@@ -85,6 +80,7 @@ class ResidualUnit(nn.Module):
 
 
 class EncoderBlock(nn.Module):
+
     def __init__(self, dim: int = 16, stride: int = 1):
         super().__init__()
         self.block = nn.Sequential(
@@ -106,6 +102,7 @@ class EncoderBlock(nn.Module):
 
 
 class LSTMBlock(nn.Module):
+
     def __init__(self, *args, skip: bool = True, **kwargs):
         super().__init__()
         self.skip = skip
@@ -120,6 +117,7 @@ class LSTMBlock(nn.Module):
 
 
 class Encoder(nn.Module):
+
     def __init__(
         self,
         d_model: int = 64,
@@ -157,6 +155,7 @@ default_decoder_convtr_kwargs = {
 
 
 class DecoderBlock(nn.Module):
+
     def __init__(
         self,
         input_dim: int = 16,
@@ -206,21 +205,77 @@ class DecoderBlock(nn.Module):
             ]
 
         layers += [
-            ResidualUnit(output_dim, dilation=1, act="Snake", compress=1, causal=False, pad_mode="none", norm="weight_norm", true_skip=False),
-            ResidualUnit(output_dim, dilation=3, act="Snake", compress=1, causal=False, pad_mode="none", norm="weight_norm", true_skip=False),
-            ResidualUnit(output_dim // downsampling_factor, kernel=3, act="ELU", compress=2, causal=True, pad_mode="auto", norm="none", true_skip=True),
-            ResidualUnit(output_dim // downsampling_factor, kernel=3, act="ELU", compress=2, causal=True, pad_mode="auto", norm="none", true_skip=True),
-            ResidualUnit(output_dim, dilation=9, act="Snake", compress=1, causal=False, pad_mode="none", norm="weight_norm", true_skip=False),
+            ResidualUnit(
+                output_dim,
+                dilation=1,
+                act="Snake",
+                compress=1,
+                causal=False,
+                pad_mode="none",
+                norm="weight_norm",
+                true_skip=False),
+            ResidualUnit(
+                output_dim,
+                dilation=3,
+                act="Snake",
+                compress=1,
+                causal=False,
+                pad_mode="none",
+                norm="weight_norm",
+                true_skip=False),
+            ResidualUnit(
+                output_dim // downsampling_factor,
+                kernel=3,
+                act="ELU",
+                compress=2,
+                causal=True,
+                pad_mode="auto",
+                norm="none",
+                true_skip=True),
+            ResidualUnit(
+                output_dim // downsampling_factor,
+                kernel=3,
+                act="ELU",
+                compress=2,
+                causal=True,
+                pad_mode="auto",
+                norm="none",
+                true_skip=True),
+            ResidualUnit(
+                output_dim,
+                dilation=9,
+                act="Snake",
+                compress=1,
+                causal=False,
+                pad_mode="none",
+                norm="weight_norm",
+                true_skip=False),
         ]
 
         if last_kernel_size is not None:
-            layers += [ResidualUnit(output_dim, kernel=last_kernel_size, act="Snake", pad_mode="none", norm="weight_norm", causal=False, true_skip=True)]
+            layers += [
+                ResidualUnit(
+                    output_dim,
+                    kernel=last_kernel_size,
+                    act="Snake",
+                    pad_mode="none",
+                    norm="weight_norm",
+                    causal=False,
+                    true_skip=True)
+            ]
         else:
             layers += [nn.Identity()]
 
         layers += [
             nn.ELU(alpha=1.0),
-            NormConv1d(conv_out_dim, conv_in_dim, kernel_size=2 * stride_wm, stride=stride_wm, causal=True, pad_mode="auto", norm="none"),
+            NormConv1d(
+                conv_out_dim,
+                conv_in_dim,
+                kernel_size=2 * stride_wm,
+                stride=stride_wm,
+                causal=True,
+                pad_mode="auto",
+                norm="none"),
         ]
 
         self.block = nn.ModuleList(layers)
@@ -254,6 +309,7 @@ default_wm_encoder_kwargs = {
 
 
 class WatermarkEncoderBlock(nn.Module):
+
     def __init__(
         self,
         in_dim: int = 96,
@@ -335,8 +391,8 @@ class WatermarkEncoderBlock(nn.Module):
         return self.post(x)
 
 
-
 class WatermarkDecoderBlock(nn.Module):
+
     def __init__(
         self,
         in_dim: int = 128,
@@ -382,6 +438,7 @@ class WatermarkDecoderBlock(nn.Module):
 
 
 class Watermarker(nn.Module):
+
     def __init__(
         self,
         dim: int,
@@ -394,9 +451,11 @@ class Watermarker(nn.Module):
     ):
         super().__init__()
 
-        self.encoder_block = WatermarkEncoderBlock(dim, d_latent, channels, hidden=hidden, lstm_layers=lstm_layers)
+        self.encoder_block = WatermarkEncoderBlock(
+            dim, d_latent, channels, hidden=hidden, lstm_layers=lstm_layers)
         self.msg_processor = MsgProcessor(nbits, d_latent)
-        self.decoder_block = WatermarkDecoderBlock(d_latent, d_out, channels, hidden=hidden, lstm_layers=lstm_layers)
+        self.decoder_block = WatermarkDecoderBlock(
+            d_latent, d_out, channels, hidden=hidden, lstm_layers=lstm_layers)
 
     def random_message(self, bsz: int):
         if self.msg_processor is not None:
@@ -413,17 +472,18 @@ class Watermarker(nn.Module):
 
 
 class Decoder(nn.Module):
+
     def __init__(
-        self,
-        input_channel,
-        channels,
-        rates,
-        wm_rates,
-        wm_channels: int = 32,
-        nbits: int = 16,
-        d_out: int = 1,
-        d_wm_out: int = 128,
-        blending: str = "linear",  # "linear" or "conv"
+            self,
+            input_channel,
+            channels,
+            rates,
+            wm_rates,
+            wm_channels: int = 32,
+            nbits: int = 16,
+            d_out: int = 1,
+            d_wm_out: int = 128,
+            blending: str = "linear",  # "linear" or "conv"
     ):
         super().__init__()
 
@@ -433,14 +493,20 @@ class Decoder(nn.Module):
         # Add upsampling + MRF blocks
         for i, (stride, wm_stride) in enumerate(zip(rates, wm_rates)):
             input_dim = channels // 2**i
-            output_dim = channels // 2 ** (i + 1)
+            output_dim = channels // 2**(i + 1)
             layers += [DecoderBlock(input_dim, output_dim, stride, wm_stride)]
 
         self.model = nn.ModuleList(layers)
 
         # Add watermarking
         self.wm_model = Watermarker(
-            output_dim, d_out, d_wm_out, wm_channels, hidden=512, nbits=nbits, lstm_layers=2,  # type: ignore
+            output_dim,
+            d_out,
+            d_wm_out,
+            wm_channels,
+            hidden=512,
+            nbits=nbits,
+            lstm_layers=2,  # type: ignore
         )
         self.alpha = wm_channels / d_wm_out
         self.blending = blending
@@ -449,7 +515,6 @@ class Decoder(nn.Module):
         for layer in self.model:
             x = layer(x)
         return self.watermark(x, message)
-
 
     def watermark(self, x, message: Optional[torch.Tensor] = None):
         if self.alpha == 0.0:
@@ -483,6 +548,7 @@ class Decoder(nn.Module):
 
 
 class DAC(nn.Module):
+
     def __init__(
         self,
         encoder_dim: int = 64,
@@ -506,7 +572,7 @@ class DAC(nn.Module):
         self.sample_rate = sample_rate
 
         if latent_dim is None:
-            latent_dim = encoder_dim * (2 ** len(encoder_rates))
+            latent_dim = encoder_dim * (2**len(encoder_rates))
         assert isinstance(latent_dim, int)
 
         if wm_rates is None:
@@ -553,7 +619,7 @@ class DAC(nn.Module):
         audio_data: torch.Tensor,
         n_quantizers: Optional[int] = None,
     ):
-        """Encode given audio data and return quantized latent codes
+        """Encode given audio data and return quantized latent codes.
 
         Parameters
         ----------
@@ -583,14 +649,12 @@ class DAC(nn.Module):
                 Number of samples in input audio
         """
         z = self.encoder(audio_data)
-        z, codes, latents, commitment_loss, codebook_loss = self.quantizer(
-            z, n_quantizers
-        )
+        z, codes, latents, commitment_loss, codebook_loss = self.quantizer(z, n_quantizers)
 
         return z, codes, latents, commitment_loss, codebook_loss
 
     def decode(self, z: torch.Tensor, message: Optional[torch.Tensor] = None):
-        """Decode given latent codes and return audio data
+        """Decode given latent codes and return audio data.
 
         Parameters
         ----------
@@ -616,7 +680,7 @@ class DAC(nn.Module):
         sample_rate: Optional[int] = None,
         n_quantizers: Optional[int] = None,
     ):
-        """Model forward pass
+        """Model forward pass.
 
         Parameters
         ----------
@@ -652,9 +716,7 @@ class DAC(nn.Module):
         """
         length = audio_data.shape[-1]
         audio_data = self.preprocess(audio_data, sample_rate)
-        z, codes, latents, commitment_loss, codebook_loss = self.encode(
-            audio_data, n_quantizers
-        )
+        z, codes, latents, commitment_loss, codebook_loss = self.encode(audio_data, n_quantizers)
 
         x = self.decode(z)
         return {
@@ -668,6 +730,7 @@ class DAC(nn.Module):
 
 
 class DACVAE(DAC):
+
     def __init__(
         self,
         encoder_dim: int = 64,
@@ -703,8 +766,7 @@ class DACVAE(DAC):
     def load(cls, path):
         raise RuntimeError(
             "Use IrodoriDACVAECodec.from_checkpoint(); direct pickle loading is "
-            "intentionally disabled."
-        )
+            "intentionally disabled.")
 
     def _pad(self, wavs):
         length = wavs.size(-1)

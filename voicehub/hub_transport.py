@@ -298,19 +298,20 @@ def download_hugging_face_snapshot(
 ) -> Path:
     """Resolve a complete, immutable Hugging Face repository snapshot.
 
-    The repository API is used only to resolve a requested revision to an
-    immutable commit and enumerate its files.  Every file is then downloaded
-    through :func:`download_hugging_face_file`, retaining its atomic writes,
-    integrity checks, credential handling, and cache locks.
+    The repository API is used only to resolve a requested revision to
+    an immutable commit and enumerate its files.  Every file is then
+    downloaded through :func:`download_hugging_face_file`, retaining its
+    atomic writes, integrity checks, credential handling, and cache
+    locks.
 
     A snapshot manifest is published only after every selected file is
-    present.  That manifest makes later offline resolution deterministic and
-    prevents a partially downloaded repository from appearing complete.
-    Patterns use POSIX repository paths and shell-style wildcards.
+    present.  That manifest makes later offline resolution deterministic
+    and prevents a partially downloaded repository from appearing
+    complete. Patterns use POSIX repository paths and shell-style
+    wildcards.
     """
     normalized_repo = _validate_repo_id(repo_id)
-    normalized_revision = _validate_revision(
-        _DEFAULT_REVISION if revision is None else revision)
+    normalized_revision = _validate_revision(_DEFAULT_REVISION if revision is None else revision)
     normalized_allow = _normalize_patterns(allow_patterns, "allow_patterns")
     normalized_ignore = _normalize_patterns(ignore_patterns, "ignore_patterns")
     root = _cache_root(cache_dir)
@@ -374,8 +375,7 @@ def download_hugging_face_snapshot(
         raise
 
     selected_files = tuple(
-        repo_file for repo_file in repo_files
-        if _matches_snapshot_patterns(
+        repo_file for repo_file in repo_files if _matches_snapshot_patterns(
             repo_file.path,
             allow_patterns=normalized_allow,
             ignore_patterns=normalized_ignore,
@@ -427,8 +427,7 @@ def download_hugging_face_snapshot(
             if snapshot_root is None:
                 snapshot_root = candidate_root
             elif candidate_root.resolve() != snapshot_root.resolve():
-                raise HubDownloadError(
-                    "Hub files resolved into different immutable snapshots.")
+                raise HubDownloadError("Hub files resolved into different immutable snapshots.")
 
             actual_size = downloaded.stat().st_size
             if repo_file.size is not None and actual_size != repo_file.size:
@@ -478,10 +477,11 @@ def get_cached_hugging_face_commit(
 ) -> str | None:
     """Return the verified commit recorded for a cached Hub file.
 
-    Callers resolving several files can download the first one from a moving
-    branch, read its immutable commit, and request every remaining asset from
-    that commit.  ``None`` means the file is absent, legacy-cached, or the Hub
-    did not provide trustworthy commit metadata.
+    Callers resolving several files can download the first one from a
+    moving branch, read its immutable commit, and request every
+    remaining asset from that commit.  ``None`` means the file is
+    absent, legacy-cached, or the Hub did not provide trustworthy commit
+    metadata.
     """
     normalized_repo = _validate_repo_id(repo_id)
     normalized_revision = _validate_revision(revision or _DEFAULT_REVISION)
@@ -539,10 +539,8 @@ def _resolve_hugging_face_commit(
     commit = payload.get("sha")
     if not isinstance(commit, str) or not _COMMIT_HASH.fullmatch(commit):
         raise HubDownloadError("The Hub model-info response has no valid commit hash.")
-    if (_COMMIT_HASH.fullmatch(revision) and
-            not commit.lower().startswith(revision.lower())):
-        raise HubDownloadError(
-            "The Hub resolved an immutable revision to a different commit.")
+    if (_COMMIT_HASH.fullmatch(revision) and not commit.lower().startswith(revision.lower())):
+        raise HubDownloadError("The Hub resolved an immutable revision to a different commit.")
     return commit.lower()
 
 
@@ -554,8 +552,7 @@ def _list_hugging_face_files(
 ) -> tuple[_RepoFile, ...]:
     encoded_repo = "/".join(quote(part, safe="") for part in repo_id.split("/"))
     api_path = f"/api/models/{encoded_repo}/tree/{quote(commit, safe='')}"
-    next_url: str | None = (
-        f"{_HUGGING_FACE_ENDPOINT}{api_path}?recursive=true&expand=false")
+    next_url: str | None = (f"{_HUGGING_FACE_ENDPOINT}{api_path}?recursive=true&expand=false")
     visited_urls: set[str] = set()
     files: dict[str, _RepoFile] = {}
     page_count = 0
@@ -584,31 +581,24 @@ def _list_hugging_face_files(
             if entry_type == "directory":
                 continue
             if entry_type != "file":
-                raise HubDownloadError(
-                    "The Hub repository tree contains an unsupported entry type.")
+                raise HubDownloadError("The Hub repository tree contains an unsupported entry type.")
             raw_path = entry.get("path")
             if not isinstance(raw_path, str):
-                raise HubDownloadError(
-                    "The Hub repository tree contains a file without a path.")
+                raise HubDownloadError("The Hub repository tree contains a file without a path.")
             try:
                 path = _validate_repo_path("", raw_path)
             except (TypeError, ValueError) as error:
-                raise HubDownloadError(
-                    "The Hub repository tree contains an unsafe file path.") from error
+                raise HubDownloadError("The Hub repository tree contains an unsafe file path.") from error
             normalized_path = path.as_posix()
             if normalized_path in files:
-                raise HubDownloadError(
-                    "The Hub repository tree contains a duplicate file path.")
+                raise HubDownloadError("The Hub repository tree contains a duplicate file path.")
 
             size = entry.get("size")
-            if size is not None and (
-                    not isinstance(size, int) or isinstance(size, bool) or size < 0):
-                raise HubDownloadError(
-                    "The Hub repository tree contains an invalid file size.")
+            if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size < 0):
+                raise HubDownloadError("The Hub repository tree contains an invalid file size.")
             files[normalized_path] = _RepoFile(path=path, size=size)
             if len(files) > _MAX_SNAPSHOT_FILES:
-                raise HubDownloadError(
-                    "The Hub repository contains too many files for a safe snapshot.")
+                raise HubDownloadError("The Hub repository contains too many files for a safe snapshot.")
 
         next_url = _next_pagination_url(
             headers,
@@ -650,26 +640,21 @@ def _request_hub_json(
             f"Hugging Face returned HTTP {error.code} while resolving {context}.") from None
     except (TimeoutError, URLError) as error:
         reason = getattr(error, "reason", error)
-        raise HubDownloadError(
-            f"Could not reach Hugging Face while resolving {context}: {reason}") from error
+        raise HubDownloadError(f"Could not reach Hugging Face while resolving {context}: {reason}") from error
 
     with response:
         status = getattr(response, "status", None)
         if status is None:
             status = response.getcode()
         if status is not None and not 200 <= status < 300:
-            raise HubDownloadError(
-                f"Hugging Face returned HTTP {status} while resolving {context}.")
-        response_headers = {
-            str(key): str(value) for key, value in response.headers.items()
-        }
+            raise HubDownloadError(f"Hugging Face returned HTTP {status} while resolving {context}.")
+        response_headers = {str(key): str(value) for key, value in response.headers.items()}
         raw_length = _get_header(response_headers, "Content-Length")
         if raw_length is not None:
             try:
                 content_length = int(raw_length)
             except (TypeError, ValueError):
-                raise HubDownloadError(
-                    "The Hub API response contains an invalid Content-Length.") from None
+                raise HubDownloadError("The Hub API response contains an invalid Content-Length.") from None
             if content_length < 0 or content_length > _MAX_API_RESPONSE_BYTES:
                 raise HubDownloadError("The Hub API response is too large.")
         content = response.read(_MAX_API_RESPONSE_BYTES + 1)
@@ -714,17 +699,10 @@ def _validate_hub_api_url(url: str, *, expected_path: str) -> str:
         raise HubDownloadError("The Hub API returned an invalid pagination URL.")
     target = urlsplit(url)
     hub = urlsplit(_HUGGING_FACE_ENDPOINT)
-    if (
-            target.scheme.lower() != "https" or
-            target.hostname != hub.hostname or
-            target.port != hub.port or
-            target.username is not None or
-            target.password is not None or
-            target.path != expected_path or
-            target.fragment
-    ):
-        raise HubDownloadError(
-            "VoiceHub refused an untrusted Hub API pagination URL.")
+    if (target.scheme.lower() != "https" or target.hostname != hub.hostname or target.port != hub.port or
+            target.username is not None or target.password is not None or target.path != expected_path or
+            target.fragment):
+        raise HubDownloadError("VoiceHub refused an untrusted Hub API pagination URL.")
     return url
 
 
@@ -735,7 +713,7 @@ def _normalize_patterns(
     if patterns is None:
         return ()
     if isinstance(patterns, str):
-        candidates = (patterns,)
+        candidates = (patterns, )
     else:
         try:
             candidates = tuple(patterns)
@@ -748,12 +726,9 @@ def _normalize_patterns(
     for pattern in candidates:
         if not isinstance(pattern, str):
             raise TypeError(f"Every `{name}` entry must be a string.")
-        if (
-                not pattern or len(pattern) > 1_024 or pattern.startswith("/") or
-                "\\" in pattern or "\x00" in pattern or
-                any(ord(character) < 32 for character in pattern) or
-                ".." in pattern.split("/")
-        ):
+        if (not pattern or len(pattern) > 1_024 or pattern.startswith("/") or "\\" in pattern or
+                "\x00" in pattern or any(ord(character) < 32 for character in pattern) or
+                ".." in pattern.split("/")):
             raise ValueError(f"Invalid repository pattern in `{name}`: {pattern!r}")
         normalized.add(pattern)
     return tuple(sorted(normalized))
@@ -811,13 +786,9 @@ def _read_cached_snapshot(
         return None
     if not isinstance(manifest, dict):
         return None
-    if (
-            manifest.get("version") != 1 or
-            manifest.get("repo_id") != repo_id or
-            manifest.get("revision") != revision or
-            manifest.get("allow_patterns") != list(allow_patterns) or
-            manifest.get("ignore_patterns") != list(ignore_patterns)
-    ):
+    if (manifest.get("version") != 1 or manifest.get("repo_id") != repo_id or
+            manifest.get("revision") != revision or manifest.get("allow_patterns") != list(allow_patterns) or
+            manifest.get("ignore_patterns") != list(ignore_patterns)):
         return None
     commit = manifest.get("commit")
     if not isinstance(commit, str) or not _COMMIT_HASH.fullmatch(commit):
@@ -844,10 +815,7 @@ def _read_cached_snapshot(
             return None
         raw_path = entry.get("path")
         size = entry.get("size")
-        if (
-                not isinstance(raw_path, str) or
-                not isinstance(size, int) or isinstance(size, bool) or size < 0
-        ):
+        if (not isinstance(raw_path, str) or not isinstance(size, int) or isinstance(size, bool) or size < 0):
             return None
         try:
             path = _validate_repo_path("", raw_path)
@@ -880,8 +848,9 @@ def _find_legacy_cached_snapshot(
 ) -> Path | None:
     """Read a complete legacy snapshot without importing huggingface_hub.
 
-    A legacy cache has no VoiceHub manifest, so pattern-filtered snapshots
-    cannot be proven complete and are deliberately not accepted.
+    A legacy cache has no VoiceHub manifest, so pattern-filtered
+    snapshots cannot be proven complete and are deliberately not
+    accepted.
     """
     if allow_patterns or ignore_patterns:
         return None
@@ -970,14 +939,10 @@ def _download_or_reuse(
             "X-Repo-Commit",
         )
         if commit is not None and not _COMMIT_HASH.fullmatch(commit):
-            raise HubDownloadError(
-                "The Hub response contains an invalid X-Repo-Commit header.")
-        if (
-                commit is not None and _COMMIT_HASH.fullmatch(revision) and
-                not commit.lower().startswith(revision.lower())
-        ):
-            raise HubDownloadError(
-                "The Hub returned a different commit for an immutable revision.")
+            raise HubDownloadError("The Hub response contains an invalid X-Repo-Commit header.")
+        if (commit is not None and _COMMIT_HASH.fullmatch(revision) and
+                not commit.lower().startswith(revision.lower())):
+            raise HubDownloadError("The Hub returned a different commit for an immutable revision.")
         etag = _validated_response_header(
             _get_header(response_headers, "X-Linked-ETag") or _get_header(response_headers, "ETag"),
             "ETag",

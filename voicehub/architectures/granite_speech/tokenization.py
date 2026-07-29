@@ -80,21 +80,15 @@ class GraniteSpeechTokenizer:
     ) -> GraniteSpeechTokenizer:
         tokenizer_path = Path(tokenizer_json).expanduser().resolve()
         if not tokenizer_path.is_file():
-            raise FileNotFoundError(
-                f"Granite Speech tokenizer was not found: {tokenizer_path}.")
+            raise FileNotFoundError(f"Granite Speech tokenizer was not found: {tokenizer_path}.")
         config_path = (
-            Path(tokenizer_config).expanduser().resolve()
-            if tokenizer_config is not None
-            else None
-        )
+            Path(tokenizer_config).expanduser().resolve() if tokenizer_config is not None else None)
         if config_path is not None:
             values = _read_json(config_path, name="tokenizer_config.json")
             if values.get("add_bos_token", False) is not False:
-                raise ValueError(
-                    "Granite Speech tokenizer must not prepend a BOS token.")
+                raise ValueError("Granite Speech tokenizer must not prepend a BOS token.")
             if values.get("add_prefix_space", False) is not False:
-                raise ValueError(
-                    "Granite Speech tokenizer must not add a prefix space.")
+                raise ValueError("Granite Speech tokenizer must not add a prefix space.")
         tokenizer = ByteBPETokenizer.from_tokenizer_json(
             tokenizer_path,
             pad_token_id=DEFAULT_PAD_TOKEN_ID,
@@ -106,20 +100,11 @@ class GraniteSpeechTokenizer:
             tokenizer_json_path=tokenizer_path,
             tokenizer_config_path=config_path,
             special_tokens_map_path=(
-                Path(special_tokens_map).expanduser().resolve()
-                if special_tokens_map is not None
-                else None
-            ),
+                Path(special_tokens_map).expanduser().resolve() if special_tokens_map is not None else None),
             added_tokens_path=(
-                Path(added_tokens).expanduser().resolve()
-                if added_tokens is not None
-                else None
-            ),
+                Path(added_tokens).expanduser().resolve() if added_tokens is not None else None),
             chat_template_path=(
-                Path(chat_template).expanduser().resolve()
-                if chat_template is not None
-                else None
-            ),
+                Path(chat_template).expanduser().resolve() if chat_template is not None else None),
         )
 
     @property
@@ -183,8 +168,7 @@ class GraniteSpeechTokenizer:
             if source is None:
                 continue
             if not source.is_file():
-                raise FileNotFoundError(
-                    f"Granite Speech tokenizer asset was not found: {source}.")
+                raise FileNotFoundError(f"Granite Speech tokenizer asset was not found: {source}.")
             destination = target / filename
             if source != destination.resolve():
                 shutil.copyfile(source, destination)
@@ -223,8 +207,7 @@ class GraniteSpeechTokenizer:
                     "USER: {{ message['content'] }}\n ASSISTANT:"
                     "{% elif message['role'] == 'assistant' %}"
                     "{{ message['content'] }}"
-                    "{% endif %}{% endfor %}"
-                ),
+                    "{% endif %}{% endfor %}"),
                 encoding="utf-8",
             )
         return target

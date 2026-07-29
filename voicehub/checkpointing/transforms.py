@@ -1,9 +1,9 @@
 """Explicit, composable tensor mappings for upstream checkpoints.
 
-Checkpoint conversion is data, not ad-hoc loader code.  Every rule declares
-the source tensors it consumes and the canonical VoiceHub tensors it emits.
-This makes mappings reviewable, versionable, and testable without importing an
-upstream model implementation.
+Checkpoint conversion is data, not ad-hoc loader code.  Every rule
+declares the source tensors it consumes and the canonical VoiceHub
+tensors it emits. This makes mappings reviewable, versionable, and
+testable without importing an upstream model implementation.
 """
 
 from __future__ import annotations
@@ -54,9 +54,7 @@ class MappingTensorSource:
         try:
             return tuple(tensor.shape)
         except (AttributeError, TypeError) as error:
-            raise TypeError(
-                f"Checkpoint value {name!r} does not expose a tensor shape."
-            ) from error
+            raise TypeError(f"Checkpoint value {name!r} does not expose a tensor shape.") from error
 
 
 class TensorResolver:
@@ -76,8 +74,7 @@ class TensorResolver:
         if name not in self._available:
             raise CheckpointCompatibilityError(
                 f"Checkpoint tensor {name!r} required by the conversion plan "
-                "is missing."
-            )
+                "is missing.")
         self.consumed.add(name)
         if name not in self._cache:
             self._cache[name] = self.source.get_tensor(name)
@@ -137,11 +134,11 @@ class CopyTensor(TensorRule):
 
     @property
     def source_names(self) -> tuple[str, ...]:
-        return (self.source,)
+        return (self.source, )
 
     @property
     def target_names(self) -> tuple[str, ...]:
-        return (self.target,)
+        return (self.target, )
 
     def apply(self, resolver: TensorResolver) -> Mapping[str, Any]:
         return {self.target: resolver.get(self.source)}
@@ -158,20 +155,17 @@ class TransposeTensor(TensorRule):
     def __post_init__(self) -> None:
         _name(self.source, field_name="source")
         _name(self.target, field_name="target")
-        if (
-            not isinstance(self.dimensions, tuple)
-            or any(isinstance(value, bool) or not isinstance(value, int)
-                    for value in self.dimensions)
-        ):
+        if (not isinstance(self.dimensions, tuple) or
+                any(isinstance(value, bool) or not isinstance(value, int) for value in self.dimensions)):
             raise TypeError("`dimensions` must be a tuple of integers.")
 
     @property
     def source_names(self) -> tuple[str, ...]:
-        return (self.source,)
+        return (self.source, )
 
     @property
     def target_names(self) -> tuple[str, ...]:
-        return (self.target,)
+        return (self.target, )
 
     def apply(self, resolver: TensorResolver) -> Mapping[str, Any]:
         tensor = resolver.get(self.source)
@@ -180,8 +174,7 @@ class TransposeTensor(TensorRule):
         if len(normalized) != rank or set(normalized) != set(range(rank)):
             raise CheckpointCompatibilityError(
                 f"Transpose for {self.source!r} requires a permutation of "
-                f"{rank} dimensions, found {self.dimensions!r}."
-            )
+                f"{rank} dimensions, found {self.dimensions!r}.")
         return {self.target: tensor.permute(*normalized).contiguous()}
 
 
@@ -201,21 +194,16 @@ class SplitTensor(TensorRule):
             "targets",
             _names(self.targets, field_name="targets", minimum=2),
         )
-        if (
-            not isinstance(self.sizes, tuple)
-            or len(self.sizes) != len(self.targets)
-            or any(isinstance(value, bool) or not isinstance(value, int) or value < 0
-                    for value in self.sizes)
-        ):
-            raise ValueError(
-                "`sizes` must contain one non-negative integer per target."
-            )
+        if (not isinstance(self.sizes, tuple) or len(self.sizes) != len(self.targets) or
+                any(isinstance(value, bool) or not isinstance(value, int) or value < 0
+                    for value in self.sizes)):
+            raise ValueError("`sizes` must contain one non-negative integer per target.")
         if isinstance(self.dimension, bool) or not isinstance(self.dimension, int):
             raise TypeError("`dimension` must be an integer.")
 
     @property
     def source_names(self) -> tuple[str, ...]:
-        return (self.source,)
+        return (self.source, )
 
     @property
     def target_names(self) -> tuple[str, ...]:
@@ -224,16 +212,13 @@ class SplitTensor(TensorRule):
     def apply(self, resolver: TensorResolver) -> Mapping[str, Any]:
         tensor = resolver.get(self.source)
         if tensor.ndim == 0:
-            raise CheckpointCompatibilityError(
-                f"Cannot split scalar checkpoint tensor {self.source!r}."
-            )
+            raise CheckpointCompatibilityError(f"Cannot split scalar checkpoint tensor {self.source!r}.")
         dimension = self.dimension % tensor.ndim
         if sum(self.sizes) != tensor.shape[dimension]:
             raise CheckpointCompatibilityError(
                 f"Split sizes {self.sizes!r} do not cover dimension "
                 f"{dimension} of {self.source!r} with size "
-                f"{tensor.shape[dimension]}."
-            )
+                f"{tensor.shape[dimension]}.")
         pieces = tensor.split(self.sizes, dim=dimension)
         return dict(zip(self.targets, pieces))
 
@@ -262,40 +247,29 @@ class ConcatenateTensors(TensorRule):
 
     @property
     def target_names(self) -> tuple[str, ...]:
-        return (self.target,)
+        return (self.target, )
 
     def apply(self, resolver: TensorResolver) -> Mapping[str, Any]:
         tensors = tuple(resolver.get(source) for source in self.sources)
         if not tensors or tensors[0].ndim == 0:
-            raise CheckpointCompatibilityError(
-                f"Cannot concatenate scalar tensors for {self.target!r}."
-            )
+            raise CheckpointCompatibilityError(f"Cannot concatenate scalar tensors for {self.target!r}.")
         rank = tensors[0].ndim
         dimension = self.dimension % rank
         if any(tensor.ndim != rank for tensor in tensors):
             raise CheckpointCompatibilityError(
-                f"Concatenation sources for {self.target!r} have different ranks."
-            )
+                f"Concatenation sources for {self.target!r} have different ranks.")
         reference = tensors[0].shape
-        if any(
-            any(
-                left != right
-                for index, (left, right) in enumerate(zip(reference, tensor.shape))
-                if index != dimension
-            )
-            for tensor in tensors[1:]
-        ):
+        if any(any(left != right for index, (left, right) in enumerate(zip(reference, tensor.shape))
+                   if index != dimension) for tensor in tensors[1:]):
             raise CheckpointCompatibilityError(
                 f"Concatenation sources for {self.target!r} have incompatible "
-                "shapes."
-            )
+                "shapes.")
         try:
             import torch
             return {self.target: torch.cat(tensors, dim=dimension)}
         except RuntimeError as error:
             raise CheckpointCompatibilityError(
-                f"Could not concatenate sources for {self.target!r}: {error}."
-            ) from error
+                f"Could not concatenate sources for {self.target!r}: {error}.") from error
 
 
 @dataclass(frozen=True)
@@ -309,24 +283,18 @@ class ReshapeTensor(TensorRule):
     def __post_init__(self) -> None:
         _name(self.source, field_name="source")
         _name(self.target, field_name="target")
-        if (
-            not isinstance(self.shape, tuple)
-            or not self.shape
-            or any(isinstance(value, bool) or not isinstance(value, int)
-                    or value == 0 or value < -1 for value in self.shape)
-            or self.shape.count(-1) > 1
-        ):
-            raise ValueError(
-                "`shape` must contain non-zero integers and at most one -1."
-            )
+        if (not isinstance(self.shape, tuple) or not self.shape or
+                any(isinstance(value, bool) or not isinstance(value, int) or value == 0 or value < -1
+                    for value in self.shape) or self.shape.count(-1) > 1):
+            raise ValueError("`shape` must contain non-zero integers and at most one -1.")
 
     @property
     def source_names(self) -> tuple[str, ...]:
-        return (self.source,)
+        return (self.source, )
 
     @property
     def target_names(self) -> tuple[str, ...]:
-        return (self.target,)
+        return (self.target, )
 
     def apply(self, resolver: TensorResolver) -> Mapping[str, Any]:
         tensor = resolver.get(self.source)
@@ -334,15 +302,11 @@ class ReshapeTensor(TensorRule):
         if -1 not in self.shape and tensor.numel() != known_size:
             raise CheckpointCompatibilityError(
                 f"Cannot reshape {self.source!r} with {tensor.numel()} elements "
-                f"to {self.shape!r}."
-            )
-        if -1 in self.shape and (
-            known_size == 0 or tensor.numel() % known_size != 0
-        ):
+                f"to {self.shape!r}.")
+        if -1 in self.shape and (known_size == 0 or tensor.numel() % known_size != 0):
             raise CheckpointCompatibilityError(
                 f"Cannot infer reshape dimension for {self.source!r} from "
-                f"{tensor.numel()} elements and shape {self.shape!r}."
-            )
+                f"{tensor.numel()} elements and shape {self.shape!r}.")
         return {self.target: tensor.reshape(self.shape)}
 
 
@@ -357,32 +321,26 @@ class SqueezeTensor(TensorRule):
     def __post_init__(self) -> None:
         _name(self.source, field_name="source")
         _name(self.target, field_name="target")
-        if (
-            not isinstance(self.dimensions, tuple)
-            or not self.dimensions
-            or any(isinstance(value, bool) or not isinstance(value, int)
-                    for value in self.dimensions)
-        ):
+        if (not isinstance(self.dimensions, tuple) or not self.dimensions or
+                any(isinstance(value, bool) or not isinstance(value, int) for value in self.dimensions)):
             raise ValueError("`dimensions` must be a non-empty tuple of integers.")
 
     @property
     def source_names(self) -> tuple[str, ...]:
-        return (self.source,)
+        return (self.source, )
 
     @property
     def target_names(self) -> tuple[str, ...]:
-        return (self.target,)
+        return (self.target, )
 
     def apply(self, resolver: TensorResolver) -> Mapping[str, Any]:
         tensor = resolver.get(self.source)
-        normalized = tuple(sorted({value % tensor.ndim for value in self.dimensions},
-                                  reverse=True))
+        normalized = tuple(sorted({value % tensor.ndim for value in self.dimensions}, reverse=True))
         for dimension in normalized:
             if tensor.shape[dimension] != 1:
                 raise CheckpointCompatibilityError(
                     f"Cannot squeeze non-singleton dimension {dimension} of "
-                    f"{self.source!r} with shape {tuple(tensor.shape)!r}."
-                )
+                    f"{self.source!r} with shape {tuple(tensor.shape)!r}.")
             tensor = tensor.squeeze(dimension)
         return {self.target: tensor}
 
@@ -403,11 +361,11 @@ class CastTensor(TensorRule):
 
     @property
     def source_names(self) -> tuple[str, ...]:
-        return (self.source,)
+        return (self.source, )
 
     @property
     def target_names(self) -> tuple[str, ...]:
-        return (self.target,)
+        return (self.target, )
 
     def apply(self, resolver: TensorResolver) -> Mapping[str, Any]:
         return {self.target: resolver.get(self.source).to(dtype=self.dtype)}
@@ -417,10 +375,11 @@ class CastTensor(TensorRule):
 class TransformTensor(TensorRule):
     """Apply an audited pure tensor callback for exceptional mappings.
 
-    Architecture adapters should prefer the explicit rules above.  This escape
-    hatch exists for mathematically named operations such as interleaving
-    rotary projections.  Callers must give it a stable ``operation`` name so a
-    plan remains inspectable and serializable in provenance logs.
+    Architecture adapters should prefer the explicit rules above.  This
+    escape hatch exists for mathematically named operations such as
+    interleaving rotary projections.  Callers must give it a stable
+    ``operation`` name so a plan remains inspectable and serializable in
+    provenance logs.
     """
 
     sources: tuple[str, ...]
@@ -453,20 +412,16 @@ class TransformTensor(TensorRule):
 
     def apply(self, resolver: TensorResolver) -> Mapping[str, Any]:
         try:
-            values = tuple(self.transform(
-                tuple(resolver.get(source) for source in self.sources)
-            ))
+            values = tuple(self.transform(tuple(resolver.get(source) for source in self.sources)))
         except CheckpointCompatibilityError:
             raise
         except Exception as error:
             raise CheckpointCompatibilityError(
-                f"Tensor transform {self.operation!r} failed: {error}."
-            ) from error
+                f"Tensor transform {self.operation!r} failed: {error}.") from error
         if len(values) != len(self.targets):
             raise CheckpointCompatibilityError(
                 f"Tensor transform {self.operation!r} returned {len(values)} "
-                f"values for {len(self.targets)} targets."
-            )
+                f"values for {len(self.targets)} targets.")
         return dict(zip(self.targets, values))
 
 
@@ -482,42 +437,22 @@ class TensorPlan:
         if any(not isinstance(rule, TensorRule) for rule in rules):
             raise TypeError("`rules` must contain TensorRule instances.")
         object.__setattr__(self, "rules", rules)
-        targets = [
-            target
-            for rule in rules
-            for target in rule.target_names
-        ]
-        duplicates = sorted({
-            target
-            for target in targets
-            if targets.count(target) > 1
-        })
+        targets = [target for rule in rules for target in rule.target_names]
+        duplicates = sorted({target for target in targets if targets.count(target) > 1})
         if duplicates:
-            raise ValueError(
-                f"Tensor plan writes duplicate targets: {duplicates!r}."
-            )
+            raise ValueError(f"Tensor plan writes duplicate targets: {duplicates!r}.")
         patterns = tuple(self.ignored_source_patterns)
         if any(not isinstance(pattern, str) or not pattern for pattern in patterns):
-            raise ValueError(
-                "Ignored source patterns must be non-empty strings."
-            )
+            raise ValueError("Ignored source patterns must be non-empty strings.")
         object.__setattr__(self, "ignored_source_patterns", patterns)
 
     @cached_property
     def source_names(self) -> frozenset[str]:
-        return frozenset(
-            source
-            for rule in self.rules
-            for source in rule.source_names
-        )
+        return frozenset(source for rule in self.rules for source in rule.source_names)
 
     @cached_property
     def target_names(self) -> frozenset[str]:
-        return frozenset(
-            target
-            for rule in self.rules
-            for target in rule.target_names
-        )
+        return frozenset(target for rule in self.rules for target in rule.target_names)
 
     def materialize(
         self,
@@ -530,9 +465,7 @@ class TensorPlan:
         elif isinstance(source, TensorSource):
             normalized_source = source
         else:
-            raise TypeError(
-                "`source` must implement TensorSource or be a state-dict mapping."
-            )
+            raise TypeError("`source` must implement TensorSource or be a state-dict mapping.")
         resolver = TensorResolver(normalized_source)
         output: dict[str, Any] = {}
         for rule in self.rules:
@@ -541,8 +474,7 @@ class TensorPlan:
                 raise CheckpointCompatibilityError(
                     f"{type(rule).__name__} emitted targets "
                     f"{sorted(result)!r}; expected "
-                    f"{sorted(rule.target_names)!r}."
-                )
+                    f"{sorted(rule.target_names)!r}.")
             output.update(result)
         return output, frozenset(resolver.consumed)
 

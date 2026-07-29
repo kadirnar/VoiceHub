@@ -13,17 +13,14 @@ from voicehub.models.parlertts.source.parler_tts.dac_wrapper.modeling_dac import
     EncodecDecoderOutput,
     EncodecEncoderOutput,
 )
-from voicehub.models.parlertts.source.parler_tts.dac_wrapper.modeling_outputs import (
-    DACDecoderOutput,
-    DACEncoderOutput,
-)
+from voicehub.models.parlertts.source.parler_tts.dac_wrapper.modeling_outputs import DACDecoderOutput, DACEncoderOutput
 
 
 class _FakeQuantizer:
 
     @staticmethod
     def from_codes(codes):
-        return (codes.float(),)
+        return (codes.float(), )
 
 
 class _FakeDAC:
@@ -98,14 +95,8 @@ class ParlerDACOutputTests(unittest.TestCase):
 
     def test_wrapper_has_no_model_specific_transformers_import(self):
         wrapper_directory = (
-            Path(__file__).resolve().parents[1]
-            / "voicehub"
-            / "models"
-            / "parlertts"
-            / "source"
-            / "parler_tts"
-            / "dac_wrapper"
-        )
+            Path(__file__).resolve().parents[1] / "voicehub" / "models" / "parlertts" / "source" /
+            "parler_tts" / "dac_wrapper")
         imports = []
         for source_path in wrapper_directory.glob("*.py"):
             tree = ast.parse(

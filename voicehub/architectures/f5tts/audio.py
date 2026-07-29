@@ -19,8 +19,8 @@ def htk_mel_filter_bank(
 ) -> torch.Tensor:
     """Return torchaudio-compatible, unnormalised HTK mel filters.
 
-    The returned orientation is ``[frequency, mel]``, matching the buffer in
-    ``charactr/vocos-mel-24khz``.
+    The returned orientation is ``[frequency, mel]``, matching the
+    buffer in ``charactr/vocos-mel-24khz``.
     """
     return _htk_mel_filter_bank(
         sample_rate=sample_rate,
@@ -70,9 +70,7 @@ class F5MelSpectrogram(nn.Module):
         if waveform.ndim == 3 and waveform.shape[1] == 1:
             waveform = waveform[:, 0]
         if waveform.ndim != 2:
-            raise ValueError(
-                "F5-TTS mel extraction expects `[batch, samples]` audio."
-            )
+            raise ValueError("F5-TTS mel extraction expects `[batch, samples]` audio.")
         window = self.window.to(device=waveform.device, dtype=waveform.dtype)
         spectrum = torch.stft(
             waveform,

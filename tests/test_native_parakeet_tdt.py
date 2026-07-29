@@ -201,12 +201,7 @@ class NativeParakeetTDTTests(unittest.TestCase):
                 "model.joint",
             ),
         )
-        self.assertTrue(
-            all(
-                entrypoint.startswith("voicehub.")
-                for entrypoint in spec.source_entrypoints
-            )
-        )
+        self.assertTrue(all(entrypoint.startswith("voicehub.") for entrypoint in spec.source_entrypoints))
 
     def test_published_graph_inventory_and_provenance_are_exact(self):
         expected = PARAKEET_TDT_CHECKPOINTS["nvidia/parakeet-tdt-0.6b-v3"]

@@ -1,4 +1,5 @@
-"""VoiceHub-owned PyTorch implementation of multilingual MarbleNet Frame-VAD."""
+"""VoiceHub-owned PyTorch implementation of multilingual MarbleNet Frame-
+VAD."""
 
 from __future__ import annotations
 
@@ -9,10 +10,7 @@ import torch
 from torch import Tensor, nn
 
 from voicehub.architectures.marblenet_vad.configuration import MarbleNetVADConfig
-from voicehub.architectures.marblenet_vad.frontend import (
-    MarbleNetAudioPreprocessor,
-    MarbleNetSpecAugment,
-)
+from voicehub.architectures.marblenet_vad.frontend import MarbleNetAudioPreprocessor, MarbleNetSpecAugment
 from voicehub.architectures.marblenet_vad.objective import marblenet_vad_loss
 
 
@@ -44,23 +42,16 @@ class MaskedConv1d(nn.Module):
 
     def output_lengths(self, lengths: Tensor) -> Tensor:
         convolution = self.conv
-        if (
-            convolution.stride[0] == 1
-            and 2 * convolution.padding[0]
-            == convolution.dilation[0] * (convolution.kernel_size[0] - 1)
-        ):
+        if (convolution.stride[0] == 1 and
+                2 * convolution.padding[0] == convolution.dilation[0] * (convolution.kernel_size[0] - 1)):
             return lengths
         return (
             torch.div(
-                lengths
-                + 2 * convolution.padding[0]
-                - convolution.dilation[0] * (convolution.kernel_size[0] - 1)
-                - 1,
+                lengths + 2 * convolution.padding[0] - convolution.dilation[0] *
+                (convolution.kernel_size[0] - 1) - 1,
                 convolution.stride[0],
                 rounding_mode="trunc",
-            )
-            + 1
-        )
+            ) + 1)
 
     def forward(self, inputs: Tensor, lengths: Tensor) -> tuple[Tensor, Tensor]:
         positions = torch.arange(inputs.shape[-1], device=inputs.device)
@@ -139,27 +130,23 @@ class MarbleNetBlock(nn.Module):
                     stride=stride,
                     dilation=dilation,
                     separable=separable,
-                )
-            )
+                ))
             if repeat_index < repeat - 1:
                 modules.extend((nn.ReLU(inplace=True), nn.Dropout(dropout)))
             current_channels = out_channels
         self.mconv = nn.ModuleList(modules)
         if residual:
-            self.res: nn.ModuleList | None = nn.ModuleList(
-                [
-                    nn.ModuleList(
-                        _conv_norm(
-                            in_channels,
-                            out_channels,
-                            kernel_size=1,
-                            stride=1,
-                            dilation=1,
-                            separable=False,
-                        )
-                    )
-                ]
-            )
+            self.res: nn.ModuleList | None = nn.ModuleList([
+                nn.ModuleList(
+                    _conv_norm(
+                        in_channels,
+                        out_channels,
+                        kernel_size=1,
+                        stride=1,
+                        dilation=1,
+                        separable=False,
+                    ))
+            ])
         else:
             self.res = None
         self.mout = nn.Sequential(nn.ReLU(inplace=True), nn.Dropout(dropout))
@@ -203,13 +190,13 @@ class MarbleNetEncoder(nn.Module):
         current_channels = config.num_mel_bins
         blocks = []
         for (
-            out_channels,
-            repeat,
-            kernel_size,
-            stride,
-            dilation,
-            residual,
-            separable,
+                out_channels,
+                repeat,
+                kernel_size,
+                stride,
+                dilation,
+                residual,
+                separable,
         ) in self._LAYERS:
             blocks.append(
                 MarbleNetBlock(
@@ -222,8 +209,7 @@ class MarbleNetEncoder(nn.Module):
                     dropout=config.dropout,
                     residual=residual,
                     separable=separable,
-                )
-            )
+                ))
             current_channels = out_channels
         self.encoder = nn.ModuleList(blocks)
 
@@ -236,7 +222,8 @@ class MarbleNetEncoder(nn.Module):
 
 
 class MarbleNetFrameDecoder(nn.Module):
-    """Per-frame linear decoder with the official `decoder.layer0` namespace."""
+    """Per-frame linear decoder with the official `decoder.layer0`
+    namespace."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -291,7 +278,7 @@ class MarbleNetVADModel(nn.Module):
                 waveforms = waveforms.unsqueeze(0)
             if waveform_lengths is None:
                 waveform_lengths = torch.full(
-                    (waveforms.shape[0],),
+                    (waveforms.shape[0], ),
                     waveforms.shape[-1],
                     dtype=torch.long,
                     device=waveforms.device,
@@ -303,17 +290,14 @@ class MarbleNetVADModel(nn.Module):
         elif waveforms is not None:
             raise TypeError("Pass raw waveforms or precomputed features, not both.")
         if not isinstance(processed_features, Tensor) or processed_features.ndim != 3:
-            raise ValueError(
-                "`processed_features` must have shape [batch, 80, frames]."
-            )
+            raise ValueError("`processed_features` must have shape [batch, 80, frames].")
         if processed_features.shape[1] != self.config.num_mel_bins:
             raise ValueError(
                 f"Expected {self.config.num_mel_bins} mel bins, found "
-                f"{processed_features.shape[1]}."
-            )
+                f"{processed_features.shape[1]}.")
         if feature_lengths is None:
             feature_lengths = torch.full(
-                (processed_features.shape[0],),
+                (processed_features.shape[0], ),
                 processed_features.shape[-1],
                 dtype=torch.long,
                 device=processed_features.device,
@@ -345,15 +329,11 @@ class MarbleNetVADModel(nn.Module):
             if supplied_mask.shape != length_mask.shape:
                 raise ValueError("`label_mask` must have shape [batch, frames].")
             effective_mask = length_mask & supplied_mask
-        loss = (
-            None
-            if labels is None
-            else marblenet_vad_loss(
-                logits,
-                labels,
-                label_mask=effective_mask,
-            )
-        )
+        loss = (None if labels is None else marblenet_vad_loss(
+            logits,
+            labels,
+            label_mask=effective_mask,
+        ))
         return MarbleNetVADOutput(
             logits=logits,
             probabilities=probabilities,

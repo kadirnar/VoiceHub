@@ -1,9 +1,10 @@
 """Source-faithful fine-tuning and preprocessing for native Chatterbox.
 
-The adapter accepts portable ``audio``/``text`` records or the precomputed
-tensor schema used by the reviewed community trainer. T3 language-model and
-S3Gen flow objectives remain separate jobs because they use different frozen
-frontends, parameter graphs, and optimizer state.
+The adapter accepts portable ``audio``/``text`` records or the
+precomputed tensor schema used by the reviewed community trainer. T3
+language-model and S3Gen flow objectives remain separate jobs because
+they use different frozen frontends, parameter graphs, and optimizer
+state.
 """
 
 from __future__ import annotations
@@ -22,10 +23,7 @@ from voicehub.models.chatterbox.models.s3gen.const import S3GEN_SR
 from voicehub.models.chatterbox.models.s3tokenizer import S3_SR
 from voicehub.models.chatterbox.models.t3.modules.cond_enc import T3Cond
 from voicehub.models.chatterbox.tts import punc_norm
-from voicehub.processing.waveform import (
-    load_native_audio,
-    resample_waveform,
-)
+from voicehub.processing.waveform import load_native_audio, resample_waveform
 from voicehub.training.adapters import CompositeTrainingAdapter
 from voicehub.training.collators import DataCollatorForAudioTraining
 from voicehub.training.contracts import TrainingContext
@@ -35,15 +33,12 @@ from voicehub.training.datasets import SpeechDataset
 def resize_t3_text_vocabulary(t3: nn.Module, vocabulary_size: int) -> None:
     """Resize T3's text embedding/head with mean-initialized new tokens.
 
-    Chatterbox community fine-tuning uses this operation when a replacement
-    tokenizer adds a language.  Mean initialization preserves the original
-    embedding scale and avoids introducing unusually large random logits.
+    Chatterbox community fine-tuning uses this operation when a
+    replacement tokenizer adds a language.  Mean initialization
+    preserves the original embedding scale and avoids introducing
+    unusually large random logits.
     """
-    if (
-        isinstance(vocabulary_size, bool)
-        or not isinstance(vocabulary_size, int)
-        or vocabulary_size <= 0
-    ):
+    if (isinstance(vocabulary_size, bool) or not isinstance(vocabulary_size, int) or vocabulary_size <= 0):
         raise ValueError("Chatterbox text vocabulary size must be a positive integer.")
     current_size = int(t3.text_emb.num_embeddings)
     if vocabulary_size == current_size:
@@ -55,20 +50,14 @@ def resize_t3_text_vocabulary(t3: nn.Module, vocabulary_size: int) -> None:
     if vocabulary_size < minimum_size:
         raise ValueError(
             "Chatterbox text vocabulary cannot be smaller than its reserved "
-            f"token range ({minimum_size})."
-        )
+            f"token range ({minimum_size}).")
 
     embedding = t3.text_emb
     head = t3.text_head
-    if (
-        embedding.weight.ndim != 2
-        or head.weight.ndim != 2
-        or embedding.weight.shape != head.weight.shape
-    ):
+    if (embedding.weight.ndim != 2 or head.weight.ndim != 2 or embedding.weight.shape != head.weight.shape):
         raise ValueError(
             "Chatterbox T3 vocabulary resize requires matching text embedding "
-            "and projection matrices."
-        )
+            "and projection matrices.")
     embedding_trainable = embedding.weight.requires_grad
     head_trainable = head.weight.requires_grad
     replacement_embedding = nn.Embedding(
@@ -86,17 +75,11 @@ def resize_t3_text_vocabulary(t3: nn.Module, vocabulary_size: int) -> None:
     )
     copied = min(current_size, vocabulary_size)
     with torch.no_grad():
-        replacement_embedding.weight[:copied].copy_(
-            embedding.weight[:copied]
-        )
+        replacement_embedding.weight[:copied].copy_(embedding.weight[:copied])
         replacement_head.weight[:copied].copy_(head.weight[:copied])
         if vocabulary_size > current_size:
-            replacement_embedding.weight[current_size:].copy_(
-                embedding.weight.mean(dim=0, keepdim=True)
-            )
-            replacement_head.weight[current_size:].copy_(
-                head.weight.mean(dim=0, keepdim=True)
-            )
+            replacement_embedding.weight[current_size:].copy_(embedding.weight.mean(dim=0, keepdim=True))
+            replacement_head.weight[current_size:].copy_(head.weight.mean(dim=0, keepdim=True))
     replacement_embedding.weight.requires_grad_(embedding_trainable)
     replacement_head.weight.requires_grad_(head_trainable)
     t3.text_emb = replacement_embedding
@@ -154,8 +137,7 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
                     "padding_value": 0.0,
                     "length_field": "speech_feat_len",
                 },
-            }
-        )
+            })
 
     @property
     def selected_phase_name(self) -> str:
@@ -171,8 +153,7 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
             choices = ", ".join(sorted(self._PHASE_ALIASES))
             raise ValueError(
                 f"Unknown Chatterbox training_component {configured!r}; "
-                f"choose one of: {choices}."
-            ) from error
+                f"choose one of: {choices}.") from error
 
     def setup(self):
         if self.is_ready:
@@ -188,8 +169,7 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
             if self.selected_phase_name != "language_model":
                 raise ValueError(
                     "Chatterbox vocabulary expansion is available only for "
-                    "language_model training."
-                )
+                    "language_model training.")
             resize_t3_text_vocabulary(
                 runtime.t3,
                 configured_vocabulary_size,
@@ -199,18 +179,13 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
             for parameter in component.parameters():
                 parameter.requires_grad_(False)
             component.eval()
-        selected = (
-            runtime.t3
-            if self.selected_phase_name == "language_model"
-            else runtime.s3gen.flow
-        )
+        selected = (runtime.t3 if self.selected_phase_name == "language_model" else runtime.s3gen.flow)
         lora_rank = getattr(self.model.config, "training_lora_rank", None)
         if lora_rank is not None:
             if self.selected_phase_name != "language_model":
                 raise ValueError(
                     "Chatterbox LoRA is available only for language_model "
-                    "training; S3Gen flow uses its published dense objective."
-                )
+                    "training; S3Gen flow uses its published dense objective.")
             from voicehub.optimization import LoRAConfig, inject_lora
 
             self._lora_injection = inject_lora(
@@ -241,8 +216,7 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
                                 "down_proj",
                                 "spkr_enc",
                             ),
-                        )
-                    ),
+                        )),
                     freeze_base=True,
                     seed=getattr(
                         self.model.config,
@@ -252,8 +226,8 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
                 ),
             )
             for module_name in getattr(
-                self.model.config,
-                "training_lora_modules_to_train",
+                    self.model.config,
+                    "training_lora_modules_to_train",
                 ("text_emb", "text_head"),
             ):
                 module = runtime.t3.get_submodule(str(module_name))
@@ -266,23 +240,20 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
         return self
 
     def train(self, mode: bool = True):
-        """Train only the selected phase while frozen frontends stay in eval."""
+        """Train only the selected phase while frozen frontends stay in
+        eval."""
         self.setup()
         runtime = self.model.model
         runtime.t3.eval()
         runtime.s3gen.eval()
         runtime.ve.eval()
-        selected = (
-            runtime.t3
-            if self.selected_phase_name == "language_model"
-            else runtime.s3gen.flow
-        )
+        selected = (runtime.t3 if self.selected_phase_name == "language_model" else runtime.s3gen.flow)
         selected.train(mode)
         return self
 
     def plan_training_phases(self, step: int):
         del step
-        return (self.spec.get_phase(self.selected_phase_name),)
+        return (self.spec.get_phase(self.selected_phase_name), )
 
     def select_training_phase(self, training_phase=None):
         phase = super().select_training_phase(training_phase)
@@ -290,39 +261,28 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
             raise ValueError(
                 f"This Chatterbox runtime was configured for "
                 f"{self.selected_phase_name!r}, not {phase.name!r}. Start a "
-                "separate job with the other training_component."
-            )
+                "separate job with the other training_component.")
         return phase
 
     def create_dataset(self, records, **kwargs):
         if isinstance(records, (str, bytes, Mapping)):
             raise TypeError("Chatterbox records must be an iterable of mappings.")
         materialized = tuple(records)
-        precomputed_required = (
-            (
-                "text_tokens",
-                "speech_tokens",
-                "speaker_emb",
-            )
-            if self.selected_phase_name == "language_model"
-            else (
-                "speech_token",
-                "speech_feat",
-                "embedding",
-            )
-        )
-        raw_required = (
-            ("audio", "text")
-            if self.selected_phase_name == "language_model"
-            else ("audio",)
-        )
+        precomputed_required = ((
+            "text_tokens",
+            "speech_tokens",
+            "speaker_emb",
+        ) if self.selected_phase_name == "language_model" else (
+            "speech_token",
+            "speech_feat",
+            "embedding",
+        ))
+        raw_required = (("audio", "text") if self.selected_phase_name == "language_model" else ("audio", ))
         normalized = []
         modes = set()
         for index, record in enumerate(materialized):
             if not isinstance(record, Mapping):
-                raise TypeError(
-                    f"Chatterbox record {index} must be a mapping."
-                )
+                raise TypeError(f"Chatterbox record {index} must be a mapping.")
             value = dict(record)
             if "audio" not in value and "audio_path" in value:
                 value["audio"] = value.pop("audio_path")
@@ -337,15 +297,8 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
                         "speech_token_lens",
                         int(torch.as_tensor(value["speech_tokens"]).numel()),
                     )
-                    if (
-                        "prompt_tokens" in value
-                        and "prompt_lens" not in value
-                    ):
-                        value["prompt_lens"] = int(
-                            torch.as_tensor(
-                                value["prompt_tokens"]
-                            ).numel()
-                        )
+                    if ("prompt_tokens" in value and "prompt_lens" not in value):
+                        value["prompt_lens"] = int(torch.as_tensor(value["prompt_tokens"]).numel())
                 else:
                     value.setdefault(
                         "speech_token_len",
@@ -353,31 +306,19 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
                     )
                     value.setdefault(
                         "speech_feat_len",
-                        int(
-                            torch.as_tensor(value["speech_feat"]).shape[-1]
-                        ),
+                        int(torch.as_tensor(value["speech_feat"]).shape[-1]),
                     )
             elif all(name in value for name in raw_required):
                 modes.add("raw")
             else:
-                options = (
-                    f"{', '.join(precomputed_required)} or "
-                    f"{', '.join(raw_required)}"
-                )
-                raise ValueError(
-                    f"Chatterbox record {index} requires {options}."
-                )
+                options = (f"{', '.join(precomputed_required)} or "
+                           f"{', '.join(raw_required)}")
+                raise ValueError(f"Chatterbox record {index} requires {options}.")
             normalized.append(value)
         if len(modes) > 1:
-            raise ValueError(
-                "Do not mix raw-audio and precomputed Chatterbox records in "
-                "one dataset."
-            )
-        required = (
-            raw_required
-            if modes == {"raw"}
-            else precomputed_required
-        )
+            raise ValueError("Do not mix raw-audio and precomputed Chatterbox records in "
+                             "one dataset.")
+        required = (raw_required if modes == {"raw"} else precomputed_required)
         return SpeechDataset(
             normalized,
             required_fields=required,
@@ -389,9 +330,7 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
         missing = [name for name in fields if name not in batch]
         if missing:
             raise ValueError(
-                f"Chatterbox {phase} fine-tuning requires precomputed fields: "
-                + ", ".join(missing)
-            )
+                f"Chatterbox {phase} fine-tuning requires precomputed fields: " + ", ".join(missing))
 
     @staticmethod
     def _batch_items(
@@ -401,10 +340,7 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
         name: str,
     ) -> list[Any]:
         if isinstance(value, torch.Tensor):
-            if batch_size == 1 and (
-                value.ndim == 1
-                or value.ndim == 2 and value.shape[0] != 1
-            ):
+            if batch_size == 1 and (value.ndim == 1 or value.ndim == 2 and value.shape[0] != 1):
                 return [value]
             if value.ndim >= 1 and value.shape[0] == batch_size:
                 return list(value.unbind(0))
@@ -415,14 +351,10 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
             values = list(value)
             if len(values) == batch_size:
                 return values
-            if batch_size == 1 and values and all(
-                isinstance(item, (int, float)) for item in values
-            ):
+            if batch_size == 1 and values and all(isinstance(item, (int, float)) for item in values):
                 return [values]
-        raise ValueError(
-            f"Chatterbox raw field {name!r} does not contain "
-            f"{batch_size} sample(s)."
-        )
+        raise ValueError(f"Chatterbox raw field {name!r} does not contain "
+                         f"{batch_size} sample(s).")
 
     @staticmethod
     def _batch_rates(value: Any, *, batch_size: int) -> list[int | None]:
@@ -431,7 +363,7 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
         if isinstance(value, torch.Tensor):
             values = value.detach().cpu().reshape(-1).tolist()
         elif isinstance(value, Sequence) and not isinstance(
-            value,
+                value,
             (str, bytes),
         ):
             values = list(value)
@@ -442,20 +374,13 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
         if len(values) != batch_size:
             raise ValueError(
                 "Chatterbox sampling_rate must be scalar or contain one "
-                "value per audio sample."
-            )
+                "value per audio sample.")
         output = []
         for rate in values:
             if rate is None:
                 output.append(None)
-            elif (
-                isinstance(rate, bool)
-                or int(rate) != rate
-                or int(rate) <= 0
-            ):
-                raise ValueError(
-                    "Chatterbox sampling rates must be positive integers."
-                )
+            elif (isinstance(rate, bool) or int(rate) != rate or int(rate) <= 0):
+                raise ValueError("Chatterbox sampling rates must be positive integers.")
             else:
                 output.append(int(rate))
         return output
@@ -482,13 +407,8 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
         if not values:
             raise ValueError("Cannot pad an empty Chatterbox feature batch.")
         channels = int(values[0].shape[0])
-        if any(
-            value.ndim != 2 or value.shape[0] != channels
-            for value in values
-        ):
-            raise ValueError(
-                "Chatterbox speech features must have matching channels."
-            )
+        if any(value.ndim != 2 or value.shape[0] != channels for value in values):
+            raise ValueError("Chatterbox speech features must have matching channels.")
         frames = max(int(value.shape[1]) for value in values)
         output = values[0].new_zeros(len(values), channels, frames)
         for index, value in enumerate(values):
@@ -516,36 +436,27 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
                 lengths_value,
                 batch_size=batch_size,
                 name="audio_lengths",
-            )
-            if lengths_value is not None
-            else [None] * batch_size
-        )
+            ) if lengths_value is not None else [None] * batch_size)
         waveforms_16k = []
         waveforms_24k = []
         for value, rate, length in zip(audio, rates, lengths):
             if length is not None and not isinstance(value, (str, Path, Mapping)):
                 length = int(torch.as_tensor(length).item())
                 if length <= 0:
-                    raise ValueError(
-                        "Chatterbox audio_lengths must be positive."
-                    )
+                    raise ValueError("Chatterbox audio_lengths must be positive.")
                 value = torch.as_tensor(value)[..., :length]
             decoded = load_native_audio(value, sampling_rate=rate)
             waveform = decoded.waveform
-            waveforms_16k.append(
-                resample_waveform(
-                    waveform,
-                    decoded.sampling_rate,
-                    S3_SR,
-                )
-            )
-            waveforms_24k.append(
-                resample_waveform(
-                    waveform,
-                    decoded.sampling_rate,
-                    S3GEN_SR,
-                )
-            )
+            waveforms_16k.append(resample_waveform(
+                waveform,
+                decoded.sampling_rate,
+                S3_SR,
+            ))
+            waveforms_24k.append(resample_waveform(
+                waveform,
+                decoded.sampling_rate,
+                S3GEN_SR,
+            ))
         return waveforms_16k, waveforms_24k
 
     def _prepare_raw_language_model_batch(
@@ -559,53 +470,35 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
         elif isinstance(texts_value, Sequence):
             texts = list(texts_value)
         else:
-            raise TypeError(
-                "Chatterbox raw T3 batches require text strings."
-            )
+            raise TypeError("Chatterbox raw T3 batches require text strings.")
         if not texts or any(not isinstance(text, str) for text in texts):
-            raise TypeError(
-                "Every Chatterbox raw T3 example must contain a text string."
-            )
+            raise TypeError("Every Chatterbox raw T3 example must contain a text string.")
         waveforms_16k, _ = self._raw_audio_batch(
             batch,
             batch_size=len(texts),
         )
         runtime = self.model.model
         device = runtime.t3.device
-        max_text = int(
-            getattr(self.model.config, "training_max_text_tokens", 256)
-        )
-        max_speech = int(
-            getattr(self.model.config, "training_max_speech_tokens", 850)
-        )
-        prompt_duration = float(
-            getattr(self.model.config, "training_prompt_duration", 3.0)
-        )
-        dropout = float(
-            getattr(
-                self.model.config,
-                "training_conditioning_dropout",
-                0.2,
-            )
-        )
+        max_text = int(getattr(self.model.config, "training_max_text_tokens", 256))
+        max_speech = int(getattr(self.model.config, "training_max_speech_tokens", 850))
+        prompt_duration = float(getattr(self.model.config, "training_prompt_duration", 3.0))
+        dropout = float(getattr(
+            self.model.config,
+            "training_conditioning_dropout",
+            0.2,
+        ))
         if max_text < 3 or max_text > runtime.t3.hp.max_text_tokens:
             raise ValueError(
                 "training_max_text_tokens must be between 3 and the T3 "
-                f"limit ({runtime.t3.hp.max_text_tokens})."
-            )
+                f"limit ({runtime.t3.hp.max_text_tokens}).")
         if max_speech < 3 or max_speech > runtime.t3.hp.max_speech_tokens:
             raise ValueError(
                 "training_max_speech_tokens must be between 3 and the T3 "
-                f"limit ({runtime.t3.hp.max_speech_tokens})."
-            )
+                f"limit ({runtime.t3.hp.max_speech_tokens}).")
         if not math.isfinite(prompt_duration) or prompt_duration <= 0:
-            raise ValueError(
-                "training_prompt_duration must be finite and positive."
-            )
+            raise ValueError("training_prompt_duration must be finite and positive.")
         if not math.isfinite(dropout) or not 0 <= dropout < 1:
-            raise ValueError(
-                "training_conditioning_dropout must be in [0, 1)."
-            )
+            raise ValueError("training_conditioning_dropout must be in [0, 1).")
 
         text_tokens = []
         speech_tokens = []
@@ -629,20 +522,13 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
                 if code_length < 1:
                     raise ValueError(
                         "Chatterbox T3 preprocessing produced no speech "
-                        "tokens; provide a longer recording."
-                    )
+                        "tokens; provide a longer recording.")
                 codes = codes[0, :code_length].long()
-                speech = torch.cat(
-                    (
-                        codes.new_tensor(
-                            [runtime.t3.hp.start_speech_token]
-                        ),
-                        codes,
-                        codes.new_tensor(
-                            [runtime.t3.hp.stop_speech_token]
-                        ),
-                    )
-                )
+                speech = torch.cat((
+                    codes.new_tensor([runtime.t3.hp.start_speech_token]),
+                    codes,
+                    codes.new_tensor([runtime.t3.hp.stop_speech_token]),
+                ))
 
                 prompt_waveform = waveform[:prompt_samples]
                 if prompt_waveform.numel() < prompt_samples:
@@ -658,26 +544,15 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
                     0,
                     :int(prompt_length[0].item()),
                 ].long()
-                body = runtime.tokenizer.text_to_tokens(
-                    punc_norm(text)
-                ).reshape(-1).to(device=device, dtype=torch.long)
+                body = runtime.tokenizer.text_to_tokens(punc_norm(text)).reshape(-1).to(
+                    device=device, dtype=torch.long)
                 body = body[:max_text - 2]
-                text_sequence = torch.cat(
-                    (
-                        body.new_tensor(
-                            [runtime.t3.hp.start_text_token]
-                        ),
-                        body,
-                        body.new_tensor(
-                            [runtime.t3.hp.stop_text_token]
-                        ),
-                    )
-                )
-                if (
-                    context.is_training
-                    and dropout > 0
-                    and bool(torch.rand((), device=device) < dropout)
-                ):
+                text_sequence = torch.cat((
+                    body.new_tensor([runtime.t3.hp.start_text_token]),
+                    body,
+                    body.new_tensor([runtime.t3.hp.stop_text_token]),
+                ))
+                if (context.is_training and dropout > 0 and bool(torch.rand((), device=device) < dropout)):
                     speaker = torch.zeros_like(speaker)
                     prompt = prompt.new_zeros(1)
                     prompt_loss_length = 0
@@ -690,21 +565,28 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
                 speaker_embeddings.append(speaker)
 
         return {
-            "text_tokens": self._pad_1d(text_tokens),
-            "text_token_lens": torch.tensor(
+            "text_tokens":
+            self._pad_1d(text_tokens),
+            "text_token_lens":
+            torch.tensor(
                 [value.numel() for value in text_tokens],
                 device=device,
                 dtype=torch.long,
             ),
-            "speech_tokens": self._pad_1d(speech_tokens),
-            "speech_token_lens": torch.tensor(
+            "speech_tokens":
+            self._pad_1d(speech_tokens),
+            "speech_token_lens":
+            torch.tensor(
                 [value.numel() for value in speech_tokens],
                 device=device,
                 dtype=torch.long,
             ),
-            "speaker_emb": torch.stack(speaker_embeddings),
-            "prompt_tokens": self._pad_1d(prompt_tokens),
-            "prompt_lens": torch.tensor(
+            "speaker_emb":
+            torch.stack(speaker_embeddings),
+            "prompt_tokens":
+            self._pad_1d(prompt_tokens),
+            "prompt_lens":
+            torch.tensor(
                 prompt_loss_lengths,
                 device=device,
                 dtype=torch.long,
@@ -730,56 +612,49 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
         )
         runtime = self.model.model
         device = runtime.s3gen.device
-        max_speech = int(
-            getattr(self.model.config, "training_max_speech_tokens", 850)
-        )
+        max_speech = int(getattr(self.model.config, "training_max_speech_tokens", 850))
         tokens = []
         features = []
         embeddings = []
         with torch.inference_mode():
             for waveform_16k, waveform_24k in zip(
-                waveforms_16k,
-                waveforms_24k,
+                    waveforms_16k,
+                    waveforms_24k,
             ):
                 waveform_16k = waveform_16k.to(device)
                 waveform_24k = waveform_24k.to(device)
-                token, token_length = runtime.s3gen.tokenizer(
-                    [waveform_16k]
-                )
-                feature = runtime.s3gen.mel_extractor(
-                    waveform_24k.unsqueeze(0)
-                )[0]
+                token, token_length = runtime.s3gen.tokenizer([waveform_16k])
+                feature = runtime.s3gen.mel_extractor(waveform_24k.unsqueeze(0))[0]
                 usable_tokens = min(
                     int(token_length[0].item()),
                     max_speech,
                     int(feature.shape[1]) // 2,
                 )
                 if usable_tokens < 1:
-                    raise ValueError(
-                        "Chatterbox flow preprocessing produced no aligned "
-                        "speech frames."
-                    )
+                    raise ValueError("Chatterbox flow preprocessing produced no aligned "
+                                     "speech frames.")
                 tokens.append(token[0, :usable_tokens].long())
                 features.append(feature[:, :usable_tokens * 2])
-                embeddings.append(
-                    runtime.s3gen.speaker_encoder.inference(
-                        [waveform_16k]
-                    )[0]
-                )
+                embeddings.append(runtime.s3gen.speaker_encoder.inference([waveform_16k])[0])
         return {
-            "speech_token": self._pad_1d(tokens),
-            "speech_token_len": torch.tensor(
+            "speech_token":
+            self._pad_1d(tokens),
+            "speech_token_len":
+            torch.tensor(
                 [value.numel() for value in tokens],
                 device=device,
                 dtype=torch.long,
             ),
-            "speech_feat": self._pad_features(features),
-            "speech_feat_len": torch.tensor(
+            "speech_feat":
+            self._pad_features(features),
+            "speech_feat_len":
+            torch.tensor(
                 [value.shape[1] for value in features],
                 device=device,
                 dtype=torch.long,
             ),
-            "embedding": torch.stack(embeddings),
+            "embedding":
+            torch.stack(embeddings),
         }
 
     def prepare_training_inputs(
@@ -804,34 +679,24 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
             if "speaker_emb" not in batch and "speaker_embedding" in batch:
                 batch["speaker_emb"] = batch.pop("speaker_embedding")
             community_prompt = batch.pop("prompt_tokens", None)
-            if (
-                community_prompt is not None
-                and "cond_prompt_speech_tokens" in batch
-            ):
-                raise ValueError(
-                    "Pass either prompt_tokens or "
-                    "cond_prompt_speech_tokens, not both."
-                )
+            if (community_prompt is not None and "cond_prompt_speech_tokens" in batch):
+                raise ValueError("Pass either prompt_tokens or "
+                                 "cond_prompt_speech_tokens, not both.")
             if community_prompt is not None:
                 batch["cond_prompt_speech_tokens"] = community_prompt
-                if (
-                    "prompt_lens" not in batch
-                    and bool(
-                        getattr(
-                            self.model.config,
-                            "training_mask_prompt_loss",
-                            True,
-                        )
-                    )
-                ):
+                if ("prompt_lens" not in batch and bool(getattr(
+                        self.model.config,
+                        "training_mask_prompt_loss",
+                        True,
+                ))):
                     batch["prompt_lens"] = torch.full(
-                        (community_prompt.shape[0],),
+                        (community_prompt.shape[0], ),
                         community_prompt.shape[1],
                         device=community_prompt.device,
                         dtype=torch.long,
                     )
             if "t3_cond" not in batch:
-                self._require(batch, ("speaker_emb",), phase="T3 conditioning")
+                self._require(batch, ("speaker_emb", ), phase="T3 conditioning")
                 speaker_embedding = batch.pop("speaker_emb")
                 emotion = batch.pop("emotion_adv", None)
                 if emotion is None:
@@ -848,16 +713,13 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
                         dtype=speaker_embedding.dtype,
                     )
                     if emotion.numel() == 1:
-                        emotion = emotion.expand(
-                            speaker_embedding.shape[0]
-                        ).reshape(-1, 1, 1)
+                        emotion = emotion.expand(speaker_embedding.shape[0]).reshape(-1, 1, 1)
                     elif emotion.numel() == speaker_embedding.shape[0]:
                         emotion = emotion.reshape(-1, 1, 1)
                     else:
                         raise ValueError(
                             "Chatterbox emotion_adv must contain one value "
-                            "or one value per sample."
-                        )
+                            "or one value per sample.")
                 batch["t3_cond"] = T3Cond(
                     speaker_emb=speaker_embedding,
                     clap_emb=batch.pop("clap_emb", None),
@@ -899,30 +761,18 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
     ) -> TTSTrainingOutput:
         self.setup()
         phase = self.select_training_phase(context.phase)
-        prepared = self.prepare_runtime_inputs(
-            self.prepare_batch(context.inputs, context)
-        )
+        prepared = self.prepare_runtime_inputs(self.prepare_batch(context.inputs, context))
         runtime = self.model.model
         if phase.name == "language_model":
             prepared["t3_cond"].to(device=runtime.t3.device)
             text_loss, speech_loss = runtime.t3.loss(**prepared)
-            text_weight = float(
-                getattr(self.model.config, "training_text_loss_weight", 1.0)
-            )
-            speech_weight = float(
-                getattr(self.model.config, "training_speech_loss_weight", 1.0)
-            )
-            if (
-                not math.isfinite(text_weight)
-                or not math.isfinite(speech_weight)
-                or text_weight < 0
-                or speech_weight < 0
-                or text_weight + speech_weight <= 0
-            ):
+            text_weight = float(getattr(self.model.config, "training_text_loss_weight", 1.0))
+            speech_weight = float(getattr(self.model.config, "training_speech_loss_weight", 1.0))
+            if (not math.isfinite(text_weight) or not math.isfinite(speech_weight) or text_weight < 0 or
+                    speech_weight < 0 or text_weight + speech_weight <= 0):
                 raise ValueError(
                     "Chatterbox T3 loss weights must be finite, non-negative, "
-                    "and include at least one positive value."
-                )
+                    "and include at least one positive value.")
             weighted_text = text_loss * text_weight
             weighted_speech = speech_loss * speech_weight
             loss = weighted_text + weighted_speech
@@ -961,16 +811,14 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
 
     def recipe_resume_configuration(self):
         configuration = dict(super().recipe_resume_configuration())
-        configuration.update(
-            {
-                "selected_phase": self.selected_phase_name,
-                "published_objective": True,
-                "author_end_to_end_recipe_published": False,
-                "accepts_raw_audio": True,
-                "precomputed_supervision_supported": True,
-                "parameter_efficient": self._lora_injection is not None,
-            }
-        )
+        configuration.update({
+            "selected_phase": self.selected_phase_name,
+            "published_objective": True,
+            "author_end_to_end_recipe_published": False,
+            "accepts_raw_audio": True,
+            "precomputed_supervision_supported": True,
+            "parameter_efficient": self._lora_injection is not None,
+        })
         return configuration
 
     def save_pretrained(self, save_directory) -> None:

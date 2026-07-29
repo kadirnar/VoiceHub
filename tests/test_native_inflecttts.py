@@ -78,8 +78,7 @@ class NativeInflectArchitectureTests(unittest.TestCase):
                     "print(*(int(name in sys.modules) for name in ("
                     "'voicehub.models.inflecttts.inference', "
                     "'voicehub.architectures.inflecttts.modeling', "
-                    "'voicehub.architectures.inflecttts.training')))"
-                ),
+                    "'voicehub.architectures.inflecttts.training')))"),
             ],
             cwd=Path(__file__).parents[1],
             check=True,
@@ -223,15 +222,12 @@ class NativeInflectArchitectureTests(unittest.TestCase):
             adapter = wrapper.get_training_adapter()
             adapter.setup()
             self.assertEqual(
-                tuple(
-                    phase.name
-                    for phase in adapter.plan_training_phases(0)
-                ),
+                tuple(phase.name for phase in adapter.plan_training_phases(0)),
                 ("generator", ),
             )
             with self.assertRaisesRegex(
-                ValueError,
-                "discriminator training is disabled",
+                    ValueError,
+                    "discriminator training is disabled",
             ):
                 adapter.select_training_phase("discriminator")
             self.assertFalse(wrapper.model.generator.inference_only)

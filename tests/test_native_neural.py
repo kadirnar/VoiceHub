@@ -4,13 +4,7 @@ import unittest
 
 import torch
 
-from voicehub.neural import (
-    DynamicKVCache,
-    MultiHeadAttention,
-    RMSNorm,
-    TransformerLayerConfig,
-    TransformerStack,
-)
+from voicehub.neural import DynamicKVCache, MultiHeadAttention, RMSNorm, TransformerLayerConfig, TransformerStack
 
 
 class NativeNeuralTests(unittest.TestCase):
@@ -73,12 +67,10 @@ class NativeNeuralTests(unittest.TestCase):
 
         self.assertEqual(tuple(output.hidden_states.shape), (1, 4, 8))
         self.assertTrue(torch.isfinite(output.hidden_states).all())
-        self.assertTrue(
-            torch.equal(
-                output.weights[..., 2:],
-                torch.zeros_like(output.weights[..., 2:]),
-            )
-        )
+        self.assertTrue(torch.equal(
+            output.weights[..., 2:],
+            torch.zeros_like(output.weights[..., 2:]),
+        ))
 
     def test_cross_attention_cache_is_static_across_decoder_steps(self):
         config = TransformerLayerConfig(

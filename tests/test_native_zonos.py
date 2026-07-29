@@ -10,20 +10,14 @@ from unittest.mock import patch
 import torch
 
 from voicehub.architectures.registry import ArchitectureRegistry
-from voicehub.architectures.zonos.artifacts import (
-    ZonosArtifacts,
-    resolve_zonos_artifacts,
-)
+from voicehub.architectures.zonos.artifacts import ZonosArtifacts, resolve_zonos_artifacts
 from voicehub.architectures.zonos.checkpoint import (
     export_zonos_checkpoint,
     load_zonos_checkpoint,
     save_zonos_pretrained,
     zonos_inventory_fingerprint,
 )
-from voicehub.architectures.zonos.configuration import (
-    ZonosArchitectureConfig,
-    ZonosBackboneConfig,
-)
+from voicehub.architectures.zonos.configuration import ZonosArchitectureConfig, ZonosBackboneConfig
 from voicehub.architectures.zonos.frontend import (
     PHONEME_SYMBOLS,
     PrecomputedPhonemeFrontend,
@@ -44,24 +38,12 @@ from voicehub.architectures.zonos.metadata import (
 )
 from voicehub.architectures.zonos.modeling import ZonosForCausalLM
 from voicehub.architectures.zonos.pattern import apply_delay_pattern
-from voicehub.architectures.zonos.registration import (
-    create_zonos_architecture_spec,
-    register_zonos_architecture,
-)
-from voicehub.architectures.zonos.runtime import (
-    NativeZonosRuntime,
-    ZonosGeneration,
-)
-from voicehub.architectures.zonos.sampling import (
-    ZonosSamplingOptions,
-    sample_zonos_token,
-)
+from voicehub.architectures.zonos.registration import create_zonos_architecture_spec, register_zonos_architecture
+from voicehub.architectures.zonos.runtime import NativeZonosRuntime, ZonosGeneration
+from voicehub.architectures.zonos.sampling import ZonosSamplingOptions, sample_zonos_token
 from voicehub.checkpointing import save_safetensors
 from voicehub.checkpointing.errors import CheckpointCompatibilityError
-from voicehub.models.zonos.inference import (
-    ZonosConfig,
-    ZonosForTextToSpeech,
-)
+from voicehub.models.zonos.inference import ZonosConfig, ZonosForTextToSpeech
 from voicehub.models.zonos.training import ZonosTrainingAdapter
 from voicehub.training.specs import get_training_spec
 
@@ -85,8 +67,7 @@ def _tiny_config() -> ZonosArchitectureConfig:
                 "qkv_proj_bias": False,
                 "out_proj_bias": False,
             },
-        ),
-    )
+        ), )
 
 
 def _tiny_prefix(
@@ -104,6 +85,7 @@ def _tiny_prefix(
 
 
 class _Wrapper:
+
     def __init__(self, model: ZonosForCausalLM):
         self.model = model
         self.config = ZonosConfig(name_or_path="local")
@@ -140,10 +122,9 @@ class _FakeCodec:
 
 
 class NativeZonosConfigurationTests(unittest.TestCase):
+
     def test_pinned_provenance_is_present(self):
-        source = json.loads(
-            (ARCHITECTURE_ROOT / "SOURCE.json").read_text(encoding="utf-8"),
-        )
+        source = json.loads((ARCHITECTURE_ROOT / "SOURCE.json").read_text(encoding="utf-8"), )
         self.assertEqual(
             source["source"]["revision"],
             ZONOS_SOURCE_REVISION,
@@ -156,9 +137,7 @@ class NativeZonosConfigurationTests(unittest.TestCase):
             source["checkpoint"]["tensor_count"],
             ZONOS_TRANSFORMER_TENSOR_COUNT,
         )
-        self.assertTrue(
-            (ARCHITECTURE_ROOT / "THIRD_PARTY_LICENSE").is_file(),
-        )
+        self.assertTrue((ARCHITECTURE_ROOT / "THIRD_PARTY_LICENSE").is_file(), )
 
     def test_default_meta_graph_matches_the_official_safe_header(self):
         with torch.device("meta"):
@@ -169,10 +148,7 @@ class NativeZonosConfigurationTests(unittest.TestCase):
             sum(value.numel() for value in state.values()),
             ZONOS_TRANSFORMER_PARAMETER_COUNT,
         )
-        inventory = {
-            name: ("BF16", tuple(value.shape))
-            for name, value in state.items()
-        }
+        inventory = {name: ("BF16", tuple(value.shape)) for name, value in state.items()}
         self.assertEqual(
             zonos_inventory_fingerprint(inventory),
             ZONOS_TRANSFORMER_HEADER_FINGERPRINT,
@@ -210,6 +186,7 @@ class NativeZonosConfigurationTests(unittest.TestCase):
 
 
 class NativeZonosFrontendTests(unittest.TestCase):
+
     def test_published_phoneme_vocabulary_is_exact(self):
         self.assertEqual(len(PHONEME_SYMBOLS), 185)
         ids = tokenize_phonemes("həlo")
@@ -251,6 +228,7 @@ class NativeZonosFrontendTests(unittest.TestCase):
 
 
 class NativeZonosModelTests(unittest.TestCase):
+
     def test_delay_pattern_does_not_leak_between_batches(self):
         codes = torch.tensor([
             [[1, 2, 3], [4, 5, 6]],
@@ -286,17 +264,13 @@ class NativeZonosModelTests(unittest.TestCase):
                 )
         output.loss.backward()
         self.assertTrue(torch.isfinite(output.loss))
-        self.assertIsNotNone(
-            model.backbone.layers[0].mixer.in_proj.weight.grad,
-        )
+        self.assertIsNotNone(model.backbone.layers[0].mixer.in_proj.weight.grad, )
         self.assertGreater(
-            model.heads[0].weight.grad[model.eos_token_id]
-            .abs().sum().item(),
+            model.heads[0].weight.grad[model.eos_token_id].abs().sum().item(),
             0,
         )
         self.assertGreater(
-            model.prefix_conditioner.conditioners[1]
-            .uncond_vector.grad.abs().sum().item(),
+            model.prefix_conditioner.conditioners[1].uncond_vector.grad.abs().sum().item(),
             0,
         )
 
@@ -317,6 +291,7 @@ class NativeZonosModelTests(unittest.TestCase):
 
 
 class NativeZonosCheckpointTests(unittest.TestCase):
+
     def test_export_strict_reload_and_fresh_runtime(self):
         config = _tiny_config()
         source = ZonosForCausalLM(config)
@@ -384,13 +359,11 @@ class NativeZonosCheckpointTests(unittest.TestCase):
 
     def test_official_resolution_is_pinned(self):
         with patch(
-            "voicehub.architectures.zonos.artifacts."
-            "resolve_pretrained_file",
-            side_effect=lambda source, filename, **kwargs: Path(filename),
+                "voicehub.architectures.zonos.artifacts."
+                "resolve_pretrained_file",
+                side_effect=lambda source, filename, **kwargs: Path(filename),
         ) as resolver:
-            artifacts = resolve_zonos_artifacts(
-                ZONOS_TRANSFORMER_REPOSITORY,
-            )
+            artifacts = resolve_zonos_artifacts(ZONOS_TRANSFORMER_REPOSITORY, )
         self.assertEqual(artifacts.revision, ZONOS_TRANSFORMER_REVISION)
         self.assertEqual(resolver.call_count, 2)
         for call in resolver.call_args_list:
@@ -401,6 +374,7 @@ class NativeZonosCheckpointTests(unittest.TestCase):
 
 
 class NativeZonosRuntimeTests(unittest.TestCase):
+
     def test_runtime_accepts_precomputed_phonemes_and_native_codec(self):
         model = ZonosForCausalLM(_tiny_config())
         runtime = NativeZonosRuntime(
@@ -416,8 +390,8 @@ class NativeZonosRuntimeTests(unittest.TestCase):
         )
         expected_codes = torch.zeros(1, 9, 3, dtype=torch.long)
         with patch(
-            "voicehub.architectures.zonos.runtime.generate_zonos_codes",
-            return_value=expected_codes,
+                "voicehub.architectures.zonos.runtime.generate_zonos_codes",
+                return_value=expected_codes,
         ):
             result = runtime.generate(
                 "ignored raw text",
@@ -517,6 +491,7 @@ class NativeZonosRuntimeTests(unittest.TestCase):
 
 
 class NativeZonosDependencyTests(unittest.TestCase):
+
     def test_native_runtime_has_no_external_architecture_imports(self):
         allowed = {
             "__future__",

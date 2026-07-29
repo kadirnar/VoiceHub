@@ -21,19 +21,12 @@ class Wav2Vec2FeatureExtractor:
         padding_value: float = 0.0,
         return_attention_mask: bool = False,
     ) -> None:
-        if (
-            isinstance(sampling_rate, bool)
-            or not isinstance(sampling_rate, int)
-            or sampling_rate <= 0
-        ):
+        if (isinstance(sampling_rate, bool) or not isinstance(sampling_rate, int) or sampling_rate <= 0):
             raise ValueError("`sampling_rate` must be a positive integer.")
         if not isinstance(do_normalize, bool):
             raise TypeError("`do_normalize` must be a boolean.")
-        if (
-            isinstance(padding_value, bool)
-            or not isinstance(padding_value, (int, float))
-            or not math.isfinite(float(padding_value))
-        ):
+        if (isinstance(padding_value, bool) or not isinstance(padding_value, (int, float)) or
+                not math.isfinite(float(padding_value))):
             raise ValueError("`padding_value` must be a finite real number.")
         if not isinstance(return_attention_mask, bool):
             raise TypeError("`return_attention_mask` must be a boolean.")
@@ -53,14 +46,10 @@ class Wav2Vec2FeatureExtractor:
         values = {} if path is None else read_json_file(path)
         feature_size = values.get("feature_size", 1)
         if feature_size != 1:
-            raise ValueError(
-                "Native Wav2Vec2 consumes raw mono waveforms and requires "
-                "`feature_size=1`."
-            )
+            raise ValueError("Native Wav2Vec2 consumes raw mono waveforms and requires "
+                             "`feature_size=1`.")
         if values.get("padding_side", "right") != "right":
-            raise ValueError(
-                "Native Wav2Vec2 requires right-padded waveform batches."
-            )
+            raise ValueError("Native Wav2Vec2 requires right-padded waveform batches.")
         return cls(
             sampling_rate=values.get(
                 "sampling_rate",

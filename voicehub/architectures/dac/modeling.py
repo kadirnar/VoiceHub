@@ -60,17 +60,14 @@ class DacModel(DAC):
         )
 
     def decode_output(self, quantized_representation: Tensor) -> DacDecoderOutput:
-        return DacDecoderOutput(
-            audio_values=self.decode(quantized_representation)
-        )
+        return DacDecoderOutput(audio_values=self.decode(quantized_representation))
 
     def quantizer_loss(self, output: DacEncoderOutput) -> Tensor:
         if not isinstance(output, DacEncoderOutput):
             raise TypeError("`output` must be a DacEncoderOutput.")
         return (
-            self.config.commitment_loss_weight * output.commitment_loss
-            + self.config.codebook_loss_weight * output.codebook_loss
-        )
+            self.config.commitment_loss_weight * output.commitment_loss +
+            self.config.codebook_loss_weight * output.codebook_loss)
 
 
 __all__ = [

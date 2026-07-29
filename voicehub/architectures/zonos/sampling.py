@@ -10,10 +10,7 @@ import torch
 from torch import Tensor
 
 from voicehub.architectures.zonos.modeling import ZonosForCausalLM
-from voicehub.architectures.zonos.pattern import (
-    apply_delay_pattern,
-    revert_delay_pattern,
-)
+from voicehub.architectures.zonos.pattern import apply_delay_pattern, revert_delay_pattern
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,21 +37,17 @@ class ZonosSamplingOptions:
         if isinstance(self.top_k, bool) or not isinstance(self.top_k, int) or self.top_k < 0:
             raise ValueError("`top_k` must be a non-negative integer.")
         for name in (
-            "cfg_scale",
-            "temperature",
-            "top_p",
-            "min_p",
-            "linear",
-            "confidence",
-            "quadratic",
-            "repetition_penalty",
+                "cfg_scale",
+                "temperature",
+                "top_p",
+                "min_p",
+                "linear",
+                "confidence",
+                "quadratic",
+                "repetition_penalty",
         ):
             value = getattr(self, name)
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-            ):
+            if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)):
                 raise ValueError(f"`{name}` must be finite.")
         if self.cfg_scale < 0:
             raise ValueError("`cfg_scale` must be non-negative.")
@@ -98,10 +91,7 @@ def _unified_probabilities(
         dim=-1,
         keepdim=True,
     )
-    scores = (
-        log_probabilities * (linear + entropy * confidence)
-        - log_probabilities.square() * quadratic
-    )
+    scores = (log_probabilities * (linear + entropy * confidence) - log_probabilities.square() * quadratic)
     return scores.softmax(dim=-1)
 
 
@@ -176,9 +166,7 @@ def sample_zonos_token(
 ) -> Tensor:
     """Sample one token for every codebook."""
     if not isinstance(logits, Tensor) or logits.ndim != 3:
-        raise ValueError(
-            "Zonos logits must have shape [batch, codebook, vocabulary]."
-        )
+        raise ValueError("Zonos logits must have shape [batch, codebook, vocabulary].")
     if generated_tokens is not None:
         logits = apply_repetition_penalty(
             logits,
@@ -224,18 +212,11 @@ def generate_zonos_codes(
     options = ZonosSamplingOptions() if options is None else options
     if not isinstance(options, ZonosSamplingOptions):
         raise TypeError("`options` must be ZonosSamplingOptions or None.")
-    if (
-        not isinstance(prefix_conditioning, Tensor)
-        or prefix_conditioning.ndim != 3
-    ):
-        raise ValueError(
-            "Zonos prefix conditioning must have shape "
-            "[batch, time, hidden_size]."
-        )
+    if (not isinstance(prefix_conditioning, Tensor) or prefix_conditioning.ndim != 3):
+        raise ValueError("Zonos prefix conditioning must have shape "
+                         "[batch, time, hidden_size].")
     if prefix_conditioning.shape[-1] != model.config.backbone.d_model:
-        raise ValueError(
-            "Zonos prefix conditioning hidden size does not match the model."
-        )
+        raise ValueError("Zonos prefix conditioning hidden size does not match the model.")
     if options.cfg_scale == 1.0:
         # ``prepare_conditioning`` returns conditional then unconditional
         # batches. Guidance-free decoding consumes only the first half.
@@ -247,8 +228,7 @@ def generate_zonos_codes(
         if prefix_conditioning.shape[0] % 2:
             raise ValueError(
                 "Guided Zonos conditioning must contain matching conditional "
-                "and unconditional batches."
-            )
+                "and unconditional batches.")
         batch_size = prefix_conditioning.shape[0] // 2
         cache_batch_size = prefix_conditioning.shape[0]
     prefix_conditioning = prefix_conditioning.to(
@@ -258,36 +238,20 @@ def generate_zonos_codes(
 
     prefix_audio_length = 0
     if audio_prefix_codes is not None:
-        if (
-            not isinstance(audio_prefix_codes, Tensor)
-            or audio_prefix_codes.ndim != 3
-        ):
-            raise ValueError(
-                "Zonos audio prefix must have shape "
-                "[batch, codebook, time]."
-            )
+        if (not isinstance(audio_prefix_codes, Tensor) or audio_prefix_codes.ndim != 3):
+            raise ValueError("Zonos audio prefix must have shape "
+                             "[batch, codebook, time].")
         if audio_prefix_codes.shape[:2] != (
-            batch_size,
-            model.config.num_codebooks,
+                batch_size,
+                model.config.num_codebooks,
         ):
             raise ValueError(
                 "Zonos audio prefix batch/codebook dimensions do not match "
-                "the conditioning."
-            )
-        if (
-            audio_prefix_codes.dtype == torch.bool
-            or audio_prefix_codes.is_floating_point()
-        ):
+                "the conditioning.")
+        if (audio_prefix_codes.dtype == torch.bool or audio_prefix_codes.is_floating_point()):
             raise TypeError("Zonos audio prefix must use an integer dtype.")
-        if bool(
-            (
-                (audio_prefix_codes < 0)
-                | (audio_prefix_codes >= model.config.codebook_size)
-            ).any()
-        ):
-            raise ValueError(
-                "Zonos audio prefix tokens must be in [0, 1023]."
-            )
+        if bool(((audio_prefix_codes < 0) | (audio_prefix_codes >= model.config.codebook_size)).any()):
+            raise ValueError("Zonos audio prefix tokens must be in [0, 1023].")
         audio_prefix_codes = audio_prefix_codes.to(
             device=model.device,
             dtype=torch.long,
@@ -295,14 +259,9 @@ def generate_zonos_codes(
         prefix_audio_length = audio_prefix_codes.shape[-1]
 
     unknown_token = -1
-    audio_sequence_length = (
-        prefix_audio_length + options.max_new_tokens
-    )
+    audio_sequence_length = (prefix_audio_length + options.max_new_tokens)
     total_sequence_length = (
-        prefix_conditioning.shape[1]
-        + audio_sequence_length
-        + model.config.num_codebooks
-    )
+        prefix_conditioning.shape[1] + audio_sequence_length + model.config.num_codebooks)
     cache = model.setup_cache(
         batch_size=cache_batch_size,
         max_sequence_length=total_sequence_length,
@@ -336,11 +295,7 @@ def generate_zonos_codes(
     frame = delayed[..., offset:offset + 1]
     frame.masked_scatter_(frame == unknown_token, next_token)
 
-    consumed = (
-        prefix_conditioning.shape[1]
-        + prefix_audio_length
-        + 1
-    )
+    consumed = (prefix_conditioning.shape[1] + prefix_audio_length + 1)
     cache.sequence_offset += consumed
     cache.lengths_per_sample.add_(consumed)
 
@@ -353,7 +308,7 @@ def generate_zonos_codes(
     )
     maximum_steps = delayed.shape[-1] - offset
     remaining = torch.full(
-        (batch_size,),
+        (batch_size, ),
         maximum_steps,
         dtype=torch.long,
         device=model.device,
@@ -382,15 +337,11 @@ def generate_zonos_codes(
             ),
         )
         stopping |= eos_in_first
-        endpoint_codebook = (
-            model.config.num_codebooks - remaining
-        ).clamp(max=model.config.num_codebooks - 1)
+        endpoint_codebook = (model.config.num_codebooks - remaining).clamp(max=model.config.num_codebooks - 1)
         for batch_index in range(batch_size):
             if bool(stopping[batch_index]):
                 codebook_index = int(endpoint_codebook[batch_index].item())
-                next_token[batch_index, :codebook_index] = (
-                    model.masked_token_id
-                )
+                next_token[batch_index, :codebook_index] = (model.masked_token_id)
                 next_token[
                     batch_index,
                     codebook_index,
@@ -402,9 +353,9 @@ def generate_zonos_codes(
         remaining.sub_(1)
         step += 1
         if callback is not None and not callback(
-            frame,
-            step,
-            maximum_steps,
+                frame,
+                step,
+                maximum_steps,
         ):
             break
 
@@ -415,9 +366,7 @@ def generate_zonos_codes(
     )
     output = output[..., :max(0, offset - model.config.num_codebooks)]
     if output.shape[-1] == 0:
-        raise RuntimeError(
-            "Zonos generation ended before producing a complete DAC frame."
-        )
+        raise RuntimeError("Zonos generation ended before producing a complete DAC frame.")
     return output
 
 

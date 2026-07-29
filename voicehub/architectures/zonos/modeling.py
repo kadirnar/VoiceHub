@@ -1,9 +1,9 @@
 """VoiceHub-owned PyTorch implementation of Zonos v0.1 Transformer.
 
-The module preserves the exact published Safetensors namespace while keeping
-training and inference as explicit execution modes.  It depends only on
-PyTorch and other VoiceHub modules; the vendored upstream tree is provenance,
-not an executable runtime dependency.
+The module preserves the exact published Safetensors namespace while
+keeping training and inference as explicit execution modes.  It depends
+only on PyTorch and other VoiceHub modules; the vendored upstream tree
+is provenance, not an executable runtime dependency.
 """
 
 from __future__ import annotations
@@ -52,20 +52,15 @@ def precompute_rotary_frequencies(
     base: float = 10_000.0,
 ) -> Tensor:
     if sequence_length <= 0 or head_dim <= 0 or head_dim % 2:
-        raise ValueError(
-            "Rotary sequence length and even head dimension must be positive."
-        )
+        raise ValueError("Rotary sequence length and even head dimension must be positive.")
     frequencies = 1.0 / (
-        base ** (
-            torch.arange(
-                0,
-                head_dim,
-                2,
-                dtype=torch.float32,
-                device=device,
-            ) / head_dim
-        )
-    )
+        base**(torch.arange(
+            0,
+            head_dim,
+            2,
+            dtype=torch.float32,
+            device=device,
+        ) / head_dim))
     positions = torch.arange(
         sequence_length,
         dtype=torch.float32,
@@ -83,10 +78,8 @@ def apply_rotary_embedding(values: Tensor, frequencies: Tensor) -> Tensor:
     if frequencies.ndim == 3:
         frequencies = frequencies.unsqueeze(0)
     if frequencies.ndim != 4:
-        raise ValueError(
-            "Zonos rotary frequencies must have shape "
-            "[batch, time, head_dim / 2, 2]."
-        )
+        raise ValueError("Zonos rotary frequencies must have shape "
+                         "[batch, time, head_dim / 2, 2].")
     frequencies = frequencies.reshape(
         -1,
         paired.shape[1],
@@ -96,10 +89,8 @@ def apply_rotary_embedding(values: Tensor, frequencies: Tensor) -> Tensor:
     )
     rotated = torch.stack(
         (
-            paired[..., 0] * frequencies[..., 0]
-            - paired[..., 1] * frequencies[..., 1],
-            paired[..., 1] * frequencies[..., 0]
-            + paired[..., 0] * frequencies[..., 1],
+            paired[..., 0] * frequencies[..., 0] - paired[..., 1] * frequencies[..., 1],
+            paired[..., 1] * frequencies[..., 0] + paired[..., 0] * frequencies[..., 1],
         ),
         dim=-1,
     )
@@ -140,9 +131,7 @@ class ZonosConditioner(nn.Module):
         elif uncond_type == "none":
             self.register_parameter("uncond_vector", None)
         else:
-            raise ValueError(
-                f"Unknown Zonos unconditional type {uncond_type!r}."
-            )
+            raise ValueError(f"Unknown Zonos unconditional type {uncond_type!r}.")
 
     def apply_condition(self, value: Any) -> Tensor:
         raise NotImplementedError
@@ -150,9 +139,7 @@ class ZonosConditioner(nn.Module):
     def forward(self, value: Any | None) -> Tensor:
         if value is None:
             if self.uncond_vector is None:
-                raise ValueError(
-                    f"Zonos conditioning value {self.name!r} is required."
-                )
+                raise ValueError(f"Zonos conditioning value {self.name!r} is required.")
             # Do not use ``.data`` here. The learned unconditional vector is
             # part of the published checkpoint and must remain trainable.
             return self.uncond_vector.view(1, 1, -1)
@@ -170,18 +157,16 @@ class ZonosPhonemeConditioner(ZonosConditioner):
         if not isinstance(value, Tensor) or value.ndim != 2:
             raise ValueError(
                 "Zonos `espeak` conditioning must contain phoneme IDs with "
-                "shape [batch, time]."
-            )
+                "shape [batch, time].")
         if value.dtype == torch.bool or value.is_floating_point():
             raise TypeError("Zonos phoneme IDs must use an integer dtype.")
         if bool(((value < 0) | (value >= self.phoneme_embedder.num_embeddings)).any()):
             raise ValueError("Zonos phoneme IDs are outside the released vocabulary.")
-        return self.phoneme_embedder(
-            value.to(device=self.phoneme_embedder.weight.device, dtype=torch.long),
-        )
+        return self.phoneme_embedder(value.to(device=self.phoneme_embedder.weight.device, dtype=torch.long), )
 
 
 class ZonosFourierConditioner(ZonosConditioner):
+
     def __init__(
         self,
         output_dim: int,
@@ -205,24 +190,20 @@ class ZonosFourierConditioner(ZonosConditioner):
 
     def apply_condition(self, value: Tensor) -> Tensor:
         if not isinstance(value, Tensor) or value.ndim != 3:
-            raise ValueError(
-                f"Zonos `{self.name}` conditioning must have shape "
-                "[batch, time, feature]."
-            )
+            raise ValueError(f"Zonos `{self.name}` conditioning must have shape "
+                             "[batch, time, feature].")
         if value.shape[-1] != self.input_dim:
             raise ValueError(
                 f"Zonos `{self.name}` expects {self.input_dim} features, "
-                f"received {value.shape[-1]}."
-            )
-        normalized = (
-            value.to(device=self.weight.device, dtype=self.weight.dtype)
-            - self.min_val
-        ) / (self.max_val - self.min_val)
+                f"received {value.shape[-1]}.")
+        normalized = (value.to(device=self.weight.device, dtype=self.weight.dtype) -
+                      self.min_val) / (self.max_val - self.min_val)
         frequencies = 2 * torch.pi * normalized @ self.weight.T
         return torch.cat((frequencies.cos(), frequencies.sin()), dim=-1)
 
 
 class ZonosIntegerConditioner(ZonosConditioner):
+
     def __init__(
         self,
         output_dim: int,
@@ -241,42 +222,32 @@ class ZonosIntegerConditioner(ZonosConditioner):
 
     def apply_condition(self, value: Tensor) -> Tensor:
         if not isinstance(value, Tensor) or value.ndim != 3:
-            raise ValueError(
-                f"Zonos `{self.name}` conditioning must have shape "
-                "[batch, time, 1]."
-            )
+            raise ValueError(f"Zonos `{self.name}` conditioning must have shape "
+                             "[batch, time, 1].")
         if value.shape[-1] != 1:
-            raise ValueError(
-                f"Zonos `{self.name}` expects one integer feature."
-            )
+            raise ValueError(f"Zonos `{self.name}` expects one integer feature.")
         if value.dtype == torch.bool or value.is_floating_point():
-            raise TypeError(
-                f"Zonos `{self.name}` conditioning must use an integer dtype."
-            )
+            raise TypeError(f"Zonos `{self.name}` conditioning must use an integer dtype.")
         indices = value.squeeze(-1).to(
             device=self.int_embedder.weight.device,
             dtype=torch.long,
         ) - self.min_val
         if bool(((indices < 0) | (indices >= self.int_embedder.num_embeddings)).any()):
-            raise ValueError(
-                f"Zonos `{self.name}` values must be in "
-                f"[{self.min_val}, {self.max_val}]."
-            )
+            raise ValueError(f"Zonos `{self.name}` values must be in "
+                             f"[{self.min_val}, {self.max_val}].")
         return self.int_embedder(indices)
 
 
 class ZonosPassthroughConditioner(ZonosConditioner):
+
     def apply_condition(self, value: Tensor) -> Tensor:
         if not isinstance(value, Tensor) or value.ndim != 3:
-            raise ValueError(
-                f"Zonos `{self.name}` conditioning must have shape "
-                "[batch, time, feature]."
-            )
+            raise ValueError(f"Zonos `{self.name}` conditioning must have shape "
+                             "[batch, time, feature].")
         if value.shape[-1] != self.cond_dim:
             raise ValueError(
                 f"Zonos `{self.name}` expects feature dimension "
-                f"{self.cond_dim}, received {value.shape[-1]}."
-            )
+                f"{self.cond_dim}, received {value.shape[-1]}.")
         parameter = next(self.project.parameters(), None)
         if parameter is None:
             return value
@@ -308,15 +279,11 @@ class ZonosPrefixConditioner(ZonosConditioner):
             _CONDITIONERS[str(values["type"])](
                 output_dim,
                 **dict(values),
-            )
-            for values in config.conditioners
+            ) for values in config.conditioners
         ])
         self.norm = nn.LayerNorm(output_dim)
         self.required_keys = frozenset(
-            conditioner.name
-            for conditioner in self.conditioners
-            if conditioner.uncond_vector is None
-        )
+            conditioner.name for conditioner in self.conditioners if conditioner.uncond_vector is None)
 
     def apply_condition(self, value: Any) -> Tensor:  # pragma: no cover
         raise NotImplementedError("Prefix conditioner owns a mapping forward.")
@@ -326,26 +293,17 @@ class ZonosPrefixConditioner(ZonosConditioner):
             raise TypeError("Zonos prefix conditioning must be a dictionary.")
         missing = self.required_keys - set(values)
         if missing:
-            raise ValueError(
-                f"Missing required Zonos conditioning keys: {sorted(missing)!r}."
-            )
-        conditioned = [
-            conditioner(values.get(conditioner.name))
-            for conditioner in self.conditioners
-        ]
+            raise ValueError(f"Missing required Zonos conditioning keys: {sorted(missing)!r}.")
+        conditioned = [conditioner(values.get(conditioner.name)) for conditioner in self.conditioners]
         batch_size = max(item.shape[0] for item in conditioned)
         if any(item.shape[0] not in {1, batch_size} for item in conditioned):
-            raise ValueError(
-                "Zonos conditioner batch dimensions are not broadcastable."
-            )
-        conditioned = [
-            item.expand(batch_size, -1, -1)
-            for item in conditioned
-        ]
+            raise ValueError("Zonos conditioner batch dimensions are not broadcastable.")
+        conditioned = [item.expand(batch_size, -1, -1) for item in conditioned]
         return self.norm(self.project(torch.cat(conditioned, dim=-2)))
 
 
 class ZonosAttention(nn.Module):
+
     def __init__(
         self,
         config: ZonosBackboneConfig,
@@ -356,9 +314,7 @@ class ZonosAttention(nn.Module):
         self.num_heads_kv = config.num_heads_kv
         self.head_dim = config.head_dim
         self.layer_index = layer_index
-        projected = (
-            self.num_heads + 2 * self.num_heads_kv
-        ) * self.head_dim
+        projected = (self.num_heads + 2 * self.num_heads_kv) * self.head_dim
         self.in_proj = nn.Linear(
             config.d_model,
             projected,
@@ -425,10 +381,7 @@ class ZonosAttention(nn.Module):
         *,
         causal: bool,
     ) -> Tensor:
-        query, key, value = (
-            item.transpose(1, 2)
-            for item in (query, key, value)
-        )
+        query, key, value = (item.transpose(1, 2) for item in (query, key, value))
         try:
             attended = F.scaled_dot_product_attention(
                 query,
@@ -480,17 +433,13 @@ class ZonosAttention(nn.Module):
         try:
             storage = cache.key_values[self.layer_index]
         except KeyError as error:
-            raise RuntimeError(
-                f"Missing Zonos KV cache for layer {self.layer_index}."
-            ) from error
+            raise RuntimeError(f"Missing Zonos KV cache for layer {self.layer_index}.") from error
         batch_start = cache.batch_offset
         batch_end = batch_start + key.shape[0]
         sequence_start = cache.sequence_offset
         sequence_end = sequence_start + key.shape[1]
         if batch_end > storage.shape[0] or sequence_end > storage.shape[1]:
-            raise RuntimeError(
-                "Zonos generation exceeded its allocated KV-cache capacity."
-            )
+            raise RuntimeError("Zonos generation exceeded its allocated KV-cache capacity.")
         storage[
             batch_start:batch_end,
             sequence_start:sequence_end,
@@ -515,6 +464,7 @@ class ZonosAttention(nn.Module):
 
 
 class ZonosFeedForward(nn.Module):
+
     def __init__(self, config: ZonosBackboneConfig) -> None:
         super().__init__()
         self.fc1 = nn.Linear(
@@ -534,6 +484,7 @@ class ZonosFeedForward(nn.Module):
 
 
 class ZonosTransformerBlock(nn.Module):
+
     def __init__(
         self,
         config: ZonosBackboneConfig,
@@ -582,10 +533,7 @@ class ZonosTransformerBackbone(nn.Module):
     def __init__(self, config: ZonosBackboneConfig) -> None:
         super().__init__()
         self.config = config
-        self.layers = nn.ModuleList(
-            ZonosTransformerBlock(config, index)
-            for index in range(config.n_layer)
-        )
+        self.layers = nn.ModuleList(ZonosTransformerBlock(config, index) for index in range(config.n_layer))
         self.norm_f = nn.LayerNorm(
             config.d_model,
             eps=config.norm_epsilon,
@@ -600,7 +548,8 @@ class ZonosTransformerBackbone(nn.Module):
         device: torch.device | str,
     ) -> dict[int, Tensor]:
         return {
-            index: layer.mixer.allocate_cache(
+            index:
+            layer.mixer.allocate_cache(
                 batch_size=batch_size,
                 sequence_length=sequence_length,
                 dtype=dtype,
@@ -628,20 +577,14 @@ class ZonosTransformerBackbone(nn.Module):
         cache: ZonosInferenceCache,
     ) -> Tensor:
         if cache.lengths_per_sample is None:
-            raise RuntimeError(
-                "Zonos inference cache has no per-sample positions."
-            )
+            raise RuntimeError("Zonos inference cache has no per-sample positions.")
         positions = (
             torch.arange(
                 hidden_states.shape[1],
                 device=hidden_states.device,
-            )[None, :]
-            + cache.lengths_per_sample.to(hidden_states.device)[:, None]
-        )
+            )[None, :] + cache.lengths_per_sample.to(hidden_states.device)[:, None])
         if int(positions.max().item()) >= cache.max_sequence_length:
-            raise RuntimeError(
-                "Zonos rotary position exceeds the allocated sequence length."
-            )
+            raise RuntimeError("Zonos rotary position exceeds the allocated sequence length.")
         all_frequencies = precompute_rotary_frequencies(
             cache.max_sequence_length,
             self.config.head_dim,
@@ -668,9 +611,7 @@ class ZonosForCausalLM(nn.Module):
         if isinstance(config, dict):
             config = ZonosArchitectureConfig.from_dict(config)
         if not isinstance(config, ZonosArchitectureConfig):
-            raise TypeError(
-                "`config` must be a ZonosArchitectureConfig or mapping."
-            )
+            raise TypeError("`config` must be a ZonosArchitectureConfig or mapping.")
         self.config = config
         dimension = config.backbone.d_model
         self.eos_token_id = config.eos_token_id
@@ -680,17 +621,14 @@ class ZonosForCausalLM(nn.Module):
             config.prefix_conditioner,
             dimension,
         )
-        self.embeddings = nn.ModuleList([
-            nn.Embedding(config.input_vocab_size, dimension)
-            for _ in range(config.num_codebooks)
-        ])
+        self.embeddings = nn.ModuleList(
+            [nn.Embedding(config.input_vocab_size, dimension) for _ in range(config.num_codebooks)])
         self.heads = nn.ModuleList([
             nn.Linear(
                 dimension,
                 config.output_vocab_size,
                 bias=False,
-            )
-            for _ in range(config.num_codebooks)
+            ) for _ in range(config.num_codebooks)
         ])
 
     @property
@@ -703,29 +641,19 @@ class ZonosForCausalLM(nn.Module):
 
     def embed_codes(self, codes: Tensor) -> Tensor:
         if not isinstance(codes, Tensor) or codes.ndim != 3:
-            raise ValueError(
-                "Zonos delayed codes must have shape "
-                "[batch, codebook, time]."
-            )
+            raise ValueError("Zonos delayed codes must have shape "
+                             "[batch, codebook, time].")
         if codes.shape[1] != self.config.num_codebooks:
             raise ValueError(
                 f"Zonos expects {self.config.num_codebooks} codebooks, "
-                f"received {codes.shape[1]}."
-            )
+                f"received {codes.shape[1]}.")
         if codes.dtype == torch.bool or codes.is_floating_point():
             raise TypeError("Zonos delayed codes must use an integer dtype.")
-        if bool(
-            (
-                (codes < 0)
-                | (codes >= self.config.input_vocab_size)
-            ).any()
-        ):
+        if bool(((codes < 0) | (codes >= self.config.input_vocab_size)).any()):
             raise ValueError("Zonos delayed codes contain invalid token IDs.")
         embedded = self.embeddings[0](codes[:, 0].long())
         for index in range(1, self.config.num_codebooks):
-            embedded = embedded + self.embeddings[index](
-                codes[:, index].long(),
-            )
+            embedded = embedded + self.embeddings[index](codes[:, index].long(), )
         return embedded
 
     def apply_heads(self, hidden_states: Tensor) -> Tensor:
@@ -740,17 +668,12 @@ class ZonosForCausalLM(nn.Module):
         unconditional: dict[str, Any] | None = None,
     ) -> Tensor:
         if unconditional is None:
-            unconditional = {
-                key: conditional[key]
-                for key in self.prefix_conditioner.required_keys
-            }
+            unconditional = {key: conditional[key] for key in self.prefix_conditioner.required_keys}
         conditioned = self.prefix_conditioner(conditional)
         unconditioned = self.prefix_conditioner(unconditional)
         if conditioned.shape != unconditioned.shape:
-            raise ValueError(
-                "Conditional and unconditional Zonos prefixes must have "
-                "matching shapes."
-            )
+            raise ValueError("Conditional and unconditional Zonos prefixes must have "
+                             "matching shapes.")
         return torch.cat((conditioned, unconditioned), dim=0)
 
     def teacher_forced_logits(
@@ -760,31 +683,21 @@ class ZonosForCausalLM(nn.Module):
         *,
         audio_code_lengths: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
-        if (
-            not isinstance(prefix_conditioning, Tensor)
-            or prefix_conditioning.ndim != 3
-        ):
+        if (not isinstance(prefix_conditioning, Tensor) or prefix_conditioning.ndim != 3):
             raise ValueError(
                 "Zonos prefix conditioning must have shape "
-                "[batch, prefix_time, hidden_size]."
-            )
+                "[batch, prefix_time, hidden_size].")
         if prefix_conditioning.shape[-1] != self.config.backbone.d_model:
-            raise ValueError(
-                "Zonos prefix hidden size does not match the architecture."
-            )
+            raise ValueError("Zonos prefix hidden size does not match the architecture.")
         if not isinstance(audio_codes, Tensor) or audio_codes.ndim != 3:
-            raise ValueError(
-                "Zonos audio codes must have shape "
-                "[batch, codebook, time]."
-            )
+            raise ValueError("Zonos audio codes must have shape "
+                             "[batch, codebook, time].")
         if audio_codes.shape[:2] != (
-            prefix_conditioning.shape[0],
-            self.config.num_codebooks,
+                prefix_conditioning.shape[0],
+                self.config.num_codebooks,
         ):
-            raise ValueError(
-                "Zonos prefix and audio-code batch/codebook dimensions do "
-                "not match."
-            )
+            raise ValueError("Zonos prefix and audio-code batch/codebook dimensions do "
+                             "not match.")
         model_codes, labels = add_endpoint_and_delay(
             audio_codes.to(device=self.device),
             lengths=audio_code_lengths,
@@ -820,9 +733,7 @@ class ZonosForCausalLM(nn.Module):
         if compute_loss:
             supervised = labels.ne(self.masked_token_id)
             if not bool(supervised.any()):
-                raise ValueError(
-                    "Zonos training batch contains no supervised codec token."
-                )
+                raise ValueError("Zonos training batch contains no supervised codec token.")
             targets = labels.masked_fill(~supervised, -100)
             loss = F.cross_entropy(
                 logits.reshape(-1, logits.shape[-1]),
@@ -842,14 +753,10 @@ class ZonosForCausalLM(nn.Module):
         max_sequence_length: int,
     ) -> ZonosInferenceCache:
         if batch_size <= 0 or max_sequence_length <= 0:
-            raise ValueError(
-                "Zonos cache batch and sequence dimensions must be positive."
-            )
+            raise ValueError("Zonos cache batch and sequence dimensions must be positive.")
         aligned_length = (
-            max_sequence_length
-            if max_sequence_length % 8 == 0
-            else max_sequence_length + 8 - max_sequence_length % 8
-        )
+            max_sequence_length if max_sequence_length % 8 == 0 else max_sequence_length + 8 -
+            max_sequence_length % 8)
         return ZonosInferenceCache(
             max_sequence_length=aligned_length,
             max_batch_size=batch_size,
@@ -877,10 +784,7 @@ class ZonosForCausalLM(nn.Module):
         logits = self.apply_heads(hidden_states).squeeze(2).float()
         if cfg_scale != 1.0:
             conditional, unconditional = logits.chunk(2)
-            logits = (
-                unconditional
-                + (conditional - unconditional) * cfg_scale
-            )
+            logits = (unconditional + (conditional - unconditional) * cfg_scale)
         return logits
 
     def prefill(

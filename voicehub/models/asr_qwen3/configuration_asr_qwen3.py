@@ -25,10 +25,10 @@ _DTYPE_ALIASES = {
 class Qwen3ASRConfig(VoiceHubConfig):
     """Configure native checkpoint loading, decoding, and fine-tuning.
 
-    Compatibility options from the former Transformers wrapper are accepted
-    only so callers receive explicit migration errors.  Architecture code,
-    tokenization, feature extraction, generation, loss, and checkpoint I/O
-    are all implemented by VoiceHub.
+    Compatibility options from the former Transformers wrapper are
+    accepted only so callers receive explicit migration errors.
+    Architecture code, tokenization, feature extraction, generation,
+    loss, and checkpoint I/O are all implemented by VoiceHub.
     """
 
     model_type = "asr_qwen3"

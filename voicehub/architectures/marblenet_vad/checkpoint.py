@@ -16,13 +16,7 @@ from voicehub.architectures.marblenet_vad.metadata import (
     MARBLENET_VAD_TENSOR_FINGERPRINT,
     MARBLENET_VAD_WEIGHTS_SHA256,
 )
-from voicehub.checkpointing import (
-    CheckpointAdapter,
-    CopyTensor,
-    SafeTensorReader,
-    TensorPlan,
-    save_safetensors,
-)
+from voicehub.checkpointing import CheckpointAdapter, CopyTensor, SafeTensorReader, TensorPlan, save_safetensors
 from voicehub.hub import write_json_file
 
 NATIVE_MARBLENET_VAD_FORMAT = "voicehub-marblenet-vad-v1"
@@ -56,15 +50,11 @@ def tensor_inventory_fingerprint(tensors: Mapping[str, Any]) -> str:
 
 
 def native_marblenet_vad_tensor_shapes(
-    config: MarbleNetVADConfig | Mapping[str, Any] | None = None,
-) -> dict[str, tuple[int, ...]]:
+    config: MarbleNetVADConfig | Mapping[str, Any] | None = None, ) -> dict[str, tuple[int, ...]]:
     from voicehub.architectures.marblenet_vad.modeling import MarbleNetVADModel
 
     model = MarbleNetVADModel(MarbleNetVADConfig.coerce(config or {}))
-    return {
-        name: tuple(tensor.shape)
-        for name, tensor in model.state_dict().items()
-    }
+    return {name: tuple(tensor.shape) for name, tensor in model.state_dict().items()}
 
 
 class MarbleNetVADSafeTensorsCheckpointAdapter(CheckpointAdapter):
@@ -87,9 +77,7 @@ class MarbleNetVADSafeTensorsCheckpointAdapter(CheckpointAdapter):
 
     def tensor_plan(self, config: Mapping[str, Any]) -> TensorPlan:
         shapes = native_marblenet_vad_tensor_shapes(config)
-        return TensorPlan(
-            rules=tuple(CopyTensor(name, name) for name in sorted(shapes)),
-        )
+        return TensorPlan(rules=tuple(CopyTensor(name, name) for name in sorted(shapes)), )
 
 
 def _read_nemo_members(source: Path) -> tuple[bytes, bytes]:
@@ -108,9 +96,7 @@ def _read_nemo_members(source: Path) -> tuple[bytes, bytes]:
             if not member.isfile():
                 raise ValueError(f"NeMo member {member.name!r} is not a regular file.")
             if member.size <= 0 or member.size > _MAX_ARCHIVE_MEMBER_BYTES:
-                raise ValueError(
-                    f"NeMo member {member.name!r} has an unsafe size."
-                )
+                raise ValueError(f"NeMo member {member.name!r} has an unsafe size.")
             if basename in selected:
                 raise ValueError(f"NeMo archive contains duplicate {basename!r}.")
             selected[basename] = member
@@ -146,10 +132,8 @@ def _load_restricted_state(payload: bytes | Path) -> Mapping[str, Any]:
     state = value.get("state_dict", value)
     if not isinstance(state, Mapping) or not state:
         raise ValueError("NeMo checkpoint must contain a non-empty tensor state.")
-    if any(
-        not isinstance(name, str) or not isinstance(tensor, torch.Tensor)
-        for name, tensor in state.items()
-    ):
+    if any(not isinstance(name, str) or not isinstance(tensor, torch.Tensor)
+           for name, tensor in state.items()):
         raise TypeError("NeMo state must map string names to tensors only.")
     return state
 
@@ -166,8 +150,7 @@ def convert_nemo_marblenet_checkpoint(
         raise ValueError(
             "NeMo publishes a pickle-based checkpoint. Review the artifact "
             "origin, then pass `trust_pickle_checkpoint=True` for this "
-            "one-time restricted conversion."
-        )
+            "one-time restricted conversion.")
     source_path = Path(source).expanduser().resolve()
     if not source_path.is_file():
         raise FileNotFoundError(f"NeMo checkpoint was not found: {source_path}.")
@@ -177,8 +160,7 @@ def convert_nemo_marblenet_checkpoint(
     if expected_sha256 is not None and actual_sha.lower() != expected_sha256.lower():
         raise ValueError(
             "NeMo checkpoint SHA-256 mismatch: "
-            f"expected {expected_sha256}, found {actual_sha}."
-        )
+            f"expected {expected_sha256}, found {actual_sha}.")
 
     config_sha = None
     weights_sha = None
@@ -204,12 +186,10 @@ def convert_nemo_marblenet_checkpoint(
             "NeMo tensor namespace is incompatible with multilingual "
             "Frame-VAD MarbleNet "
             f"(missing={sorted(expected_names - source_names)}, "
-            f"unexpected={sorted(source_names - expected_names)})."
-        )
+            f"unexpected={sorted(source_names - expected_names)}).")
     mismatches = {
         name: (tuple(state[name].shape), expected_shapes[name])
-        for name in expected_names
-        if tuple(state[name].shape) != expected_shapes[name]
+        for name in expected_names if tuple(state[name].shape) != expected_shapes[name]
     }
     if mismatches:
         raise ValueError(f"NeMo tensor shape mismatch: {mismatches}.")
@@ -221,10 +201,8 @@ def convert_nemo_marblenet_checkpoint(
     output.mkdir(parents=True, exist_ok=True)
     safe_path = output / NATIVE_MARBLENET_VAD_FILENAME
     save_safetensors(
-        {
-            name: state[name].detach().cpu().contiguous()
-            for name in sorted(expected_names)
-        },
+        {name: state[name].detach().cpu().contiguous()
+         for name in sorted(expected_names)},
         safe_path,
         metadata={
             "architecture": "marblenet-vad",
@@ -234,16 +212,14 @@ def convert_nemo_marblenet_checkpoint(
         },
     )
     values = config.to_dict()
-    values.update(
-        {
-            "checkpoint_format": NATIVE_MARBLENET_VAD_FORMAT,
-            "source_checkpoint_name": source_path.name,
-            "source_checkpoint_sha256": actual_sha,
-            "source_config_sha256": config_sha,
-            "source_weights_sha256": weights_sha,
-            "source_tensor_fingerprint": inventory,
-        }
-    )
+    values.update({
+        "checkpoint_format": NATIVE_MARBLENET_VAD_FORMAT,
+        "source_checkpoint_name": source_path.name,
+        "source_checkpoint_sha256": actual_sha,
+        "source_config_sha256": config_sha,
+        "source_weights_sha256": weights_sha,
+        "source_tensor_fingerprint": inventory,
+    })
     write_json_file(output / "config.json", values)
 
     from voicehub.architectures.marblenet_vad.modeling import MarbleNetVADModel

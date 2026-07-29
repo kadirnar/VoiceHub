@@ -102,7 +102,8 @@ def filter_top_p(logits: Tensor, top_p: float, *, min_tokens_to_keep: int = 1) -
 
 
 def filter_min_p(logits: Tensor, min_p: float, *, min_tokens_to_keep: int = 1) -> Tensor:
-    """Mask tokens whose probability is too small relative to the row maximum."""
+    """Mask tokens whose probability is too small relative to the row
+    maximum."""
     _validate_logits(logits)
     if not isinstance(min_p, (int, float)) or isinstance(min_p, bool):
         raise TypeError("`min_p` must be a real number.")

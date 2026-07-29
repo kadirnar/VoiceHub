@@ -1,9 +1,10 @@
 """Validated configuration for Inflect Micro/Nano v2.
 
-The schema mirrors the immutable ``config.json`` files published with the
-Inflect v2 releases.  It intentionally keeps the release's ``inference_only``
-flag separate from VoiceHub's training warm-start mode: the public checkpoint
-does not contain the posterior encoder or discriminators.
+The schema mirrors the immutable ``config.json`` files published with
+the Inflect v2 releases.  It intentionally keeps the release's
+``inference_only`` flag separate from VoiceHub's training warm-start
+mode: the public checkpoint does not contain the posterior encoder or
+discriminators.
 """
 
 from __future__ import annotations

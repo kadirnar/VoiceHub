@@ -43,9 +43,7 @@ def _optional_local(root: Path, filename: str) -> Path | None:
 def _required_local(root: Path, filename: str) -> Path:
     path = root / filename
     if not path.is_file():
-        raise FileNotFoundError(
-            f"Native Whisper requires {filename!r} in {root}."
-        )
+        raise FileNotFoundError(f"Native Whisper requires {filename!r} in {root}.")
     return path
 
 
@@ -75,28 +73,18 @@ def _safe_shard_names(index_path: Path) -> tuple[str, ...]:
     document = read_json_file(index_path)
     weight_map = document.get("weight_map")
     if not isinstance(weight_map, dict) or not weight_map:
-        raise ValueError(
-            "Whisper Safetensors index must contain a non-empty `weight_map`."
-        )
+        raise ValueError("Whisper Safetensors index must contain a non-empty `weight_map`.")
     names = set()
     for tensor_name, shard_name in weight_map.items():
         if not isinstance(tensor_name, str) or not tensor_name:
-            raise ValueError(
-                "Whisper Safetensors index contains an invalid tensor name."
-            )
+            raise ValueError("Whisper Safetensors index contains an invalid tensor name.")
         if not isinstance(shard_name, str) or not shard_name:
-            raise ValueError(
-                "Whisper Safetensors index contains an invalid shard name."
-            )
+            raise ValueError("Whisper Safetensors index contains an invalid shard name.")
         path = PurePosixPath(shard_name)
         if path.is_absolute() or len(path.parts) != 1 or ".." in path.parts:
-            raise ValueError(
-                f"Unsafe Whisper checkpoint shard path {shard_name!r}."
-            )
+            raise ValueError(f"Unsafe Whisper checkpoint shard path {shard_name!r}.")
         if not shard_name.endswith(".safetensors"):
-            raise ValueError(
-                f"Whisper checkpoint shard is not Safetensors: {shard_name!r}."
-            )
+            raise ValueError(f"Whisper checkpoint shard is not Safetensors: {shard_name!r}.")
         names.add(shard_name)
     return tuple(sorted(names))
 
@@ -110,10 +98,8 @@ def _resolve_local_artifacts(
     checkpoint_override: Path | None = None
     if source.is_file():
         if source.name in {_CONFIG_NAME, _TOKENIZER_NAME}:
-            raise ValueError(
-                "A direct native Whisper file must be a Safetensors "
-                "checkpoint or index."
-            )
+            raise ValueError("A direct native Whisper file must be a Safetensors "
+                             "checkpoint or index.")
         checkpoint_override = source
         root = source.parent
     else:
@@ -128,14 +114,9 @@ def _resolve_local_artifacts(
         checkpoint = _optional_local(root, _SINGLE_CHECKPOINT_NAME)
     if checkpoint is None:
         checkpoint = _required_local(root, _SHARDED_CHECKPOINT_NAME)
-    if (
-        checkpoint.suffix != ".safetensors"
-        and not checkpoint.name.endswith(".safetensors.index.json")
-    ):
-        raise ValueError(
-            "Native Whisper accepts Safetensors checkpoints or a "
-            "Safetensors index."
-        )
+    if (checkpoint.suffix != ".safetensors" and not checkpoint.name.endswith(".safetensors.index.json")):
+        raise ValueError("Native Whisper accepts Safetensors checkpoints or a "
+                         "Safetensors index.")
     if checkpoint.name.endswith(".safetensors.index.json"):
         for shard in _safe_shard_names(checkpoint):
             _required_local(root, shard)
@@ -163,13 +144,9 @@ def resolve_whisper_artifacts(
     """Resolve a coherent local or immutable Hub Whisper artifact set."""
     if not isinstance(source, (str, Path)) or not str(source).strip():
         raise ValueError("Whisper `source` must be a non-empty path or Hub ID.")
-    if checkpoint_filename is not None and (
-        not isinstance(checkpoint_filename, str)
-        or not checkpoint_filename.strip()
-    ):
-        raise ValueError(
-            "`checkpoint_filename` must be a non-empty string or None."
-        )
+    if checkpoint_filename is not None and (not isinstance(checkpoint_filename, str) or
+                                            not checkpoint_filename.strip()):
+        raise ValueError("`checkpoint_filename` must be a non-empty string or None.")
     if not isinstance(tokenizer_filename, str) or not tokenizer_filename.strip():
         raise ValueError("`tokenizer_filename` must be a non-empty string.")
     source_path = Path(source).expanduser()
@@ -208,11 +185,8 @@ def resolve_whisper_artifacts(
         local_files_only=local_files_only,
     )
 
-    candidates = (
-        (checkpoint_filename,)
-        if checkpoint_filename is not None
-        else (_SINGLE_CHECKPOINT_NAME, _SHARDED_CHECKPOINT_NAME)
-    )
+    candidates = ((checkpoint_filename, ) if checkpoint_filename is not None else
+                  (_SINGLE_CHECKPOINT_NAME, _SHARDED_CHECKPOINT_NAME))
     checkpoint = None
     for candidate in candidates:
         checkpoint = _resolve_optional_remote(
@@ -227,9 +201,7 @@ def resolve_whisper_artifacts(
             break
     if checkpoint is None:
         names = ", ".join(repr(name) for name in candidates)
-        raise FileNotFoundError(
-            f"Native Whisper could not find a checkpoint among: {names}."
-        )
+        raise FileNotFoundError(f"Native Whisper could not find a checkpoint among: {names}.")
     if checkpoint.name.endswith(".safetensors.index.json"):
         for shard in _safe_shard_names(checkpoint):
             resolve_pretrained_file(

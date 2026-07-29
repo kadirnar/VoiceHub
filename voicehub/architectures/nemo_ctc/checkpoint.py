@@ -151,7 +151,8 @@ def convert_nemo_quartznet_checkpoint(
     """Convert the hash-pinned public `.nemo` file to native Safetensors.
 
     Only the exact audited archive is accepted. Arbitrary NeMo pickle
-    checkpoints are deliberately outside this converter's trust boundary.
+    checkpoints are deliberately outside this converter's trust
+    boundary.
     """
     source_path = Path(source).expanduser().resolve()
     if not source_path.is_file():

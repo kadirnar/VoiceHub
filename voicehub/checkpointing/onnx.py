@@ -1,14 +1,16 @@
 """Small, dependency-free reader for trusted ONNX model containers.
 
-This module reads the bounded subset of the ONNX protobuf schema needed by
-explicit checkpoint converters and VoiceHub's allowlisted native graph
-runtime.  It uses only the Python standard library and rejects external tensor
-data, protobuf groups, malformed lengths, and unsupported tensor encodings.
+This module reads the bounded subset of the ONNX protobuf schema needed
+by explicit checkpoint converters and VoiceHub's allowlisted native
+graph runtime.  It uses only the Python standard library and rejects
+external tensor data, protobuf groups, malformed lengths, and
+unsupported tensor encodings.
 
-The reader deliberately exposes graph structure and attributes as immutable
-data. Architecture converters remain responsible for validating the exact
-operator graph, tensor namespace, shapes, dtypes, provenance, and source
-digest before writing a safe internal artifact or constructing a runtime.
+The reader deliberately exposes graph structure and attributes as
+immutable data. Architecture converters remain responsible for
+validating the exact operator graph, tensor namespace, shapes, dtypes,
+provenance, and source digest before writing a safe internal artifact or
+constructing a runtime.
 """
 
 from __future__ import annotations
@@ -86,8 +88,7 @@ def _fields(data: bytes | memoryview) -> Iterator[tuple[int, int, Any]]:
             value = bytes(view[offset:end])
             offset = end
         else:
-            raise CheckpointFormatError(
-                f"Unsupported protobuf wire type {wire_type}; groups are rejected.")
+            raise CheckpointFormatError(f"Unsupported protobuf wire type {wire_type}; groups are rejected.")
         yield field_number, wire_type, value
 
 
@@ -109,17 +110,13 @@ def _packed_varints(value: memoryview, *, signed: bool = False) -> tuple[int, ..
 
 def _packed_fixed32(value: memoryview) -> tuple[float, ...]:
     if len(value) % 4:
-        raise CheckpointFormatError(
-            "Packed ONNX float data is misaligned."
-        )
+        raise CheckpointFormatError("Packed ONNX float data is misaligned.")
     return struct.unpack(f"<{len(value) // 4}f", value)
 
 
 def _packed_fixed64(value: memoryview) -> tuple[float, ...]:
     if len(value) % 8:
-        raise CheckpointFormatError(
-            "Packed ONNX double data is misaligned."
-        )
+        raise CheckpointFormatError("Packed ONNX double data is misaligned.")
     return struct.unpack(f"<{len(value) // 8}d", value)
 
 
@@ -177,16 +174,14 @@ class ONNXTensor:
         except KeyError:
             raise CheckpointFormatError(
                 f"ONNX tensor {self.name or '<anonymous>'!r} uses "
-                f"unsupported dtype {self.data_type}."
-            ) from None
+                f"unsupported dtype {self.data_type}.") from None
         count = self.element_count
         if self.raw_data:
             expected = count * width
             if len(self.raw_data) != expected:
                 raise CheckpointFormatError(
                     f"ONNX tensor {self.name or '<anonymous>'!r} contains "
-                    f"{len(self.raw_data)} raw bytes; expected {expected}."
-                )
+                    f"{len(self.raw_data)} raw bytes; expected {expected}.")
             values = torch.frombuffer(
                 bytearray(self.raw_data),
                 dtype=dtype,
@@ -211,8 +206,7 @@ class ONNXTensor:
             if len(source) != count:
                 raise CheckpointFormatError(
                     f"ONNX tensor {self.name or '<anonymous>'!r} contains "
-                    f"{len(source)} values; expected {count}."
-                )
+                    f"{len(source)} values; expected {count}.")
             if self.data_type in {10, 16}:
                 encoded = struct.pack(
                     f"<{count}H",
@@ -232,9 +226,9 @@ class ONNXTensor:
 class ONNXAttribute:
     """One immutable ONNX node attribute.
 
-    ``attribute_type`` retains ONNX's declared ``AttributeType`` enum so an
-    architecture fingerprint can distinguish semantically different encodings
-    even when their Python values compare equal.
+    ``attribute_type`` retains ONNX's declared ``AttributeType`` enum so
+    an architecture fingerprint can distinguish semantically different
+    encodings even when their Python values compare equal.
     """
 
     name: str
@@ -251,9 +245,7 @@ class ONNXNode:
     inputs: tuple[str, ...]
     outputs: tuple[str, ...]
     name: str = ""
-    attributes: Mapping[str, ONNXAttribute] = field(
-        default_factory=lambda: MappingProxyType({}),
-    )
+    attributes: Mapping[str, ONNXAttribute] = field(default_factory=lambda: MappingProxyType({}), )
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,19 +323,18 @@ def _attribute_semantic_value(value: Any) -> Any:
         return {"integer": value}
     if isinstance(value, tuple):
         return [_attribute_semantic_value(item) for item in value]
-    raise TypeError(
-        f"Unsupported ONNX semantic attribute value "
-        f"{type(value).__name__}."
-    )
+    raise TypeError(f"Unsupported ONNX semantic attribute value "
+                    f"{type(value).__name__}.")
 
 
 def onnx_semantic_fingerprint(model: ONNXModel) -> str:
     """Hash graph semantics without hashing learned initializer values.
 
-    Node order, connections, operator attributes, constant values, graph I/O,
-    opsets, and initializer namespaces/dtypes/shapes are covered. Learned
-    initializer payloads are deliberately excluded so an architecture can
-    validate the same graph before and after fine-tuning.
+    Node order, connections, operator attributes, constant values, graph
+    I/O, opsets, and initializer namespaces/dtypes/shapes are covered.
+    Learned initializer payloads are deliberately excluded so an
+    architecture can validate the same graph before and after fine-
+    tuning.
     """
     if not isinstance(model, ONNXModel):
         raise TypeError("`model` must be an ONNXModel.")
@@ -360,43 +351,34 @@ def onnx_semantic_fingerprint(model: ONNXModel) -> str:
         "domain": model.domain,
         "opsets": [list(item) for item in model.opsets],
         "graph": {
-            "name": model.graph.name,
+            "name":
+            model.graph.name,
             "inputs": [value_info(value) for value in model.graph.inputs],
             "outputs": [value_info(value) for value in model.graph.outputs],
-            "initializers": [
-                {
+            "initializers": [{
+                "name": name,
+                **_tensor_semantic_record(
+                    tensor,
+                    include_values=False,
+                ),
+            } for name, tensor in sorted(model.graph.initializers.items(), )],
+            "nodes": [{
+                "name":
+                node.name,
+                "domain":
+                node.domain,
+                "op_type":
+                node.op_type,
+                "inputs":
+                list(node.inputs),
+                "outputs":
+                list(node.outputs),
+                "attributes": [{
                     "name": name,
-                    **_tensor_semantic_record(
-                        tensor,
-                        include_values=False,
-                    ),
-                }
-                for name, tensor in sorted(
-                    model.graph.initializers.items(),
-                )
-            ],
-            "nodes": [
-                {
-                    "name": node.name,
-                    "domain": node.domain,
-                    "op_type": node.op_type,
-                    "inputs": list(node.inputs),
-                    "outputs": list(node.outputs),
-                    "attributes": [
-                        {
-                            "name": name,
-                            "attribute_type": attribute.attribute_type,
-                            "value": _attribute_semantic_value(
-                                attribute.value,
-                            ),
-                        }
-                        for name, attribute in sorted(
-                            node.attributes.items(),
-                        )
-                    ],
-                }
-                for node in model.graph.nodes
-            ],
+                    "attribute_type": attribute.attribute_type,
+                    "value": _attribute_semantic_value(attribute.value, ),
+                } for name, attribute in sorted(node.attributes.items(), )],
+            } for node in model.graph.nodes],
         },
     }
     encoded = json.dumps(
@@ -505,11 +487,9 @@ def _parse_tensor(
     if data_type == 0:
         raise CheckpointFormatError(f"ONNX initializer {name!r} has no dtype.")
     if any(dimension < 0 for dimension in dimensions):
-        raise CheckpointFormatError(
-            f"ONNX initializer {name!r} has a negative dimension.")
+        raise CheckpointFormatError(f"ONNX initializer {name!r} has a negative dimension.")
     if external_data or data_location != 0:
-        raise CheckpointFormatError(
-            f"ONNX initializer {name!r} uses external data, which is rejected.")
+        raise CheckpointFormatError(f"ONNX initializer {name!r} uses external data, which is rejected.")
     return ONNXTensor(
         name=name,
         data_type=data_type,
@@ -573,8 +553,7 @@ def _parse_attribute(data: memoryview) -> ONNXAttribute:
         fields = ", ".join(str(number) for number in sorted(unsupported_fields))
         raise CheckpointFormatError(
             f"ONNX attribute {name!r} contains unsupported nested field(s): "
-            f"{fields}."
-        )
+            f"{fields}.")
     values = {
         1: scalar_float,
         2: scalar_integer,
@@ -586,15 +565,11 @@ def _parse_attribute(data: memoryview) -> ONNXAttribute:
         9: tuple(tensors),
     }
     if attribute_type not in values:
-        raise CheckpointFormatError(
-            f"ONNX attribute {name!r} uses unsupported type "
-            f"{attribute_type}."
-        )
+        raise CheckpointFormatError(f"ONNX attribute {name!r} uses unsupported type "
+                                    f"{attribute_type}.")
     result = values[attribute_type]
     if result is None:
-        raise CheckpointFormatError(
-            f"ONNX attribute {name!r} does not contain its declared value."
-        )
+        raise CheckpointFormatError(f"ONNX attribute {name!r} does not contain its declared value.")
     return ONNXAttribute(
         name=name,
         attribute_type=attribute_type,
@@ -627,8 +602,7 @@ def _parse_node(data: memoryview) -> ONNXNode:
             if attribute.name in attributes:
                 raise CheckpointFormatError(
                     f"ONNX node contains duplicate attribute "
-                    f"{attribute.name!r}."
-                )
+                    f"{attribute.name!r}.")
             attributes[attribute.name] = attribute
     if not op_type:
         raise CheckpointFormatError("ONNX node has an empty operator type.")
@@ -658,8 +632,7 @@ def _parse_graph(data: memoryview) -> ONNXGraph:
         elif number == 5:
             tensor = _parse_tensor(value)
             if tensor.name in tensors:
-                raise CheckpointFormatError(
-                    f"Duplicate ONNX initializer {tensor.name!r}.")
+                raise CheckpointFormatError(f"Duplicate ONNX initializer {tensor.name!r}.")
             tensors[tensor.name] = tensor
         elif number == 11:
             inputs.append(_parse_value_info(value))
@@ -707,8 +680,7 @@ def read_onnx_model(
     source = Path(path).expanduser().resolve()
     if not source.is_file():
         raise FileNotFoundError(f"ONNX checkpoint was not found: {source}.")
-    if (isinstance(max_file_bytes, bool) or not isinstance(max_file_bytes, int)
-            or max_file_bytes < 1):
+    if (isinstance(max_file_bytes, bool) or not isinstance(max_file_bytes, int) or max_file_bytes < 1):
         raise ValueError("`max_file_bytes` must be a positive integer.")
     size = source.stat().st_size
     if size > max_file_bytes:

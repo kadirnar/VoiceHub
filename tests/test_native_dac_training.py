@@ -6,17 +6,8 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from voicehub.components.audio.codecs.dac.model.discriminator import (
-    Discriminator,
-    MPD,
-    MRD,
-)
-from voicehub.components.audio.codecs.dac.nn.loss import (
-    GANLoss,
-    MelSpectrogramLoss,
-    MultiScaleSTFTLoss,
-    SISDRLoss,
-)
+from voicehub.components.audio.codecs.dac.model.discriminator import MPD, MRD, Discriminator
+from voicehub.components.audio.codecs.dac.nn.loss import GANLoss, MelSpectrogramLoss, MultiScaleSTFTLoss, SISDRLoss
 from voicehub.policies.architecture_dependencies import inspect_native_imports
 
 
@@ -39,8 +30,8 @@ class NativeDACTrainingTests(unittest.TestCase):
 
     def test_composite_discriminator_preserves_published_weight_names(self):
         discriminator = Discriminator(
-            periods=(2,),
-            fft_sizes=(64,),
+            periods=(2, ),
+            fft_sizes=(64, ),
             sample_rate=16_000,
             bands=((0.0, 0.5), (0.5, 1.0)),
         )
@@ -89,6 +80,7 @@ class NativeDACTrainingTests(unittest.TestCase):
         self.assertLess(float(identity), float(noise))
 
     def test_gan_loss_detaches_fake_for_discriminator_step(self):
+
         class TinyDiscriminator(nn.Module):
 
             def forward(self, waveform):
@@ -109,15 +101,10 @@ class NativeDACTrainingTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         paths = (
             root / "voicehub/components/audio/codecs/_compat.py",
-            root
-            / "voicehub/components/audio/codecs/dac/model/discriminator.py",
+            root / "voicehub/components/audio/codecs/dac/model/discriminator.py",
             root / "voicehub/components/audio/codecs/dac/nn/loss.py",
         )
-        violations = tuple(
-            violation
-            for path in paths
-            for violation in inspect_native_imports(path)
-        )
+        violations = tuple(violation for path in paths for violation in inspect_native_imports(path))
         self.assertEqual(
             violations,
             (),

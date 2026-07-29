@@ -35,11 +35,8 @@ class ModelBatch(Mapping[str, Any]):
             "metadata",
             _freeze_mapping(self.metadata, name="metadata"),
         )
-        if (
-            isinstance(self.batch_size, bool)
-            or not isinstance(self.batch_size, int)
-            or self.batch_size <= 0
-        ):
+        if (isinstance(self.batch_size, bool) or not isinstance(self.batch_size, int) or
+                self.batch_size <= 0):
             raise ValueError("`batch_size` must be a positive integer.")
 
     def __getitem__(self, key: str) -> Any:
@@ -51,7 +48,7 @@ class ModelBatch(Mapping[str, Any]):
     def __len__(self) -> int:
         return len(self.data)
 
-    def to(self, *args: Any, **kwargs: Any) -> "ModelBatch":
+    def to(self, *args: Any, **kwargs: Any) -> ModelBatch:
         """Return a batch with tensor-like values moved through ``.to()``."""
 
         def move(value: Any) -> Any:
@@ -67,7 +64,10 @@ class ModelBatch(Mapping[str, Any]):
             return value
 
         return ModelBatch(
-            data={key: move(value) for key, value in self.data.items()},
+            data={
+                key: move(value)
+                for key, value in self.data.items()
+            },
             batch_size=self.batch_size,
             metadata=self.metadata,
         )

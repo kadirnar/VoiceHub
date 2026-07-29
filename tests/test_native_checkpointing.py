@@ -30,13 +30,7 @@ def _write_npy_v1(path: Path, header: dict, payload: bytes) -> None:
     encoded = repr(header).encode("latin1")
     padding = (-(10 + len(encoded) + 1)) % 16
     encoded += b" " * padding + b"\n"
-    path.write_bytes(
-        b"\x93NUMPY"
-        + bytes((1, 0))
-        + struct.pack("<H", len(encoded))
-        + encoded
-        + payload
-    )
+    path.write_bytes(b"\x93NUMPY" + bytes((1, 0)) + struct.pack("<H", len(encoded)) + encoded + payload)
 
 
 @unittest.skipUnless(torch is not None, "Native checkpoints use PyTorch tensors")
@@ -205,7 +199,9 @@ class NumpyTensorTests(unittest.TestCase):
             )
             _write_npy_v1(
                 fortran_path,
-                {**header, "fortran_order": True},
+                {
+                    **header, "fortran_order": True
+                },
                 struct.pack("<6f", 1, 4, 2, 5, 3, 6),
             )
             expected = torch.tensor(
@@ -229,7 +225,7 @@ class NumpyTensorTests(unittest.TestCase):
                 {
                     "descr": "|O8",
                     "fortran_order": False,
-                    "shape": (1,),
+                    "shape": (1, ),
                 },
                 b"\0" * 8,
             )
@@ -238,19 +234,19 @@ class NumpyTensorTests(unittest.TestCase):
                 {
                     "descr": "|u1",
                     "fortran_order": False,
-                    "shape": (1,),
+                    "shape": (1, ),
                 },
                 b"\1\2",
             )
 
             with self.assertRaisesRegex(
-                CheckpointFormatError,
-                "Unsupported NPY dtype",
+                    CheckpointFormatError,
+                    "Unsupported NPY dtype",
             ):
                 load_numpy_tensor(object_path)
             with self.assertRaisesRegex(
-                CheckpointFormatError,
-                "trailing bytes",
+                    CheckpointFormatError,
+                    "trailing bytes",
             ):
                 load_numpy_tensor(trailing_path)
 

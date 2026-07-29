@@ -26,7 +26,7 @@ class NativeEnergyVADTests(unittest.TestCase):
 
     def test_digital_silence_estimates_infinite_threshold(self):
         threshold = estimate_energy_threshold(
-            torch.full((3,), -200.0),
+            torch.full((3, ), -200.0),
             method="otsu",
         )
 
@@ -53,10 +53,7 @@ class NativeEnergyVADTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            tuple(
-                (region.start_sample, region.end_sample)
-                for region in result.regions
-            ),
+            tuple((region.start_sample, region.end_sample) for region in result.regions),
             (
                 (0, 400),
                 (400, 800),

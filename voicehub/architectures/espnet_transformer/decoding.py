@@ -8,9 +8,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from voicehub.architectures.espnet_transformer.configuration import (
-    ESPnetLibriSpeechTransformerConfig,
-)
+from voicehub.architectures.espnet_transformer.configuration import ESPnetLibriSpeechTransformerConfig
 from voicehub.architectures.espnet_transformer.modeling import (
     ESPnetLibriSpeechTransformerForASR,
     ESPnetSequentialRNNLanguageModel,
@@ -57,10 +55,8 @@ class ESPnetCTCPrefixScorer:
         )
         self.initial_state[0, 1] = self.values[0, blank_token_id]
         for index in range(1, self.values.shape[0]):
-            self.initial_state[index, 1] = (
-                self.initial_state[index - 1, 1]
-                + self.values[index, blank_token_id]
-            )
+            self.initial_state[index,
+                               1] = (self.initial_state[index - 1, 1] + self.values[index, blank_token_id])
 
     def extend(
         self,
@@ -93,7 +89,7 @@ class ESPnetCTCPrefixScorer:
             transition[:, repeated] = previous_state[:, 1].unsqueeze(1)
         start = max(output_length, 1)
         if start >= frames:
-            scores = self.values.new_full((count,), _LOG_ZERO)
+            scores = self.values.new_full((count, ), _LOG_ZERO)
         else:
             scores = states[start - 1, 0].clone()
             blank = self.values[:, self.blank_token_id]
@@ -102,16 +98,12 @@ class ESPnetCTCPrefixScorer:
                     torch.logaddexp(
                         states[frame - 1, 0],
                         transition[frame - 1],
-                    )
-                    + emissions[frame]
-                )
-                states[frame, 1] = (
-                    torch.logaddexp(
-                        states[frame - 1, 0],
-                        states[frame - 1, 1],
-                    )
-                    + blank[frame]
-                )
+                    ) + emissions[frame])
+                states[frame,
+                       1] = (torch.logaddexp(
+                           states[frame - 1, 0],
+                           states[frame - 1, 1],
+                       ) + blank[frame])
                 scores = torch.logaddexp(
                     scores,
                     transition[frame - 1] + emissions[frame],
@@ -135,10 +127,7 @@ class ESPnetJointBeamSearch:
     ) -> None:
         if not isinstance(model, ESPnetLibriSpeechTransformerForASR):
             raise TypeError("`model` must be the native ESPnet ASR graph.")
-        if (
-            language_model is not None
-            and not isinstance(language_model, ESPnetSequentialRNNLanguageModel)
-        ):
+        if (language_model is not None and not isinstance(language_model, ESPnetSequentialRNNLanguageModel)):
             raise TypeError("`language_model` must be the native ESPnet RNNLM.")
         self.model = model
         self.config = ESPnetLibriSpeechTransformerConfig.coerce(config)
@@ -157,7 +146,7 @@ class ESPnetJointBeamSearch:
             eos_token_id=self.config.sos_eos_token_id,
         )
         initial = _Hypothesis(
-            tokens=(self.config.sos_eos_token_id,),
+            tokens=(self.config.sos_eos_token_id, ),
             score=0.0,
             ctc_state=ctc.initial_state,
             ctc_score=0.0,
@@ -182,11 +171,7 @@ class ESPnetJointBeamSearch:
                 candidate_count,
                 max(
                     beam_size,
-                    int(
-                        math.ceil(
-                            beam_size * self.config.ctc_candidate_ratio
-                        )
-                    ),
+                    int(math.ceil(beam_size * self.config.ctc_candidate_ratio)),
                 ),
             )
         for step in range(maximum_length):
@@ -198,9 +183,7 @@ class ESPnetJointBeamSearch:
                     device=memory.device,
                 )
                 attention_scores = self.model.decoder.score(prefix, memory)
-                preselection = (
-                    (1.0 - self.config.ctc_weight) * attention_scores
-                )
+                preselection = ((1.0 - self.config.ctc_weight) * attention_scores)
                 next_lm_state = hypothesis.lm_state
                 lm_scores = attention_scores.new_zeros(attention_scores.shape)
                 if self.language_model is not None:
@@ -209,10 +192,7 @@ class ESPnetJointBeamSearch:
                         hypothesis.lm_state,
                     )
                     lm_scores = lm_values.squeeze(0)
-                    preselection = (
-                        preselection
-                        + self.config.language_model_weight * lm_scores
-                    )
+                    preselection = (preselection + self.config.language_model_weight * lm_scores)
                 preselection = preselection.clone()
                 preselection[self.config.blank_token_id] = _LOG_ZERO
                 if step < minimum_length:
@@ -221,12 +201,7 @@ class ESPnetJointBeamSearch:
                     preselection,
                     candidate_count,
                 ).indices
-                if (
-                    step >= minimum_length
-                    and not torch.any(
-                        candidate_ids == self.config.sos_eos_token_id
-                    )
-                ):
+                if (step >= minimum_length and not torch.any(candidate_ids == self.config.sos_eos_token_id)):
                     candidate_ids[-1] = self.config.sos_eos_token_id
                 ctc_scores, ctc_states = ctc.extend(
                     hypothesis.tokens,
@@ -235,20 +210,14 @@ class ESPnetJointBeamSearch:
                 )
                 local_ctc = ctc_scores - hypothesis.ctc_score
                 local_scores = (
-                    (1.0 - self.config.ctc_weight)
-                    * attention_scores.index_select(0, candidate_ids)
-                    + self.config.ctc_weight * local_ctc
-                    + self.config.language_model_weight
-                    * lm_scores.index_select(0, candidate_ids)
-                    + self.config.length_bonus
-                )
+                    (1.0 - self.config.ctc_weight) * attention_scores.index_select(0, candidate_ids) +
+                    self.config.ctc_weight * local_ctc +
+                    self.config.language_model_weight * lm_scores.index_select(0, candidate_ids) +
+                    self.config.length_bonus)
                 for index, token in enumerate(candidate_ids.tolist()):
                     child = _Hypothesis(
                         tokens=(*hypothesis.tokens, token),
-                        score=(
-                            hypothesis.score
-                            + float(local_scores[index].item())
-                        ),
+                        score=(hypothesis.score + float(local_scores[index].item())),
                         ctc_state=ctc_states[index],
                         ctc_score=float(ctc_scores[index].item()),
                         lm_state=next_lm_state,
@@ -293,17 +262,13 @@ class ESPnetJointBeamSearch:
         if lengths.ndim != 1 or lengths.shape[0] != encoder_states.shape[0]:
             raise ValueError("Encoder lengths must have shape [batch].")
         resolved_beam = self.config.beam_size if beam_size is None else beam_size
-        if (
-            isinstance(resolved_beam, bool)
-            or not isinstance(resolved_beam, int)
-            or resolved_beam < 1
-        ):
+        if (isinstance(resolved_beam, bool) or not isinstance(resolved_beam, int) or resolved_beam < 1):
             raise ValueError("Beam size must be a positive integer.")
         sequences = []
         scores = []
         for index, length in enumerate(lengths):
             tokens, score = self._decode_one(
-                encoder_states[index, : int(length.item())],
+                encoder_states[index, :int(length.item())],
                 beam_size=resolved_beam,
             )
             sequences.append(tokens)

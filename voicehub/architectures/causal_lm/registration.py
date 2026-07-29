@@ -36,12 +36,8 @@ def create_causal_lm_architecture_spec() -> ArchitectureSpec:
             "voicehub.architectures.causal_lm.checkpoint:"
             "HuggingFaceCausalLMCheckpointAdapter"),
         components={
-            "granite-config": (
-                "voicehub.architectures.causal_lm.configuration:GraniteConfig"
-            ),
-            "granite-model": (
-                "voicehub.architectures.causal_lm.modeling:GraniteForCausalLM"
-            ),
+            "granite-config": ("voicehub.architectures.causal_lm.configuration:GraniteConfig"),
+            "granite-model": ("voicehub.architectures.causal_lm.modeling:GraniteForCausalLM"),
             "llama-config": ("voicehub.architectures.causal_lm.configuration:LlamaConfig"),
             "llama-model": ("voicehub.architectures.causal_lm.modeling:LlamaForCausalLM"),
             "qwen2-config": ("voicehub.architectures.causal_lm.configuration:Qwen2Config"),

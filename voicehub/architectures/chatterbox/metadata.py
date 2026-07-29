@@ -14,32 +14,22 @@ CHATTERBOX_COMPONENT_INVENTORIES = {
     "voice_encoder": {
         "tensor_count": 16,
         "parameter_count": 1_423_618,
-        "inventory_sha256": (
-            "72b7f222248b33ac93885d9056bf7e463c006a1da4a95a65b46b5428fc64a54e"
-        ),
+        "inventory_sha256": ("72b7f222248b33ac93885d9056bf7e463c006a1da4a95a65b46b5428fc64a54e"),
     },
     "t3": {
         "tensor_count": 292,
         "parameter_count": 532_405_248,
-        "inventory_sha256": (
-            "702aed62bb8f117db5a5b38ce96a1da957bed12a551f5bfe982636cc574cacb5"
-        ),
+        "inventory_sha256": ("702aed62bb8f117db5a5b38ce96a1da957bed12a551f5bfe982636cc574cacb5"),
     },
     "s3gen": {
         "tensor_count": 2_489,
         "parameter_count": 264_041_793,
-        "inventory_sha256": (
-            "f235fedc693ac64663dee304804f4024da836fcefc54a21a458f0adb2874e05a"
-        ),
+        "inventory_sha256": ("f235fedc693ac64663dee304804f4024da836fcefc54a21a458f0adb2874e05a"),
     },
 }
 
-CHATTERBOX_COMMUNITY_TRAINING_SOURCE = (
-    "https://github.com/gokhaneraslan/chatterbox-finetuning"
-)
-CHATTERBOX_COMMUNITY_TRAINING_REVISION = (
-    "fac31c46ec96b37283a363a1a96c2a0e56640e03"
-)
+CHATTERBOX_COMMUNITY_TRAINING_SOURCE = ("https://github.com/gokhaneraslan/chatterbox-finetuning")
+CHATTERBOX_COMMUNITY_TRAINING_REVISION = ("fac31c46ec96b37283a363a1a96c2a0e56640e03")
 CHATTERBOX_COMMUNITY_TRAINING_LICENSE = "Apache-2.0"
 
 __all__ = [

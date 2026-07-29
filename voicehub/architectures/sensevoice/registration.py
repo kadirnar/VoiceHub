@@ -56,7 +56,7 @@ def create_sensevoice_architecture_spec() -> ArchitectureSpec:
                 "safetensors",
                 "trust-gated-verified-pytorch-conversion",
             ),
-            export_formats=("safetensors",),
+            export_formats=("safetensors", ),
             training=True,
             streaming=False,
             batched_inference=True,

@@ -179,7 +179,8 @@ class JasperBlock(nn.Module):
 
 
 class QuartzNetEncoder(nn.Module):
-    """Configurable Jasper stack with the released ``encoder.encoder`` namespace."""
+    """Configurable Jasper stack with the released ``encoder.encoder``
+    namespace."""
 
     def __init__(self, config: NeMoQuartzNetCTCConfig) -> None:
         super().__init__()
@@ -227,7 +228,8 @@ class QuartzNetCTCDecoder(nn.Module):
 
 @dataclass(slots=True)
 class NeMoCTCOutput:
-    """Differentiable QuartzNet output used by inference and VoiceHub Trainer."""
+    """Differentiable QuartzNet output used by inference and VoiceHub
+    Trainer."""
 
     loss: Tensor | None
     logits: Tensor

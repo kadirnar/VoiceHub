@@ -27,6 +27,7 @@ class Conv1D(nn.Module):
 
 
 class GPT2Attention(nn.Module):
+
     def __init__(self, width: int, heads: int) -> None:
         super().__init__()
         if width % heads:
@@ -87,6 +88,7 @@ class GPT2Attention(nn.Module):
 
 
 class GPT2MLP(nn.Module):
+
     def __init__(self, width: int) -> None:
         super().__init__()
         self.c_fc = Conv1D(width * 4, width)
@@ -98,6 +100,7 @@ class GPT2MLP(nn.Module):
 
 
 class GPT2Block(nn.Module):
+
     def __init__(self, width: int, heads: int) -> None:
         super().__init__()
         self.ln_1 = nn.LayerNorm(width, eps=1e-5)

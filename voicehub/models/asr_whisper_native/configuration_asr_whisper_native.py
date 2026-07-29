@@ -60,19 +60,15 @@ class WhisperASRConfig(VoiceHubConfig):
         elif isinstance(inference_config, Mapping):
             inference_values = dict(inference_config)
         else:
-            raise TypeError(
-                "`inference_config` must be an ASRInferenceConfig, mapping, "
-                "or None."
-            )
+            raise TypeError("`inference_config` must be an ASRInferenceConfig, mapping, "
+                            "or None.")
         for name in ASRInferenceConfig._COMMON_FIELDS:
             if name in kwargs:
                 inference_values[name] = kwargs.pop(name)
 
         super().__init__(
             sample_rate=sample_rate,
-            inference_config=ASRInferenceConfig.from_dict(
-                inference_values
-            ).to_dict(),
+            inference_config=ASRInferenceConfig.from_dict(inference_values).to_dict(),
             **kwargs,
         )
         self.revision = revision
@@ -92,11 +88,8 @@ class WhisperASRConfig(VoiceHubConfig):
         if self.sample_rate != 16_000:
             raise ValueError(
                 "Whisper checkpoints require `sample_rate=16000`; VoiceHub "
-                "resamples public inputs at the processor boundary."
-            )
-        if self.revision is not None and (
-            not isinstance(self.revision, str) or not self.revision.strip()
-        ):
+                "resamples public inputs at the processor boundary.")
+        if self.revision is not None and (not isinstance(self.revision, str) or not self.revision.strip()):
             raise ValueError("`revision` must be a non-empty string or None.")
         if self.revision is not None:
             self.revision = self.revision.strip()
@@ -121,17 +114,13 @@ class WhisperASRConfig(VoiceHubConfig):
             self.torch_dtype = _DTYPE_ALIASES[normalized_dtype]
         except KeyError as error:
             choices = ", ".join(sorted(set(_DTYPE_ALIASES.values())))
-            raise ValueError(
-                f"`torch_dtype` must be one of: {choices}."
-            ) from error
+            raise ValueError(f"`torch_dtype` must be one of: {choices}.") from error
         values = getattr(self, "inference_config", {})
         if isinstance(values, ASRInferenceConfig):
             values = values.to_dict()
         if not isinstance(values, Mapping):
             raise TypeError("`inference_config` must serialize to a mapping.")
-        self.inference_config = ASRInferenceConfig.from_dict(
-            dict(values)
-        ).to_dict()
+        self.inference_config = ASRInferenceConfig.from_dict(dict(values)).to_dict()
 
     def to_dict(self) -> dict[str, Any]:
         """Validate mutable fields before serialization."""

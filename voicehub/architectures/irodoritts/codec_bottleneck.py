@@ -2,17 +2,19 @@
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-
 """Vector quantizer."""
-from typing import List
-from typing import Union
+
+from typing import List, Union
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from .codec_layers import NormConv1d
 
+
 class VAEBottleneck(nn.Module):
+
     def __init__(
         self,
         input_dim: int = 512,
@@ -22,10 +24,9 @@ class VAEBottleneck(nn.Module):
         super().__init__()
         self.codebook_size = codebook_size
         self.codebook_dim = codebook_dim
-        self.in_proj = NormConv1d(input_dim, codebook_dim*2, kernel_size=1)
+        self.in_proj = NormConv1d(input_dim, codebook_dim * 2, kernel_size=1)
         self.out_proj = NormConv1d(codebook_dim, input_dim, kernel_size=1)
         self.dummy_codebook_loss = torch.tensor(0.0)
-
 
     def forward(self, z, n_quantizers: int = None):
         mean, scale = self.in_proj(z).chunk(2, dim=1)

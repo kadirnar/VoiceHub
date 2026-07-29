@@ -1,14 +1,15 @@
 """Checkpoint-compatible Llama 3.2 decoder used by ConversationTTS.
 
-The public ConversationTTS checkpoint was trained with TorchTune's Llama 3.2
-components.  This module owns the exact subset of that graph required by
-VoiceHub: pre-normalized decoder layers, grouped-query attention, Llama 3
-scaled RoPE, SwiGLU feed-forward blocks, and fixed-size inference caches.
+The public ConversationTTS checkpoint was trained with TorchTune's Llama
+3.2 components.  This module owns the exact subset of that graph
+required by VoiceHub: pre-normalized decoder layers, grouped-query
+attention, Llama 3 scaled RoPE, SwiGLU feed-forward blocks, and fixed-
+size inference caches.
 
 Parameter names deliberately match the released checkpoint (for example
 ``layers.0.attn.q_proj.weight``, ``layers.0.mlp.w1.weight``, and
-``norm.scale``).  Cache tensors and RoPE tables are non-persistent buffers, so
-serving state never leaks into a fine-tuning artifact.
+``norm.scale``).  Cache tensors and RoPE tables are non-persistent
+buffers, so serving state never leaks into a fine-tuning artifact.
 """
 
 from __future__ import annotations
@@ -23,7 +24,8 @@ from torch.nn import functional
 
 
 class ConversationRMSNorm(nn.Module):
-    """RMS normalization with the parameter namespace used by the checkpoint."""
+    """RMS normalization with the parameter namespace used by the
+    checkpoint."""
 
     def __init__(self, dimension: int, *, epsilon: float = 1e-5) -> None:
         super().__init__()
@@ -31,7 +33,7 @@ class ConversationRMSNorm(nn.Module):
             raise ValueError("`dimension` must be a positive integer.")
         if not math.isfinite(epsilon) or epsilon <= 0:
             raise ValueError("`epsilon` must be finite and positive.")
-        self.normalized_shape = (dimension,)
+        self.normalized_shape = (dimension, )
         self.epsilon = float(epsilon)
         self.scale = nn.Parameter(torch.ones(dimension))
 
@@ -86,15 +88,13 @@ class Llama3ScaledRotaryEmbedding(nn.Module):
         if original_context_length <= 0:
             raise ValueError("`original_context_length` must be positive.")
 
-        frequencies = 1.0 / (
-            base**(torch.arange(0, dimension, 2, dtype=torch.float32) / dimension))
+        frequencies = 1.0 / (base**(torch.arange(0, dimension, 2, dtype=torch.float32) / dimension))
         low_wavelength = original_context_length / low_frequency_factor
         high_wavelength = original_context_length / high_frequency_factor
         wavelengths = (2.0 * math.pi) / frequencies
         scaled = frequencies / scale_factor
-        smooth = (
-            original_context_length / wavelengths - low_frequency_factor
-        ) / (high_frequency_factor - low_frequency_factor)
+        smooth = (original_context_length / wavelengths -
+                  low_frequency_factor) / (high_frequency_factor - low_frequency_factor)
         medium = (1.0 - smooth) * scaled + smooth * frequencies
         theta = torch.where(
             wavelengths < high_wavelength,
@@ -116,8 +116,7 @@ class Llama3ScaledRotaryEmbedding(nn.Module):
         input_positions: Tensor | None = None,
     ) -> Tensor:
         if inputs.ndim != 4 or inputs.shape[-1] != self.dimension:
-            raise ValueError(
-                "Rotary inputs must have shape [batch, time, heads, dimension].")
+            raise ValueError("Rotary inputs must have shape [batch, time, heads, dimension].")
         sequence_length = inputs.shape[1]
         if input_positions is None:
             if sequence_length > self.maximum_sequence_length:
@@ -126,21 +125,14 @@ class Llama3ScaledRotaryEmbedding(nn.Module):
         else:
             if not isinstance(input_positions, Tensor):
                 raise TypeError("`input_positions` must be a PyTorch tensor.")
-            if (
-                input_positions.dtype == torch.bool
-                or input_positions.is_floating_point()
-                or input_positions.is_complex()
-            ):
+            if (input_positions.dtype == torch.bool or input_positions.is_floating_point() or
+                    input_positions.is_complex()):
                 raise TypeError("`input_positions` must use an integer dtype.")
             if input_positions.ndim == 1:
                 input_positions = input_positions.unsqueeze(0)
-            if (
-                input_positions.ndim != 2
-                or input_positions.shape[-1] != sequence_length
-                or input_positions.shape[0] not in (1, inputs.shape[0])
-            ):
-                raise ValueError(
-                    "`input_positions` must have shape [1|batch, time].")
+            if (input_positions.ndim != 2 or input_positions.shape[-1] != sequence_length or
+                    input_positions.shape[0] not in (1, inputs.shape[0])):
+                raise ValueError("`input_positions` must have shape [1|batch, time].")
             if input_positions.numel():
                 minimum = int(input_positions.min().item())
                 maximum = int(input_positions.max().item())
@@ -185,10 +177,10 @@ class ConversationKVCache(nn.Module):
     ) -> None:
         super().__init__()
         if min(
-            batch_size,
-            maximum_sequence_length,
-            number_of_heads,
-            head_dimension,
+                batch_size,
+                maximum_sequence_length,
+                number_of_heads,
+                head_dimension,
         ) <= 0:
             raise ValueError("Cache dimensions must be positive.")
         shape = (
@@ -228,9 +220,9 @@ class ConversationKVCache(nn.Module):
         if key.shape[0] > self.k_cache.shape[0]:
             raise ValueError("Cache input batch exceeds the configured batch size.")
         if key.shape[1:] != (
-            self.k_cache.shape[1],
-            key.shape[2],
-            self.k_cache.shape[3],
+                self.k_cache.shape[1],
+                key.shape[2],
+                self.k_cache.shape[3],
         ):
             raise ValueError("Cache input head dimensions are incompatible.")
         sequence_length = key.shape[2]
@@ -338,18 +330,12 @@ class ConversationMultiHeadAttention(nn.Module):
                 raise ValueError("Rank-two attention mask has an invalid shape.")
             mask = mask.view(1, 1, query_length, key_length)
         elif mask.ndim == 3:
-            if (
-                mask.shape[0] not in (1, batch_size)
-                or tuple(mask.shape[1:]) != (query_length, key_length)
-            ):
+            if (mask.shape[0] not in (1, batch_size) or tuple(mask.shape[1:]) != (query_length, key_length)):
                 raise ValueError("Rank-three attention mask has an invalid shape.")
             mask = mask.unsqueeze(1)
         elif mask.ndim == 4:
-            if (
-                mask.shape[0] not in (1, batch_size)
-                or mask.shape[1] not in (1,)
-                or tuple(mask.shape[2:]) != (query_length, key_length)
-            ):
+            if (mask.shape[0] not in (1, batch_size) or mask.shape[1] not in (1, ) or
+                    tuple(mask.shape[2:]) != (query_length, key_length)):
                 raise ValueError("Rank-four attention mask has an invalid shape.")
         else:
             raise ValueError("Attention mask must have rank two, three, or four.")
@@ -364,8 +350,7 @@ class ConversationMultiHeadAttention(nn.Module):
         input_pos: Tensor | None = None,
     ) -> Tensor:
         if inputs.ndim != 3 or inputs.shape[-1] != self.embed_dim:
-            raise ValueError(
-                "Attention inputs must have shape [batch, time, embedding].")
+            raise ValueError("Attention inputs must have shape [batch, time, embedding].")
         values = inputs if values is None else values
         if values.ndim != 3 or values.shape[0] != inputs.shape[0]:
             raise ValueError("Attention key/value inputs have an invalid shape.")
@@ -499,13 +484,12 @@ class ConversationDecoderLayer(nn.Module):
         **_: Any,
     ) -> Tensor:
         normalized = self.sa_norm(inputs)
-        hidden = inputs + self.sa_scale(
-            self.attn(
-                normalized,
-                normalized,
-                mask=mask,
-                input_pos=input_pos,
-            ))
+        hidden = inputs + self.sa_scale(self.attn(
+            normalized,
+            normalized,
+            mask=mask,
+            input_pos=input_pos,
+        ))
         return hidden + self.mlp_scale(self.mlp(self.mlp_norm(hidden)))
 
 
@@ -549,11 +533,7 @@ class ConversationDecoder(nn.Module):
     ) -> None:
         if self.caches_are_setup():
             raise RuntimeError("Decoder caches are already initialized.")
-        maximum_length = (
-            self.max_seq_len
-            if decoder_max_seq_len is None
-            else decoder_max_seq_len
-        )
+        maximum_length = (self.max_seq_len if decoder_max_seq_len is None else decoder_max_seq_len)
         if maximum_length <= 0 or maximum_length > self.max_seq_len:
             raise ValueError("Decoder cache length is outside the supported range.")
         self.decoder_max_cache_seq_len = maximum_length
@@ -587,8 +567,7 @@ class ConversationDecoder(nn.Module):
         if inputs.ndim < 2 or inputs.shape[1] > self.max_seq_len:
             raise ValueError("Decoder input sequence exceeds `max_seq_len`.")
         if self.caches_are_enabled() and (mask is None or input_pos is None):
-            raise ValueError(
-                "Cached decoding requires both `mask` and `input_pos`.")
+            raise ValueError("Cached decoding requires both `mask` and `input_pos`.")
         hidden = self.tok_embeddings(inputs)
         for layer in self.layers:
             hidden = layer(
@@ -650,8 +629,7 @@ def build_llama32_decoder(
             ),
             embedding_dimension=embedding_dimension,
             normalization_epsilon=normalization_epsilon,
-        )
-        for _ in range(number_of_layers)
+        ) for _ in range(number_of_layers)
     ]
     return ConversationDecoder(
         token_embeddings=nn.Embedding(vocabulary_size, embedding_dimension),

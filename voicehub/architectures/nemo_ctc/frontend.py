@@ -52,7 +52,8 @@ class NeMoFilterbankFeatures(nn.Module):
         )
 
     def feature_lengths(self, waveform_lengths: Tensor) -> Tensor:
-        """Match NeMo's centered-STFT logical length (the final frame is masked)."""
+        """Match NeMo's centered-STFT logical length (the final frame is
+        masked)."""
         lengths = torch.as_tensor(waveform_lengths)
         return torch.div(
             lengths,

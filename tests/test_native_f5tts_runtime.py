@@ -28,13 +28,8 @@ from voicehub.architectures.f5tts.metadata import (
     VOCOS_SOURCE_REVISION,
 )
 from voicehub.architectures.f5tts.modeling import F5ConditionalFlowMatcher
-from voicehub.architectures.f5tts.modules import (
-    RotaryEmbedding,
-    apply_rotary_position_embedding,
-)
-from voicehub.architectures.f5tts.registration import (
-    create_f5tts_architecture_spec,
-)
+from voicehub.architectures.f5tts.modules import RotaryEmbedding, apply_rotary_position_embedding
+from voicehub.architectures.f5tts.registration import create_f5tts_architecture_spec
 from voicehub.architectures.f5tts.runtime import NativeF5TTSRuntime
 from voicehub.architectures.f5tts.vocoder import NativeVocos
 from voicehub.models.f5tts.inference import F5TTSConfig, F5TTSForTextToSpeech
@@ -62,9 +57,7 @@ def _tiny_config() -> F5TTSArchitectureConfig:
 
 
 def _tiny_vocabulary() -> F5Vocabulary:
-    return F5Vocabulary(
-        (" ", ".", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j")
-    )
+    return F5Vocabulary((" ", ".", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j"))
 
 
 class NativeF5TTSRuntimeTests(unittest.TestCase):
@@ -77,8 +70,7 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
             "s=create_f5tts_architecture_spec();"
             "print(json.dumps({'torch': 'torch' in sys.modules,"
             "'license': s.license_id,"
-            "'checkpoint': s.metadata['checkpoint_license']}))"
-        )
+            "'checkpoint': s.metadata['checkpoint_license']}))")
         result = subprocess.run(
             (sys.executable, "-c", code),
             check=True,
@@ -107,30 +99,21 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
             F5TTS_V1_BASE_PARAMETER_COUNT,
         )
         self.assertEqual(
-            tuple(
-                state[
-                    "transformer.text_embed.text_embed.weight"
-                ].shape
-            ),
+            tuple(state["transformer.text_embed.text_embed.weight"].shape),
             (2_546, 512),
         )
         self.assertEqual(
             tuple(state["transformer.rotary_embed.inv_freq"].shape),
-            (32,),
+            (32, ),
         )
 
     def test_rotary_embedding_uses_x_transformers_adjacent_pairs(self):
         rotary = RotaryEmbedding(4)
         frequencies, scale = rotary.forward_from_seq_len(2)
-        hidden = torch.tensor(
-            [[[[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]]]
-        )
+        hidden = torch.tensor([[[[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]]])
         actual = apply_rotary_position_embedding(hidden, frequencies, scale)
         angle = frequencies[1]
-        expected_last = (
-            hidden[0, 0, 1] * angle.cos()
-            + torch.tensor([-6.0, 5.0, -8.0, 7.0]) * angle.sin()
-        )
+        expected_last = (hidden[0, 0, 1] * angle.cos() + torch.tensor([-6.0, 5.0, -8.0, 7.0]) * angle.sin())
         self.assertTrue(torch.allclose(actual[0, 0, 0], hidden[0, 0, 0]))
         self.assertTrue(torch.allclose(actual[0, 0, 1], expected_last))
 
@@ -150,9 +133,7 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
         self.assertEqual(loss.ndim, 0)
         self.assertEqual(conditioning.shape, mel.shape)
         self.assertEqual(prediction.shape, mel.shape)
-        self.assertIsNotNone(
-            model.transformer.input_embed.proj.weight.grad
-        )
+        self.assertIsNotNone(model.transformer.input_embed.proj.weight.grad)
 
     def test_native_sampler_is_seeded_and_preserves_reference_frames(self):
         model = F5ConditionalFlowMatcher(_tiny_config()).eval()
@@ -162,7 +143,7 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
             reference,
             text,
             12,
-            lengths=torch.tensor((7,)),
+            lengths=torch.tensor((7, )),
             steps=3,
             seed=31,
         )
@@ -170,7 +151,7 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
             reference,
             text,
             12,
-            lengths=torch.tensor((7,)),
+            lengths=torch.tensor((7, )),
             steps=3,
             seed=31,
         )
@@ -195,13 +176,10 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
                 self.assertTrue(torch.equal(tensor, target.state_dict()[name]))
 
             incompatible = F5ConditionalFlowMatcher(
-                F5TTSArchitectureConfig(
-                    **{
-                        **_tiny_config().to_dict(),
-                        "text_num_embeds": 13,
-                    }
-                )
-            )
+                F5TTSArchitectureConfig(**{
+                    **_tiny_config().to_dict(),
+                    "text_num_embeds": 13,
+                }))
             with self.assertRaisesRegex(ValueError, "shape"):
                 load_f5tts_checkpoint(incompatible, checkpoint)
 
@@ -211,12 +189,10 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
             legacy = Path(directory) / "legacy.pt"
             native = Path(directory) / "model.safetensors"
             torch.save(
-                {
-                    "state_dict": {
-                        f"ema_model.{name}": value
-                        for name, value in model.state_dict().items()
-                    }
-                },
+                {"state_dict": {
+                    f"ema_model.{name}": value
+                    for name, value in model.state_dict().items()
+                }},
                 legacy,
             )
             with patch.object(torch, "load", wraps=torch.load) as load:
@@ -276,7 +252,7 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
         ).setup()
         with torch.no_grad():
             next(flow.parameters()).add_(0.25)
-        adapter.on_optimizer_step(optimizer_names=("model",), step=1)
+        adapter.on_optimizer_step(optimizer_names=("model", ), step=1)
 
         with tempfile.TemporaryDirectory() as directory:
             adapter.save_pretrained(directory)

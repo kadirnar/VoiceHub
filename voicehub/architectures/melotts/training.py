@@ -218,7 +218,8 @@ class MeloTTSMelSpectrogram(nn.Module):
 
 
 class MeloTTSTrainingModel(nn.Module):
-    """Differentiable generator, waveform discriminator, and duration phases."""
+    """Differentiable generator, waveform discriminator, and duration
+    phases."""
 
     def __init__(
         self,

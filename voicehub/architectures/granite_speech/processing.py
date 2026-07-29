@@ -10,22 +10,12 @@ from typing import Any
 import torch
 from torch import Tensor
 
-from voicehub.architectures.granite_speech.configuration import (
-    GraniteSpeechArchitectureConfig,
-)
-from voicehub.architectures.granite_speech.frontend import (
-    SAMPLE_RATE,
-    GraniteSpeechFeatureExtractor,
-)
-from voicehub.architectures.granite_speech.tokenization import (
-    AUDIO_TOKEN,
-    GraniteSpeechTokenizer,
-)
+from voicehub.architectures.granite_speech.configuration import GraniteSpeechArchitectureConfig
+from voicehub.architectures.granite_speech.frontend import SAMPLE_RATE, GraniteSpeechFeatureExtractor
+from voicehub.architectures.granite_speech.tokenization import AUDIO_TOKEN, GraniteSpeechTokenizer
 from voicehub.hub import write_json_file
 
-DEFAULT_TRANSCRIPTION_PROMPT = (
-    "Please transcribe the following audio to text<|audio|>"
-)
+DEFAULT_TRANSCRIPTION_PROMPT = ("Please transcribe the following audio to text<|audio|>")
 
 
 def _broadcast(
@@ -36,21 +26,20 @@ def _broadcast(
     default: Any = None,
 ) -> tuple[Any, ...]:
     if value is None:
-        return (default,) * batch_size
+        return (default, ) * batch_size
     if isinstance(value, (str, bytes, Path)):
-        return (value,) * batch_size
+        return (value, ) * batch_size
     if isinstance(value, Tensor):
         if value.ndim == 0:
-            return (value.item(),) * batch_size
+            return (value.item(), ) * batch_size
         values = tuple(value.detach().cpu().tolist())
     elif isinstance(value, Sequence):
         values = tuple(value)
     else:
-        return (value,) * batch_size
+        return (value, ) * batch_size
     if len(values) != batch_size:
-        raise ValueError(
-            f"`{name}` contains {len(values)} values for a batch of "
-            f"{batch_size}.")
+        raise ValueError(f"`{name}` contains {len(values)} values for a batch of "
+                         f"{batch_size}.")
     return values
 
 
@@ -66,13 +55,11 @@ class GraniteSpeechProcessor:
         processor_config_path: Path | None = None,
     ) -> None:
         if not isinstance(config, GraniteSpeechArchitectureConfig):
-            raise TypeError(
-                "`config` must be GraniteSpeechArchitectureConfig.")
+            raise TypeError("`config` must be GraniteSpeechArchitectureConfig.")
         if not isinstance(tokenizer, GraniteSpeechTokenizer):
             raise TypeError("`tokenizer` must be GraniteSpeechTokenizer.")
         if tokenizer.audio_token_id != config.audio_token_index:
-            raise ValueError(
-                "Granite Speech tokenizer and model audio token IDs disagree.")
+            raise ValueError("Granite Speech tokenizer and model audio token IDs disagree.")
         if tokenizer.token_id_space_size != config.text_config.vocab_size:
             raise ValueError(
                 "Granite Speech tokenizer ID space does not match the "
@@ -101,14 +88,9 @@ class GraniteSpeechProcessor:
 
     @staticmethod
     def instruction_prompt(prompt: str | None) -> str:
-        instruction = (
-            DEFAULT_TRANSCRIPTION_PROMPT
-            if prompt is None
-            else prompt
-        )
+        instruction = (DEFAULT_TRANSCRIPTION_PROMPT if prompt is None else prompt)
         if not isinstance(instruction, str) or not instruction.strip():
-            raise ValueError(
-                "Granite Speech prompt must be a non-empty string.")
+            raise ValueError("Granite Speech prompt must be a non-empty string.")
         instruction = instruction.strip()
         if AUDIO_TOKEN not in instruction:
             instruction = f"{AUDIO_TOKEN}{instruction}"
@@ -125,21 +107,10 @@ class GraniteSpeechProcessor:
     ) -> str:
         if hotwords is None:
             return instruction
-        values = (
-            (hotwords,)
-            if isinstance(hotwords, str)
-            else tuple(hotwords)
-        )
-        if not values or any(
-            not isinstance(value, str) or not value.strip()
-            for value in values
-        ):
-            raise ValueError(
-                "Granite Speech hotwords must be non-empty strings.")
-        return (
-            f"{instruction.rstrip()} Keywords: "
-            + ", ".join(value.strip() for value in values)
-        )
+        values = ((hotwords, ) if isinstance(hotwords, str) else tuple(hotwords))
+        if not values or any(not isinstance(value, str) or not value.strip() for value in values):
+            raise ValueError("Granite Speech hotwords must be non-empty strings.")
+        return (f"{instruction.rstrip()} Keywords: " + ", ".join(value.strip() for value in values))
 
     @staticmethod
     def render_instruction(instruction: str) -> str:
@@ -153,11 +124,7 @@ class GraniteSpeechProcessor:
         audio_tokens: int,
         hotwords: str | Sequence[str] | None = None,
     ) -> str:
-        if (
-            isinstance(audio_tokens, bool)
-            or not isinstance(audio_tokens, int)
-            or audio_tokens <= 0
-        ):
+        if (isinstance(audio_tokens, bool) or not isinstance(audio_tokens, int) or audio_tokens <= 0):
             raise ValueError("`audio_tokens` must be a positive integer.")
         instruction = self._with_hotwords(
             self.instruction_prompt(prompt),
@@ -198,12 +165,10 @@ class GraniteSpeechProcessor:
         *,
         sampling_rates: int | None | Sequence[int | None],
         prompts: str | None | Sequence[str | None] = None,
-        hotwords: (
-            str
-            | Sequence[str]
-            | Sequence[str | Sequence[str] | None]
-            | None
-        ) = None,
+        hotwords: (str
+                   | Sequence[str]
+                   | Sequence[str | Sequence[str] | None]
+                   | None) = None,
     ) -> dict[str, Tensor]:
         materialized = self.feature_extractor.materialize(
             audios,
@@ -211,10 +176,7 @@ class GraniteSpeechProcessor:
         )
         features = self.feature_extractor.extract(
             materialized,
-            sampling_rates=tuple(
-                item.sampling_rate
-                for item in materialized
-            ),
+            sampling_rates=tuple(item.sampling_rate for item in materialized),
         )
         batch_size = len(materialized)
         prompt_rows = _broadcast(
@@ -223,18 +185,10 @@ class GraniteSpeechProcessor:
             name="prompts",
             default=None,
         )
-        if (
-            batch_size == 1
-            and hotwords is not None
-            and (
-                isinstance(hotwords, str)
-                or (
-                    isinstance(hotwords, Sequence)
-                    and all(isinstance(item, str) for item in hotwords)
-                )
-            )
-        ):
-            hotword_rows = (hotwords,)
+        if (batch_size == 1 and hotwords is not None and
+            (isinstance(hotwords, str) or
+             (isinstance(hotwords, Sequence) and all(isinstance(item, str) for item in hotwords)))):
+            hotword_rows = (hotwords, )
         else:
             hotword_rows = _broadcast(
                 hotwords,
@@ -247,17 +201,12 @@ class GraniteSpeechProcessor:
                 prompt=prompt,
                 audio_tokens=int(size.item()),
                 hotwords=keywords,
-            )
-            for prompt, keywords, size in zip(
+            ) for prompt, keywords, size in zip(
                 prompt_rows,
                 hotword_rows,
                 features["audio_embed_sizes"],
-            )
-        )
-        encoded = tuple(
-            self.tokenizer.encode_prompt(text).input_ids
-            for text in texts
-        )
+            ))
+        encoded = tuple(self.tokenizer.encode_prompt(text).input_ids for text in texts)
         input_ids, attention_mask = self._left_pad(
             encoded,
             pad_token_id=self.tokenizer.pad_token_id,
@@ -284,20 +233,12 @@ class GraniteSpeechProcessor:
         )
         texts = tuple(transcripts)
         if len(texts) != len(materialized):
-            raise ValueError(
-                "Granite Speech requires one transcript per waveform.")
-        if not texts or any(
-            not isinstance(text, str) or not text.strip()
-            for text in texts
-        ):
-            raise ValueError(
-                "Granite Speech transcripts must be non-empty strings.")
+            raise ValueError("Granite Speech requires one transcript per waveform.")
+        if not texts or any(not isinstance(text, str) or not text.strip() for text in texts):
+            raise ValueError("Granite Speech transcripts must be non-empty strings.")
         features = self.feature_extractor.extract(
             materialized,
-            sampling_rates=tuple(
-                item.sampling_rate
-                for item in materialized
-            ),
+            sampling_rates=tuple(item.sampling_rate for item in materialized),
         )
         prompt_rows = _broadcast(
             prompts,
@@ -306,24 +247,17 @@ class GraniteSpeechProcessor:
             default=None,
         )
         encoded_prompts = tuple(
-            self.tokenizer.encode_prompt(
-                self.build_prompt(
-                    prompt=prompt,
-                    audio_tokens=int(size.item()),
-                )
-            ).input_ids
-            for prompt, size in zip(
+            self.tokenizer.encode_prompt(self.build_prompt(
+                prompt=prompt,
+                audio_tokens=int(size.item()),
+            )).input_ids for prompt, size in zip(
                 prompt_rows,
                 features["audio_embed_sizes"],
-            )
-        )
-        encoded_targets = tuple(
-            (
-                *self.tokenizer.encode_transcript(text).input_ids,
-                self.tokenizer.eos_token_id,
-            )
-            for text in texts
-        )
+            ))
+        encoded_targets = tuple((
+            *self.tokenizer.encode_transcript(text).input_ids,
+            self.tokenizer.eos_token_id,
+        ) for text in texts)
         prompt_width = max(len(row) for row in encoded_prompts)
         target_width = max(len(row) for row in encoded_targets)
         total_width = prompt_width + target_width
@@ -341,9 +275,7 @@ class GraniteSpeechProcessor:
             -100,
             dtype=torch.long,
         )
-        for index, (prompt_ids, target_ids) in enumerate(
-            zip(encoded_prompts, encoded_targets)
-        ):
+        for index, (prompt_ids, target_ids) in enumerate(zip(encoded_prompts, encoded_targets)):
             prompt_start = prompt_width - len(prompt_ids)
             prompt_tensor = torch.tensor(
                 prompt_ids,
@@ -389,9 +321,7 @@ class GraniteSpeechProcessor:
             write_json_file(
                 target / "preprocessor_config.json",
                 {
-                    "feature_extractor_type": (
-                        "GraniteSpeechFeatureExtractor"
-                    ),
+                    "feature_extractor_type": ("GraniteSpeechFeatureExtractor"),
                     "melspec_kwargs": {
                         "hop_length": self.feature_extractor.hop_length,
                         "n_fft": self.feature_extractor.n_fft,
@@ -400,12 +330,8 @@ class GraniteSpeechProcessor:
                         "win_length": self.feature_extractor.win_length,
                     },
                     "processor_class": "GraniteSpeechProcessor",
-                    "projector_downsample_rate": (
-                        self.feature_extractor.projector_downsample_rate
-                    ),
-                    "projector_window_size": (
-                        self.feature_extractor.projector_window_size
-                    ),
+                    "projector_downsample_rate": (self.feature_extractor.projector_downsample_rate),
+                    "projector_window_size": (self.feature_extractor.projector_window_size),
                     "sampling_rate": self.feature_extractor.sampling_rate,
                 },
             )

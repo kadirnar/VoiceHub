@@ -18,8 +18,7 @@ class NativeSenseVoiceTrainingAdapter(CTCTrainingAdapter):
     def setup(self) -> NativeSenseVoiceTrainingAdapter:
         super().setup()
         if getattr(self.model, "architecture_family", None) != "ctc":
-            raise ValueError(
-                "Native SenseVoice fine-tuning requires the CTC runtime.")
+            raise ValueError("Native SenseVoice fine-tuning requires the CTC runtime.")
         if self.primary_model is not getattr(self.model, "model", None):
             raise ValueError(
                 "Native SenseVoice fine-tuning must target the wrapper's "

@@ -21,9 +21,7 @@ def __getattr__(name: str) -> Any:
     try:
         module_name = _EXPORTS[name]
     except KeyError:
-        raise AttributeError(
-            f"module {__name__!r} has no attribute {name!r}"
-        ) from None
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
     value = getattr(import_module(module_name), name)
     globals()[name] = value
     return value

@@ -26,29 +26,17 @@ class LoRAConfig:
     def __post_init__(self) -> None:
         if isinstance(self.rank, bool) or not isinstance(self.rank, int) or self.rank <= 0:
             raise ValueError("LoRA `rank` must be a positive integer.")
-        if (
-            isinstance(self.alpha, bool)
-            or not isinstance(self.alpha, (int, float))
-            or not math.isfinite(float(self.alpha))
-            or self.alpha <= 0
-        ):
+        if (isinstance(self.alpha, bool) or not isinstance(self.alpha, (int, float)) or
+                not math.isfinite(float(self.alpha)) or self.alpha <= 0):
             raise ValueError("LoRA `alpha` must be finite and positive.")
         object.__setattr__(self, "alpha", float(self.alpha))
-        if (
-            isinstance(self.dropout, bool)
-            or not isinstance(self.dropout, (int, float))
-            or not 0.0 <= float(self.dropout) < 1.0
-        ):
+        if (isinstance(self.dropout, bool) or not isinstance(self.dropout, (int, float)) or
+                not 0.0 <= float(self.dropout) < 1.0):
             raise ValueError("LoRA `dropout` must be in [0, 1).")
         object.__setattr__(self, "dropout", float(self.dropout))
         patterns = tuple(self.target_modules)
-        if not patterns or any(
-            not isinstance(pattern, str) or not pattern.strip()
-            for pattern in patterns
-        ):
-            raise ValueError(
-                "LoRA `target_modules` must contain non-empty glob patterns."
-            )
+        if not patterns or any(not isinstance(pattern, str) or not pattern.strip() for pattern in patterns):
+            raise ValueError("LoRA `target_modules` must contain non-empty glob patterns.")
         if len(patterns) != len(set(patterns)):
             raise ValueError("LoRA target patterns cannot contain duplicates.")
         object.__setattr__(
@@ -82,8 +70,7 @@ class LoRALinear(nn.Module):
         if config.rank > min(base.in_features, base.out_features):
             raise ValueError(
                 f"LoRA rank {config.rank} exceeds the smaller dimension of "
-                f"Linear({base.in_features}, {base.out_features})."
-            )
+                f"Linear({base.in_features}, {base.out_features}).")
         self.base = base
         self.rank = config.rank
         self.alpha = config.alpha
@@ -95,21 +82,15 @@ class LoRALinear(nn.Module):
                 base.in_features,
                 dtype=base.weight.dtype,
                 device=base.weight.device,
-            )
-        )
+            ))
         self.lora_b = nn.Parameter(
             torch.zeros(
                 base.out_features,
                 config.rank,
                 dtype=base.weight.dtype,
                 device=base.weight.device,
-            )
-        )
-        generator_device = (
-            base.weight.device
-            if base.weight.device.type == "cuda"
-            else torch.device("cpu")
-        )
+            ))
+        generator_device = (base.weight.device if base.weight.device.type == "cuda" else torch.device("cpu"))
         generator = torch.Generator(device=generator_device)
         generator.manual_seed(config.seed + seed_offset)
         bound = 1.0 / math.sqrt(base.in_features)
@@ -149,8 +130,7 @@ class LoRALinear(nn.Module):
                 self.adapter_delta().to(
                     device=self.base.weight.device,
                     dtype=self.base.weight.dtype,
-                )
-            )
+                ))
         self._merged = True
 
     def unmerge(self) -> None:
@@ -162,8 +142,7 @@ class LoRALinear(nn.Module):
                 self.adapter_delta().to(
                     device=self.base.weight.device,
                     dtype=self.base.weight.dtype,
-                )
-            )
+                ))
         self._merged = False
 
     def restore_base_trainability(self) -> None:
@@ -174,10 +153,8 @@ class LoRALinear(nn.Module):
 def _matches(name: str, patterns: tuple[str, ...]) -> bool:
     leaf = name.rpartition(".")[2]
     return any(
-        fnmatchcase(name, pattern)
-        or ("*" not in pattern and "?" not in pattern and leaf == pattern)
-        for pattern in patterns
-    )
+        fnmatchcase(name, pattern) or ("*" not in pattern and "?" not in pattern and leaf == pattern)
+        for pattern in patterns)
 
 
 def _parent_module(model: nn.Module, module_name: str) -> tuple[nn.Module, str]:
@@ -245,10 +222,8 @@ class LoRAInjection:
         missing = tuple(sorted(expected - received))
         unexpected = tuple(sorted(received - expected))
         if strict and (missing or unexpected):
-            raise ValueError(
-                f"LoRA state mismatch: missing={missing!r}, "
-                f"unexpected={unexpected!r}."
-            )
+            raise ValueError(f"LoRA state mismatch: missing={missing!r}, "
+                             f"unexpected={unexpected!r}.")
         destinations = {
             key: parameter
             for name, module in self.modules.items()
@@ -265,16 +240,14 @@ class LoRAInjection:
             if tuple(source.shape) != tuple(destination.shape):
                 raise ValueError(
                     f"LoRA state {key!r} has shape {tuple(source.shape)!r}; "
-                    f"expected {tuple(destination.shape)!r}."
-                )
+                    f"expected {tuple(destination.shape)!r}.")
         with torch.no_grad():
             for key in sorted(expected & received):
                 destinations[key].copy_(
                     state_dict[key].to(
                         device=destinations[key].device,
                         dtype=destinations[key].dtype,
-                    )
-                )
+                    ))
         return missing, unexpected
 
     def restore(self) -> nn.Module:
@@ -302,30 +275,19 @@ def inject_lora(model: nn.Module, config: LoRAConfig) -> LoRAInjection:
         raise TypeError("LoRA injection requires a torch.nn.Module.")
     if not isinstance(config, LoRAConfig):
         raise TypeError("`config` must be a LoRAConfig.")
-    selected = [
-        (name, module)
-        for name, module in model.named_modules()
-        if name
-        and isinstance(module, nn.Linear)
-        and _matches(name, config.target_modules)
-    ]
+    selected = [(name, module) for name, module in model.named_modules()
+                if name and isinstance(module, nn.Linear) and _matches(name, config.target_modules)]
     if not selected:
-        available = tuple(
-            name
-            for name, module in model.named_modules()
-            if isinstance(module, nn.Linear)
-        )
+        available = tuple(name for name, module in model.named_modules() if isinstance(module, nn.Linear))
         raise ValueError(
             f"LoRA target patterns {config.target_modules!r} matched no "
-            f"linear modules. Available: {available!r}."
-        )
+            f"linear modules. Available: {available!r}.")
     for name, module in selected:
         if config.rank > min(module.in_features, module.out_features):
             raise ValueError(
                 f"LoRA rank {config.rank} is incompatible with target "
                 f"{name!r} shaped ({module.out_features}, "
-                f"{module.in_features})."
-            )
+                f"{module.in_features}).")
 
     wrappers: dict[str, LoRALinear] = {}
     try:

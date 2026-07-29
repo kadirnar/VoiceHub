@@ -67,9 +67,7 @@ def _safe_filename(value: str | None, *, name: str) -> str | None:
 def _required(root: Path, filename: str, *, owner: str) -> Path:
     path = root / filename
     if not path.is_file():
-        raise FileNotFoundError(
-            f"Native {owner} requires {filename!r} in {root}."
-        )
+        raise FileNotFoundError(f"Native {owner} requires {filename!r} in {root}.")
     return path.resolve()
 
 
@@ -79,10 +77,7 @@ def _optional(root: Path, filename: str) -> Path | None:
 
 
 def _validate_checkpoint(path: Path, *, owner: str) -> None:
-    if not (
-        path.suffix == ".safetensors"
-        or path.name.endswith(".safetensors.index.json")
-    ):
+    if not (path.suffix == ".safetensors" or path.name.endswith(".safetensors.index.json")):
         raise ValueError(f"Native {owner} accepts Safetensors checkpoints only.")
 
 
@@ -90,20 +85,14 @@ def _shard_names(index: Path, *, owner: str) -> tuple[str, ...]:
     document = read_json_file(index)
     weight_map = document.get("weight_map")
     if not isinstance(weight_map, dict) or not weight_map:
-        raise ValueError(
-            f"{owner} Safetensors index requires a non-empty `weight_map`."
-        )
+        raise ValueError(f"{owner} Safetensors index requires a non-empty `weight_map`.")
     names = set()
     for name in weight_map.values():
         if not isinstance(name, str):
             raise ValueError(f"{owner} checkpoint shard names must be strings.")
         path = PurePosixPath(name)
-        if (
-            path.is_absolute()
-            or len(path.parts) != 1
-            or ".." in path.parts
-            or not name.endswith(".safetensors")
-        ):
+        if (path.is_absolute() or len(path.parts) != 1 or ".." in path.parts or
+                not name.endswith(".safetensors")):
             raise ValueError(f"Unsafe {owner} checkpoint shard {name!r}.")
         names.add(name)
     return tuple(sorted(names))
@@ -160,7 +149,7 @@ def _remote_checkpoint(
     local_files_only: bool,
     owner: str,
 ) -> Path:
-    names = (filename,) if filename is not None else (
+    names = (filename, ) if filename is not None else (
         _CHECKPOINT,
         _CHECKPOINT_INDEX,
     )
@@ -178,10 +167,7 @@ def _remote_checkpoint(
             break
     if checkpoint is None:
         raise FileNotFoundError(
-            f"Native {owner} found none of: "
-            + ", ".join(repr(name) for name in names)
-            + "."
-        )
+            f"Native {owner} found none of: " + ", ".join(repr(name) for name in names) + ".")
     _validate_checkpoint(checkpoint, owner=owner)
     if checkpoint.name.endswith(".safetensors.index.json"):
         for shard in _shard_names(checkpoint, owner=owner):
@@ -209,9 +195,7 @@ def _resolved_revision(
             config.name,
             cache_dir=cache_dir,
             revision=requested,
-        )
-        or requested
-    )
+        ) or requested)
 
 
 def resolve_llasa_artifacts(
@@ -233,9 +217,7 @@ def resolve_llasa_artifacts(
     source_path = Path(source).expanduser()
     if source_path.exists():
         if not source_path.is_dir():
-            raise NotADirectoryError(
-                "A local LLaSA source must be an artifact directory."
-            )
+            raise NotADirectoryError("A local LLaSA source must be an artifact directory.")
         root = source_path.resolve()
         return LlasaArtifacts(
             source=str(root),
@@ -254,13 +236,7 @@ def resolve_llasa_artifacts(
 
     repo_id = str(source)
     requested = (
-        revision
-        or (
-            LLASA_MULTILINGUAL_REVISION
-            if repo_id == LLASA_MULTILINGUAL_REPOSITORY
-            else "main"
-        )
-    )
+        revision or (LLASA_MULTILINGUAL_REVISION if repo_id == LLASA_MULTILINGUAL_REPOSITORY else "main"))
     config = resolve_pretrained_file(
         repo_id,
         _CONFIG,
@@ -327,9 +303,7 @@ def resolve_xcodec2_artifacts(
     source_path = Path(source).expanduser()
     if source_path.exists():
         if not source_path.is_dir():
-            raise NotADirectoryError(
-                "A local XCodec2 source must be an artifact directory."
-            )
+            raise NotADirectoryError("A local XCodec2 source must be an artifact directory.")
         root = source_path.resolve()
         return XCodec2Artifacts(
             source=str(root),
@@ -343,25 +317,15 @@ def resolve_xcodec2_artifacts(
             preprocessor_config=_optional(root, _PREPROCESSOR_CONFIG),
         )
     if is_explicit_local_path(source):
-        raise FileNotFoundError(
-            f"XCodec2 model path was not found: {source_path}."
-        )
+        raise FileNotFoundError(f"XCodec2 model path was not found: {source_path}.")
 
     repo_id = str(source)
     if repo_id in {"HKUSTAudio/xcodec2", "HKUST-Audio/xcodec2"}:
         raise ValueError(
             "The legacy XCodec2 repository uses an executable remote-code "
             "layout. Native VoiceHub requires the authors' self-contained "
-            f"conversion {XCODEC2_HF_REPOSITORY!r}."
-        )
-    requested = (
-        revision
-        or (
-            XCODEC2_HF_REVISION
-            if repo_id == XCODEC2_HF_REPOSITORY
-            else "main"
-        )
-    )
+            f"conversion {XCODEC2_HF_REPOSITORY!r}.")
+    requested = (revision or (XCODEC2_HF_REVISION if repo_id == XCODEC2_HF_REPOSITORY else "main"))
     config = resolve_pretrained_file(
         repo_id,
         _CONFIG,

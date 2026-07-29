@@ -33,28 +33,22 @@ def _validate_inputs(
     if logits.shape[0] == 0 or logits.shape[1] == 0 or logits.shape[2] < 2:
         raise ValueError(
             "CTC logits require non-empty batch/time axes and at least two "
-            "vocabulary entries."
-        )
+            "vocabulary entries.")
     if isinstance(blank_id, bool) or not isinstance(blank_id, int):
         raise TypeError("`blank_id` must be an integer.")
     if not 0 <= blank_id < logits.shape[-1]:
         raise ValueError("`blank_id` is outside the CTC vocabulary.")
     if lengths is None:
         return torch.full(
-            (logits.shape[0],),
+            (logits.shape[0], ),
             logits.shape[1],
             dtype=torch.long,
             device=logits.device,
         )
     if not isinstance(lengths, Tensor):
         raise TypeError("`lengths` must be a PyTorch tensor or None.")
-    if (
-        lengths.ndim != 1
-        or lengths.shape[0] != logits.shape[0]
-        or lengths.dtype == torch.bool
-        or lengths.is_floating_point()
-        or lengths.is_complex()
-    ):
+    if (lengths.ndim != 1 or lengths.shape[0] != logits.shape[0] or lengths.dtype == torch.bool or
+            lengths.is_floating_point() or lengths.is_complex()):
         raise ValueError("`lengths` must be an integer vector with one value per row.")
     if (lengths <= 0).any() or (lengths > logits.shape[1]).any():
         raise ValueError("CTC lengths must be in the interval [1, time].")
@@ -110,8 +104,7 @@ def _collapse_greedy(
                 start_frame=active_start,
                 end_frame=end_frame,
                 score=sum(active_scores) / len(active_scores),
-            )
-        )
+            ))
         active_token = None
         active_scores = []
 
@@ -148,13 +141,11 @@ def ctc_greedy_decode(
             blank_id=blank_id,
         )
         score = float(frame_scores[row, :length].sum().item())
-        results.append(
-            CTCDecodeResult(
-                tokens=tokens,
-                score=score,
-                token_spans=spans,
-            )
-        )
+        results.append(CTCDecodeResult(
+            tokens=tokens,
+            score=score,
+            token_spans=spans,
+        ))
     return tuple(results)
 
 
@@ -173,17 +164,12 @@ def _hotword_score(
     return score
 
 
-def _normalize_hotwords(
-    hotwords: Mapping[Sequence[int], float] | None,
-) -> dict[tuple[int, ...], float]:
+def _normalize_hotwords(hotwords: Mapping[Sequence[int], float] | None, ) -> dict[tuple[int, ...], float]:
     normalized: dict[tuple[int, ...], float] = {}
     for tokens, weight in (hotwords or {}).items():
         phrase = tuple(tokens)
-        if (
-            not phrase
-            or any(isinstance(token, bool) or not isinstance(token, int) or token < 0
-                   for token in phrase)
-        ):
+        if (not phrase or
+                any(isinstance(token, bool) or not isinstance(token, int) or token < 0 for token in phrase)):
             raise ValueError("CTC hotwords must contain non-negative token IDs.")
         if isinstance(weight, bool) or not isinstance(weight, (int, float)):
             raise TypeError("CTC hotword weights must be real numbers.")
@@ -205,13 +191,9 @@ def _prefix_beam_row(
     hotwords: Mapping[tuple[int, ...], float],
 ) -> tuple[tuple[int, ...], float]:
     # Each prefix owns its blank-ending and non-blank-ending acoustic scores.
-    beams: dict[tuple[int, ...], tuple[float, float]] = {
-        (): (0.0, _NEGATIVE_INFINITY)
-    }
+    beams: dict[tuple[int, ...], tuple[float, float]] = {(): (0.0, _NEGATIVE_INFINITY)}
     for frame in log_probabilities:
-        candidate_scores, candidate_ids = frame.topk(
-            min(token_beam_size, frame.shape[0])
-        )
+        candidate_scores, candidate_ids = frame.topk(min(token_beam_size, frame.shape[0]))
         next_beams: dict[tuple[int, ...], tuple[float, float]] = {}
 
         def update(
@@ -232,8 +214,8 @@ def _prefix_beam_row(
         for prefix, (blank_score, non_blank_score) in beams.items():
             total_score = _log_add(blank_score, non_blank_score)
             for token, token_score in zip(
-                candidate_ids.tolist(),
-                candidate_scores.tolist(),
+                    candidate_ids.tolist(),
+                    candidate_scores.tolist(),
             ):
                 if token == blank_id:
                     update(
@@ -249,13 +231,13 @@ def _prefix_beam_row(
                         prefix,
                         non_blank=non_blank_score + token_score,
                     )
-                    repeated = prefix + (token,)
+                    repeated = prefix + (token, )
                     update(
                         repeated,
                         non_blank=blank_score + token_score,
                     )
                 else:
-                    extended = prefix + (token,)
+                    extended = prefix + (token, )
                     update(
                         extended,
                         non_blank=total_score + token_score,
@@ -268,8 +250,7 @@ def _prefix_beam_row(
                     item[0],
                 ),
                 reverse=True,
-            )[:beam_size]
-        )
+            )[:beam_size])
     prefix, scores = max(
         beams.items(),
         key=lambda item: (
@@ -292,29 +273,22 @@ def ctc_prefix_beam_search(
 ) -> tuple[CTCDecodeResult, ...]:
     """Decode globally competing CTC prefixes with optional hotword bias.
 
-    Hotword scores are applied only when a complete token phrase occurs; no
-    reward is given to unfinished prefixes. Timestamp spans are recovered with
-    Viterbi forced alignment of the winning token sequence.
+    Hotword scores are applied only when a complete token phrase occurs;
+    no reward is given to unfinished prefixes. Timestamp spans are
+    recovered with Viterbi forced alignment of the winning token
+    sequence.
     """
     lengths = _validate_inputs(logits, lengths, blank_id)
     if isinstance(beam_size, bool) or not isinstance(beam_size, int) or beam_size <= 0:
         raise ValueError("`beam_size` must be a positive integer.")
     token_beam_size = beam_size if token_beam_size is None else token_beam_size
-    if (
-        isinstance(token_beam_size, bool)
-        or not isinstance(token_beam_size, int)
-        or token_beam_size <= 0
-    ):
+    if (isinstance(token_beam_size, bool) or not isinstance(token_beam_size, int) or token_beam_size <= 0):
         raise ValueError("`token_beam_size` must be a positive integer.")
     if not isinstance(return_timestamps, bool):
         raise TypeError("`return_timestamps` must be a boolean.")
     normalized_hotwords = _normalize_hotwords(hotwords)
     vocabulary_size = logits.shape[-1]
-    if any(
-        token >= vocabulary_size
-        for phrase in normalized_hotwords
-        for token in phrase
-    ):
+    if any(token >= vocabulary_size for phrase in normalized_hotwords for token in phrase):
         raise ValueError("A CTC hotword token is outside the vocabulary.")
 
     log_probabilities = functional.log_softmax(logits.float(), dim=-1)
@@ -334,17 +308,12 @@ def ctc_prefix_beam_search(
                 tokens,
                 blank_id=blank_id,
                 log_probabilities=True,
-            )
-            if return_timestamps and tokens
-            else ()
-        )
-        results.append(
-            CTCDecodeResult(
-                tokens=tokens,
-                score=score,
-                token_spans=spans,
-            )
-        )
+            ) if return_timestamps and tokens else ())
+        results.append(CTCDecodeResult(
+            tokens=tokens,
+            score=score,
+            token_spans=spans,
+        ))
     return tuple(results)
 
 
@@ -361,28 +330,15 @@ def ctc_forced_alignment(
     if not emissions.is_floating_point():
         raise TypeError("CTC alignment emissions must use a floating-point dtype.")
     token_ids = tuple(tokens)
-    if any(
-        isinstance(token, bool)
-        or not isinstance(token, int)
-        or token < 0
-        or token >= emissions.shape[-1]
-        or token == blank_id
-        for token in token_ids
-    ):
-        raise ValueError(
-            "Alignment tokens must be non-blank IDs inside the vocabulary."
-        )
+    if any(isinstance(token, bool) or not isinstance(token, int) or token < 0 or
+           token >= emissions.shape[-1] or token == blank_id for token in token_ids):
+        raise ValueError("Alignment tokens must be non-blank IDs inside the vocabulary.")
     if not token_ids:
         return ()
-    minimum_frames = len(token_ids) + sum(
-        left == right
-        for left, right in zip(token_ids, token_ids[1:])
-    )
+    minimum_frames = len(token_ids) + sum(left == right for left, right in zip(token_ids, token_ids[1:]))
     if emissions.shape[0] < minimum_frames:
-        raise ValueError(
-            f"Cannot align {len(token_ids)} CTC tokens in "
-            f"{emissions.shape[0]} frames."
-        )
+        raise ValueError(f"Cannot align {len(token_ids)} CTC tokens in "
+                         f"{emissions.shape[0]} frames.")
     log_probs = emissions.float()
     if not log_probabilities:
         log_probs = functional.log_softmax(log_probs, dim=-1)
@@ -415,11 +371,7 @@ def ctc_forced_alignment(
             candidates = [(scores[frame - 1, state], state)]
             if state > 0:
                 candidates.append((scores[frame - 1, state - 1], state - 1))
-            if (
-                state > 1
-                and states[state] != blank_id
-                and states[state] != states[state - 2]
-            ):
+            if (state > 1 and states[state] != blank_id and states[state] != states[state - 2]):
                 candidates.append((scores[frame - 1, state - 2], state - 2))
             best_score, best_state = max(
                 candidates,
@@ -462,8 +414,7 @@ def ctc_forced_alignment(
                 start_frame=frames[0],
                 end_frame=frames[-1] + 1,
                 score=float(probabilities.mean().item()),
-            )
-        )
+            ))
     return tuple(spans)
 
 

@@ -23,10 +23,7 @@ from voicehub.architectures.marblenet_vad.metadata import (
 from voicehub.architectures.marblenet_vad.modeling import MarbleNetVADModel
 from voicehub.checkpointing import SafeTensorReader, save_safetensors
 from voicehub.hub import write_json_file
-from voicehub.models.vad_nemo import (
-    NeMoVADConfig,
-    NeMoVADForVoiceActivityDetection,
-)
+from voicehub.models.vad_nemo import NeMoVADConfig, NeMoVADForVoiceActivityDetection
 from voicehub.registry import get_model_spec
 from voicehub.training import get_training_spec
 
@@ -94,18 +91,13 @@ print(json.dumps({
         self.assertEqual(sum(tensor.numel() for tensor in state.values()), 114_270)
 
     def test_raw_audio_forward_masks_lengths_and_backpropagates(self):
-        model = MarbleNetVADModel(
-            MarbleNetVADConfig(dither=0.0),
-        )
+        model = MarbleNetVADModel(MarbleNetVADConfig(dither=0.0), )
         waveforms = torch.randn(2, 3_200)
         lengths = torch.tensor([3_200, 2_400])
         frontend_lengths = lengths // 160 + 1
         frame_lengths = (frontend_lengths + 1) // 2
         labels = torch.zeros(2, int(frame_lengths.max()), dtype=torch.long)
-        label_mask = (
-            torch.arange(labels.shape[1]).unsqueeze(0)
-            < frame_lengths.unsqueeze(1)
-        )
+        label_mask = (torch.arange(labels.shape[1]).unsqueeze(0) < frame_lengths.unsqueeze(1))
 
         output = model(
             waveforms,
@@ -119,12 +111,7 @@ print(json.dumps({
         self.assertEqual(output.frame_lengths.tolist(), [11, 8])
         self.assertTrue(torch.isfinite(output.loss))
         self.assertTrue(
-            all(
-                parameter.grad is not None
-                for parameter in model.parameters()
-                if parameter.requires_grad
-            )
-        )
+            all(parameter.grad is not None for parameter in model.parameters() if parameter.requires_grad))
 
     def test_restricted_checkpoint_conversion_and_safe_reload(self):
         source_model = MarbleNetVADModel(MarbleNetVADConfig())
@@ -139,9 +126,7 @@ print(json.dumps({
                 root / "native",
                 trust_pickle_checkpoint=True,
             )
-            config = json.loads(
-                (output / "config.json").read_text(encoding="utf-8")
-            )
+            config = json.loads((output / "config.json").read_text(encoding="utf-8"))
             restored = MarbleNetVADModel(MarbleNetVADConfig.from_dict(config))
             with SafeTensorReader(output / "model.safetensors") as reader:
                 MarbleNetVADSafeTensorsCheckpointAdapter().load_streaming(

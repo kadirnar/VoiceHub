@@ -40,9 +40,7 @@ class XTTSConfig(VoiceHubConfig):
         if not isinstance(self.language, str) or not self.language.strip():
             raise ValueError("XTTS `language` must be a non-empty language code.")
         self.language = self.language.strip().lower()
-        if self.revision is not None and (
-            not isinstance(self.revision, str) or not self.revision.strip()
-        ):
+        if self.revision is not None and (not isinstance(self.revision, str) or not self.revision.strip()):
             raise ValueError("XTTS `revision` must be a non-empty string or None.")
         if self.revision is not None:
             self.revision = self.revision.strip()

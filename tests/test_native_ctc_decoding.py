@@ -4,11 +4,7 @@ import unittest
 
 import torch
 
-from voicehub.generation import (
-    ctc_forced_alignment,
-    ctc_greedy_decode,
-    ctc_prefix_beam_search,
-)
+from voicehub.generation import ctc_forced_alignment, ctc_greedy_decode, ctc_prefix_beam_search
 
 
 class NativeCTCDecodingTests(unittest.TestCase):
@@ -63,12 +59,12 @@ class NativeCTCDecodingTests(unittest.TestCase):
             logits,
             beam_size=4,
             token_beam_size=3,
-            hotwords={(2,): 1.0},
+            hotwords={(2, ): 1.0},
             return_timestamps=False,
         )[0]
 
         self.assertNotEqual(unbiased.tokens, biased.tokens)
-        self.assertEqual(biased.tokens, (2,))
+        self.assertEqual(biased.tokens, (2, ))
 
     def test_forced_alignment_separates_repeated_tokens_with_blank(self):
         path = torch.tensor([1, 0, 1])

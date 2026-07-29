@@ -26,11 +26,11 @@ class MeloTTSFeatureBatch:
 class NativeMeloTTSFrontend:
     """Validate already prepared upstream-compatible linguistic features.
 
-    MeloTTS checkpoints consume outputs from language-specific G2P and BERT
-    models. Those pretrained frontends are not encoded in the acoustic
-    checkpoint, so VoiceHub does not silently replace them. Callers provide
-    the exact phone, tone, language, 1024-channel BERT, and 768-channel
-    Japanese-BERT sequences used by their checkpoint.
+    MeloTTS checkpoints consume outputs from language-specific G2P and
+    BERT models. Those pretrained frontends are not encoded in the
+    acoustic checkpoint, so VoiceHub does not silently replace them.
+    Callers provide the exact phone, tone, language, 1024-channel BERT,
+    and 768-channel Japanese-BERT sequences used by their checkpoint.
     """
 
     def __init__(self, config: MeloTTSArchitectureConfig) -> None:

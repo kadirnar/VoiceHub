@@ -1,9 +1,9 @@
 """Native decoder for the Qwen3-TTS 12 Hz speech tokenizer.
 
-The public tokenizer checkpoint also contains a Mimi-derived audio encoder.
-Generated speech only needs the decoder graph implemented here. The encoder
-is deliberately not emulated: ICL cloning remains unavailable until that
-published graph is ported separately.
+The public tokenizer checkpoint also contains a Mimi-derived audio
+encoder. Generated speech only needs the decoder graph implemented here.
+The encoder is deliberately not emulated: ICL cloning remains
+unavailable until that published graph is ported separately.
 """
 
 from __future__ import annotations

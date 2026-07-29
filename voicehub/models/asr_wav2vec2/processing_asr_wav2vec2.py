@@ -6,8 +6,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from voicehub.architectures.wav2vec2.tokenization import Wav2Vec2CTCTokenizer
 from voicehub.architectures.wav2vec2.processing import Wav2Vec2FeatureExtractor
+from voicehub.architectures.wav2vec2.tokenization import Wav2Vec2CTCTokenizer
 from voicehub.hub import read_json_file, write_json_file
 
 

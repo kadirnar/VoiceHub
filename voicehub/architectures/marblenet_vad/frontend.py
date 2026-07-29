@@ -15,8 +15,9 @@ from voicehub.processing.audio import mel_filter_bank
 class MarbleNetFilterbankFeatures(nn.Module):
     """Released 25 ms Hann, pre-emphasis, power-mel, log frontend.
 
-    Buffer names intentionally match the official `.nemo` state dictionary so
-    conversion is an identity mapping rather than a heuristic rename.
+    Buffer names intentionally match the official `.nemo` state
+    dictionary so conversion is an identity mapping rather than a
+    heuristic rename.
     """
 
     def __init__(self, config: MarbleNetVADConfig) -> None:
@@ -42,9 +43,7 @@ class MarbleNetFilterbankFeatures(nn.Module):
 
     def feature_lengths(self, waveform_lengths: Tensor) -> Tensor:
         lengths = torch.as_tensor(waveform_lengths)
-        return (
-            torch.div(lengths, self.config.hop_length, rounding_mode="floor") + 1
-        ).to(dtype=torch.long)
+        return (torch.div(lengths, self.config.hop_length, rounding_mode="floor") + 1).to(dtype=torch.long)
 
     def _extract(self, waveforms: Tensor, lengths: Tensor) -> tuple[Tensor, Tensor]:
         feature_lengths = self.feature_lengths(lengths)
@@ -62,9 +61,7 @@ class MarbleNetFilterbankFeatures(nn.Module):
         autocast_factory = getattr(autocast, "autocast", None)
         context = (
             autocast_factory(values.device.type, enabled=False)
-            if callable(autocast_factory)
-            else nullcontext()
-        )
+            if callable(autocast_factory) else nullcontext())
         with context:
             spectrum = torch.stft(
                 values.float(),
@@ -111,9 +108,7 @@ class MarbleNetFilterbankFeatures(nn.Module):
         if lengths.ndim != 1 or lengths.shape[0] != waveforms.shape[0]:
             raise ValueError("`waveform_lengths` must have shape [batch].")
         if torch.any(lengths < self.config.window_length):
-            raise ValueError(
-                "MarbleNet VAD requires at least 400 samples (25 ms) per waveform."
-            )
+            raise ValueError("MarbleNet VAD requires at least 400 samples (25 ms) per waveform.")
         if torch.any(lengths > waveforms.shape[-1]):
             raise ValueError("A waveform length exceeds the padded waveform size.")
         if self.config.frontend_gradients:
@@ -167,9 +162,7 @@ class MarbleNetSpecAugment(nn.Module):
                 count,
                 dtype=torch.float32,
                 device=features.device,
-            )
-            * maximum_width
-        ).long()
+            ) * maximum_width).long()
         mask_start = torch.rand(
             batch,
             count,
@@ -183,10 +176,7 @@ class MarbleNetSpecAugment(nn.Module):
         mask_start = mask_start.long()
         mask_end = mask_start + mask_width
         indices = torch.arange(axis_length, device=features.device)
-        ranges = (
-            (indices >= mask_start.unsqueeze(-1))
-            & (indices < mask_end.unsqueeze(-1))
-        ).any(dim=1)
+        ranges = ((indices >= mask_start.unsqueeze(-1)) & (indices < mask_end.unsqueeze(-1))).any(dim=1)
         mask = ranges.unsqueeze(1) if axis == 2 else ranges.unsqueeze(2)
         return features.masked_fill(mask, 0.0)
 

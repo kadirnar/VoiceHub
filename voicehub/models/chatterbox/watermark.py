@@ -1,8 +1,9 @@
 """VoiceHub-owned runtime for Chatterbox's bundled Perth watermark.
 
-The network topology and released checkpoint are vendored under the original
-MIT license.  This module replaces Perth's TorchAudio/librosa/YAML execution
-boundary with equivalent PyTorch STFT, iSTFT, and native resampling.
+The network topology and released checkpoint are vendored under the
+original MIT license.  This module replaces Perth's
+TorchAudio/librosa/YAML execution boundary with equivalent PyTorch STFT,
+iSTFT, and native resampling.
 """
 
 from __future__ import annotations
@@ -30,9 +31,7 @@ class PerthConfig(NamedTuple):
 def _subband_size(config: PerthConfig) -> int:
     bins = config.n_fft // 2 + 1
     nyquist = config.sample_rate / 2
-    return int(round(
-        bins * config.maximum_watermark_frequency / nyquist
-    ))
+    return int(round(bins * config.maximum_watermark_frequency / nyquist))
 
 
 def _magnitude_mask(magnitude: Tensor, threshold: float = 0.05) -> Tensor:
@@ -72,9 +71,7 @@ class _Encoder(nn.Module):
     def forward(self, magnitude: Tensor) -> tuple[Tensor, Tensor]:
         output = magnitude.clone()
         mask = _magnitude_mask(magnitude)[:, None]
-        output[:, :self.subband] += self.layers(
-            magnitude[:, :self.subband]
-        ) * mask
+        output[:, :self.subband] += self.layers(magnitude[:, :self.subband]) * mask
         return output, mask
 
 
@@ -107,9 +104,7 @@ class _AudioProcessor(nn.Module):
             onesided=True,
             return_complex=True,
         )
-        magnitude = 20.0 * spectrum.abs().clamp_min(
-            self.config.magnitude_minimum
-        ).log10()
+        magnitude = 20.0 * spectrum.abs().clamp_min(self.config.magnitude_minimum).log10()
         minimum_db = 20.0 * math.log10(self.config.magnitude_minimum)
         magnitude = (magnitude - minimum_db) / (-minimum_db + 15.0)
         return magnitude, spectrum.angle()
@@ -154,16 +149,8 @@ class NativePerthWatermarker:
             _subband_size(self.config),
         ).to(self.device)
         source = (
-            Path(checkpoint_path)
-            if checkpoint_path is not None
-            else Path(__file__).parent
-            / "source"
-            / "perth"
-            / "perth_net"
-            / "pretrained"
-            / "implicit"
-            / "perth_net_250000.pth.tar"
-        )
+            Path(checkpoint_path) if checkpoint_path is not None else Path(__file__).parent / "source" /
+            "perth" / "perth_net" / "pretrained" / "implicit" / "perth_net_250000.pth.tar")
         if not source.is_file():
             raise FileNotFoundError(f"Bundled Perth checkpoint was not found: {source}.")
         checkpoint = torch.load(
@@ -177,8 +164,7 @@ class NativePerthWatermarker:
         prefix = "encoder."
         encoder_state = {
             name[len(prefix):]: value
-            for name, value in state.items()
-            if name.startswith(prefix)
+            for name, value in state.items() if name.startswith(prefix)
         }
         incompatible = self.encoder.load_state_dict(encoder_state, strict=True)
         if incompatible.missing_keys or incompatible.unexpected_keys:

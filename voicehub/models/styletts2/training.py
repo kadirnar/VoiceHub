@@ -214,14 +214,10 @@ class StyleTTS2TrainingAdapter(VITSTrainingAdapter):
 
     def select_training_phase(self, training_phase=None):
         phase = super().select_training_phase(training_phase)
-        if (
-            phase.name == "discriminator"
-            and not self.model.config.training_enable_discriminators
-        ):
+        if (phase.name == "discriminator" and not self.model.config.training_enable_discriminators):
             raise ValueError(
                 "StyleTTS 2 discriminator training is disabled by "
-                "`training_enable_discriminators=False`."
-            )
+                "`training_enable_discriminators=False`.")
         return phase
 
     def plan_training_phases(self, step: int):

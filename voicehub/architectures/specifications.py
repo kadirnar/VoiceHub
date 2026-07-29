@@ -1,10 +1,10 @@
-"""
-Declarative contracts for VoiceHub-owned model architectures.
+"""Declarative contracts for VoiceHub-owned model architectures.
 
-Architecture specifications contain metadata and import references only.  In particular, constructing or
-registering a specification must never import a model implementation.  This keeps discovery inexpensive and
-allows a process to inspect the complete architecture catalogue without installing or initialising every
-execution backend.
+Architecture specifications contain metadata and import references only.
+In particular, constructing or registering a specification must never
+import a model implementation.  This keeps discovery inexpensive and
+allows a process to inspect the complete architecture catalogue without
+installing or initialising every execution backend.
 """
 
 from __future__ import annotations
@@ -25,7 +25,8 @@ class ArchitectureError(RuntimeError):
 
 
 class ComponentResolutionError(ImportError, ArchitectureError):
-    """Raised when a lazily referenced architecture component cannot resolve."""
+    """Raised when a lazily referenced architecture component cannot
+    resolve."""
 
 
 def normalize_architecture_id(value: str) -> str:
@@ -96,13 +97,13 @@ def _freeze_metadata(value: Any) -> Any:
 
 @dataclass(frozen=True)
 class LazyComponentReference:
-    """
-    An import target that remains unresolved until explicitly requested.
+    """An import target that remains unresolved until explicitly requested.
 
-    ``attribute`` may be a dotted path within the imported module.  Python's
-    normal module cache handles repeat imports; VoiceHub deliberately does not
-    cache the resolved object separately so tests, plugin reloaders, and
-    development environments retain normal import semantics.
+    ``attribute`` may be a dotted path within the imported module.
+    Python's normal module cache handles repeat imports; VoiceHub
+    deliberately does not cache the resolved object separately so tests,
+    plugin reloaders, and development environments retain normal import
+    semantics.
     """
 
     module: str
@@ -152,8 +153,7 @@ class LazyComponentReference:
         return cls.from_path(value)
 
     def resolve(self, expected_type: type[_T] | None = None) -> _T | Any:
-        """
-        Import and return the referenced component.
+        """Import and return the referenced component.
 
         Args:
             expected_type: Optional runtime type constraint.  It is evaluated
@@ -198,11 +198,12 @@ LazyComponentRef = LazyComponentReference
 
 @dataclass(frozen=True)
 class ArchitectureCapabilities:
-    """
-    Execution features guaranteed by one native architecture.
+    """Execution features guaranteed by one native architecture.
 
-    Devices, dtypes, formats, optimisation passes, and feature flags are open string sets rather than enums.
-    New hardware and execution systems can therefore be represented without changing VoiceHub's core types.
+    Devices, dtypes, formats, optimisation passes, and feature flags are
+    open string sets rather than enums. New hardware and execution
+    systems can therefore be represented without changing VoiceHub's
+    core types.
     """
 
     tasks: tuple[SpeechTask | str, ...]

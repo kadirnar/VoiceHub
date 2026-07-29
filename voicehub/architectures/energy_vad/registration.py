@@ -4,14 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from voicehub.architectures.registry import (
-    ARCHITECTURE_REGISTRY,
-    ArchitectureRegistry,
-)
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.tasks import SpeechTask
 
 AUDITOK_REFERENCE_REVISION = "833ae725aef73a489366cc5940b831e16223059f"
@@ -23,15 +17,13 @@ def create_energy_vad_architecture_spec() -> ArchitectureSpec:
     return ArchitectureSpec(
         architecture_id="energy-vad",
         version="1",
-        model_builder=(
-            "voicehub.architectures.energy_vad.modeling:"
-            "EnergyVoiceActivityDetector"
-        ),
+        model_builder=("voicehub.architectures.energy_vad.modeling:"
+                       "EnergyVoiceActivityDetector"),
         capabilities=ArchitectureCapabilities(
-            tasks=(SpeechTask.VOICE_ACTIVITY_DETECTION,),
+            tasks=(SpeechTask.VOICE_ACTIVITY_DETECTION, ),
             devices=("cpu", "cuda", "mps"),
-            dtypes=("float32",),
-            checkpoint_formats=("none",),
+            dtypes=("float32", ),
+            checkpoint_formats=("none", ),
             training=False,
             streaming=False,
             batched_inference=False,
@@ -47,10 +39,8 @@ def create_energy_vad_architecture_spec() -> ArchitectureSpec:
         metadata={
             "family": "short-term-energy",
             "implementation": "voicehub-native",
-            "reference_source": (
-                "https://github.com/amsehili/auditok/tree/"
-                f"{AUDITOK_REFERENCE_REVISION}"
-            ),
+            "reference_source": ("https://github.com/amsehili/auditok/tree/"
+                                 f"{AUDITOK_REFERENCE_REVISION}"),
         },
     )
 

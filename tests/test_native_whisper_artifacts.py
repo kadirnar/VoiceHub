@@ -23,14 +23,10 @@ class WhisperArtifactTests(unittest.TestCase):
                 (root / name).write_bytes(b"checkpoint")
             index = root / "model.safetensors.index.json"
             index.write_text(
-                json.dumps(
-                    {
-                        "weight_map": {
-                            "z": "part-2.safetensors",
-                            "a": "part-1.safetensors",
-                        }
-                    }
-                ),
+                json.dumps({"weight_map": {
+                    "z": "part-2.safetensors",
+                    "a": "part-1.safetensors",
+                }}),
                 encoding="utf-8",
             )
 
@@ -48,7 +44,9 @@ class WhisperArtifactTests(unittest.TestCase):
                 (root / "config.json").write_text("{}", encoding="utf-8")
                 (root / "tokenizer.json").write_text("{}", encoding="utf-8")
                 (root / "model.safetensors.index.json").write_text(
-                    json.dumps({"weight_map": {"weight": shard}}),
+                    json.dumps({"weight_map": {
+                        "weight": shard
+                    }}),
                     encoding="utf-8",
                 )
                 with self.assertRaisesRegex(ValueError, "Unsafe"):
@@ -60,11 +58,11 @@ class WhisperArtifactTests(unittest.TestCase):
             root = Path(directory)
             paths = {}
             for filename in (
-                "config.json",
-                "tokenizer.json",
-                "model.safetensors",
-                "generation_config.json",
-                "preprocessor_config.json",
+                    "config.json",
+                    "tokenizer.json",
+                    "model.safetensors",
+                    "generation_config.json",
+                    "preprocessor_config.json",
             ):
                 path = root / filename
                 path.write_text("{}", encoding="utf-8")
@@ -75,24 +73,22 @@ class WhisperArtifactTests(unittest.TestCase):
                 return paths[filename]
 
             with (
-                patch(
-                    "voicehub.architectures.whisper.artifacts."
-                    "resolve_pretrained_file",
-                    side_effect=resolve,
-                ),
-                patch(
-                    "voicehub.architectures.whisper.artifacts."
-                    "get_cached_hugging_face_commit",
-                    return_value="a" * 40,
-                ),
+                    patch(
+                        "voicehub.architectures.whisper.artifacts."
+                        "resolve_pretrained_file",
+                        side_effect=resolve,
+                    ),
+                    patch(
+                        "voicehub.architectures.whisper.artifacts."
+                        "get_cached_hugging_face_commit",
+                        return_value="a" * 40,
+                    ),
             ):
                 artifacts = resolve_whisper_artifacts("owner/whisper")
 
         self.assertEqual(artifacts.revision, "a" * 40)
         self.assertEqual(requests[0], ("owner/whisper", "config.json", "main"))
-        self.assertTrue(
-            all(revision == "a" * 40 for _, _, revision in requests[1:])
-        )
+        self.assertTrue(all(revision == "a" * 40 for _, _, revision in requests[1:]))
 
 
 if __name__ == "__main__":

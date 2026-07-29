@@ -130,9 +130,7 @@ class KaldiFbankConfig:
         if low_frequency < 0.0:
             raise ValueError("`low_frequency` cannot be negative.")
         if not 0.0 <= preemphasis <= 1.0:
-            raise ValueError(
-                "`preemphasis_coefficient` must be between zero and one."
-            )
+            raise ValueError("`preemphasis_coefficient` must be between zero and one.")
         if minimum_duration < 0.0:
             raise ValueError("`minimum_duration` cannot be negative.")
         if vtln_warp <= 0.0:
@@ -143,59 +141,36 @@ class KaldiFbankConfig:
             choices = ", ".join(sorted(_WINDOW_TYPES))
             raise ValueError(f"`window_type` must be one of: {choices}.")
         for name in (
-            "remove_dc_offset",
-            "round_to_power_of_two",
-            "snip_edges",
-            "raw_energy",
-            "use_energy",
-            "use_log_fbank",
-            "use_power",
-            "htk_compatibility",
-            "subtract_mean",
+                "remove_dc_offset",
+                "round_to_power_of_two",
+                "snip_edges",
+                "raw_energy",
+                "use_energy",
+                "use_log_fbank",
+                "use_power",
+                "htk_compatibility",
+                "subtract_mean",
         ):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"`{name}` must be a boolean.")
-        window_size = int(
-            sample_frequency * frame_length * _MILLISECONDS_TO_SECONDS
-        )
-        window_shift = int(
-            sample_frequency * frame_shift * _MILLISECONDS_TO_SECONDS
-        )
+        window_size = int(sample_frequency * frame_length * _MILLISECONDS_TO_SECONDS)
+        window_shift = int(sample_frequency * frame_shift * _MILLISECONDS_TO_SECONDS)
         if window_size < 2:
             raise ValueError("The configured analysis window is too short.")
         if window_shift < 1:
             raise ValueError("The configured frame shift is too short.")
-        padded = (
-            _next_power_of_two(window_size)
-            if self.round_to_power_of_two
-            else window_size
-        )
+        padded = (_next_power_of_two(window_size) if self.round_to_power_of_two else window_size)
         if padded % 2:
             raise ValueError(
                 "The FFT window must be even; enable "
-                "`round_to_power_of_two` or change `frame_length`."
-            )
+                "`round_to_power_of_two` or change `frame_length`.")
         nyquist = sample_frequency / 2.0
-        resolved_high = (
-            high_frequency + nyquist
-            if high_frequency <= 0.0
-            else high_frequency
-        )
+        resolved_high = (high_frequency + nyquist if high_frequency <= 0.0 else high_frequency)
         if not 0.0 <= low_frequency < resolved_high <= nyquist:
-            raise ValueError(
-                "Mel bounds must satisfy 0 <= low < high <= Nyquist."
-            )
-        resolved_vtln_high = (
-            vtln_high + nyquist
-            if vtln_high < 0.0
-            else vtln_high
-        )
-        if vtln_warp != 1.0 and not (
-            low_frequency < vtln_low < resolved_vtln_high < resolved_high
-        ):
-            raise ValueError(
-                "VTLN cutoffs must lie strictly inside the mel passband."
-            )
+            raise ValueError("Mel bounds must satisfy 0 <= low < high <= Nyquist.")
+        resolved_vtln_high = (vtln_high + nyquist if vtln_high < 0.0 else vtln_high)
+        if vtln_warp != 1.0 and not (low_frequency < vtln_low < resolved_vtln_high < resolved_high):
+            raise ValueError("VTLN cutoffs must lie strictly inside the mel passband.")
         object.__setattr__(self, "sample_frequency", sample_frequency)
         object.__setattr__(self, "frame_length", frame_length)
         object.__setattr__(self, "frame_shift", frame_shift)
@@ -214,8 +189,8 @@ class KaldiFbankConfig:
     @classmethod
     def coerce(
         cls,
-        value: "KaldiFbankConfig | dict[str, Any] | None",
-    ) -> "KaldiFbankConfig":
+        value: KaldiFbankConfig | dict[str, Any] | None,
+    ) -> KaldiFbankConfig:
         if value is None:
             return cls()
         if isinstance(value, cls):
@@ -226,19 +201,11 @@ class KaldiFbankConfig:
 
     @property
     def window_size(self) -> int:
-        return int(
-            self.sample_frequency
-            * self.frame_length
-            * _MILLISECONDS_TO_SECONDS
-        )
+        return int(self.sample_frequency * self.frame_length * _MILLISECONDS_TO_SECONDS)
 
     @property
     def window_shift(self) -> int:
-        return int(
-            self.sample_frequency
-            * self.frame_shift
-            * _MILLISECONDS_TO_SECONDS
-        )
+        return int(self.sample_frequency * self.frame_shift * _MILLISECONDS_TO_SECONDS)
 
     @property
     def padded_window_size(self) -> int:
@@ -255,7 +222,7 @@ class KaldiFbankConfig:
 
 
 def _next_power_of_two(value: int) -> int:
-    return 1 if value == 0 else 2 ** (value - 1).bit_length()
+    return 1 if value == 0 else 2**(value - 1).bit_length()
 
 
 def _strided_frames(
@@ -331,10 +298,8 @@ def _window_function(
     phase = 2.0 * math.pi / (size - 1)
     coefficient = config.blackman_coefficient
     return (
-        coefficient
-        - 0.5 * torch.cos(phase * positions)
-        + (0.5 - coefficient) * torch.cos(2.0 * phase * positions)
-    )
+        coefficient - 0.5 * torch.cos(phase * positions) +
+        (0.5 - coefficient) * torch.cos(2.0 * phase * positions))
 
 
 def _epsilon(reference: Tensor) -> Tensor:
@@ -374,27 +339,20 @@ def _windowed_frames(
     if frames.shape[0] == 0:
         return (
             waveform.new_empty((0, config.padded_window_size)),
-            waveform.new_empty((0,)),
+            waveform.new_empty((0, )),
         )
     if config.dither:
         frames = frames + torch.randn_like(frames) * config.dither
     if config.remove_dc_offset:
         frames = frames - frames.mean(dim=1, keepdim=True)
-    energy = (
-        _log_energy(frames, energy_floor=config.energy_floor)
-        if config.raw_energy
-        else None
-    )
+    energy = (_log_energy(frames, energy_floor=config.energy_floor) if config.raw_energy else None)
     if config.preemphasis_coefficient:
         previous = functional.pad(
             frames.unsqueeze(0),
             (1, 0),
             mode="replicate",
         ).squeeze(0)[:, :-1]
-        frames = (
-            frames
-            - config.preemphasis_coefficient * previous
-        )
+        frames = (frames - config.preemphasis_coefficient * previous)
     frames = frames * _window_function(
         config,
         device=frames.device,
@@ -436,31 +394,16 @@ def _vtln_warp_frequency(
     scale = 1.0 / warp
     warped_lower = scale * lower_inflection
     warped_upper = scale * upper_inflection
-    left_scale = (
-        (warped_lower - low_frequency)
-        / (lower_inflection - low_frequency)
-    )
-    right_scale = (
-        (high_frequency - warped_upper)
-        / (high_frequency - upper_inflection)
-    )
+    left_scale = ((warped_lower - low_frequency) / (lower_inflection - low_frequency))
+    right_scale = ((high_frequency - warped_upper) / (high_frequency - upper_inflection))
     result = torch.empty_like(frequencies)
-    outside = (
-        (frequencies < low_frequency)
-        | (frequencies > high_frequency)
-    )
+    outside = ((frequencies < low_frequency) | (frequencies > high_frequency))
     before_lower = frequencies < lower_inflection
     before_upper = frequencies < upper_inflection
     after_upper = frequencies >= upper_inflection
-    result[after_upper] = (
-        high_frequency
-        + right_scale * (frequencies[after_upper] - high_frequency)
-    )
+    result[after_upper] = (high_frequency + right_scale * (frequencies[after_upper] - high_frequency))
     result[before_upper] = scale * frequencies[before_upper]
-    result[before_lower] = (
-        low_frequency
-        + left_scale * (frequencies[before_lower] - low_frequency)
-    )
+    result[before_lower] = (low_frequency + left_scale * (frequencies[before_lower] - low_frequency))
     result[outside] = frequencies[outside]
     return result
 
@@ -482,10 +425,7 @@ def kaldi_mel_filter_bank(
         vtln_high += nyquist
     low_mel = _mel_scale_scalar(resolved.low_frequency)
     high_mel = _mel_scale_scalar(high_frequency)
-    mel_step = (
-        (high_mel - low_mel)
-        / (resolved.num_mel_bins + 1)
-    )
+    mel_step = ((high_mel - low_mel) / (resolved.num_mel_bins + 1))
     indices = torch.arange(
         resolved.num_mel_bins,
         dtype=dtype,
@@ -495,30 +435,27 @@ def kaldi_mel_filter_bank(
     center = low_mel + (indices + 1.0) * mel_step
     right = low_mel + (indices + 2.0) * mel_step
     if resolved.vtln_warp != 1.0:
+
         def warp(values: Tensor) -> Tensor:
             frequencies = _inverse_mel_scale(values)
-            return _mel_scale(_vtln_warp_frequency(
-                frequencies,
-                low_cutoff=resolved.vtln_low,
-                high_cutoff=vtln_high,
-                low_frequency=resolved.low_frequency,
-                high_frequency=high_frequency,
-                warp=resolved.vtln_warp,
-            ))
+            return _mel_scale(
+                _vtln_warp_frequency(
+                    frequencies,
+                    low_cutoff=resolved.vtln_low,
+                    high_cutoff=vtln_high,
+                    low_frequency=resolved.low_frequency,
+                    high_frequency=high_frequency,
+                    warp=resolved.vtln_warp,
+                ))
 
         left, center, right = warp(left), warp(center), warp(right)
-    fft_width = (
-        resolved.sample_frequency
-        / resolved.padded_window_size
-    )
+    fft_width = (resolved.sample_frequency / resolved.padded_window_size)
     mel_bins = _mel_scale(
-        fft_width
-        * torch.arange(
+        fft_width * torch.arange(
             resolved.padded_window_size // 2,
             dtype=dtype,
             device=device,
-        )
-    ).unsqueeze(0)
+        )).unsqueeze(0)
     rising = (mel_bins - left) / (center - left)
     falling = (right - mel_bins) / (right - center)
     if resolved.vtln_warp == 1.0:
@@ -539,9 +476,10 @@ def kaldi_fbank(
 ) -> Tensor:
     """Compute one Kaldi-compatible feature matrix.
 
-    ``waveform`` may have shape ``[samples]`` or ``[channels, samples]``.
-    Values are not implicitly scaled; callers loading normalized PCM should
-    multiply by the scale used during model training (usually ``32768``).
+    ``waveform`` may have shape ``[samples]`` or ``[channels,
+    samples]``. Values are not implicitly scaled; callers loading
+    normalized PCM should multiply by the scale used during model
+    training (usually ``32768``).
     """
     resolved = KaldiFbankConfig.coerce(config)
     if not isinstance(waveform, Tensor):
@@ -549,9 +487,7 @@ def kaldi_fbank(
     if waveform.ndim == 1:
         waveform = waveform.unsqueeze(0)
     if waveform.ndim != 2:
-        raise ValueError(
-            "`waveform` must have shape [samples] or [channels, samples]."
-        )
+        raise ValueError("`waveform` must have shape [samples] or [channels, samples].")
     if not waveform.is_floating_point():
         raise TypeError("`waveform` must use a floating-point dtype.")
     if waveform.is_complex():
@@ -560,17 +496,12 @@ def kaldi_fbank(
         raise ValueError("`waveform` contains NaN or infinite values.")
     selected_channel = max(int(channel), 0)
     if selected_channel >= waveform.shape[0]:
-        raise ValueError(
-            f"Channel {channel} is unavailable for "
-            f"{waveform.shape[0]}-channel audio."
-        )
+        raise ValueError(f"Channel {channel} is unavailable for "
+                         f"{waveform.shape[0]}-channel audio.")
     samples = waveform[selected_channel]
     if samples.shape[0] < resolved.window_size:
         return samples.new_empty((0, resolved.feature_size))
-    if (
-        samples.shape[0]
-        < resolved.minimum_duration * resolved.sample_frequency
-    ):
+    if (samples.shape[0] < resolved.minimum_duration * resolved.sample_frequency):
         return samples.new_empty((0, resolved.feature_size))
     frames, log_energy = _windowed_frames(samples, resolved)
     spectrum = torch.fft.rfft(frames).abs()
@@ -588,10 +519,8 @@ def kaldi_fbank(
     if resolved.use_energy:
         energy = log_energy.unsqueeze(1)
         mel = (
-            torch.cat((mel, energy), dim=1)
-            if resolved.htk_compatibility
-            else torch.cat((energy, mel), dim=1)
-        )
+            torch.cat((mel, energy), dim=1) if resolved.htk_compatibility else torch.cat(
+                (energy, mel), dim=1))
     if resolved.subtract_mean and mel.shape[0]:
         mel = mel - mel.mean(dim=0, keepdim=True)
     return mel
@@ -645,15 +574,13 @@ class KaldiFbank(nn.Module):
         if waveforms.ndim == 1:
             waveforms = waveforms.unsqueeze(0)
         if waveforms.ndim != 2:
-            raise ValueError(
-                "`waveforms` must have shape [samples] or [batch, samples]."
-            )
+            raise ValueError("`waveforms` must have shape [samples] or [batch, samples].")
         if not waveforms.is_floating_point():
             raise TypeError("`waveforms` must use a floating-point dtype.")
         batch_size, maximum_samples = waveforms.shape
         if waveform_lengths is None:
             lengths = torch.full(
-                (batch_size,),
+                (batch_size, ),
                 maximum_samples,
                 dtype=torch.long,
                 device=waveforms.device,
@@ -664,24 +591,15 @@ class KaldiFbank(nn.Module):
                 dtype=torch.long,
                 device=waveforms.device,
             )
-            if tuple(lengths.shape) != (batch_size,):
-                raise ValueError(
-                    "`waveform_lengths` must have shape [batch]."
-                )
-            if (
-                (lengths <= 0).any()
-                or (lengths > maximum_samples).any()
-            ):
-                raise ValueError(
-                    "Waveform lengths must lie within the padded batch."
-                )
+            if tuple(lengths.shape) != (batch_size, ):
+                raise ValueError("`waveform_lengths` must have shape [batch].")
+            if ((lengths <= 0).any() or (lengths > maximum_samples).any()):
+                raise ValueError("Waveform lengths must lie within the padded batch.")
         rows = [
             kaldi_fbank(
-                waveforms[index, :int(length.item())]
-                * self.waveform_scale,
+                waveforms[index, :int(length.item())] * self.waveform_scale,
                 self.config,
-            )
-            for index, length in enumerate(lengths)
+            ) for index, length in enumerate(lengths)
         ]
         frame_lengths = torch.tensor(
             [row.shape[0] for row in rows],
@@ -690,9 +608,7 @@ class KaldiFbank(nn.Module):
         )
         if not rows:
             return (
-                waveforms.new_empty(
-                    (0, 0, self.config.feature_size)
-                ),
+                waveforms.new_empty((0, 0, self.config.feature_size)),
                 frame_lengths,
             )
         return (
@@ -710,8 +626,7 @@ class KaldiFbank(nn.Module):
             f"num_mel_bins={self.config.num_mel_bins}, "
             f"frame_length={self.config.frame_length:g}, "
             f"frame_shift={self.config.frame_shift:g}, "
-            f"waveform_scale={self.waveform_scale:g}"
-        )
+            f"waveform_scale={self.waveform_scale:g}")
 
 
 class GlobalFeatureNormalization(nn.Module):
@@ -728,17 +643,11 @@ class GlobalFeatureNormalization(nn.Module):
             ("inverse_std", inverse_std),
         ):
             if not isinstance(value, Tensor) or value.ndim != 1:
-                raise ValueError(
-                    f"`{name}` must be a rank-one PyTorch tensor."
-                )
+                raise ValueError(f"`{name}` must be a rank-one PyTorch tensor.")
             if not value.is_floating_point() or not torch.isfinite(value).all():
-                raise ValueError(
-                    f"`{name}` must contain finite floating-point values."
-                )
+                raise ValueError(f"`{name}` must contain finite floating-point values.")
         if mean.shape != inverse_std.shape:
-            raise ValueError(
-                "`mean` and `inverse_std` must have identical shapes."
-            )
+            raise ValueError("`mean` and `inverse_std` must have identical shapes.")
         if (inverse_std <= 0).any():
             raise ValueError("`inverse_std` must be strictly positive.")
         self.register_buffer(
@@ -752,14 +661,10 @@ class GlobalFeatureNormalization(nn.Module):
 
     def forward(self, features: Tensor) -> Tensor:
         if not isinstance(features, Tensor) or features.ndim < 2:
-            raise ValueError(
-                "`features` must have a final feature dimension."
-            )
+            raise ValueError("`features` must have a final feature dimension.")
         if features.shape[-1] != self.mean.numel():
-            raise ValueError(
-                f"Expected {self.mean.numel()} feature bins, found "
-                f"{features.shape[-1]}."
-            )
+            raise ValueError(f"Expected {self.mean.numel()} feature bins, found "
+                             f"{features.shape[-1]}.")
         mean = self.mean.to(
             device=features.device,
             dtype=features.dtype,
@@ -783,27 +688,19 @@ def _cmvn_vector(
         try:
             number = _finite_real(item, name=f"{name}[{index}]")
         except (TypeError, ValueError) as error:
-            raise ValueError(
-                f"`{name}` must contain only finite numbers."
-            ) from error
+            raise ValueError(f"`{name}` must contain only finite numbers.") from error
         result.append(number)
     return result
 
 
-def _json_cmvn_statistics(
-    content: str,
-) -> tuple[list[float], list[float], float]:
+def _json_cmvn_statistics(content: str, ) -> tuple[list[float], list[float], float]:
     try:
         payload = json.loads(content)
     except json.JSONDecodeError as error:
         raise ValueError("The CMVN file contains invalid JSON.") from error
     if not isinstance(payload, dict):
         raise ValueError("A JSON CMVN file must contain an object.")
-    missing = {
-        key
-        for key in ("mean_stat", "var_stat", "frame_num")
-        if key not in payload
-    }
+    missing = {key for key in ("mean_stat", "var_stat", "frame_num") if key not in payload}
     if missing:
         names = ", ".join(sorted(missing))
         raise ValueError(f"The CMVN file is missing: {names}.")
@@ -813,13 +710,9 @@ def _json_cmvn_statistics(
     return means, variances, count
 
 
-def _kaldi_cmvn_statistics(
-    content: str,
-) -> tuple[list[float], list[float], float]:
+def _kaldi_cmvn_statistics(content: str, ) -> tuple[list[float], list[float], float]:
     if content.startswith("\0B"):
-        raise ValueError(
-            "Binary Kaldi CMVN files are unsupported; export text statistics."
-        )
+        raise ValueError("Binary Kaldi CMVN files are unsupported; export text statistics.")
     tokens = content.split()
     if len(tokens) < 6 or tokens[0] != "[" or tokens[-1] != "]":
         raise ValueError("The Kaldi CMVN text matrix is malformed.")
@@ -835,8 +728,7 @@ def _kaldi_cmvn_statistics(
             _finite_real(
                 float(tokens[index]),
                 name=f"mean_stat[{index - 1}]",
-            )
-            for index in range(1, dimension + 1)
+            ) for index in range(1, dimension + 1)
         ]
         count = _finite_real(
             float(tokens[dimension + 1]),
@@ -846,13 +738,10 @@ def _kaldi_cmvn_statistics(
             _finite_real(
                 float(tokens[index]),
                 name=f"var_stat[{index - dimension - 2}]",
-            )
-            for index in range(dimension + 2, 2 * dimension + 2)
+            ) for index in range(dimension + 2, 2 * dimension + 2)
         ]
     except (TypeError, ValueError) as error:
-        raise ValueError(
-            "The Kaldi CMVN matrix must contain finite numbers."
-        ) from error
+        raise ValueError("The Kaldi CMVN matrix must contain finite numbers.") from error
     return means, variances, count
 
 
@@ -905,22 +794,14 @@ def load_global_cmvn(
         raise FileNotFoundError(f"CMVN statistics were not found: {resolved}")
     size = resolved.stat().st_size
     if size > max_file_bytes:
-        raise ValueError(
-            f"CMVN file is {size} bytes; limit is {max_file_bytes} bytes."
-        )
+        raise ValueError(f"CMVN file is {size} bytes; limit is {max_file_bytes} bytes.")
     try:
         content = resolved.read_text(encoding="utf-8")
     except UnicodeDecodeError as error:
-        raise ValueError(
-            "CMVN statistics must be UTF-8 JSON or text-Kaldi data."
-        ) from error
+        raise ValueError("CMVN statistics must be UTF-8 JSON or text-Kaldi data.") from error
     resolved_format = format
     if resolved_format == "auto":
-        resolved_format = (
-            "json"
-            if content.lstrip().startswith("{")
-            else "kaldi"
-        )
+        resolved_format = ("json" if content.lstrip().startswith("{") else "kaldi")
     if resolved_format == "json":
         means, variances, count = _json_cmvn_statistics(content)
     else:
@@ -928,16 +809,9 @@ def load_global_cmvn(
     if count <= 0.0:
         raise ValueError("`frame_num` must be greater than zero.")
     if len(means) != len(variances):
-        raise ValueError(
-            "`mean_stat` and `var_stat` must have identical dimensions."
-        )
-    if (
-        expected_dimension is not None
-        and len(means) != expected_dimension
-    ):
-        raise ValueError(
-            f"Expected {expected_dimension} CMVN bins, found {len(means)}."
-        )
+        raise ValueError("`mean_stat` and `var_stat` must have identical dimensions.")
+    if (expected_dimension is not None and len(means) != expected_dimension):
+        raise ValueError(f"Expected {expected_dimension} CMVN bins, found {len(means)}.")
     mean = torch.tensor(means, dtype=torch.float64) / count
     second_moment = torch.tensor(
         variances,

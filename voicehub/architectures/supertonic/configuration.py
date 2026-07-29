@@ -34,11 +34,11 @@ class SupertonicArchitectureConfig:
         if not isinstance(self.version, str) or not self.version.strip():
             raise ValueError("Supertonic `version` must be non-empty.")
         for name in (
-            "sample_rate",
-            "base_chunk_size",
-            "autoencoder_compression",
-            "latent_dimension",
-            "text_to_latent_compression",
+                "sample_rate",
+                "base_chunk_size",
+                "autoencoder_compression",
+                "latent_dimension",
+                "text_to_latent_compression",
         ):
             _positive_integer(getattr(self, name), name=name)
 
@@ -48,17 +48,13 @@ class SupertonicArchitectureConfig:
 
     @property
     def latent_hop_length(self) -> int:
-        return (
-            self.base_chunk_size
-            * self.autoencoder_compression
-            * self.text_to_latent_compression
-        )
+        return (self.base_chunk_size * self.autoencoder_compression * self.text_to_latent_compression)
 
     @classmethod
     def from_mapping(
         cls,
         value: Mapping[str, Any],
-    ) -> "SupertonicArchitectureConfig":
+    ) -> SupertonicArchitectureConfig:
         if not isinstance(value, Mapping):
             raise TypeError("Supertonic architecture config must be a mapping.")
         autoencoder = _mapping(value.get("ae"), name="ae")

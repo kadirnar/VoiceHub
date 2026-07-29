@@ -35,8 +35,8 @@ def sequence_cross_entropy(
 
     Half-precision and bfloat16 logits are promoted to float32 for the
     log-softmax calculation. ``attention_mask`` and ``ignore_index`` are
-    combined, and a fully masked batch returns a differentiable zero instead
-    of ``NaN``.
+    combined, and a fully masked batch returns a differentiable zero
+    instead of ``NaN``.
     """
     if not isinstance(logits, Tensor) or not isinstance(targets, Tensor):
         raise TypeError("`logits` and `targets` must be PyTorch tensors.")

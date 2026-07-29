@@ -10,12 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from voicehub.checkpointing.errors import CheckpointCompatibilityError
-from voicehub.checkpointing.transforms import (
-    CopyTensor,
-    MappingTensorSource,
-    TensorPlan,
-    TensorSource,
-)
+from voicehub.checkpointing.transforms import CopyTensor, MappingTensorSource, TensorPlan, TensorSource
 
 
 @dataclass(frozen=True)
@@ -42,19 +37,12 @@ class CheckpointCompatibilityReport:
 
     @property
     def is_compatible(self) -> bool:
-        return not (
-            self.missing
-            or self.unexpected
-            or self.shape_mismatches
-            or self.unused_sources
-        )
+        return not (self.missing or self.unexpected or self.shape_mismatches or self.unused_sources)
 
     def summary(self) -> str:
         if self.is_compatible:
-            return (
-                f"{self.adapter} loaded {len(self.loaded)} tensors for "
-                f"{self.architecture}."
-            )
+            return (f"{self.adapter} loaded {len(self.loaded)} tensors for "
+                    f"{self.architecture}.")
         details = []
         for name, values in (
             ("missing", self.missing),
@@ -64,10 +52,8 @@ class CheckpointCompatibilityReport:
         ):
             if values:
                 details.append(f"{len(values)} {name}")
-        return (
-            f"{self.adapter} is incompatible with {self.architecture}: "
-            f"{', '.join(details)}."
-        )
+        return (f"{self.adapter} is incompatible with {self.architecture}: "
+                f"{', '.join(details)}.")
 
     def require_compatible(self) -> None:
         if not self.is_compatible:
@@ -77,9 +63,9 @@ class CheckpointCompatibilityReport:
 class CheckpointAdapter(ABC):
     """Convert one upstream checkpoint namespace into a native model.
 
-    Implementations are deliberately stateless.  Adapter IDs and versions are
-    persisted in ``voicehub_manifest.json`` and must change whenever tensor
-    semantics change.
+    Implementations are deliberately stateless.  Adapter IDs and
+    versions are persisted in ``voicehub_manifest.json`` and must change
+    whenever tensor semantics change.
     """
 
     architecture_id: str
@@ -91,10 +77,8 @@ class CheckpointAdapter(ABC):
         for name in ("architecture_id", "adapter_id", "adapter_version"):
             value = getattr(cls, name, None)
             if not isinstance(value, str) or not value.strip():
-                raise TypeError(
-                    f"Checkpoint adapter {cls.__name__} must declare "
-                    f"a non-empty `{name}`."
-                )
+                raise TypeError(f"Checkpoint adapter {cls.__name__} must declare "
+                                f"a non-empty `{name}`.")
 
     @property
     def qualified_id(self) -> str:
@@ -121,9 +105,7 @@ class CheckpointAdapter(ABC):
             return MappingTensorSource(source)
         if isinstance(source, TensorSource):
             return source
-        raise TypeError(
-            "`source` must implement TensorSource or be a state-dict mapping."
-        )
+        raise TypeError("`source` must implement TensorSource or be a state-dict mapping.")
 
     def inspect(
         self,
@@ -151,24 +133,17 @@ class CheckpointAdapter(ABC):
                 name=name,
                 checkpoint_shape=tuple(converted[name].shape),
                 model_shape=tuple(model_state[name].shape),
-            )
-            for name in sorted(expected & provided)
-            if tuple(converted[name].shape) != tuple(model_state[name].shape)
-        )
+            ) for name in sorted(expected & provided)
+            if tuple(converted[name].shape) != tuple(model_state[name].shape))
         mismatch_names = {item.name for item in shape_mismatches}
         loaded = tuple(sorted(expected & provided - mismatch_names))
         available_sources = set(normalized_source.keys())
         ignored_sources = {
             name
-            for name in available_sources - consumed
-            if any(
-                fnmatchcase(name, pattern)
-                for pattern in plan.ignored_source_patterns
-            )
+            for name in available_sources - consumed if any(
+                fnmatchcase(name, pattern) for pattern in plan.ignored_source_patterns)
         }
-        unused_sources = tuple(
-            sorted(available_sources - consumed - ignored_sources)
-        )
+        unused_sources = tuple(sorted(available_sources - consumed - ignored_sources))
         report = CheckpointCompatibilityReport(
             architecture=self.architecture_id,
             adapter=self.qualified_id,
@@ -198,8 +173,7 @@ class CheckpointAdapter(ABC):
         mismatch_names = {item.name for item in report.shape_mismatches}
         loadable = {
             name: tensor
-            for name, tensor in converted.items()
-            if name in report.loaded and name not in mismatch_names
+            for name, tensor in converted.items() if name in report.loaded and name not in mismatch_names
         }
         model.load_state_dict(loadable, strict=False)
         return report
@@ -214,29 +188,25 @@ class CheckpointAdapter(ABC):
     ) -> CheckpointCompatibilityReport:
         """Validate then copy a rename-only plan one tensor at a time.
 
-        Large speech checkpoints commonly use a pure source-to-native rename
-        plan.  This path validates all names and shapes from Safetensors
-        headers before mutation, then retains at most one checkpoint tensor in
-        memory.  Plans requiring split, concatenate, transpose, cast, reshape,
-        or custom transformations must use :meth:`load`.
+        Large speech checkpoints commonly use a pure source-to-native
+        rename plan.  This path validates all names and shapes from
+        Safetensors headers before mutation, then retains at most one
+        checkpoint tensor in memory.  Plans requiring split,
+        concatenate, transpose, cast, reshape, or custom transformations
+        must use :meth:`load`.
         """
         type(self)._validate_identity()
         if not callable(getattr(model, "state_dict", None)):
             raise TypeError("Checkpoint target must expose state_dict().")
         plan = self.tensor_plan(config)
         if any(not isinstance(rule, CopyTensor) for rule in plan.rules):
-            raise CheckpointCompatibilityError(
-                "Streaming checkpoint loading supports CopyTensor rules only."
-            )
+            raise CheckpointCompatibilityError("Streaming checkpoint loading supports CopyTensor rules only.")
         normalized_source = self._source(source)
         model_state = model.state_dict()
         if not isinstance(model_state, Mapping):
             raise TypeError("Model state_dict() must return a mapping.")
 
-        mapping = {
-            rule.target: rule.source
-            for rule in plan.rules
-        }
+        mapping = {rule.target: rule.source for rule in plan.rules}
         expected = set(model_state)
         provided = set(mapping)
         available_sources = set(normalized_source.keys())
@@ -245,15 +215,10 @@ class CheckpointAdapter(ABC):
         unexpected = tuple(sorted(provided - expected))
         ignored_sources = {
             name
-            for name in available_sources - consumed
-            if any(
-                fnmatchcase(name, pattern)
-                for pattern in plan.ignored_source_patterns
-            )
+            for name in available_sources - consumed if any(
+                fnmatchcase(name, pattern) for pattern in plan.ignored_source_patterns)
         }
-        unused_sources = tuple(
-            sorted(available_sources - consumed - ignored_sources)
-        )
+        unused_sources = tuple(sorted(available_sources - consumed - ignored_sources))
 
         tensor_shape = getattr(normalized_source, "tensor_shape", None)
         shape_mismatches: list[TensorShapeMismatch] = []
@@ -264,9 +229,7 @@ class CheckpointAdapter(ABC):
             if callable(tensor_shape):
                 checkpoint_shape = tuple(tensor_shape(source_name))
             else:
-                checkpoint_shape = tuple(
-                    normalized_source.get_tensor(source_name).shape
-                )
+                checkpoint_shape = tuple(normalized_source.get_tensor(source_name).shape)
             model_shape = tuple(model_state[target_name].shape)
             if checkpoint_shape != model_shape:
                 shape_mismatches.append(
@@ -274,25 +237,15 @@ class CheckpointAdapter(ABC):
                         name=target_name,
                         checkpoint_shape=checkpoint_shape,
                         model_shape=model_shape,
-                    )
-                )
+                    ))
         absent_sources = consumed - available_sources
         missing = tuple(
-            sorted(set(missing) | {
-                target
-                for target, source_name in mapping.items()
-                if source_name in absent_sources
-            })
-        )
-        mismatch_names = {item.name for item in shape_mismatches}
-        loaded = tuple(
             sorted(
-                expected
-                & provided
-                - mismatch_names
-                - set(missing)
-            )
-        )
+                set(missing)
+                | {target
+                   for target, source_name in mapping.items() if source_name in absent_sources}))
+        mismatch_names = {item.name for item in shape_mismatches}
+        loaded = tuple(sorted(expected & provided - mismatch_names - set(missing)))
         report = CheckpointCompatibilityReport(
             architecture=self.architecture_id,
             adapter=self.qualified_id,
@@ -309,14 +262,10 @@ class CheckpointAdapter(ABC):
         try:
             import torch
         except ModuleNotFoundError as error:  # pragma: no cover - invariant
-            raise RuntimeError(
-                "Native checkpoint loading requires PyTorch."
-            ) from error
+            raise RuntimeError("Native checkpoint loading requires PyTorch.") from error
         with torch.no_grad():
             for target_name in report.loaded:
-                source_tensor = normalized_source.get_tensor(
-                    mapping[target_name]
-                )
+                source_tensor = normalized_source.get_tensor(mapping[target_name])
                 target_tensor = model_state[target_name]
                 target_tensor.copy_(
                     source_tensor,

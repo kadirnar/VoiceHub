@@ -239,12 +239,12 @@ _MISSING = object()
 
 @dataclass(frozen=True)
 class RuntimeBundle:
-    """
-    Resolved objects used by inference, training, and optimisation.
+    """Resolved objects used by inference, training, and optimisation.
 
-    The bundle does not prescribe a tensor framework or model call signature. Architecture-specific builders
-    create the objects, while generic VoiceHub orchestration addresses them through these stable semantic
-    names.
+    The bundle does not prescribe a tensor framework or model call
+    signature. Architecture-specific builders create the objects, while
+    generic VoiceHub orchestration addresses them through these stable
+    semantic names.
     """
 
     spec: ArchitectureSpec

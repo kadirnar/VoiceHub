@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 """VoiceHub-native S3 tokenizer v2 graph.
 
 Ported from S3Tokenizer revision
@@ -25,16 +24,11 @@ from typing import Optional, Tuple
 
 import torch
 
+from voicehub.models.chatterbox.models.s3tokenizer.model import Conv1d, LayerNorm, Linear, MultiHeadAttention
 from voicehub.models.chatterbox.models.s3tokenizer.native_utils import (
     make_non_pad_mask,
     mask_to_bias,
     merge_tokenized_segments,
-)
-from voicehub.models.chatterbox.models.s3tokenizer.model import (
-    Conv1d,
-    LayerNorm,
-    Linear,
-    MultiHeadAttention,
 )
 
 
@@ -50,10 +44,7 @@ class ModelConfig:
     use_sdpa: bool = False
 
 
-def precompute_freqs_cis(dim: int,
-                         end: int,
-                         theta: float = 10000.0,
-                         scaling=None):
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, scaling=None):
     freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)].float() / dim))
     t = torch.arange(end, device=freqs.device)  # type: ignore
     if scaling is not None:
@@ -90,9 +81,7 @@ def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
     ndim = x.ndim
     assert 0 <= 1 < ndim
     assert freqs_cis.shape == (x.shape[1], x.shape[-1])
-    shape = [
-        d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)
-    ]
+    shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
     return freqs_cis.view(*shape)
 
 
@@ -119,21 +108,19 @@ class FSQCodebook(torch.nn.Module):
         h = h * 0.9990000128746033
         h = h.round() + 1
         # h = ((self.level - 1) * h).round()  # range [-k, k]
-        powers = torch.pow(
-            self.level,
-            torch.arange(2**self.level, device=x.device, dtype=h.dtype))
+        powers = torch.pow(self.level, torch.arange(2**self.level, device=x.device, dtype=h.dtype))
         mu = torch.sum(h * powers.unsqueeze(0), dim=-1)
         ind = mu.reshape(x_shape[0], x_shape[1]).int()
         return ind
 
     @torch.inference_mode()
     def decode(self, embed_ind: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError(
-            'There is no official up project component provided')
+        raise NotImplementedError('There is no official up project component provided')
 
 
 class FSQVectorQuantization(torch.nn.Module):
     """Vector quantization implementation (inference-only).
+
     Args:
         dim (int): Dimension
         codebook_size (int): Codebook size
@@ -174,24 +161,16 @@ class FSMNMultiHeadAttention(MultiHeadAttention):
     ):
         super().__init__(n_state, n_head)
 
-        self.fsmn_block = torch.nn.Conv1d(n_state,
-                                          n_state,
-                                          kernel_size,
-                                          stride=1,
-                                          padding=0,
-                                          groups=n_state,
-                                          bias=False)
+        self.fsmn_block = torch.nn.Conv1d(
+            n_state, n_state, kernel_size, stride=1, padding=0, groups=n_state, bias=False)
         self.left_padding = (kernel_size - 1) // 2
         self.right_padding = kernel_size - 1 - self.left_padding
-        self.pad_fn = torch.nn.ConstantPad1d(
-            (self.left_padding, self.right_padding), 0.0)
+        self.pad_fn = torch.nn.ConstantPad1d((self.left_padding, self.right_padding), 0.0)
 
         self.use_sdpa = use_sdpa
         self.key = Linear(n_state, n_state, bias=False)
 
-    def forward_fsmn(self,
-                     inputs: torch.Tensor,
-                     mask: Optional[torch.Tensor] = None):
+    def forward_fsmn(self, inputs: torch.Tensor, mask: Optional[torch.Tensor] = None):
         b, t, _, _ = inputs.size()
         inputs = inputs.view(b, t, -1)
         if mask is not None and mask.size(2) > 0:  # time2 > 0
@@ -203,13 +182,14 @@ class FSMNMultiHeadAttention(MultiHeadAttention):
         x += inputs
         return x * mask
 
-    def qkv_attention(self,
-                      q: torch.Tensor,
-                      k: torch.Tensor,
-                      v: torch.Tensor,
-                      mask: Optional[torch.Tensor] = None,
-                      mask_pad: Optional[torch.Tensor] = None,
-                      freqs_cis: Optional[torch.Tensor] = None):
+    def qkv_attention(
+            self,
+            q: torch.Tensor,
+            k: torch.Tensor,
+            v: torch.Tensor,
+            mask: Optional[torch.Tensor] = None,
+            mask_pad: Optional[torch.Tensor] = None,
+            freqs_cis: Optional[torch.Tensor] = None):
         _, _, D = q.shape
         scale = (D // self.n_head)**-0.25
         q = q.view(*q.shape[:2], self.n_head, -1)
@@ -231,8 +211,7 @@ class FSMNMultiHeadAttention(MultiHeadAttention):
                 qk = qk + mask
             qk = qk.float()
             w = torch.nn.functional.softmax(qk, dim=-1).to(q.dtype)
-            return (w @ v).permute(
-                0, 2, 1, 3).flatten(start_dim=2), qk.detach(), fsm_memory
+            return (w @ v).permute(0, 2, 1, 3).flatten(start_dim=2), qk.detach(), fsm_memory
         else:
             k = k.permute(0, 2, 1, 3) * scale
             assert mask is not None
@@ -244,23 +223,21 @@ class FSMNMultiHeadAttention(MultiHeadAttention):
                 dropout_p=0.,
                 scale=1.,
             )
-            output = (output.transpose(1,
-                                       2).contiguous().view(q.size(0), -1, D)
-                      )  # (batch, time1, d_model)
+            output = (output.transpose(1, 2).contiguous().view(q.size(0), -1, D))  # (batch, time1, d_model)
             return output, None, fsm_memory
 
-    def forward(self,
-                x: torch.Tensor,
-                mask: Optional[torch.Tensor] = None,
-                mask_pad: Optional[torch.Tensor] = None,
-                freqs_cis: Optional[torch.Tensor] = None):
+    def forward(
+            self,
+            x: torch.Tensor,
+            mask: Optional[torch.Tensor] = None,
+            mask_pad: Optional[torch.Tensor] = None,
+            freqs_cis: Optional[torch.Tensor] = None):
 
         q = self.query(x)
         k = self.key(x)
         v = self.value(x)
 
-        wv, qk, fsm_memory = self.qkv_attention(q, k, v, mask, mask_pad,
-                                                freqs_cis)
+        wv, qk, fsm_memory = self.qkv_attention(q, k, v, mask, mask_pad, freqs_cis)
         return self.out(wv) + fsm_memory, qk
 
 
@@ -275,16 +252,12 @@ class ResidualAttentionBlock(torch.nn.Module):
     ):
         super().__init__()
 
-        self.attn = FSMNMultiHeadAttention(n_state,
-                                           n_head,
-                                           kernel_size,
-                                           use_sdpa=use_sdpa)
+        self.attn = FSMNMultiHeadAttention(n_state, n_head, kernel_size, use_sdpa=use_sdpa)
         self.attn_ln = LayerNorm(n_state, eps=1e-5)
 
         n_mlp = n_state * 4
 
-        self.mlp = torch.nn.Sequential(Linear(n_state, n_mlp), torch.nn.GELU(),
-                                       Linear(n_mlp, n_state))
+        self.mlp = torch.nn.Sequential(Linear(n_state, n_mlp), torch.nn.GELU(), Linear(n_mlp, n_state))
         self.mlp_ln = LayerNorm(n_state)
 
     def forward(
@@ -294,9 +267,7 @@ class ResidualAttentionBlock(torch.nn.Module):
         mask_pad: Optional[torch.Tensor] = None,
         freqs_cis: Optional[torch.Tensor] = None,
     ):
-        x = x + self.attn(
-            self.attn_ln(x), mask=mask, mask_pad=mask_pad,
-            freqs_cis=freqs_cis)[0]
+        x = x + self.attn(self.attn_ln(x), mask=mask, mask_pad=mask_pad, freqs_cis=freqs_cis)[0]
 
         x = x + self.mlp(self.mlp_ln(x))
         return x
@@ -316,24 +287,13 @@ class AudioEncoderV2(torch.nn.Module):
         super().__init__()
         self.stride = stride
 
-        self.conv1 = Conv1d(n_mels,
-                            n_state,
-                            kernel_size=3,
-                            stride=stride,
-                            padding=1)
-        self.conv2 = Conv1d(n_state,
-                            n_state,
-                            kernel_size=3,
-                            stride=2,
-                            padding=1)
+        self.conv1 = Conv1d(n_mels, n_state, kernel_size=3, stride=stride, padding=1)
+        self.conv2 = Conv1d(n_state, n_state, kernel_size=3, stride=2, padding=1)
         self.freqs_cis = precompute_freqs_cis(64, 1024 * 2)
-        self.blocks = torch.nn.ModuleList([
-            ResidualAttentionBlock(n_state, n_head, use_sdpa=use_sdpa)
-            for _ in range(n_layer)
-        ])
+        self.blocks = torch.nn.ModuleList(
+            [ResidualAttentionBlock(n_state, n_head, use_sdpa=use_sdpa) for _ in range(n_layer)])
 
-    def forward(self, x: torch.Tensor,
-                x_len: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor, x_len: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         x : torch.Tensor, shape = (batch_size, n_mels, T)
             the mel spectrogram of the audio
@@ -371,6 +331,7 @@ class AudioEncoderV2(torch.nn.Module):
 
 class S3TokenizerV2(torch.nn.Module):
     """S3 tokenizer v2 implementation (inference-only).
+
     Args:
         config (ModelConfig): Config
     """
@@ -396,15 +357,13 @@ class S3TokenizerV2(torch.nn.Module):
             self.config.n_codebook_size,
         )
 
-    def forward(self, mel: torch.Tensor,
-                mel_len: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, mel: torch.Tensor, mel_len: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.quantize(mel, mel_len)
 
     @torch.inference_mode()
-    def quantize(self, mel: torch.Tensor,
-                 mel_len: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Quantize mel spectrogram to tokens, with automatic long audio handling.
+    def quantize(self, mel: torch.Tensor, mel_len: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Quantize mel spectrogram to tokens, with automatic long audio
+        handling.
 
         Args:
             mel: mel spectrogram tensor, shape (batch_size, n_mels, T)
@@ -423,8 +382,7 @@ class S3TokenizerV2(torch.nn.Module):
 
         if long_audio_mask.any():
             # Has long audio - need special processing
-            return self._quantize_mixed_batch(mel, mel_len, long_audio_mask,
-                                              max_frames)
+            return self._quantize_mixed_batch(mel, mel_len, long_audio_mask, max_frames)
         else:
             # All short audio - use original method
             hidden, code_len = self.encoder(mel, mel_len)
@@ -433,11 +391,10 @@ class S3TokenizerV2(torch.nn.Module):
 
     @torch.inference_mode()
     def _quantize_mixed_batch(
-            self, mel: torch.Tensor, mel_len: torch.Tensor,
-            long_audio_mask: torch.Tensor,
+            self, mel: torch.Tensor, mel_len: torch.Tensor, long_audio_mask: torch.Tensor,
             max_frames: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Handle mixed batch with both short and long audio using unified batch processing.
+        """Handle mixed batch with both short and long audio using unified
+        batch processing.
 
         Args:
             mel: mel spectrogram tensor, shape (batch_size, n_mels, T)
@@ -465,8 +422,7 @@ class S3TokenizerV2(torch.nn.Module):
         # Collect all segments to process (including short and long audio segments)
         all_segments = []
         all_segments_len = []
-        segment_info = [
-        ]  # Record which audio each segment belongs to and whether it's long audio
+        segment_info = []  # Record which audio each segment belongs to and whether it's long audio
 
         # Process all audio in the batch
         for batch_idx in range(batch_size):
@@ -485,8 +441,7 @@ class S3TokenizerV2(torch.nn.Module):
                     segment = torch.nn.functional.pad(segment, (0, pad_size))
 
                 all_segments.append(segment)
-                all_segments_len.append(
-                    torch.tensor(seg_len, device=mel.device))
+                all_segments_len.append(torch.tensor(seg_len, device=mel.device))
                 segment_info.append({
                     'batch_idx': batch_idx,
                     'is_long_audio': False,
@@ -505,12 +460,10 @@ class S3TokenizerV2(torch.nn.Module):
                     # Pad if necessary
                     if seg_len < frames_per_window:
                         pad_size = frames_per_window - seg_len
-                        segment = torch.nn.functional.pad(
-                            segment, (0, pad_size))
+                        segment = torch.nn.functional.pad(segment, (0, pad_size))
 
                     all_segments.append(segment)
-                    all_segments_len.append(
-                        torch.tensor(seg_len, device=mel.device))
+                    all_segments_len.append(torch.tensor(seg_len, device=mel.device))
                     segment_info.append({
                         'batch_idx': batch_idx,
                         'is_long_audio': True,
@@ -529,13 +482,9 @@ class S3TokenizerV2(torch.nn.Module):
 
         if not all_segments:
             # Fallback if no segments
-            return torch.zeros(batch_size,
-                               0,
-                               dtype=torch.long,
-                               device=mel.device), torch.zeros(
-                                   batch_size,
-                                   dtype=torch.long,
-                                   device=mel.device)
+            return torch.zeros(
+                batch_size, 0, dtype=torch.long, device=mel.device), torch.zeros(
+                    batch_size, dtype=torch.long, device=mel.device)
 
         # Unified batch processing for all segments
         unified_batch_mel = torch.stack(all_segments)
@@ -554,8 +503,7 @@ class S3TokenizerV2(torch.nn.Module):
             segment_idx = info['segment_idx']
 
             # Get codes for current segment
-            segment_code = codes[
-                seg_idx, :code_len[seg_idx].item()].detach().cpu()
+            segment_code = codes[seg_idx, :code_len[seg_idx].item()].detach().cpu()
 
             if not is_long_audio:
                 # Short audio: use directly
@@ -579,9 +527,7 @@ class S3TokenizerV2(torch.nn.Module):
                 # V2 models use 25Hz token rate
                 token_rate = 25
 
-                merged_codes = merge_tokenized_segments(audio_codes,
-                                                        overlap=overlap,
-                                                        token_rate=token_rate)
+                merged_codes = merge_tokenized_segments(audio_codes, overlap=overlap, token_rate=token_rate)
 
                 # Convert to tensor
                 merged_codes_tensor = merged_codes.to(
@@ -593,13 +539,8 @@ class S3TokenizerV2(torch.nn.Module):
         # Construct final output
         max_code_len = max(code_info[1] for code_info in results.values())
 
-        output_codes = torch.zeros(batch_size,
-                                   max_code_len,
-                                   dtype=torch.long,
-                                   device=mel.device)
-        output_codes_len = torch.zeros(batch_size,
-                                       dtype=torch.long,
-                                       device=mel.device)
+        output_codes = torch.zeros(batch_size, max_code_len, dtype=torch.long, device=mel.device)
+        output_codes_len = torch.zeros(batch_size, dtype=torch.long, device=mel.device)
 
         for batch_idx, (code_tensor, code_len) in results.items():
             output_codes[batch_idx, :code_len] = code_tensor
@@ -614,8 +555,7 @@ class S3TokenizerV2(torch.nn.Module):
     def init_from_onnx(self, onnx_path: str):
         raise NotImplementedError(
             "Native Chatterbox loads the reviewed Safetensors checkpoint; "
-            "untrusted ONNX-to-PyTorch conversion is intentionally unavailable."
-        )
+            "untrusted ONNX-to-PyTorch conversion is intentionally unavailable.")
 
     def init_from_pt(self, ckpt_path: str):
         ckpt = torch.load(ckpt_path, map_location="cpu", mmap=True, weights_only=True)

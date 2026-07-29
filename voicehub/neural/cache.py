@@ -70,16 +70,11 @@ class DynamicKVCache:
         if previous is None or not append:
             self._entries[layer_index] = incoming
             return incoming
-        if (
-            previous.key.shape[:2] != key.shape[:2]
-            or previous.key.shape[-1] != key.shape[-1]
-            or previous.key.device != key.device
-            or previous.key.dtype != key.dtype
-        ):
+        if (previous.key.shape[:2] != key.shape[:2] or previous.key.shape[-1] != key.shape[-1] or
+                previous.key.device != key.device or previous.key.dtype != key.dtype):
             raise ValueError(
                 f"Cache update for layer {layer_index} is incompatible with "
-                "existing batch/head/device/dtype state."
-            )
+                "existing batch/head/device/dtype state.")
         entry = CacheEntry(
             torch.cat((previous.key, key), dim=-2),
             torch.cat((previous.value, value), dim=-2),
@@ -87,15 +82,11 @@ class DynamicKVCache:
         self._entries[layer_index] = entry
         return entry
 
-    def reorder(self, batch_indices: Tensor) -> "DynamicKVCache":
+    def reorder(self, batch_indices: Tensor) -> DynamicKVCache:
         """Reorder or duplicate cache rows for beam search."""
-        if (
-            not isinstance(batch_indices, Tensor)
-            or batch_indices.ndim != 1
-            or batch_indices.dtype == torch.bool
-            or batch_indices.is_floating_point()
-            or batch_indices.is_complex()
-        ):
+        if (not isinstance(batch_indices, Tensor) or batch_indices.ndim != 1 or
+                batch_indices.dtype == torch.bool or batch_indices.is_floating_point() or
+                batch_indices.is_complex()):
             raise TypeError("Cache batch indices must be a one-dimensional integer tensor.")
         for layer_index, entry in tuple(self._entries.items()):
             indices = batch_indices.to(entry.key.device)
@@ -105,7 +96,7 @@ class DynamicKVCache:
             )
         return self
 
-    def detach(self) -> "DynamicKVCache":
+    def detach(self) -> DynamicKVCache:
         for layer_index, entry in tuple(self._entries.items()):
             self._entries[layer_index] = CacheEntry(
                 entry.key.detach(),
@@ -116,7 +107,7 @@ class DynamicKVCache:
     def clear(self) -> None:
         self._entries.clear()
 
-    def clone(self) -> "DynamicKVCache":
+    def clone(self) -> DynamicKVCache:
         result = DynamicKVCache()
         result._entries = {
             layer_index: CacheEntry(entry.key.clone(), entry.value.clone())

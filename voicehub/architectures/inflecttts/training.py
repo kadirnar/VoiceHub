@@ -1,10 +1,11 @@
 """Differentiable VITS warm-start objectives for Inflect v2.
 
-The release contains the complete deployable generator but intentionally omits
-the posterior encoder and discriminators.  This module reconstructs those
-published VITS components and initializes them freshly.  It is a real
-fine-tuning path, but not a claim that the unpublished author optimizer/data
-recipe or resumable state has been recovered.
+The release contains the complete deployable generator but intentionally
+omits the posterior encoder and discriminators.  This module
+reconstructs those published VITS components and initializes them
+freshly.  It is a real fine-tuning path, but not a claim that the
+unpublished author optimizer/data recipe or resumable state has been
+recovered.
 """
 
 from __future__ import annotations

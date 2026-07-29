@@ -12,14 +12,8 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
-from voicehub.architectures.supertonic.configuration import (
-    SupertonicArchitectureConfig,
-)
-from voicehub.architectures.supertonic.frontend import (
-    SupertonicStyle,
-    SupertonicUnicodeProcessor,
-    length_mask,
-)
+from voicehub.architectures.supertonic.configuration import SupertonicArchitectureConfig
+from voicehub.architectures.supertonic.frontend import SupertonicStyle, SupertonicUnicodeProcessor, length_mask
 from voicehub.checkpointing import ONNXModel
 from voicehub.hub import read_json_file
 from voicehub.neural.onnx import NativeONNXGraph
@@ -29,25 +23,18 @@ _SENTENCE_BOUNDARY = re.compile(
     r"(?<!Sr\.)(?<!Jr\.)(?<!Ph\.D\.)(?<!etc\.)(?<!e\.g\.)"
     r"(?<!i\.e\.)(?<!vs\.)(?<!Inc\.)(?<!Ltd\.)(?<!Co\.)"
     r"(?<!Corp\.)(?<!St\.)(?<!Ave\.)(?<!Blvd\.)"
-    r"(?<!\b[A-Z]\.)(?<=[.!?])\s+"
-)
+    r"(?<!\b[A-Z]\.)(?<=[.!?])\s+")
 
 
 def chunk_text(text: str, *, maximum_characters: int = 300) -> tuple[str, ...]:
     """Split paragraphs and sentences without truncating model input."""
     if not isinstance(text, str) or not text.strip():
         raise ValueError("Supertonic text must be non-empty.")
-    if (
-        isinstance(maximum_characters, bool)
-        or not isinstance(maximum_characters, int)
-        or maximum_characters <= 0
-    ):
+    if (isinstance(maximum_characters, bool) or not isinstance(maximum_characters, int) or
+            maximum_characters <= 0):
         raise ValueError("`maximum_characters` must be a positive integer.")
     chunks: list[str] = []
-    paragraphs = (
-        paragraph.strip()
-        for paragraph in re.split(r"\n\s*\n+", text.strip())
-    )
+    paragraphs = (paragraph.strip() for paragraph in re.split(r"\n\s*\n+", text.strip()))
     for paragraph in paragraphs:
         if not paragraph:
             continue
@@ -78,10 +65,11 @@ class SupertonicFineTuningOutput:
 class NativeSupertonicRuntime(nn.Module):
     """Own all four released graphs as trainable PyTorch modules.
 
-    The public release omits the audio/style encoders and original optimizer
-    recipe. VoiceHub therefore supports exact inference and explicitly
-    reconstructed fine-tuning of the published duration, text-to-latent,
-    vector-update, and vocoder graphs from precomputed style/latent targets.
+    The public release omits the audio/style encoders and original
+    optimizer recipe. VoiceHub therefore supports exact inference and
+    explicitly reconstructed fine-tuning of the published duration,
+    text-to-latent, vector-update, and vocoder graphs from precomputed
+    style/latent targets.
     """
 
     def __init__(
@@ -96,13 +84,9 @@ class NativeSupertonicRuntime(nn.Module):
     ) -> None:
         super().__init__()
         if not isinstance(architecture, SupertonicArchitectureConfig):
-            raise TypeError(
-                "`architecture` must be SupertonicArchitectureConfig."
-            )
+            raise TypeError("`architecture` must be SupertonicArchitectureConfig.")
         if not isinstance(processor, SupertonicUnicodeProcessor):
-            raise TypeError(
-                "`processor` must be SupertonicUnicodeProcessor."
-            )
+            raise TypeError("`processor` must be SupertonicUnicodeProcessor.")
         self.architecture = architecture
         self.processor = processor
         self.duration_predictor = NativeONNXGraph(duration_predictor)
@@ -127,11 +111,11 @@ class NativeSupertonicRuntime(nn.Module):
         expected = {
             "duration_predictor": (
                 ("text_ids", "style_dp", "text_mask"),
-                ("duration",),
+                ("duration", ),
             ),
             "text_encoder": (
                 ("text_ids", "style_ttl", "text_mask"),
-                ("text_emb",),
+                ("text_emb", ),
             ),
             "vector_estimator": (
                 (
@@ -143,20 +127,18 @@ class NativeSupertonicRuntime(nn.Module):
                     "current_step",
                     "total_step",
                 ),
-                ("denoised_latent",),
+                ("denoised_latent", ),
             ),
             "vocoder": (
-                ("latent",),
-                ("wav_tts",),
+                ("latent", ),
+                ("wav_tts", ),
             ),
         }
         for name, (inputs, outputs) in expected.items():
             graph = getattr(self, name)
             if graph.input_names != inputs or graph.output_names != outputs:
-                raise ValueError(
-                    f"Supertonic {name} I/O contract differs from the "
-                    "reviewed release."
-                )
+                raise ValueError(f"Supertonic {name} I/O contract differs from the "
+                                 "reviewed release.")
 
     def prepare_for_training(self) -> None:
         self.train()
@@ -176,18 +158,14 @@ class NativeSupertonicRuntime(nn.Module):
         if resolved.ttl.shape[0] == batch_size:
             return resolved
         if resolved.ttl.shape[0] != 1:
-            raise ValueError(
-                "Supertonic style batch must be one or match the text batch."
-            )
+            raise ValueError("Supertonic style batch must be one or match the text batch.")
         return SupertonicStyle(
             ttl=resolved.ttl.expand(batch_size, -1, -1),
             duration=resolved.duration.expand(batch_size, -1, -1),
         )
 
     def _latent_mask(self, duration: Tensor) -> tuple[Tensor, int]:
-        waveform_lengths = (
-            duration * self.sample_rate
-        ).to(dtype=torch.int64)
+        waveform_lengths = (duration * self.sample_rate).to(dtype=torch.int64)
         hop = self.architecture.latent_hop_length
         latent_lengths = torch.div(
             waveform_lengths + hop - 1,
@@ -240,30 +218,15 @@ class NativeSupertonicRuntime(nn.Module):
         """Synthesize a batch and return padded audio plus durations."""
         texts = tuple(texts)
         languages = tuple(languages)
-        if (
-            isinstance(total_steps, bool)
-            or not isinstance(total_steps, int)
-            or total_steps <= 0
-        ):
+        if (isinstance(total_steps, bool) or not isinstance(total_steps, int) or total_steps <= 0):
             raise ValueError("`total_steps` must be a positive integer.")
-        if (
-            isinstance(speed, bool)
-            or not isinstance(speed, (int, float))
-            or not math.isfinite(speed)
-            or speed <= 0
-        ):
+        if (isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or
+                speed <= 0):
             raise ValueError("`speed` must be a finite positive number.")
-        duration, text_embedding, text_mask, style_ttl = (
-            self._text_features(texts, languages, style)
-        )
+        duration, text_embedding, text_mask, style_ttl = (self._text_features(texts, languages, style))
         duration = duration / float(speed)
-        if (
-            not torch.isfinite(duration).all()
-            or (duration <= 0).any()
-        ):
-            raise RuntimeError(
-                "Supertonic duration predictor returned invalid values."
-            )
+        if (not torch.isfinite(duration).all() or (duration <= 0).any()):
+            raise RuntimeError("Supertonic duration predictor returned invalid values.")
         latent_mask, latent_length = self._latent_mask(duration)
         latent = torch.randn(
             len(texts),
@@ -275,14 +238,14 @@ class NativeSupertonicRuntime(nn.Module):
         )
         latent = latent * latent_mask.to(dtype=self.dtype)
         total = torch.full(
-            (len(texts),),
+            (len(texts), ),
             float(total_steps),
             device=self.device,
             dtype=self.dtype,
         )
         for step in range(total_steps):
             current = torch.full(
-                (len(texts),),
+                (len(texts), ),
                 float(step),
                 device=self.device,
                 dtype=self.dtype,
@@ -312,15 +275,9 @@ class NativeSupertonicRuntime(nn.Module):
         generator: torch.Generator | None = None,
     ) -> tuple[Tensor, Tensor]:
         """Synthesize one text, trimming every padded chunk before joining."""
-        if (
-            isinstance(silence_duration, bool)
-            or not isinstance(silence_duration, (int, float))
-            or not math.isfinite(silence_duration)
-            or silence_duration < 0
-        ):
-            raise ValueError(
-                "`silence_duration` must be finite and non-negative."
-            )
+        if (isinstance(silence_duration, bool) or not isinstance(silence_duration, (int, float)) or
+                not math.isfinite(silence_duration) or silence_duration < 0):
+            raise ValueError("`silence_duration` must be finite and non-negative.")
         maximum = 120 if language in {"ko", "ja"} else 300
         chunks = chunk_text(text, maximum_characters=maximum)
         pieces: list[Tensor] = []
@@ -332,8 +289,8 @@ class NativeSupertonicRuntime(nn.Module):
         )
         for index, chunk in enumerate(chunks):
             waveform, duration = self.infer_batch(
-                (chunk,),
-                (language,),
+                (chunk, ),
+                (language, ),
                 style,
                 total_steps=total_steps,
                 speed=speed,
@@ -349,10 +306,7 @@ class NativeSupertonicRuntime(nn.Module):
             durations.append(duration[0])
         total_duration = torch.stack(durations).sum()
         if len(durations) > 1:
-            total_duration = (
-                total_duration
-                + (len(durations) - 1) * silence_duration
-            )
+            total_duration = (total_duration + (len(durations) - 1) * silence_duration)
         return torch.cat(pieces).unsqueeze(0), total_duration.unsqueeze(0)
 
     def fine_tuning_loss(
@@ -375,16 +329,15 @@ class NativeSupertonicRuntime(nn.Module):
     ) -> SupertonicFineTuningOutput:
         """Fine-tune published graphs from precomputed latent supervision.
 
-        This objective is reconstructed from the released iterative graph; it
-        is not presented as Supertone's unpublished original training recipe.
+        This objective is reconstructed from the released iterative
+        graph; it is not presented as Supertone's unpublished original
+        training recipe.
         """
         if text_ids.ndim != 2 or text_ids.dtype != torch.int64:
             raise ValueError("`text_ids` must have shape [batch, text].")
         batch_size = text_ids.shape[0]
         if text_mask.shape != (batch_size, 1, text_ids.shape[1]):
-            raise ValueError(
-                "`text_mask` must have shape [batch, 1, text]."
-            )
+            raise ValueError("`text_mask` must have shape [batch, 1, text].")
         style = self._style_batch(
             SupertonicStyle(style_ttl, style_dp),
             batch_size,
@@ -405,9 +358,7 @@ class NativeSupertonicRuntime(nn.Module):
                 dtype=self.dtype,
             ).reshape(-1)
             if target_duration.shape != predicted_duration.shape:
-                raise ValueError(
-                    "`target_duration` must have shape [batch]."
-                )
+                raise ValueError("`target_duration` must have shape [batch].")
             losses["duration_loss"] = functional.l1_loss(
                 predicted_duration,
                 target_duration,
@@ -420,16 +371,11 @@ class NativeSupertonicRuntime(nn.Module):
                 device=self.device,
                 dtype=self.dtype,
             )
-            if (
-                target_latent.ndim != 3
-                or target_latent.shape[0] != batch_size
-                or target_latent.shape[1]
-                != self.architecture.latent_channels
-            ):
+            if (target_latent.ndim != 3 or target_latent.shape[0] != batch_size or
+                    target_latent.shape[1] != self.architecture.latent_channels):
                 raise ValueError(
                     "`target_latent` must have shape "
-                    f"[batch, {self.architecture.latent_channels}, time]."
-                )
+                    f"[batch, {self.architecture.latent_channels}, time].")
             if source_noise is None:
                 source_noise = torch.randn_like(target_latent)
             else:
@@ -438,9 +384,7 @@ class NativeSupertonicRuntime(nn.Module):
                     dtype=self.dtype,
                 )
                 if source_noise.shape != target_latent.shape:
-                    raise ValueError(
-                        "`source_noise` and `target_latent` shapes differ."
-                    )
+                    raise ValueError("`source_noise` and `target_latent` shapes differ.")
             if latent_mask is None:
                 latent_mask = torch.ones(
                     batch_size,
@@ -455,24 +399,18 @@ class NativeSupertonicRuntime(nn.Module):
                     dtype=self.dtype,
                 )
                 if latent_mask.shape != (
-                    batch_size,
-                    1,
-                    target_latent.shape[-1],
+                        batch_size,
+                        1,
+                        target_latent.shape[-1],
                 ):
-                    raise ValueError(
-                        "`latent_mask` must have shape [batch, 1, time]."
-                    )
-            if (
-                isinstance(total_steps, bool)
-                or not isinstance(total_steps, int)
-                or total_steps <= 0
-            ):
+                    raise ValueError("`latent_mask` must have shape [batch, 1, time].")
+            if (isinstance(total_steps, bool) or not isinstance(total_steps, int) or total_steps <= 0):
                 raise ValueError("`total_steps` must be a positive integer.")
             if current_step is None:
                 current_step = torch.randint(
                     0,
                     total_steps,
-                    (batch_size,),
+                    (batch_size, ),
                     device=self.device,
                 ).to(dtype=self.dtype)
             else:
@@ -480,37 +418,20 @@ class NativeSupertonicRuntime(nn.Module):
                     device=self.device,
                     dtype=self.dtype,
                 ).reshape(-1)
-                if current_step.shape != (batch_size,):
-                    raise ValueError(
-                        "`current_step` must have shape [batch]."
-                    )
-            if (
-                (current_step < 0).any()
-                or (current_step >= total_steps).any()
-            ):
-                raise ValueError(
-                    "`current_step` must lie in [0, total_steps)."
-                )
+                if current_step.shape != (batch_size, ):
+                    raise ValueError("`current_step` must have shape [batch].")
+            if ((current_step < 0).any() or (current_step >= total_steps).any()):
+                raise ValueError("`current_step` must lie in [0, total_steps).")
             total = torch.full(
-                (batch_size,),
+                (batch_size, ),
                 float(total_steps),
                 device=self.device,
                 dtype=self.dtype,
             )
-            ratio = (
-                current_step / total
-            ).reshape(batch_size, 1, 1)
-            next_ratio = (
-                (current_step + 1.0) / total
-            ).reshape(batch_size, 1, 1)
-            current_latent = (
-                source_noise
-                + ratio * (target_latent - source_noise)
-            ) * latent_mask
-            expected_next = (
-                source_noise
-                + next_ratio * (target_latent - source_noise)
-            ) * latent_mask
+            ratio = (current_step / total).reshape(batch_size, 1, 1)
+            next_ratio = ((current_step + 1.0) / total).reshape(batch_size, 1, 1)
+            current_latent = (source_noise + ratio * (target_latent - source_noise)) * latent_mask
+            expected_next = (source_noise + next_ratio * (target_latent - source_noise)) * latent_mask
             text_embedding = self.text_encoder(
                 text_ids=text_ids,
                 style_ttl=style.ttl,
@@ -526,12 +447,8 @@ class NativeSupertonicRuntime(nn.Module):
                 total_step=total,
             )
             denominator = latent_mask.sum().clamp_min(1.0)
-            losses["flow_step_loss"] = (
-                (next_latent - expected_next).square()
-                * latent_mask
-            ).sum() / (
-                denominator * target_latent.shape[1]
-            ) * float(flow_weight)
+            losses["flow_step_loss"] = ((next_latent - expected_next).square() * latent_mask).sum() / (
+                denominator * target_latent.shape[1]) * float(flow_weight)
 
             if target_audio is not None:
                 waveform = self.vocoder(latent=target_latent)
@@ -542,9 +459,7 @@ class NativeSupertonicRuntime(nn.Module):
                 if target_audio.ndim == 1:
                     target_audio = target_audio.unsqueeze(0)
                 if target_audio.ndim != 2 or target_audio.shape[0] != batch_size:
-                    raise ValueError(
-                        "`target_audio` must have shape [batch, samples]."
-                    )
+                    raise ValueError("`target_audio` must have shape [batch, samples].")
                 common = min(waveform.shape[-1], target_audio.shape[-1])
                 if common <= 0:
                     raise ValueError("Vocoder targets cannot be empty.")
@@ -553,15 +468,12 @@ class NativeSupertonicRuntime(nn.Module):
                     target_audio[..., :common],
                 ) * float(vocoder_weight)
         elif target_audio is not None:
-            raise ValueError(
-                "`target_audio` requires its matching `target_latent`."
-            )
+            raise ValueError("`target_audio` requires its matching `target_latent`.")
 
         if not losses:
             raise ValueError(
                 "Supertonic fine-tuning requires `target_duration`, "
-                "`target_latent`, or both."
-            )
+                "`target_latent`, or both.")
         loss = torch.stack(tuple(losses.values())).sum()
         return SupertonicFineTuningOutput(
             loss=loss,
@@ -580,9 +492,9 @@ def load_native_supertonic_runtime(
 ) -> NativeSupertonicRuntime:
     """Build the reviewed graph and apply an optional native weight overlay.
 
-    ``artifacts`` is intentionally duck-typed at this low-level boundary to
-    avoid importing the network-aware resolver during architecture discovery.
-    Every field is still validated before graph construction.
+    ``artifacts`` is intentionally duck-typed at this low-level boundary
+    to avoid importing the network-aware resolver during architecture
+    discovery. Every field is still validated before graph construction.
     """
     graph_models = getattr(artifacts, "graph_models", None)
     expected_roles = {
@@ -592,14 +504,10 @@ def load_native_supertonic_runtime(
         "vocoder",
     }
     if not isinstance(graph_models, Mapping) or set(graph_models) != expected_roles:
-        raise TypeError(
-            "Supertonic artifacts must provide all four reviewed graph models."
-        )
+        raise TypeError("Supertonic artifacts must provide all four reviewed graph models.")
     architecture_path = getattr(artifacts, "architecture_config", None)
     indexer_path = getattr(artifacts, "unicode_indexer", None)
-    architecture = SupertonicArchitectureConfig.from_mapping(
-        read_json_file(architecture_path)
-    )
+    architecture = SupertonicArchitectureConfig.from_mapping(read_json_file(architecture_path))
     processor = SupertonicUnicodeProcessor.from_file(indexer_path)
     runtime = NativeSupertonicRuntime(
         architecture=architecture,
@@ -611,9 +519,7 @@ def load_native_supertonic_runtime(
     )
     native_weights = getattr(artifacts, "native_weights", None)
     if native_weights:
-        from voicehub.architectures.supertonic.checkpoint import (
-            load_supertonic_native_weights,
-        )
+        from voicehub.architectures.supertonic.checkpoint import load_supertonic_native_weights
 
         load_supertonic_native_weights(runtime, native_weights)
     runtime.to(device=device, dtype=dtype)

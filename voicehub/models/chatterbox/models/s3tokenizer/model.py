@@ -71,18 +71,15 @@ class Linear(nn.Linear):
 
 class Conv1d(nn.Conv1d):
 
-    def _conv_forward(self, x: Tensor, weight: Tensor,
-                      bias: Optional[Tensor]) -> Tensor:
-        return super()._conv_forward(
-            x, weight.to(x.dtype), None if bias is None else bias.to(x.dtype))
+    def _conv_forward(self, x: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor:
+        return super()._conv_forward(x, weight.to(x.dtype), None if bias is None else bias.to(x.dtype))
 
 
 def sinusoids(length, channels, max_timescale=10000):
-    """Returns sinusoids for positional embedding"""
+    """Returns sinusoids for positional embedding."""
     assert channels % 2 == 0
     log_timescale_increment = math.log(max_timescale) / (channels // 2 - 1)
-    inv_timescales = torch.exp(-log_timescale_increment *
-                               torch.arange(channels // 2))
+    inv_timescales = torch.exp(-log_timescale_increment * torch.arange(channels // 2))
     scaled_time = torch.arange(length)[:, None] * inv_timescales[None, :]
     return torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], dim=1)
 
@@ -111,11 +108,7 @@ class MultiHeadAttention(nn.Module):
         wv, qk = self.qkv_attention(q, k, v, mask)
         return self.out(wv), qk
 
-    def qkv_attention(self,
-                      q: Tensor,
-                      k: Tensor,
-                      v: Tensor,
-                      mask: Optional[Tensor] = None):
+    def qkv_attention(self, q: Tensor, k: Tensor, v: Tensor, mask: Optional[Tensor] = None):
         _, _, D = q.shape
         scale = (D // self.n_head)**-0.25
         q = q.view(*q.shape[:2], self.n_head, -1).permute(0, 2, 1, 3) * scale
@@ -129,8 +122,7 @@ class MultiHeadAttention(nn.Module):
                 qk = qk + mask
             qk = qk.float()
             w = torch.nn.functional.softmax(qk, dim=-1).to(q.dtype)
-            return (w @ v).permute(0, 2, 1,
-                                   3).flatten(start_dim=2), qk.detach()
+            return (w @ v).permute(0, 2, 1, 3).flatten(start_dim=2), qk.detach()
         else:
             k = k.permute(0, 2, 1, 3) * scale
             assert mask is not None
@@ -142,9 +134,7 @@ class MultiHeadAttention(nn.Module):
                 dropout_p=0.,
                 scale=1.,
             )
-            output = (output.transpose(1,
-                                       2).contiguous().view(q.size(0), -1, D)
-                      )  # (batch, time1, d_model)
+            output = (output.transpose(1, 2).contiguous().view(q.size(0), -1, D))  # (batch, time1, d_model)
             return output, None
 
 
@@ -157,8 +147,7 @@ class ResidualAttentionBlock(nn.Module):
         self.attn_ln = LayerNorm(n_state)
 
         n_mlp = n_state * 4
-        self.mlp = nn.Sequential(Linear(n_state, n_mlp), nn.GELU(),
-                                 Linear(n_mlp, n_state))
+        self.mlp = nn.Sequential(Linear(n_state, n_mlp), nn.GELU(), Linear(n_mlp, n_state))
         self.mlp_ln = LayerNorm(n_state)
 
     def forward(
@@ -185,22 +174,12 @@ class AudioEncoder(nn.Module):
     ):
         super().__init__()
         self.stride = stride
-        self.conv1 = Conv1d(n_mels,
-                            n_state,
-                            kernel_size=3,
-                            stride=stride,
-                            padding=1)
-        self.conv2 = Conv1d(n_state,
-                            n_state,
-                            kernel_size=3,
-                            stride=2,
-                            padding=1)
+        self.conv1 = Conv1d(n_mels, n_state, kernel_size=3, stride=stride, padding=1)
+        self.conv2 = Conv1d(n_state, n_state, kernel_size=3, stride=2, padding=1)
         self.register_buffer("positional_embedding", sinusoids(n_ctx, n_state))
 
-        self.blocks: Iterable[ResidualAttentionBlock] = nn.ModuleList([
-            ResidualAttentionBlock(n_state, n_head, use_sdpa=use_sdpa)
-            for _ in range(n_layer)
-        ])
+        self.blocks: Iterable[ResidualAttentionBlock] = nn.ModuleList(
+            [ResidualAttentionBlock(n_state, n_head, use_sdpa=use_sdpa) for _ in range(n_layer)])
 
     def forward(self, x: Tensor, x_len: Tensor) -> Tuple[Tensor, Tensor]:
         """
@@ -230,6 +209,7 @@ class AudioEncoder(nn.Module):
 
 class EuclideanCodebook(nn.Module):
     """Codebook with Euclidean distance (inference-only).
+
     Args:
         dim (int): Dimension.
         codebook_size (int): Codebook size.
@@ -248,8 +228,7 @@ class EuclideanCodebook(nn.Module):
     @torch.inference_mode()
     def quantize(self, x: Tensor) -> Tensor:
         embed = self.embed.t().to(x.dtype)
-        dist = -(x.pow(2).sum(1, keepdim=True) - 2 * x @ embed +
-                 embed.pow(2).sum(0, keepdim=True))
+        dist = -(x.pow(2).sum(1, keepdim=True) - 2 * x @ embed + embed.pow(2).sum(0, keepdim=True))
         embed_ind = dist.max(dim=-1).indices
         return embed_ind
 
@@ -281,6 +260,7 @@ class EuclideanCodebook(nn.Module):
 
 class VectorQuantization(nn.Module):
     """Vector quantization implementation (inference-only).
+
     Args:
         dim (int): Dimension
         codebook_size (int): Codebook size
@@ -288,8 +268,7 @@ class VectorQuantization(nn.Module):
 
     def __init__(self, dim: int, codebook_size: int):
         super().__init__()
-        self._codebook = EuclideanCodebook(dim=dim,
-                                           codebook_size=codebook_size)
+        self._codebook = EuclideanCodebook(dim=dim, codebook_size=codebook_size)
         self.codebook_size = codebook_size
 
     @property
@@ -310,6 +289,7 @@ class VectorQuantization(nn.Module):
 
 class S3Tokenizer(nn.Module):
     """S3 tokenizer implementation (inference-only).
+
     Args:
         config  (ModelConfig): Config
     """
@@ -327,16 +307,15 @@ class S3Tokenizer(nn.Module):
             2 if name == "speech_tokenizer_v1_25hz" else 1,
             self.config.use_sdpa,
         )
-        self.quantizer = VectorQuantization(self.config.n_audio_state,
-                                            self.config.n_codebook_size)
+        self.quantizer = VectorQuantization(self.config.n_audio_state, self.config.n_codebook_size)
 
     def forward(self, mel: Tensor, mel_len: Tensor) -> Tuple[Tensor, Tensor]:
         return self.quantize(mel, mel_len)
 
     @torch.inference_mode()
     def quantize(self, mel: Tensor, mel_len: Tensor) -> Tuple[Tensor, Tensor]:
-        """
-        Quantize mel spectrogram to tokens, with automatic long audio handling.
+        """Quantize mel spectrogram to tokens, with automatic long audio
+        handling.
 
         Args:
             mel: mel spectrogram tensor, shape (batch_size, n_mels, T)
@@ -355,8 +334,7 @@ class S3Tokenizer(nn.Module):
 
         if long_audio_mask.any():
             # Has long audio - need special processing
-            return self._quantize_mixed_batch(mel, mel_len, long_audio_mask,
-                                              max_frames)
+            return self._quantize_mixed_batch(mel, mel_len, long_audio_mask, max_frames)
         else:
             # All short audio - use original method
             hidden, code_len = self.encoder(mel, mel_len)
@@ -364,11 +342,10 @@ class S3Tokenizer(nn.Module):
             return code, code_len
 
     @torch.inference_mode()
-    def _quantize_mixed_batch(self, mel: Tensor, mel_len: Tensor,
-                              long_audio_mask: Tensor,
+    def _quantize_mixed_batch(self, mel: Tensor, mel_len: Tensor, long_audio_mask: Tensor,
                               max_frames: int) -> Tuple[Tensor, Tensor]:
-        """
-        Handle mixed batch with both short and long audio using unified batch processing.
+        """Handle mixed batch with both short and long audio using unified
+        batch processing.
 
         Args:
             mel: mel spectrogram tensor, shape (batch_size, n_mels, T)
@@ -396,8 +373,7 @@ class S3Tokenizer(nn.Module):
         # Collect all segments to process (including short and long audio segments)
         all_segments = []
         all_segments_len = []
-        segment_info = [
-        ]  # Record which audio each segment belongs to and whether it's long audio
+        segment_info = []  # Record which audio each segment belongs to and whether it's long audio
 
         # Process all audio in the batch
         for batch_idx in range(batch_size):
@@ -416,8 +392,7 @@ class S3Tokenizer(nn.Module):
                     segment = F.pad(segment, (0, pad_size))
 
                 all_segments.append(segment)
-                all_segments_len.append(
-                    torch.tensor(seg_len, device=mel.device))
+                all_segments_len.append(torch.tensor(seg_len, device=mel.device))
                 segment_info.append({
                     'batch_idx': batch_idx,
                     'is_long_audio': False,
@@ -439,8 +414,7 @@ class S3Tokenizer(nn.Module):
                         segment = F.pad(segment, (0, pad_size))
 
                     all_segments.append(segment)
-                    all_segments_len.append(
-                        torch.tensor(seg_len, device=mel.device))
+                    all_segments_len.append(torch.tensor(seg_len, device=mel.device))
                     segment_info.append({
                         'batch_idx': batch_idx,
                         'is_long_audio': True,
@@ -459,13 +433,9 @@ class S3Tokenizer(nn.Module):
 
         if not all_segments:
             # Fallback if no segments
-            return torch.zeros(batch_size,
-                               0,
-                               dtype=torch.long,
-                               device=mel.device), torch.zeros(
-                                   batch_size,
-                                   dtype=torch.long,
-                                   device=mel.device)
+            return torch.zeros(
+                batch_size, 0, dtype=torch.long, device=mel.device), torch.zeros(
+                    batch_size, dtype=torch.long, device=mel.device)
 
         # Unified batch processing for all segments
         unified_batch_mel = torch.stack(all_segments)
@@ -484,8 +454,7 @@ class S3Tokenizer(nn.Module):
             segment_idx = info['segment_idx']
 
             # Get codes for current segment
-            segment_code = codes[
-                seg_idx, :code_len[seg_idx].item()].detach().cpu()
+            segment_code = codes[seg_idx, :code_len[seg_idx].item()].detach().cpu()
 
             if not is_long_audio:
                 # Short audio: use directly
@@ -507,15 +476,12 @@ class S3Tokenizer(nn.Module):
                 audio_codes = results[batch_idx]
 
                 # Determine token rate based on model name
-                if hasattr(self,
-                           'name') and self.name == "speech_tokenizer_v1":
+                if hasattr(self, 'name') and self.name == "speech_tokenizer_v1":
                     token_rate = 50
                 else:
                     token_rate = 25
 
-                merged_codes = merge_tokenized_segments(audio_codes,
-                                                        overlap=overlap,
-                                                        token_rate=token_rate)
+                merged_codes = merge_tokenized_segments(audio_codes, overlap=overlap, token_rate=token_rate)
 
                 # Convert to tensor
                 merged_codes_tensor = merged_codes.to(
@@ -527,13 +493,8 @@ class S3Tokenizer(nn.Module):
         # Construct final output
         max_code_len = max(code_info[1] for code_info in results.values())
 
-        output_codes = torch.zeros(batch_size,
-                                   max_code_len,
-                                   dtype=torch.long,
-                                   device=mel.device)
-        output_codes_len = torch.zeros(batch_size,
-                                       dtype=torch.long,
-                                       device=mel.device)
+        output_codes = torch.zeros(batch_size, max_code_len, dtype=torch.long, device=mel.device)
+        output_codes_len = torch.zeros(batch_size, dtype=torch.long, device=mel.device)
 
         for batch_idx, (code_tensor, code_len) in results.items():
             output_codes[batch_idx, :code_len] = code_tensor
@@ -548,8 +509,7 @@ class S3Tokenizer(nn.Module):
     def init_from_onnx(self, onnx_path: str):
         raise NotImplementedError(
             "Native Chatterbox loads the reviewed Safetensors checkpoint; "
-            "untrusted ONNX-to-PyTorch conversion is intentionally unavailable."
-        )
+            "untrusted ONNX-to-PyTorch conversion is intentionally unavailable.")
 
     def init_from_pt(self, ckpt_path: str):
         ckpt = torch.load(ckpt_path, map_location="cpu", mmap=True, weights_only=True)

@@ -52,9 +52,10 @@ def _normalize_eos_token_ids(value: int | Sequence[int] | None) -> tuple[int, ..
 class GenerationConfig:
     """Options shared by native autoregressive speech architectures.
 
-    ``seed`` initializes a request-owned :class:`torch.Generator`; it never
-    mutates PyTorch's process-wide random state. A tuple may be used for
-    ``eos_token_id`` when a model has more than one terminal token.
+    ``seed`` initializes a request-owned :class:`torch.Generator`; it
+    never mutates PyTorch's process-wide random state. A tuple may be
+    used for ``eos_token_id`` when a model has more than one terminal
+    token.
     """
 
     max_new_tokens: int = 256

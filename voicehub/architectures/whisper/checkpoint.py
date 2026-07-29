@@ -335,22 +335,12 @@ class NativeWhisperCheckpointAdapter(CheckpointAdapter):
         config: Mapping[str, Any],
     ) -> bool:
         return (
-            config.get("voicehub_checkpoint_format")
-            == "native-whisper-v1"
-            and any(
-                path.suffix == ".safetensors"
-                or path.name.endswith(".safetensors.index.json")
-                for path in files
-            )
-        )
+            config.get("voicehub_checkpoint_format") == "native-whisper-v1" and any(
+                path.suffix == ".safetensors" or path.name.endswith(".safetensors.index.json")
+                for path in files))
 
     def tensor_plan(self, config: Mapping[str, Any]) -> TensorPlan:
-        return TensorPlan(
-            rules=tuple(
-                CopyTensor(name, name)
-                for name in native_whisper_tensor_names(config)
-            )
-        )
+        return TensorPlan(rules=tuple(CopyTensor(name, name) for name in native_whisper_tensor_names(config)))
 
 
 HFWhisperCheckpointAdapter = HuggingFaceWhisperCheckpointAdapter

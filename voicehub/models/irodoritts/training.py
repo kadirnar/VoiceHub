@@ -30,9 +30,7 @@ class NativeIrodoriTrainingAdapter(FlowMatchingTrainingAdapter):
             raise ValueError("Irodori fine-tuning must target wrapper.model.model exactly.")
         for parameter in native.parameters():
             parameter.requires_grad_(True)
-        native.set_gradient_checkpointing(
-            bool(self.model.config.training_gradient_checkpointing)
-        )
+        native.set_gradient_checkpointing(bool(self.model.config.training_gradient_checkpointing))
         native.train()
         codec_model = getattr(getattr(runtime, "codec", None), "model", None)
         if codec_model is not None:
@@ -83,11 +81,7 @@ class NativeIrodoriTrainingAdapter(FlowMatchingTrainingAdapter):
             duration_loss_weight=self.model.config.training_duration_loss_weight,
             duration_huber_delta=self.model.config.training_duration_huber_delta,
         )
-        losses = {
-            name: value
-            for name, value in outputs.items()
-            if name.endswith("_loss") or name == "loss"
-        }
+        losses = {name: value for name, value in outputs.items() if name.endswith("_loss") or name == "loss"}
         return TTSTrainingOutput(
             loss=outputs["loss"],
             predictions=outputs.get(
@@ -110,38 +104,34 @@ class NativeIrodoriTrainingAdapter(FlowMatchingTrainingAdapter):
 
     def recipe_resume_configuration(self) -> Mapping[str, Any]:
         values = dict(super().recipe_resume_configuration())
-        values.update(
-            {
-                "checkpoint_format": "voicehub-native-irodoritts-v1",
-                "duration_huber_delta": self.model.config.training_duration_huber_delta,
-                "duration_loss_weight": self.model.config.training_duration_loss_weight,
-                "full_model": True,
-                "gradient_checkpointing": self.model.config.training_gradient_checkpointing,
-                "objective": self.model.config.training_objective,
-                "optimizer": "adamw",
-                "rf_loss_mode": self.model.config.training_rf_loss_mode,
-                "sample_rate": 48_000,
-                "source_recipe_revision": "eaf74d6a19138f743acb5b71a445fd25a57db987",
-            }
-        )
+        values.update({
+            "checkpoint_format": "voicehub-native-irodoritts-v1",
+            "duration_huber_delta": self.model.config.training_duration_huber_delta,
+            "duration_loss_weight": self.model.config.training_duration_loss_weight,
+            "full_model": True,
+            "gradient_checkpointing": self.model.config.training_gradient_checkpointing,
+            "objective": self.model.config.training_objective,
+            "optimizer": "adamw",
+            "rf_loss_mode": self.model.config.training_rf_loss_mode,
+            "sample_rate": 48_000,
+            "source_recipe_revision": "eaf74d6a19138f743acb5b71a445fd25a57db987",
+        })
         return values
 
     def artifact_manifest(self) -> dict[str, Any]:
         manifest = super().artifact_manifest()
-        manifest.update(
-            {
-                "checkpoint_format": "voicehub-native-irodoritts-v1",
-                "fine_tuning_scope": "all-irodori-model-parameters",
-                "inference_reloadable": True,
-                "native_architecture_family": "irodoritts-rf-dit",
-                "raw_audio_supported": True,
-                "preencoded_latents_supported": True,
-                "semantic_codec": {
-                    "fine_tuned": False,
-                    "reason": "fixed training target and inference decoder",
-                },
-            }
-        )
+        manifest.update({
+            "checkpoint_format": "voicehub-native-irodoritts-v1",
+            "fine_tuning_scope": "all-irodori-model-parameters",
+            "inference_reloadable": True,
+            "native_architecture_family": "irodoritts-rf-dit",
+            "raw_audio_supported": True,
+            "preencoded_latents_supported": True,
+            "semantic_codec": {
+                "fine_tuned": False,
+                "reason": "fixed training target and inference decoder",
+            },
+        })
         return manifest
 
     def save_pretrained(self, save_directory: str | Path) -> None:

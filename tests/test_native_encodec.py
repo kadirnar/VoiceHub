@@ -14,13 +14,12 @@ from unittest.mock import patch
 
 import torch
 
-from voicehub.checkpointing import save_safetensors
 from voicehub.architectures.catalog import register_builtin_architectures
 from voicehub.architectures.registry import ArchitectureRegistry
+from voicehub.checkpointing import save_safetensors
+from voicehub.components.audio.codecs.encodec import EncodecConfig, EncodecModel, ResidualVectorQuantization
+from voicehub.components.audio.codecs.encodec import checkpoint as checkpoint_module
 from voicehub.components.audio.codecs.encodec import (
-    EncodecConfig,
-    EncodecModel,
-    ResidualVectorQuantization,
     convert_official_encodec_checkpoint,
     encodec_24khz_config,
     encodec_48khz_config,
@@ -31,26 +30,15 @@ from voicehub.components.audio.codecs.encodec import (
     save_encodec_safetensors,
     verify_native_graph_contract,
 )
-from voicehub.components.audio.codecs.encodec import checkpoint as checkpoint_module
-from voicehub.components.audio.codecs.encodec.metadata import (
-    ENCODEC_24KHZ_RELEASE,
-    ENCODEC_48KHZ_RELEASE,
-)
+from voicehub.components.audio.codecs.encodec.metadata import ENCODEC_24KHZ_RELEASE, ENCODEC_48KHZ_RELEASE
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ENCODEC_ROOT = (
-    PROJECT_ROOT
-    / "voicehub"
-    / "components"
-    / "audio"
-    / "codecs"
-    / "encodec"
-)
+ENCODEC_ROOT = (PROJECT_ROOT / "voicehub" / "components" / "audio" / "codecs" / "encodec")
 
 
 def _tiny_config(*, segmented: bool = False) -> EncodecConfig:
     return EncodecConfig(
-        target_bandwidths=(0.1,),
+        target_bandwidths=(0.1, ),
         sample_rate=100,
         channels=1,
         normalize=segmented,
@@ -80,10 +68,7 @@ def _tiny_config(*, segmented: bool = False) -> EncodecConfig:
 
 
 def _fingerprint(state: dict[str, torch.Tensor]) -> str:
-    rows = [
-        f"{name}|F32|{'x'.join(str(value) for value in state[name].shape)}"
-        for name in sorted(state)
-    ]
+    rows = [f"{name}|F32|{'x'.join(str(value) for value in state[name].shape)}" for name in sorted(state)]
     return hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest()
 
 
@@ -97,17 +82,14 @@ class NativeEncodecGraphTests(unittest.TestCase):
 
         self.assertEqual(spec.architecture_id, "encodec")
         self.assertTrue(spec.capabilities.training)
-        self.assertEqual(spec.capabilities.checkpoint_formats, ("safetensors",))
+        self.assertEqual(spec.capabilities.checkpoint_formats, ("safetensors", ))
         self.assertIn("straight-through-fine-tuning", spec.capabilities.features)
         self.assertEqual(
             spec.upstream_revision,
             "0e2d0aed29362c8e8f52494baf3e6f99056b214f",
         )
         self.assertEqual(
-            tuple(
-                release["tensor_count"]
-                for release in spec.metadata["reference_releases"]
-            ),
+            tuple(release["tensor_count"] for release in spec.metadata["reference_releases"]),
             (252, 224),
         )
 
@@ -115,8 +97,7 @@ class NativeEncodecGraphTests(unittest.TestCase):
         code = (
             "import sys\n"
             "import voicehub.components.audio.codecs.encodec\n"
-            "print(int('torch' in sys.modules))\n"
-        )
+            "print(int('torch' in sys.modules))\n")
         result = subprocess.run(
             [sys.executable, "-c", code],
             cwd=PROJECT_ROOT,
@@ -145,11 +126,7 @@ class NativeEncodecGraphTests(unittest.TestCase):
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     names = [alias.name for alias in node.names]
-                elif (
-                    isinstance(node, ast.ImportFrom)
-                    and node.level == 0
-                    and node.module
-                ):
+                elif (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module):
                     names = [node.module]
                 else:
                     names = []
@@ -212,7 +189,7 @@ class NativeEncodecGraphTests(unittest.TestCase):
         )
         self.assertEqual(
             state["encoder.model.0.conv.norm.weight"].shape,
-            (32,),
+            (32, ),
         )
         self.assertNotIn("encoder.model.0.conv.conv.weight_v", state)
 
@@ -231,8 +208,7 @@ class NativeEncodecGraphTests(unittest.TestCase):
                 model_24.quantizer.get_num_quantizers_for_bandwidth(
                     model_24.frame_rate,
                     value,
-                )
-                for value in config_24.target_bandwidths
+                ) for value in config_24.target_bandwidths
             ],
             [2, 4, 8, 16, 32],
         )
@@ -241,8 +217,7 @@ class NativeEncodecGraphTests(unittest.TestCase):
                 model_48.quantizer.get_num_quantizers_for_bandwidth(
                     model_48.frame_rate,
                     value,
-                )
-                for value in config_48.target_bandwidths
+                ) for value in config_48.target_bandwidths
             ],
             [2, 4, 8, 16],
         )
@@ -267,9 +242,7 @@ class NativeEncodecGraphTests(unittest.TestCase):
 
     def test_segmented_normalized_graph_uses_visible_overlap_add(self):
         torch.manual_seed(8)
-        model = EncodecModel.from_config(
-            _tiny_config(segmented=True),
-        ).eval()
+        model = EncodecModel.from_config(_tiny_config(segmented=True), ).eval()
         waveform = torch.randn(1, 1, 23)
 
         frames = model.encode(waveform)
@@ -295,18 +268,11 @@ class NativeEncodecGraphTests(unittest.TestCase):
         model = EncodecModel.from_config(_tiny_config()).train()
         waveform = torch.randn(2, 1, 35)
         result = model.forward_quantized(waveform)
-        objective = (
-            (result.audio_values - waveform).square().mean()
-            + result.commitment_loss
-        )
+        objective = ((result.audio_values - waveform).square().mean() + result.commitment_loss)
         objective.backward()
 
-        encoder_gradient = (
-            model.encoder.model[0].conv.conv.weight_v.grad
-        )
-        decoder_gradient = (
-            model.decoder.model[-1].conv.conv.weight_v.grad
-        )
+        encoder_gradient = (model.encoder.model[0].conv.conv.weight_v.grad)
+        decoder_gradient = (model.decoder.model[-1].conv.conv.weight_v.grad)
         self.assertIsNotNone(encoder_gradient)
         self.assertIsNotNone(decoder_gradient)
         self.assertTrue(torch.isfinite(encoder_gradient).all())
@@ -323,9 +289,7 @@ class NativeEncodecGraphTests(unittest.TestCase):
             kmeans_iters=2,
             threshold_ema_dead_code=0,
         ).train()
-        quantized, _, losses = rvq(
-            torch.randn(2, 4, 5, requires_grad=True),
-        )
+        quantized, _, losses = rvq(torch.randn(2, 4, 5, requires_grad=True), )
         (quantized.square().mean() + losses.mean()).backward()
         later_gradient = rvq.layers[1].project_in.weight.grad
         self.assertIsNotNone(later_gradient)
@@ -355,10 +319,7 @@ class NativeEncodecCheckpointTests(unittest.TestCase):
     def test_safetensors_export_reconstructs_a_fresh_graph(self):
         torch.manual_seed(10)
         model = EncodecModel.from_config(_tiny_config()).eval()
-        reference = {
-            name: tensor.detach().clone()
-            for name, tensor in model.state_dict().items()
-        }
+        reference = {name: tensor.detach().clone() for name, tensor in model.state_dict().items()}
         with tempfile.TemporaryDirectory() as temporary:
             path = save_encodec_safetensors(
                 model,
@@ -387,8 +348,8 @@ class NativeEncodecCheckpointTests(unittest.TestCase):
             source = Path(temporary) / ENCODEC_24KHZ_RELEASE.filename
             source.write_bytes(b"not a checkpoint")
             with self.assertRaisesRegex(
-                PermissionError,
-                "trust_official_pickle=True",
+                    PermissionError,
+                    "trust_official_pickle=True",
             ):
                 convert_official_encodec_checkpoint(
                     source,
@@ -399,21 +360,21 @@ class NativeEncodecCheckpointTests(unittest.TestCase):
     def test_trusted_legacy_reader_still_forces_weights_only(self):
         sentinel = {"weight": torch.ones(1)}
         with (
-            patch.object(
-                checkpoint_module,
-                "verify_official_checkpoint",
-                return_value="d7cc33bc" + "0" * 56,
-            ),
-            patch.object(
-                checkpoint_module,
-                "_validate_official_state",
-                return_value=sentinel,
-            ),
-            patch.object(
-                torch,
-                "load",
-                return_value=sentinel,
-            ) as load,
+                patch.object(
+                    checkpoint_module,
+                    "verify_official_checkpoint",
+                    return_value="d7cc33bc" + "0" * 56,
+                ),
+                patch.object(
+                    checkpoint_module,
+                    "_validate_official_state",
+                    return_value=sentinel,
+                ),
+                patch.object(
+                    torch,
+                    "load",
+                    return_value=sentinel,
+                ) as load,
         ):
             state, digest = checkpoint_module._restricted_official_state(
                 "official.th",
@@ -447,9 +408,7 @@ class NativeEncodecCheckpointTests(unittest.TestCase):
         self.assertEqual(resolved, native.resolve())
 
     def test_provenance_records_pinned_source_and_audited_inventories(self):
-        provenance = json.loads(
-            (ENCODEC_ROOT / "SOURCE.json").read_text(encoding="utf-8"),
-        )
+        provenance = json.loads((ENCODEC_ROOT / "SOURCE.json").read_text(encoding="utf-8"), )
         self.assertEqual(
             provenance["source"]["revision"],
             "0e2d0aed29362c8e8f52494baf3e6f99056b214f",
@@ -460,9 +419,7 @@ class NativeEncodecCheckpointTests(unittest.TestCase):
             [252, 224],
         )
         self.assertTrue((ENCODEC_ROOT / "THIRD_PARTY_LICENSE").is_file())
-        self.assertTrue(
-            (ENCODEC_ROOT / "VECTOR_QUANTIZE_THIRD_PARTY_LICENSE").is_file(),
-        )
+        self.assertTrue((ENCODEC_ROOT / "VECTOR_QUANTIZE_THIRD_PARTY_LICENSE").is_file(), )
 
 
 if __name__ == "__main__":

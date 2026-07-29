@@ -1,8 +1,8 @@
 """Small tensor utilities used by the native S3 tokenizer runtime.
 
-The upstream project keeps these helpers next to its ONNX conversion code.
-Keeping the runtime helpers separate prevents importing ONNX, NumPy, and
-torchaudio merely to tokenize an in-memory waveform.
+The upstream project keeps these helpers next to its ONNX conversion
+code. Keeping the runtime helpers separate prevents importing ONNX,
+NumPy, and torchaudio merely to tokenize an in-memory waveform.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from torch.nn.utils.rnn import pad_sequence
 
 def make_non_pad_mask(lengths: Tensor, max_len: int = 0) -> Tensor:
     """Return ``True`` for valid time steps in each sequence."""
-
     if lengths.ndim != 1:
         raise ValueError(f"lengths must be one-dimensional, got {tuple(lengths.shape)}")
     inferred_max = int(lengths.max().item()) if lengths.numel() else 0
@@ -27,13 +26,11 @@ def make_non_pad_mask(lengths: Tensor, max_len: int = 0) -> Tensor:
 
 def mask_to_bias(mask: Tensor, dtype: torch.dtype) -> Tensor:
     """Convert a keep mask to the additive attention bias used upstream."""
-
     return (1.0 - mask.to(dtype=dtype)) * -1.0e10
 
 
 def padding(data: Sequence[Tensor]) -> tuple[Tensor, Tensor]:
     """Right-pad ``[features, time]`` tensors into a batch."""
-
     if not data:
         raise ValueError("At least one tensor is required")
     lengths = torch.tensor(
@@ -55,7 +52,6 @@ def merge_tokenized_segments(
     token_rate: int,
 ) -> Tensor:
     """Merge windowed tokenizer outputs using upstream's half-overlap rule."""
-
     if not tokenized_segments:
         raise ValueError("At least one tokenized segment is required")
     if len(tokenized_segments) == 1:

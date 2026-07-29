@@ -42,9 +42,7 @@ def marblenet_vad_loss(
                 reduction="none",
             )
     else:
-        raise ValueError(
-            "`labels` must have shape [batch, frames] or [batch, frames, 2]."
-        )
+        raise ValueError("`labels` must have shape [batch, frames] or [batch, frames, 2].")
 
     if label_mask is None:
         return losses.mean()

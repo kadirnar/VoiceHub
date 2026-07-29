@@ -27,10 +27,8 @@ def _expand_kv(tensor: Tensor, groups: int) -> Tensor:
         return tensor
     batch, heads, time, dimension = tensor.shape
     return (
-        tensor[:, :, None, :, :]
-        .expand(batch, heads, groups, time, dimension)
-        .reshape(batch, heads * groups, time, dimension)
-    )
+        tensor[:, :, None, :, :].expand(batch, heads, groups, time,
+                                        dimension).reshape(batch, heads * groups, time, dimension))
 
 
 def _attention_mask(
@@ -52,22 +50,16 @@ def _attention_mask(
             if tuple(mask.shape) != (batch_size, key_length):
                 raise ValueError(
                     f"Rank-two attention mask must have shape "
-                    f"{(batch_size, key_length)!r}."
-                )
+                    f"{(batch_size, key_length)!r}.")
             mask = mask[:, None, None, :]
         elif mask.ndim == 3:
             if tuple(mask.shape) != (batch_size, query_length, key_length):
-                raise ValueError(
-                    "Rank-three attention mask must have shape "
-                    "[batch, query, key]."
-                )
+                raise ValueError("Rank-three attention mask must have shape "
+                                 "[batch, query, key].")
             mask = mask[:, None, :, :]
         elif mask.ndim == 4:
-            if (
-                mask.shape[0] not in (1, batch_size)
-                or mask.shape[-2] not in (1, query_length)
-                or mask.shape[-1] != key_length
-            ):
+            if (mask.shape[0] not in (1, batch_size) or mask.shape[-2] not in (1, query_length) or
+                    mask.shape[-1] != key_length):
                 raise ValueError("Rank-four attention mask is not broadcast-compatible.")
         else:
             raise ValueError("Attention mask must have rank two, three, or four.")
@@ -98,7 +90,8 @@ def _attention_mask(
 
 
 class MultiHeadAttention(nn.Module):
-    """Self/cross attention supporting MHA, MQA, and grouped-query attention."""
+    """Self/cross attention supporting MHA, MQA, and grouped-query
+    attention."""
 
     def __init__(
         self,
@@ -113,35 +106,15 @@ class MultiHeadAttention(nn.Module):
         rotary_base: float = 10_000.0,
     ) -> None:
         super().__init__()
-        if (
-            isinstance(hidden_size, bool)
-            or not isinstance(hidden_size, int)
-            or hidden_size <= 0
-        ):
+        if (isinstance(hidden_size, bool) or not isinstance(hidden_size, int) or hidden_size <= 0):
             raise ValueError("Attention `hidden_size` must be positive.")
-        if (
-            isinstance(num_attention_heads, bool)
-            or not isinstance(num_attention_heads, int)
-            or num_attention_heads <= 0
-            or hidden_size % num_attention_heads
-        ):
-            raise ValueError(
-                "Attention heads must be positive and divide hidden size."
-            )
-        num_key_value_heads = (
-            num_attention_heads
-            if num_key_value_heads is None
-            else num_key_value_heads
-        )
-        if (
-            isinstance(num_key_value_heads, bool)
-            or not isinstance(num_key_value_heads, int)
-            or num_key_value_heads <= 0
-            or num_attention_heads % num_key_value_heads
-        ):
-            raise ValueError(
-                "Key/value heads must be positive and divide attention heads."
-            )
+        if (isinstance(num_attention_heads, bool) or not isinstance(num_attention_heads, int) or
+                num_attention_heads <= 0 or hidden_size % num_attention_heads):
+            raise ValueError("Attention heads must be positive and divide hidden size.")
+        num_key_value_heads = (num_attention_heads if num_key_value_heads is None else num_key_value_heads)
+        if (isinstance(num_key_value_heads, bool) or not isinstance(num_key_value_heads, int) or
+                num_key_value_heads <= 0 or num_attention_heads % num_key_value_heads):
+            raise ValueError("Key/value heads must be positive and divide attention heads.")
         if not 0.0 <= attention_dropout < 1.0:
             raise ValueError("Attention dropout must be in [0, 1).")
         self.hidden_size = hidden_size
@@ -157,9 +130,7 @@ class MultiHeadAttention(nn.Module):
         self.o_proj = nn.Linear(hidden_size, hidden_size, bias=bias)
         if rotary_dimension:
             if rotary_dimension > self.head_dimension:
-                raise ValueError(
-                    "Rotary dimension cannot exceed attention head dimension."
-                )
+                raise ValueError("Rotary dimension cannot exceed attention head dimension.")
             self.rotary = RotaryEmbedding(
                 rotary_dimension,
                 base=rotary_base,
@@ -196,8 +167,7 @@ class MultiHeadAttention(nn.Module):
         if hidden_states.ndim != 3 or hidden_states.shape[-1] != self.hidden_size:
             raise ValueError(
                 "Attention hidden states must have shape "
-                f"[batch, time, {self.hidden_size}]."
-            )
+                f"[batch, time, {self.hidden_size}].")
         is_cross_attention = key_value_states is not None
         source = hidden_states if key_value_states is None else key_value_states
         if source.ndim != 3 or source.shape[0] != hidden_states.shape[0]:
@@ -214,11 +184,7 @@ class MultiHeadAttention(nn.Module):
             if layer_index is None:
                 raise ValueError("Cached attention requires a `layer_index`.")
             existing = cache.get(layer_index)
-            past_length = (
-                0
-                if existing is None or is_cross_attention
-                else existing.sequence_length
-            )
+            past_length = (0 if existing is None or is_cross_attention else existing.sequence_length)
         if self.rotary is not None and not is_cross_attention:
             query_length = query.shape[-2]
             if position_ids is None:

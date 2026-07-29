@@ -62,14 +62,10 @@ class InflectTTSTrainingAdapter(VITSTrainingAdapter):
 
     def select_training_phase(self, training_phase=None):
         phase = super().select_training_phase(training_phase)
-        if (
-            phase.name == "discriminator"
-            and not self.model.config.training_enable_discriminator
-        ):
+        if (phase.name == "discriminator" and not self.model.config.training_enable_discriminator):
             raise ValueError(
                 "Inflect discriminator training is disabled by "
-                "`training_enable_discriminator=False`."
-            )
+                "`training_enable_discriminator=False`.")
         return phase
 
     def plan_training_phases(self, step: int):

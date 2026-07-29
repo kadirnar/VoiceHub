@@ -35,9 +35,9 @@ class TransformerLayerConfig:
 
     def __post_init__(self) -> None:
         for name in (
-            "hidden_size",
-            "intermediate_size",
-            "num_attention_heads",
+                "hidden_size",
+                "intermediate_size",
+                "num_attention_heads",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -168,15 +168,11 @@ class TransformerLayer(nn.Module):
             position_ids=position_ids,
             output_attentions=output_attentions,
         )
-        hidden_states = hidden_states + self.residual_dropout(
-            attention.hidden_states
-        )
+        hidden_states = hidden_states + self.residual_dropout(attention.hidden_states)
         cross_weights = None
         if self.cross_attention is not None:
             if encoder_hidden_states is None:
-                raise ValueError(
-                    "Cross-attention layer requires encoder hidden states."
-                )
+                raise ValueError("Cross-attention layer requires encoder hidden states.")
             cross = self.cross_attention(
                 self.cross_attention_norm(hidden_states),
                 attention_mask=encoder_attention_mask,
@@ -186,16 +182,13 @@ class TransformerLayer(nn.Module):
                 use_cache=use_cache,
                 output_attentions=output_attentions,
             )
-            hidden_states = hidden_states + self.residual_dropout(
-                cross.hidden_states
-            )
+            hidden_states = hidden_states + self.residual_dropout(cross.hidden_states)
             cache = cross.cache
             cross_weights = cross.weights
         else:
             cache = attention.cache
         hidden_states = hidden_states + self.residual_dropout(
-            self.feed_forward(self.feed_forward_norm(hidden_states))
-        )
+            self.feed_forward(self.feed_forward_norm(hidden_states)))
         return hidden_states, cache, {
             "self_attention": attention.weights,
             "cross_attention": cross_weights,
@@ -216,14 +209,8 @@ class TransformerStack(nn.Module):
         if isinstance(num_layers, bool) or not isinstance(num_layers, int) or num_layers <= 0:
             raise ValueError("Transformer `num_layers` must be positive.")
         self.layers = nn.ModuleList(
-            TransformerLayer(config, layer_index=index)
-            for index in range(num_layers)
-        )
-        self.final_norm = (
-            _normalization(config)
-            if final_normalization
-            else nn.Identity()
-        )
+            TransformerLayer(config, layer_index=index) for index in range(num_layers))
+        self.final_norm = (_normalization(config) if final_normalization else nn.Identity())
 
     def forward(
         self,

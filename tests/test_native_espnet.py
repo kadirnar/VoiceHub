@@ -25,13 +25,8 @@ from voicehub.architectures.espnet_transformer.checkpoint import (
     native_espnet_lm_tensor_shapes,
     tensor_inventory_fingerprint,
 )
-from voicehub.architectures.espnet_transformer.configuration import (
-    ESPnetLibriSpeechTransformerConfig,
-)
-from voicehub.architectures.espnet_transformer.decoding import (
-    ESPnetCTCPrefixScorer,
-    ESPnetJointBeamSearch,
-)
+from voicehub.architectures.espnet_transformer.configuration import ESPnetLibriSpeechTransformerConfig
+from voicehub.architectures.espnet_transformer.decoding import ESPnetCTCPrefixScorer, ESPnetJointBeamSearch
 from voicehub.architectures.espnet_transformer.metadata import (
     ESPNET_ASR_STATE_VALUES,
     ESPNET_ASR_TENSOR_COUNT,
@@ -46,12 +41,8 @@ from voicehub.architectures.espnet_transformer.modeling import (
     ESPnetLibriSpeechTransformerForASR,
     ESPnetSequentialRNNLanguageModel,
 )
-from voicehub.architectures.espnet_transformer.registration import (
-    create_espnet_architecture_spec,
-)
-from voicehub.architectures.espnet_transformer.tokenization import (
-    ESPnetLibriSpeechTokenizer,
-)
+from voicehub.architectures.espnet_transformer.registration import create_espnet_architecture_spec
+from voicehub.architectures.espnet_transformer.tokenization import ESPnetLibriSpeechTokenizer
 from voicehub.checkpointing import SafeTensorReader, save_safetensors
 from voicehub.hub import write_json_file
 from voicehub.models.asr_native.configuration import ESPnetASRConfig
@@ -110,10 +101,7 @@ def _tiny_tokenizer_model() -> bytes:
         _wire_varint(5, 1),
     ))
     return b"".join((
-        *(
-            _wire_bytes(1, _piece(text, score, piece_type))
-            for text, score, piece_type in pieces
-        ),
+        *(_wire_bytes(1, _piece(text, score, piece_type)) for text, score, piece_type in pieces),
         _wire_bytes(2, trainer),
         _wire_bytes(3, normalizer),
     ))
@@ -201,9 +189,7 @@ class NativeESPnetArchitectureTests(unittest.TestCase):
         from voicehub.training.specs import get_training_spec
 
         model_spec = get_model_spec("asr_espnet")
-        architecture = get_architecture_spec(
-            "espnet-librispeech-transformer-e18"
-        )
+        architecture = get_architecture_spec("espnet-librispeech-transformer-e18")
         training = get_training_spec("asr_espnet")
 
         self.assertTrue(model_spec.is_voicehub_native)
@@ -219,10 +205,7 @@ class NativeESPnetArchitectureTests(unittest.TestCase):
 
     def test_release_graph_matches_range_audited_inventory(self):
         shapes = native_espnet_asr_tensor_shapes()
-        meta = OrderedDict(
-            (name, torch.empty(shape, device="meta"))
-            for name, shape in shapes.items()
-        )
+        meta = OrderedDict((name, torch.empty(shape, device="meta")) for name, shape in shapes.items())
 
         self.assertEqual(len(shapes), ESPNET_ASR_TENSOR_COUNT)
         self.assertEqual(
@@ -250,14 +233,8 @@ class NativeESPnetArchitectureTests(unittest.TestCase):
 
     def test_language_model_inventory_preserves_exact_source_mapping(self):
         shapes = native_espnet_lm_tensor_shapes()
-        native = OrderedDict(
-            (name, torch.empty(shape, device="meta"))
-            for name, shape in shapes.items()
-        )
-        source = OrderedDict(
-            (f"lm.{name}", tensor)
-            for name, tensor in native.items()
-        )
+        native = OrderedDict((name, torch.empty(shape, device="meta")) for name, shape in shapes.items())
+        source = OrderedDict((f"lm.{name}", tensor) for name, tensor in native.items())
 
         self.assertEqual(len(shapes), 19)
         self.assertEqual(
@@ -300,16 +277,12 @@ class NativeESPnetArchitectureTests(unittest.TestCase):
         output.loss.backward()
 
         expected = (
-            config.ctc_weight * output.losses["ctc_loss"]
-            + (1.0 - config.ctc_weight)
-            * output.losses["attention_loss"]
-        )
+            config.ctc_weight * output.losses["ctc_loss"] +
+            (1.0 - config.ctc_weight) * output.losses["attention_loss"])
         self.assertTrue(torch.equal(output.loss, expected))
         self.assertTrue(torch.isfinite(output.loss))
         self.assertEqual(tuple(output.ctc_logits.shape), (2, 10, 8))
-        self.assertIsNotNone(
-            model.encoder.encoders[0].self_attn.linear_q.weight.grad
-        )
+        self.assertIsNotNone(model.encoder.encoders[0].self_attn.linear_q.weight.grad)
         self.assertIsNotNone(model.decoder.output_layer.weight.grad)
         self.assertIsNotNone(model.ctc.ctc_lo.weight.grad)
 
@@ -325,7 +298,7 @@ class NativeESPnetArchitectureTests(unittest.TestCase):
             eos_token_id=3,
         )
         scores, states = scorer.extend(
-            (3,),
+            (3, ),
             torch.tensor([1, 2, 3]),
             scorer.initial_state,
         )
@@ -418,9 +391,7 @@ class NativeESPnetArtifactTests(unittest.TestCase):
         "set VOICEHUB_TEST_ESPNET_CONFIG for pinned token-list verification",
     )
     def test_release_token_list_fingerprint(self):
-        tokens = extract_espnet_token_list(
-            os.environ["VOICEHUB_TEST_ESPNET_CONFIG"]
-        )
+        tokens = extract_espnet_token_list(os.environ["VOICEHUB_TEST_ESPNET_CONFIG"])
         payload = ("\n".join(tokens) + "\n").encode("utf-8")
         self.assertEqual(
             hashlib.sha256(payload).hexdigest(),
@@ -440,17 +411,13 @@ class NativeESPnetArtifactTests(unittest.TestCase):
             yaml = root / "config.yaml"
             torch.save(model.state_dict(), asr)
             torch.save(
-                OrderedDict(
-                    (f"lm.{name}", tensor)
-                    for name, tensor in language_model.state_dict().items()
-                ),
+                OrderedDict((f"lm.{name}", tensor) for name, tensor in language_model.state_dict().items()),
                 lm,
             )
             tokenizer.write_bytes(_tiny_tokenizer_model())
             yaml.write_text(
-                "token_list:\n"
-                + "".join(f"- {token}\n" for token in _tiny_tokens())
-                + "encoder: transformer\n",
+                "token_list:\n" + "".join(f"- {token}\n"
+                                          for token in _tiny_tokens()) + "encoder: transformer\n",
                 encoding="utf-8",
             )
             destination = root / "native"
@@ -473,9 +440,7 @@ class NativeESPnetArtifactTests(unittest.TestCase):
                 trust_pickle_checkpoint=True,
             )
 
-            with SafeTensorReader(
-                destination / NATIVE_ESPNET_FILENAME
-            ) as reader:
+            with SafeTensorReader(destination / NATIVE_ESPNET_FILENAME) as reader:
                 self.assertEqual(
                     reader.metadata["format"],
                     NATIVE_ESPNET_FORMAT,
@@ -523,12 +488,10 @@ class NativeESPnetArtifactTests(unittest.TestCase):
                 fresh.language_model.state_dict().keys(),
                 original_lm.state_dict().keys(),
             )
-            self.assertTrue(
-                torch.equal(
-                    fresh.model.ctc.ctc_lo.weight,
-                    wrapper.model.ctc.ctc_lo.weight,
-                )
-            )
+            self.assertTrue(torch.equal(
+                fresh.model.ctc.ctc_lo.weight,
+                wrapper.model.ctc.ctc_lo.weight,
+            ))
 
     def test_tokenizer_maps_sentencepiece_pieces_to_espnet_ids(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -586,7 +549,7 @@ class NativeESPnetWrapperTests(unittest.TestCase):
                 batch_size=None,
                 num_beams=None,
                 max_new_tokens=None,
-                hotwords=("VOICEHUB",),
+                hotwords=("VOICEHUB", ),
             )
 
     def test_provider_config_rejects_external_runtime_options(self):

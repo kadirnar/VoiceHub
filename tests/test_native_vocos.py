@@ -7,27 +7,15 @@ from pathlib import Path
 import torch
 
 from voicehub.architectures.f5tts.audio import htk_mel_filter_bank as f5_htk_bank
-from voicehub.components.audio.vocoders.vocos.configuration import (
-    parse_vocos_yaml,
-)
-from voicehub.components.audio.vocoders.vocos.dataset import (
-    DataConfig,
-    VocosDataset,
-)
+from voicehub.components.audio.vocoders.vocos.configuration import parse_vocos_yaml
+from voicehub.components.audio.vocoders.vocos.dataset import DataConfig, VocosDataset
 from voicehub.components.audio.vocoders.vocos.discriminators import (
     MultiPeriodDiscriminator,
     MultiResolutionDiscriminator,
 )
 from voicehub.components.audio.vocoders.vocos.experiment import VocosExp
-from voicehub.components.audio.vocoders.vocos.feature_extractors import (
-    EncodecFeatures,
-    MelSpectrogramFeatures,
-)
-from voicehub.components.audio.vocoders.vocos.heads import (
-    IMDCTCosHead,
-    IMDCTSymExpHead,
-    ISTFTHead,
-)
+from voicehub.components.audio.vocoders.vocos.feature_extractors import EncodecFeatures, MelSpectrogramFeatures
+from voicehub.components.audio.vocoders.vocos.heads import IMDCTCosHead, IMDCTSymExpHead, ISTFTHead
 from voicehub.components.audio.vocoders.vocos.models import VocosBackbone
 from voicehub.components.audio.vocoders.vocos.modules import AdaLayerNorm
 from voicehub.components.audio.vocoders.vocos.pretrained import Vocos
@@ -68,10 +56,7 @@ class NativeVocosTests(unittest.TestCase):
 
     @staticmethod
     def _tiny_encodec():
-        from voicehub.components.audio.codecs.encodec import (
-            EncodecConfig,
-            EncodecModel,
-        )
+        from voicehub.components.audio.codecs.encodec import EncodecConfig, EncodecModel
 
         return EncodecModel.from_config(
             EncodecConfig(
@@ -94,8 +79,7 @@ class NativeVocosTests(unittest.TestCase):
                 kmeans_init=False,
                 kmeans_iters=2,
                 threshold_ema_dead_code=0,
-            )
-        ).eval()
+            )).eval()
 
     def test_entire_runtime_has_no_external_imports(self):
         violations = ()
@@ -186,8 +170,8 @@ class NativeVocosTests(unittest.TestCase):
         torch.testing.assert_close(restored, waveform, rtol=0, atol=2e-5)
         hidden = torch.randn(2, 9, 8)
         for head in (
-            IMDCTSymExpHead(8, 64, padding="center", clip_audio=True),
-            IMDCTCosHead(8, 64, padding="center", clip_audio=True),
+                IMDCTSymExpHead(8, 64, padding="center", clip_audio=True),
+                IMDCTCosHead(8, 64, padding="center", clip_audio=True),
         ):
             with self.subTest(head=head.__class__.__name__):
                 audio = head(hidden)
@@ -198,14 +182,11 @@ class NativeVocosTests(unittest.TestCase):
         layer = AdaLayerNorm(num_embeddings=3, embedding_dim=4)
         with torch.no_grad():
             layer.scale.weight.copy_(
-                torch.tensor(
-                    (
-                        (1.0, 1.0, 1.0, 1.0),
-                        (2.0, 2.0, 2.0, 2.0),
-                        (3.0, 3.0, 3.0, 3.0),
-                    )
-                )
-            )
+                torch.tensor((
+                    (1.0, 1.0, 1.0, 1.0),
+                    (2.0, 2.0, 2.0, 2.0),
+                    (3.0, 3.0, 3.0, 3.0),
+                )))
         hidden = torch.randn(2, 5, 4)
 
         output = layer(hidden, torch.tensor((0, 2)))
@@ -213,7 +194,7 @@ class NativeVocosTests(unittest.TestCase):
         self.assertEqual(output.shape, hidden.shape)
         torch.testing.assert_close(
             output[0],
-            torch.nn.functional.layer_norm(hidden[0], (4,), eps=1e-6),
+            torch.nn.functional.layer_norm(hidden[0], (4, ), eps=1e-6),
         )
 
     def test_safetensors_export_loads_into_a_fresh_public_runtime(self):
@@ -274,10 +255,8 @@ class NativeVocosTests(unittest.TestCase):
             sample_rate=24_000,
             initial_learning_rate=1e-4,
             pretrain_mel_steps=10,
-            multiperiod_discriminator=MultiPeriodDiscriminator(periods=(2,)),
-            multiresolution_discriminator=MultiResolutionDiscriminator(
-                fft_sizes=(64,),
-            ),
+            multiperiod_discriminator=MultiPeriodDiscriminator(periods=(2, )),
+            multiresolution_discriminator=MultiResolutionDiscriminator(fft_sizes=(64, ), ),
         )
         waveform = torch.randn(2, 1_024)
 
@@ -291,9 +270,7 @@ class NativeVocosTests(unittest.TestCase):
         optimizers, schedulers = objective.configure_optimizers(total_steps=100)
 
         self.assertTrue(bool(torch.isfinite(loss).item()))
-        self.assertTrue(
-            any(parameter.grad is not None for parameter in backbone.parameters())
-        )
+        self.assertTrue(any(parameter.grad is not None for parameter in backbone.parameters()))
         self.assertEqual(len(optimizers), 2)
         self.assertEqual(len(schedulers), 2)
         self.assertEqual(objective.last_step.optimizer, "generator")
@@ -316,7 +293,7 @@ class NativeVocosTests(unittest.TestCase):
 
             validation = VocosDataset(config, train=False)[0]
 
-        self.assertEqual(validation.shape, (800,))
+        self.assertEqual(validation.shape, (800, ))
         self.assertTrue(bool(torch.isfinite(validation).all().item()))
 
 

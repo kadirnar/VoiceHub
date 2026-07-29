@@ -28,10 +28,7 @@ def lengths_to_mask(
     length: int | None = None,
 ) -> torch.Tensor:
     maximum = int(lengths.max().item()) if length is None else int(length)
-    return (
-        torch.arange(maximum, device=lengths.device).unsqueeze(0)
-        < lengths.unsqueeze(1)
-    )
+    return (torch.arange(maximum, device=lengths.device).unsqueeze(0) < lengths.unsqueeze(1))
 
 
 def random_span_mask(
@@ -45,10 +42,7 @@ def random_span_mask(
     starts = (maximum_start * torch.rand_like(fractions)).long().clamp_min(0)
     ends = starts + span_lengths
     positions = torch.arange(sequence_length, device=lengths.device)
-    return (
-        (positions.unsqueeze(0) >= starts.unsqueeze(1))
-        & (positions.unsqueeze(0) < ends.unsqueeze(1))
-    )
+    return ((positions.unsqueeze(0) >= starts.unsqueeze(1)) & (positions.unsqueeze(0) < ends.unsqueeze(1)))
 
 
 def epss_timesteps(
@@ -98,25 +92,18 @@ class F5DiT(nn.Module):
         self.dim = config.dim
         self.depth = config.depth
         self.transformer_blocks = nn.ModuleList(
-            (
-                DiTBlock(
-                    config.dim,
-                    heads=config.heads,
-                    dim_head=config.dim_head,
-                    ff_mult=config.ff_mult,
-                    dropout=config.dropout,
-                    qk_norm=config.qk_norm,
-                    pe_attn_head=config.pe_attn_head,
-                    attn_mask_enabled=config.attn_mask_enabled,
-                )
-                for _ in range(config.depth)
-            )
-        )
+            DiTBlock(
+                config.dim,
+                heads=config.heads,
+                dim_head=config.dim_head,
+                ff_mult=config.ff_mult,
+                dropout=config.dropout,
+                qk_norm=config.qk_norm,
+                pe_attn_head=config.pe_attn_head,
+                attn_mask_enabled=config.attn_mask_enabled,
+            ) for _ in range(config.depth))
         self.long_skip_connection = (
-            nn.Linear(config.dim * 2, config.dim, bias=False)
-            if config.long_skip_connection
-            else None
-        )
+            nn.Linear(config.dim * 2, config.dim, bias=False) if config.long_skip_connection else None)
         self.norm_out = AdaLayerNormFinal(config.dim)
         self.proj_out = nn.Linear(config.dim, config.mel_dim)
         self.checkpoint_activations = config.checkpoint_activations
@@ -151,10 +138,7 @@ class F5DiT(nn.Module):
         cached = self._text_uncond if drop_text else self._text_cond
         if cached is None or not cache:
             sequence_length: int | torch.Tensor = (
-                hidden_states.shape[1]
-                if audio_mask is None
-                else audio_mask.sum(dim=1)
-            )
+                hidden_states.shape[1] if audio_mask is None else audio_mask.sum(dim=1))
             cached = self.text_embed(
                 token_ids,
                 sequence_length,
@@ -243,9 +227,7 @@ class F5DiT(nn.Module):
                     rope=rope,
                 )
         if self.long_skip_connection is not None:
-            hidden_states = self.long_skip_connection(
-                torch.cat((hidden_states, residual), dim=-1)
-            )
+            hidden_states = self.long_skip_connection(torch.cat((hidden_states, residual), dim=-1))
         return self.proj_out(self.norm_out(hidden_states, time_embedding))
 
 
@@ -340,9 +322,7 @@ class F5ConditionalFlowMatcher(nn.Module):
         if conditioning.ndim == 2:
             conditioning = self.mel_spec(conditioning).transpose(1, 2)
         if conditioning.ndim != 3 or conditioning.shape[-1] != self.num_channels:
-            raise ValueError(
-                "F5-TTS conditioning must be waveform or `[batch, frames, mel]`."
-            )
+            raise ValueError("F5-TTS conditioning must be waveform or `[batch, frames, mel]`.")
         conditioning = conditioning.to(
             device=self.device,
             dtype=next(self.parameters()).dtype,
@@ -351,7 +331,7 @@ class F5ConditionalFlowMatcher(nn.Module):
         batch, prompt_length = conditioning.shape[:2]
         if lengths is None:
             lengths = torch.full(
-                (batch,),
+                (batch, ),
                 prompt_length,
                 device=self.device,
                 dtype=torch.long,
@@ -360,7 +340,7 @@ class F5ConditionalFlowMatcher(nn.Module):
             lengths = lengths.to(device=self.device, dtype=torch.long)
         if isinstance(duration, int):
             durations = torch.full(
-                (batch,),
+                (batch, ),
                 duration,
                 device=self.device,
                 dtype=torch.long,
@@ -385,11 +365,7 @@ class F5ConditionalFlowMatcher(nn.Module):
             conditioning,
             torch.zeros_like(conditioning),
         )
-        attention_mask = (
-            lengths_to_mask(durations, length=maximum_duration)
-            if batch > 1
-            else None
-        )
+        attention_mask = (lengths_to_mask(durations, length=maximum_duration) if batch > 1 else None)
         generator = None
         if seed is not None:
             generator = torch.Generator(device=self.device)
@@ -401,8 +377,7 @@ class F5ConditionalFlowMatcher(nn.Module):
                 device=self.device,
                 dtype=conditioning.dtype,
                 generator=generator,
-            )
-            for item in durations
+            ) for item in durations
         ]
         state = pad_sequence(initial, batch_first=True, padding_value=0.0)
         times = (
@@ -410,20 +385,15 @@ class F5ConditionalFlowMatcher(nn.Module):
                 steps,
                 device=self.device,
                 dtype=conditioning.dtype,
-            )
-            if use_epss
-            else torch.linspace(
+            ) if use_epss else torch.linspace(
                 0,
                 1,
                 steps + 1,
                 device=self.device,
                 dtype=conditioning.dtype,
-            )
-        )
+            ))
         if sway_sampling_coef is not None:
-            times = times + sway_sampling_coef * (
-                torch.cos(torch.pi / 2 * times) - 1 + times
-            )
+            times = times + sway_sampling_coef * (torch.cos(torch.pi / 2 * times) - 1 + times)
         trajectory = [state]
         try:
             for index in range(times.numel() - 1):
@@ -478,7 +448,7 @@ class F5ConditionalFlowMatcher(nn.Module):
         text = text.to(device=inp.device, dtype=torch.long)
         if lens is None:
             lens = torch.full(
-                (batch,),
+                (batch, ),
                 sequence_length,
                 device=inp.device,
                 dtype=torch.long,
@@ -507,9 +477,7 @@ class F5ConditionalFlowMatcher(nn.Module):
             torch.zeros_like(target),
             target,
         )
-        drop_audio = bool(
-            torch.rand((), device=inp.device).item() < self.audio_drop_prob
-        )
+        drop_audio = bool(torch.rand((), device=inp.device).item() < self.audio_drop_prob)
         drop_text = False
         if torch.rand((), device=inp.device).item() < self.cond_drop_prob:
             drop_audio = True
@@ -536,9 +504,7 @@ def build_f5tts_model(
 ) -> F5ConditionalFlowMatcher:
     resolved = (
         config
-        if isinstance(config, F5TTSArchitectureConfig)
-        else F5TTSArchitectureConfig.from_mapping(config)
-    )
+        if isinstance(config, F5TTSArchitectureConfig) else F5TTSArchitectureConfig.from_mapping(config))
     return F5ConditionalFlowMatcher(resolved, ode_method=ode_method)
 
 

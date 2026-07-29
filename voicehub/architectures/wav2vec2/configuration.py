@@ -230,8 +230,7 @@ class Wav2Vec2Config:
                 choices = ", ".join(sorted(_PROBLEM_TYPES))
                 raise ValueError(
                     f"`problem_type` must be one of {choices}; found "
-                    f"{self.problem_type!r}."
-                )
+                    f"{self.problem_type!r}.")
 
         if not isinstance(self.extra_config, Mapping):
             raise TypeError("`extra_config` must be a mapping.")

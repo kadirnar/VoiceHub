@@ -961,9 +961,7 @@ class _Wav2Vec2ClassificationHead(nn.Module):
         self.config = config
         if config.use_weighted_layer_sum:
             layer_count = config.num_hidden_layers + 1
-            self.layer_weights = nn.Parameter(
-                torch.ones(layer_count) / layer_count
-            )
+            self.layer_weights = nn.Parameter(torch.ones(layer_count) / layer_count)
         else:
             self.register_parameter("layer_weights", None)
 
@@ -976,9 +974,7 @@ class _Wav2Vec2ClassificationHead(nn.Module):
         output_hidden_states: bool,
         generator: torch.Generator | None,
     ) -> tuple[Wav2Vec2ModelOutput, Tensor]:
-        require_hidden_states = (
-            output_hidden_states or self.config.use_weighted_layer_sum
-        )
+        require_hidden_states = (output_hidden_states or self.config.use_weighted_layer_sum)
         outputs = self.wav2vec2(
             input_values,
             attention_mask,
@@ -988,14 +984,10 @@ class _Wav2Vec2ClassificationHead(nn.Module):
         )
         if self.config.use_weighted_layer_sum:
             if outputs.hidden_states is None:
-                raise RuntimeError(
-                    "Weighted layer aggregation requires encoder hidden states."
-                )
+                raise RuntimeError("Weighted layer aggregation requires encoder hidden states.")
             hidden_states = torch.stack(outputs.hidden_states, dim=1)
             weights = functional.softmax(self.layer_weights, dim=-1)
-            hidden_states = (
-                hidden_states * weights.view(1, -1, 1, 1)
-            ).sum(dim=1)
+            hidden_states = (hidden_states * weights.view(1, -1, 1, 1)).sum(dim=1)
         else:
             hidden_states = outputs.last_hidden_state
         return outputs, hidden_states
@@ -1083,18 +1075,14 @@ class Wav2Vec2ForSequenceClassification(_Wav2Vec2ClassificationHead):
                 )
             elif problem_type == "single_label_classification":
                 if labels.is_floating_point() or labels.is_complex():
-                    raise TypeError(
-                        "Single-label classification requires integer labels."
-                    )
+                    raise TypeError("Single-label classification requires integer labels.")
                 loss = functional.cross_entropy(
                     logits,
                     labels.to(dtype=torch.long).reshape(-1),
                 )
             else:
                 if tuple(labels.shape) != tuple(logits.shape):
-                    raise ValueError(
-                        "Multi-label targets must match the logits shape."
-                    )
+                    raise ValueError("Multi-label targets must match the logits shape.")
                 loss = functional.binary_cross_entropy_with_logits(
                     logits,
                     labels.to(dtype=logits.dtype),
@@ -1103,9 +1091,7 @@ class Wav2Vec2ForSequenceClassification(_Wav2Vec2ClassificationHead):
             logits=logits,
             loss=loss,
             feature_attention_mask=outputs.feature_attention_mask,
-            hidden_states=(
-                outputs.hidden_states if output_hidden_states else None
-            ),
+            hidden_states=(outputs.hidden_states if output_hidden_states else None),
             attentions=outputs.attentions,
             executed_layers=outputs.executed_layers,
         )
@@ -1158,22 +1144,16 @@ class Wav2Vec2ForAudioFrameClassification(_Wav2Vec2ClassificationHead):
                 raise ValueError("`labels` must be on the model input device.")
             if labels.ndim == 3:
                 if tuple(labels.shape) != tuple(logits.shape):
-                    raise ValueError(
-                        "One-hot frame labels must match the logits shape."
-                    )
+                    raise ValueError("One-hot frame labels must match the logits shape.")
                 targets = labels.argmax(dim=-1)
             elif labels.ndim == 2:
                 if tuple(labels.shape) != tuple(logits.shape[:2]):
-                    raise ValueError(
-                        "Frame labels must have shape [batch, feature_time]."
-                    )
+                    raise ValueError("Frame labels must have shape [batch, feature_time].")
                 if labels.is_floating_point() or labels.is_complex():
                     raise TypeError("Class-index frame labels must be integers.")
                 targets = labels.to(dtype=torch.long)
             else:
-                raise ValueError(
-                    "Frame labels must be class indices or one-hot targets."
-                )
+                raise ValueError("Frame labels must be class indices or one-hot targets.")
             valid_targets = targets.masked_fill(
                 ~outputs.feature_attention_mask,
                 -100,
@@ -1187,9 +1167,7 @@ class Wav2Vec2ForAudioFrameClassification(_Wav2Vec2ClassificationHead):
             logits=logits,
             loss=loss,
             feature_attention_mask=outputs.feature_attention_mask,
-            hidden_states=(
-                outputs.hidden_states if output_hidden_states else None
-            ),
+            hidden_states=(outputs.hidden_states if output_hidden_states else None),
             attentions=outputs.attentions,
             executed_layers=outputs.executed_layers,
         )

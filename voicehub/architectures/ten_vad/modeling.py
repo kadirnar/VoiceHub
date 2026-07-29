@@ -113,8 +113,9 @@ class _ONNXLSTMCell(nn.Module):
 class TENVADModel(nn.Module):
     """Released separable-convolution, two-LSTM, and dense TEN graph.
 
-    The model contains the reviewed Sherpa acoustic frontend as registered buffers, so native Safetensors
-    artifacts are complete and do not depend on ONNX metadata at inference or training time.
+    The model contains the reviewed Sherpa acoustic frontend as
+    registered buffers, so native Safetensors artifacts are complete and
+    do not depend on ONNX metadata at inference or training time.
     """
 
     def __init__(self, config: TENVADConfig | dict[str, Any]) -> None:

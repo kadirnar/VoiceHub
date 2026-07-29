@@ -358,16 +358,15 @@ class _LazyNamespaceImportVisitor(ast.NodeVisitor):
         self._function_stack.pop()
 
     def visit_Call(self, node: ast.Call) -> None:
-        if (_dynamic_import_function_name(node) is not None
-                and _literal_dynamic_import(node) is None):
+        if (_dynamic_import_function_name(node) is not None and _literal_dynamic_import(node) is None):
             self.unresolved_imports.append(
-                bool(self._function_stack)
-                and self._function_stack[-1] == "__getattr__", )
+                bool(self._function_stack) and self._function_stack[-1] == "__getattr__", )
         self.generic_visit(node)
 
 
 def _is_lazy_namespace_initializer(path: Path) -> bool:
-    """Return whether unresolved imports are confined to package ``__getattr__``."""
+    """Return whether unresolved imports are confined to package
+    ``__getattr__``."""
     if path.name != "__init__.py":
         return False
     visitor = _LazyNamespaceImportVisitor()
@@ -524,12 +523,10 @@ def inspect_native_runtime(
             relative = path.relative_to(root).as_posix()
         except ValueError:
             relative = ""
-        allow_dynamic = (relative in _DYNAMIC_IMPORT_INFRASTRUCTURE
-                         or _is_lazy_namespace_initializer(path))
+        allow_dynamic = (relative in _DYNAMIC_IMPORT_INFRASTRUCTURE or _is_lazy_namespace_initializer(path))
         path_allowed_roots = (
             frozenset(allowed_roots)
-            | _PER_FILE_ALLOWED_IMPORT_ROOTS.get(relative, frozenset())
-        )
+            | _PER_FILE_ALLOWED_IMPORT_ROOTS.get(relative, frozenset()))
         violations.extend(
             inspect_native_imports(
                 path,
@@ -592,11 +589,10 @@ def collect_native_import_closure(
     """
     root = Path(package_root)
     root_init = root / "__init__.py"
-    paths = set(
-        collect_native_runtime_paths(
-            root,
-            directories=directories,
-        ))
+    paths = set(collect_native_runtime_paths(
+        root,
+        directories=directories,
+    ))
     pending = deque(sorted(paths))
 
     def add_path(path: Path) -> None:

@@ -1,11 +1,11 @@
 """VoiceHub-owned XCodec2 graph used by LLaSA.
 
 The parameter namespace follows the authors' self-contained Transformers
-conversion at revision ``7f5d5d1aaca3cc3d236c80ec8cb34d06f08a5fb8``.
-The implementation is intentionally PyTorch-only: Wav2Vec2-BERT semantic
+conversion at revision ``7f5d5d1aaca3cc3d236c80ec8cb34d06f08a5fb8``. The
+implementation is intentionally PyTorch-only: Wav2Vec2-BERT semantic
 encoding, BigCodec acoustic encoding, finite scalar quantization, the
-Transformer/Vocos decoder, and Kaldi-compatible preprocessing all execute
-inside VoiceHub.
+Transformer/Vocos decoder, and Kaldi-compatible preprocessing all
+execute inside VoiceHub.
 """
 
 # Portions are adapted from the Hugging Face XCodec2 implementation:
@@ -25,9 +25,7 @@ from torch.nn import functional as F
 
 from voicehub.processing.kaldi import KaldiFbankConfig, kaldi_fbank
 
-XCODEC2_TRANSFORMERS_SOURCE_REVISION = (
-    "7f5d5d1aaca3cc3d236c80ec8cb34d06f08a5fb8"
-)
+XCODEC2_TRANSFORMERS_SOURCE_REVISION = ("7f5d5d1aaca3cc3d236c80ec8cb34d06f08a5fb8")
 
 
 def _positive_integer(value: Any, *, name: str) -> int:
@@ -82,44 +80,37 @@ class Wav2Vec2BertSemanticConfig:
 
     def __post_init__(self) -> None:
         for name in (
-            "feature_projection_input_dim",
-            "hidden_size",
-            "intermediate_size",
-            "num_hidden_layers",
-            "num_attention_heads",
-            "conv_depthwise_kernel_size",
-            "left_max_position_embeddings",
-            "right_max_position_embeddings",
-            "output_hidden_size",
+                "feature_projection_input_dim",
+                "hidden_size",
+                "intermediate_size",
+                "num_hidden_layers",
+                "num_attention_heads",
+                "conv_depthwise_kernel_size",
+                "left_max_position_embeddings",
+                "right_max_position_embeddings",
+                "output_hidden_size",
         ):
             _positive_integer(getattr(self, name), name=name)
         if self.hidden_size % self.num_attention_heads:
-            raise ValueError(
-                "Semantic `hidden_size` must be divisible by "
-                "`num_attention_heads`."
-            )
+            raise ValueError("Semantic `hidden_size` must be divisible by "
+                             "`num_attention_heads`.")
         if self.conv_depthwise_kernel_size % 2 != 1:
-            raise ValueError(
-                "Semantic `conv_depthwise_kernel_size` must be odd."
-            )
+            raise ValueError("Semantic `conv_depthwise_kernel_size` must be odd.")
         if self.hidden_act not in {"silu", "swish"}:
-            raise ValueError(
-                "Native XCodec2 semantic checkpoints require SiLU/Swish."
-            )
+            raise ValueError("Native XCodec2 semantic checkpoints require SiLU/Swish.")
         if self.position_embeddings_type != "relative_key":
             raise ValueError(
                 "Native XCodec2 currently supports the published "
-                "`relative_key` semantic attention only."
-            )
+                "`relative_key` semantic attention only.")
         for name in (
-            "hidden_dropout",
-            "activation_dropout",
-            "attention_dropout",
-            "feat_proj_dropout",
-            "conformer_conv_dropout",
-            "layerdrop",
-            "mask_time_prob",
-            "mask_feature_prob",
+                "hidden_dropout",
+                "activation_dropout",
+                "attention_dropout",
+                "feat_proj_dropout",
+                "conformer_conv_dropout",
+                "layerdrop",
+                "mask_time_prob",
+                "mask_feature_prob",
         ):
             object.__setattr__(
                 self,
@@ -127,16 +118,14 @@ class Wav2Vec2BertSemanticConfig:
                 _probability(getattr(self, name), name=name),
             )
         if self.add_adapter or self.use_intermediate_ffn_before_adapter:
-            raise ValueError(
-                "The published XCodec2 checkpoint has no Wav2Vec2-BERT "
-                "adapter stack."
-            )
+            raise ValueError("The published XCodec2 checkpoint has no Wav2Vec2-BERT "
+                             "adapter stack.")
 
     @classmethod
     def from_dict(
         cls,
         values: dict[str, Any] | None,
-    ) -> "Wav2Vec2BertSemanticConfig":
+    ) -> Wav2Vec2BertSemanticConfig:
         values = dict(values or {})
         known = {item.name for item in fields(cls)} - {"extra_config"}
         selected = {name: values.pop(name) for name in tuple(values) if name in known}
@@ -174,9 +163,7 @@ class XCodec2Config:
     quantization_dim: int = 2048
     quantization_levels: tuple[int, ...] = (4, 4, 4, 4, 4, 4, 4, 4)
     rope_theta: float = 10_000.0
-    semantic_model_config: Wav2Vec2BertSemanticConfig = field(
-        default_factory=Wav2Vec2BertSemanticConfig
-    )
+    semantic_model_config: Wav2Vec2BertSemanticConfig = field(default_factory=Wav2Vec2BertSemanticConfig)
     extra_config: dict[str, Any] = field(
         default_factory=dict,
         repr=False,
@@ -185,49 +172,41 @@ class XCodec2Config:
 
     def __post_init__(self) -> None:
         for name in (
-            "hidden_size",
-            "intermediate_size",
-            "num_hidden_layers",
-            "num_attention_heads",
-            "num_key_value_heads",
-            "head_dim",
-            "max_position_embeddings",
-            "encoder_hidden_size",
-            "sampling_rate",
-            "quantization_dim",
+                "hidden_size",
+                "intermediate_size",
+                "num_hidden_layers",
+                "num_attention_heads",
+                "num_key_value_heads",
+                "head_dim",
+                "max_position_embeddings",
+                "encoder_hidden_size",
+                "sampling_rate",
+                "quantization_dim",
         ):
             _positive_integer(getattr(self, name), name=name)
         if self.num_attention_heads % self.num_key_value_heads:
-            raise ValueError(
-                "`num_key_value_heads` must divide `num_attention_heads`."
-            )
+            raise ValueError("`num_key_value_heads` must divide `num_attention_heads`.")
         if self.num_key_value_heads != self.num_attention_heads:
             raise ValueError(
                 "The published XCodec2 decoder uses one key/value head per "
-                "attention head. Grouped-query variants are not verified."
-            )
+                "attention head. Grouped-query variants are not verified.")
         if self.num_attention_heads * self.head_dim != self.hidden_size:
-            raise ValueError(
-                "XCodec2 requires `num_attention_heads * head_dim == "
-                "hidden_size`."
-            )
+            raise ValueError("XCodec2 requires `num_attention_heads * head_dim == "
+                             "hidden_size`.")
         if self.hidden_size % 32:
             raise ValueError(
                 "XCodec2 decoder hidden size must be divisible by 32 for "
-                "the published GroupNorm topology."
-            )
+                "the published GroupNorm topology.")
         if self.max_position_embeddings < self.num_attention_heads:
             raise ValueError(
                 "`max_position_embeddings` must cover XCodec2's head-indexed "
-                "decoder rotary positions."
-            )
+                "decoder rotary positions.")
         if self.hidden_act != "silu":
             raise ValueError("XCodec2 decoder checkpoints require SiLU.")
         if self.attention_bias:
             raise ValueError(
                 "The published XCodec2 checkpoint uses bias-free decoder "
-                "attention projections."
-            )
+                "attention projections.")
         object.__setattr__(
             self,
             "attention_dropout",
@@ -245,47 +224,31 @@ class XCodec2Config:
             _positive_integer(ratio, name="downsampling_ratios")
         object.__setattr__(self, "downsampling_ratios", ratios)
         levels = tuple(self.quantization_levels)
-        if not levels or any(
-            isinstance(level, bool) or not isinstance(level, int) or level < 2
-            for level in levels
-        ):
-            raise ValueError(
-                "`quantization_levels` must contain integers of at least two."
-            )
+        if not levels or any(isinstance(level, bool) or not isinstance(level, int) or level < 2
+                             for level in levels):
+            raise ValueError("`quantization_levels` must contain integers of at least two.")
         object.__setattr__(self, "quantization_levels", levels)
         if math.prod(levels) != 65_536:
-            raise ValueError(
-                "LLaSA checkpoints require XCodec2's 65,536-entry codebook."
-            )
+            raise ValueError("LLaSA checkpoints require XCodec2's 65,536-entry codebook.")
         semantic = self.semantic_model_config
         if isinstance(semantic, dict):
             semantic = Wav2Vec2BertSemanticConfig.from_dict(semantic)
             object.__setattr__(self, "semantic_model_config", semantic)
         if not isinstance(semantic, Wav2Vec2BertSemanticConfig):
-            raise TypeError(
-                "`semantic_model_config` must be a mapping or semantic config."
-            )
+            raise TypeError("`semantic_model_config` must be a mapping or semantic config.")
         if self.quantization_dim != self.hidden_size + semantic.hidden_size:
-            raise ValueError(
-                "`quantization_dim` must equal acoustic plus semantic hidden "
-                "sizes."
-            )
+            raise ValueError("`quantization_dim` must equal acoustic plus semantic hidden "
+                             "sizes.")
         if semantic.feature_projection_input_dim != 160:
             raise ValueError(
                 "The native XCodec2 frontend emits 160-dimensional paired "
-                "Kaldi filter-bank frames."
-            )
+                "Kaldi filter-bank frames.")
         if self.sampling_rate != self.hop_length * 50:
             raise ValueError(
                 "XCodec2 acoustic and semantic frames must both run at 50 Hz; "
-                "`sampling_rate` must equal 50 * `hop_length`."
-            )
-        if (
-            isinstance(self.rope_theta, bool)
-            or not isinstance(self.rope_theta, (int, float))
-            or not math.isfinite(self.rope_theta)
-            or self.rope_theta <= 1.0
-        ):
+                "`sampling_rate` must equal 50 * `hop_length`.")
+        if (isinstance(self.rope_theta, bool) or not isinstance(self.rope_theta, (int, float)) or
+                not math.isfinite(self.rope_theta) or self.rope_theta <= 1.0):
             raise ValueError("`rope_theta` must be finite and greater than one.")
 
     @property
@@ -297,7 +260,7 @@ class XCodec2Config:
         return self.hop_length * 4
 
     @classmethod
-    def from_dict(cls, values: dict[str, Any]) -> "XCodec2Config":
+    def from_dict(cls, values: dict[str, Any]) -> XCodec2Config:
         if not isinstance(values, dict):
             raise TypeError("XCodec2 config must be a mapping.")
         values = dict(values)
@@ -315,9 +278,7 @@ class XCodec2Config:
         known = {item.name for item in fields(cls)} - {"extra_config"}
         selected = {name: values.pop(name) for name in tuple(values) if name in known}
         if semantic is not None:
-            selected["semantic_model_config"] = (
-                Wav2Vec2BertSemanticConfig.from_dict(semantic)
-            )
+            selected["semantic_model_config"] = (Wav2Vec2BertSemanticConfig.from_dict(semantic))
         selected["extra_config"] = values
         return cls(**selected)
 
@@ -458,9 +419,7 @@ class Wav2Vec2BertConvolutionModule(nn.Module):
             (self.depthwise_conv.kernel_size[0] - 1, 0),
         )
         hidden_states = self.depthwise_conv(hidden_states)
-        hidden_states = self.depthwise_layer_norm(
-            hidden_states.transpose(1, 2)
-        ).transpose(1, 2)
+        hidden_states = self.depthwise_layer_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
         hidden_states = F.silu(hidden_states)
         hidden_states = self.pointwise_conv2(hidden_states)
         return self.dropout(hidden_states).transpose(1, 2)
@@ -472,22 +431,14 @@ class Wav2Vec2BertSelfAttention(nn.Module):
         super().__init__()
         self.head_size = config.hidden_size // config.num_attention_heads
         self.num_heads = config.num_attention_heads
-        self.left_max_position_embeddings = (
-            config.left_max_position_embeddings
-        )
-        self.right_max_position_embeddings = (
-            config.right_max_position_embeddings
-        )
+        self.left_max_position_embeddings = (config.left_max_position_embeddings)
+        self.right_max_position_embeddings = (config.right_max_position_embeddings)
         self.linear_q = nn.Linear(config.hidden_size, config.hidden_size)
         self.linear_k = nn.Linear(config.hidden_size, config.hidden_size)
         self.linear_v = nn.Linear(config.hidden_size, config.hidden_size)
         self.linear_out = nn.Linear(config.hidden_size, config.hidden_size)
         self.dropout = nn.Dropout(config.attention_dropout)
-        positions = (
-            self.left_max_position_embeddings
-            + self.right_max_position_embeddings
-            + 1
-        )
+        positions = (self.left_max_position_embeddings + self.right_max_position_embeddings + 1)
         self.distance_embedding = nn.Embedding(positions, self.head_size)
 
     def forward(
@@ -517,9 +468,8 @@ class Wav2Vec2BertSelfAttention(nn.Module):
             -self.left_max_position_embeddings,
             self.right_max_position_embeddings,
         )
-        positional = self.distance_embedding(
-            distance + self.left_max_position_embeddings
-        ).to(dtype=query.dtype)
+        positional = self.distance_embedding(distance +
+                                             self.left_max_position_embeddings).to(dtype=query.dtype)
         relative_scores = torch.einsum(
             "bhld,lrd->bhlr",
             query,
@@ -572,29 +522,20 @@ class Wav2Vec2BertEncoderLayer(nn.Module):
         convolution_mask: Tensor | None,
     ) -> tuple[Tensor, Tensor]:
         residual = hidden_states
-        hidden_states = (
-            self.ffn1(self.ffn1_layer_norm(hidden_states)) * 0.5 + residual
-        )
+        hidden_states = (self.ffn1(self.ffn1_layer_norm(hidden_states)) * 0.5 + residual)
         residual = hidden_states
         attention_output, probabilities = self.self_attn(
             self.self_attn_layer_norm(hidden_states),
             attention_mask=attention_mask,
         )
-        hidden_states = (
-            self.self_attn_dropout(attention_output) + residual
-        )
+        hidden_states = (self.self_attn_dropout(attention_output) + residual)
         residual = hidden_states
-        hidden_states = (
-            self.conv_module(
-                hidden_states,
-                attention_mask=convolution_mask,
-            )
-            + residual
-        )
+        hidden_states = (self.conv_module(
+            hidden_states,
+            attention_mask=convolution_mask,
+        ) + residual)
         residual = hidden_states
-        hidden_states = (
-            self.ffn2(self.ffn2_layer_norm(hidden_states)) * 0.5 + residual
-        )
+        hidden_states = (self.ffn2(self.ffn2_layer_norm(hidden_states)) * 0.5 + residual)
         return self.final_layer_norm(hidden_states), probabilities
 
 
@@ -604,10 +545,7 @@ class Wav2Vec2BertEncoder(nn.Module):
         super().__init__()
         self.config = config
         self.dropout = nn.Dropout(config.hidden_dropout)
-        self.layers = nn.ModuleList(
-            Wav2Vec2BertEncoderLayer(config)
-            for _ in range(config.num_hidden_layers)
-        )
+        self.layers = nn.ModuleList(Wav2Vec2BertEncoderLayer(config) for _ in range(config.num_hidden_layers))
 
     def forward(
         self,
@@ -622,13 +560,8 @@ class Wav2Vec2BertEncoder(nn.Module):
                 ~attention_mask.bool().unsqueeze(-1),
                 0.0,
             )
-            additive_mask = (
-                1.0
-                - attention_mask[:, None, None, :].to(hidden_states.dtype)
-            )
-            additive_mask = additive_mask * torch.finfo(
-                hidden_states.dtype
-            ).min
+            additive_mask = (1.0 - attention_mask[:, None, None, :].to(hidden_states.dtype))
+            additive_mask = additive_mask * torch.finfo(hidden_states.dtype).min
             additive_mask = additive_mask.expand(
                 attention_mask.shape[0],
                 1,
@@ -654,9 +587,7 @@ class Wav2Vec2BertSemanticModel(nn.Module):
         self.config = config
         self.feature_projection = Wav2Vec2BertFeatureProjection(config)
         if config.mask_time_prob > 0.0 or config.mask_feature_prob > 0.0:
-            self.masked_spec_embed = nn.Parameter(
-                torch.empty(config.hidden_size)
-            )
+            self.masked_spec_embed = nn.Parameter(torch.empty(config.hidden_size))
         else:
             self.register_parameter("masked_spec_embed", None)
         self.encoder = Wav2Vec2BertEncoder(config)
@@ -684,9 +615,7 @@ class XCodec2SnakeBeta(nn.Module):
     def forward(self, hidden_states: Tensor) -> Tensor:
         alpha = self.alpha[None, :, None].exp()
         beta = self.beta[None, :, None].exp()
-        return hidden_states + (
-            torch.sin(hidden_states * alpha).square() / (beta + 1e-9)
-        )
+        return hidden_states + (torch.sin(hidden_states * alpha).square() / (beta + 1e-9))
 
 
 def kaiser_sinc_filter1d(
@@ -697,16 +626,11 @@ def kaiser_sinc_filter1d(
     """Return the exact anti-aliasing kernel used by XCodec2."""
     even = kernel_size % 2 == 0
     half_size = kernel_size // 2
-    attenuation = (
-        2.285 * (half_size - 1) * math.pi * (4 * half_width) + 7.95
-    )
+    attenuation = (2.285 * (half_size - 1) * math.pi * (4 * half_width) + 7.95)
     if attenuation > 50.0:
         beta = 0.1102 * (attenuation - 8.7)
     elif attenuation >= 21.0:
-        beta = (
-            0.5842 * (attenuation - 21) ** 0.4
-            + 0.07886 * (attenuation - 21.0)
-        )
+        beta = (0.5842 * (attenuation - 21)**0.4 + 0.07886 * (attenuation - 21.0))
     else:
         beta = 0.0
     window = torch.kaiser_window(
@@ -716,10 +640,8 @@ def kaiser_sinc_filter1d(
         dtype=torch.float32,
     )
     positions = (
-        torch.arange(-half_size, half_size, dtype=torch.float32) + 0.5
-        if even
-        else torch.arange(kernel_size, dtype=torch.float32) - half_size
-    )
+        torch.arange(-half_size, half_size, dtype=torch.float32) +
+        0.5 if even else torch.arange(kernel_size, dtype=torch.float32) - half_size)
     if cutoff == 0:
         return torch.zeros((1, 1, kernel_size), dtype=torch.float32)
     kernel = 2 * cutoff * window * torch.sinc(2 * cutoff * positions)
@@ -768,12 +690,8 @@ class XCodec2UpSample1d(nn.Module):
         self.kernel_size = kernel_size
         self.stride = ratio
         self.pad = kernel_size // ratio - 1
-        self.pad_left = (
-            self.pad * ratio + (kernel_size - ratio) // 2
-        )
-        self.pad_right = (
-            self.pad * ratio + (kernel_size - ratio + 1) // 2
-        )
+        self.pad_left = (self.pad * ratio + (kernel_size - ratio) // 2)
+        self.pad_right = (self.pad * ratio + (kernel_size - ratio + 1) // 2)
         self.register_buffer(
             "filter",
             kaiser_sinc_filter1d(
@@ -797,7 +715,7 @@ class XCodec2UpSample1d(nn.Module):
             stride=self.stride,
             groups=channels,
         )
-        return hidden_states[..., self.pad_left : -self.pad_right]
+        return hidden_states[..., self.pad_left:-self.pad_right]
 
 
 class XCodec2AntiAliasedActivation1d(nn.Module):
@@ -846,7 +764,7 @@ class XCodec2EncoderBlock(nn.Module):
         stride_index: int,
     ) -> None:
         super().__init__()
-        channels = config.encoder_hidden_size * 2 ** (stride_index - 1)
+        channels = config.encoder_hidden_size * 2**(stride_index - 1)
         self.res_unit1 = XCodec2ResidualUnit(channels, dilation=1)
         self.res_unit2 = XCodec2ResidualUnit(channels, dilation=3)
         self.res_unit3 = XCodec2ResidualUnit(channels, dilation=9)
@@ -878,12 +796,8 @@ class XCodec2Encoder(nn.Module):
         )
         self.block = nn.ModuleList(
             XCodec2EncoderBlock(config, stride, index + 1)
-            for index, stride in enumerate(config.downsampling_ratios)
-        )
-        channels = (
-            config.encoder_hidden_size
-            * 2 ** len(config.downsampling_ratios)
-        )
+            for index, stride in enumerate(config.downsampling_ratios))
+        channels = (config.encoder_hidden_size * 2**len(config.downsampling_ratios))
         self.snake1 = XCodec2AntiAliasedActivation1d(channels)
         self.conv2 = nn.Conv1d(
             channels,
@@ -987,7 +901,6 @@ class XCodec2FiniteScalarQuantization(nn.Module):
 
     def codes_from_indices(self, indices: Tensor) -> Tensor:
         """Map flattened codebook indices to normalized scalar codes."""
-
         return self.codebook.to(indices.device)[indices]
 
     def forward(self, hidden_states: Tensor) -> tuple[Tensor, Tensor]:
@@ -998,9 +911,7 @@ class XCodec2FiniteScalarQuantization(nn.Module):
         rounded = hidden_states.round()
         codes = hidden_states + (rounded - hidden_states).detach()
         codes = codes / half_width
-        indices = (
-            ((codes * half_width) + half_width) * self.basis
-        ).sum(dim=-1).to(torch.int32)
+        indices = (((codes * half_width) + half_width) * self.basis).sum(dim=-1).to(torch.int32)
         return codes.to(original_dtype), indices
 
 
@@ -1015,18 +926,8 @@ class XCodec2Quantizer(nn.Module):
 
     def from_codes(self, indices: Tensor) -> Tensor:
         indices = indices.squeeze(-1).long()
-        if (
-            indices.numel()
-            and (
-                bool((indices < 0).any())
-                or bool(
-                    (
-                        indices
-                        >= math.prod(self.quantizer.quantization_levels)
-                    ).any()
-                )
-            )
-        ):
+        if (indices.numel() and (bool((indices < 0).any()) or bool(
+            (indices >= math.prod(self.quantizer.quantization_levels)).any()))):
             raise ValueError("XCodec2 audio codes are outside the codebook.")
         codes = self.quantizer.codes_from_indices(indices)
         return self.project_out(codes)
@@ -1039,6 +940,7 @@ class XCodec2Quantizer(nn.Module):
         quantized = self.project_out(quantized.to(original_dtype))
         return quantized, indices.unsqueeze(-1)
 
+
 class XCodec2RMSNorm(nn.Module):
 
     def __init__(self, hidden_size: int, epsilon: float) -> None:
@@ -1050,9 +952,7 @@ class XCodec2RMSNorm(nn.Module):
         dtype = hidden_states.dtype
         normalized = hidden_states.float()
         variance = normalized.square().mean(dim=-1, keepdim=True)
-        normalized = normalized * torch.rsqrt(
-            variance + self.variance_epsilon
-        )
+        normalized = normalized * torch.rsqrt(variance + self.variance_epsilon)
         return self.weight * normalized.to(dtype)
 
 
@@ -1066,12 +966,7 @@ class XCodec2RotaryEmbedding(nn.Module):
     def __init__(self, config: XCodec2Config) -> None:
         super().__init__()
         inv_freq = 1.0 / (
-            config.rope_theta
-            ** (
-                torch.arange(0, config.head_dim, 2, dtype=torch.float32)
-                / config.head_dim
-            )
-        )
+            config.rope_theta**(torch.arange(0, config.head_dim, 2, dtype=torch.float32) / config.head_dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     def forward(
@@ -1080,9 +975,7 @@ class XCodec2RotaryEmbedding(nn.Module):
         position_ids: Tensor,
     ) -> tuple[Tensor, Tensor]:
         frequencies = torch.matmul(
-            self.inv_freq[None, :, None]
-            .float()
-            .expand(position_ids.shape[0], -1, 1),
+            self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1),
             position_ids[:, None, :].float(),
         ).transpose(1, 2)
         embeddings = torch.cat((frequencies, frequencies), dim=-1)
@@ -1099,9 +992,7 @@ class XCodec2Attention(nn.Module):
         self.head_dim = config.head_dim
         self.num_heads = config.num_attention_heads
         self.num_key_value_heads = config.num_key_value_heads
-        self.num_key_value_groups = (
-            config.num_attention_heads // config.num_key_value_heads
-        )
+        self.num_key_value_groups = (config.num_attention_heads // config.num_key_value_heads)
         self.scale = config.head_dim**-0.5
         self.attention_dropout = config.attention_dropout
         self.q_proj = nn.Linear(
@@ -1131,10 +1022,8 @@ class XCodec2Attention(nn.Module):
             return hidden_states
         batch, heads, length, dimension = hidden_states.shape
         return (
-            hidden_states[:, :, None]
-            .expand(batch, heads, repeats, length, dimension)
-            .reshape(batch, heads * repeats, length, dimension)
-        )
+            hidden_states[:, :, None].expand(batch, heads, repeats, length,
+                                             dimension).reshape(batch, heads * repeats, length, dimension))
 
     def forward(
         self,
@@ -1233,9 +1122,7 @@ class XCodec2DecoderLayer(nn.Module):
             position_embeddings=position_embeddings,
         )
         hidden_states = residual + hidden_states
-        return hidden_states + self.mlp(
-            self.post_attention_layernorm(hidden_states)
-        )
+        return hidden_states + self.mlp(self.post_attention_layernorm(hidden_states))
 
 
 class XCodec2ISTFTHead(nn.Module):
@@ -1255,10 +1142,7 @@ class XCodec2ISTFTHead(nn.Module):
     def forward(self, hidden_states: Tensor) -> Tensor:
         prediction = self.linear(hidden_states).transpose(1, 2)
         magnitude, phase = prediction.chunk(2, dim=1)
-        spectrum = (
-            magnitude.float().exp().clamp(max=1e2)
-            * torch.exp(1j * phase.float())
-        )
+        spectrum = (magnitude.float().exp().clamp(max=1e2) * torch.exp(1j * phase.float()))
         frames = torch.fft.irfft(
             spectrum,
             self.n_fft,
@@ -1269,23 +1153,19 @@ class XCodec2ISTFTHead(nn.Module):
         frame_count = spectrum.shape[-1]
         if frame_count == 0:
             raise ValueError("XCodec2 cannot decode an empty code sequence.")
-        output_size = (
-            (frame_count - 1) * self.hop_length + self.n_fft
-        )
+        output_size = ((frame_count - 1) * self.hop_length + self.n_fft)
         audio = F.fold(
             frames,
             output_size=(1, output_size),
             kernel_size=(1, self.n_fft),
             stride=(1, self.hop_length),
-        )[:, 0, 0, self.padding : -self.padding]
+        )[:, 0, 0, self.padding:-self.padding]
         envelope = F.fold(
-            self.window.square()
-            .expand(1, frame_count, -1)
-            .transpose(1, 2),
+            self.window.square().expand(1, frame_count, -1).transpose(1, 2),
             output_size=(1, output_size),
             kernel_size=(1, self.n_fft),
             stride=(1, self.hop_length),
-        )[0, 0, 0, self.padding : -self.padding]
+        )[0, 0, 0, self.padding:-self.padding]
         audio = audio / envelope.clamp_min(1e-11)
         return audio.unsqueeze(1)
 
@@ -1301,26 +1181,17 @@ class XCodec2Decoder(nn.Module):
             kernel_size=7,
             padding=3,
         )
-        self.prior_net = nn.ModuleList(
-            (XCodec2ResNetBlock(config), XCodec2ResNetBlock(config))
-        )
+        self.prior_net = nn.ModuleList((XCodec2ResNetBlock(config), XCodec2ResNetBlock(config)))
         self.num_attention_heads = config.num_attention_heads
         self.rotary_emb = XCodec2RotaryEmbedding(config)
-        self.layers = nn.ModuleList(
-            XCodec2DecoderLayer(config)
-            for _ in range(config.num_hidden_layers)
-        )
-        self.post_net = nn.ModuleList(
-            (XCodec2ResNetBlock(config), XCodec2ResNetBlock(config))
-        )
+        self.layers = nn.ModuleList(XCodec2DecoderLayer(config) for _ in range(config.num_hidden_layers))
+        self.post_net = nn.ModuleList((XCodec2ResNetBlock(config), XCodec2ResNetBlock(config)))
         self.norm = nn.LayerNorm(config.hidden_size, eps=1e-6)
         self.head = XCodec2ISTFTHead(config)
 
     def forward(self, hidden_states: Tensor) -> Tensor:
         hidden_states = self.fc(hidden_states)
-        hidden_states = self.embed(hidden_states.transpose(1, 2)).transpose(
-            1, 2
-        )
+        hidden_states = self.embed(hidden_states.transpose(1, 2)).transpose(1, 2)
         for layer in self.prior_net:
             hidden_states = layer(hidden_states)
         # The released graph intentionally indexes RoPE by decoder head, not
@@ -1403,7 +1274,6 @@ class XCodec2FeatureExtractor(nn.Module):
 
     def validate_preprocessor_config(self, values: dict[str, Any]) -> None:
         """Reject frontend metadata that would change checkpoint semantics."""
-
         if not isinstance(values, dict):
             raise TypeError("XCodec2 preprocessor config must be a mapping.")
         expected = {
@@ -1421,17 +1291,13 @@ class XCodec2FeatureExtractor(nn.Module):
         }
         mismatches = {
             name: (expected_value, values[name])
-            for name, expected_value in expected.items()
-            if name in values and values[name] != expected_value
+            for name, expected_value in expected.items() if name in values and values[name] != expected_value
         }
         if mismatches:
             details = ", ".join(
                 f"{name}={actual!r} (expected {expected_value!r})"
-                for name, (expected_value, actual) in sorted(mismatches.items())
-            )
-            raise ValueError(
-                "Unsupported XCodec2 frontend metadata: " + details + "."
-            )
+                for name, (expected_value, actual) in sorted(mismatches.items()))
+            raise ValueError("Unsupported XCodec2 frontend metadata: " + details + ".")
 
     def forward(
         self,
@@ -1445,9 +1311,7 @@ class XCodec2FeatureExtractor(nn.Module):
         if waveforms.ndim == 3 and waveforms.shape[1] == 1:
             waveforms = waveforms[:, 0]
         if waveforms.ndim != 2:
-            raise ValueError(
-                "XCodec2 waveforms must have shape [batch, samples]."
-            )
+            raise ValueError("XCodec2 waveforms must have shape [batch, samples].")
         if not waveforms.is_floating_point() or waveforms.is_complex():
             raise TypeError("XCodec2 waveforms must use a real floating dtype.")
         if not torch.isfinite(waveforms).all():
@@ -1455,7 +1319,7 @@ class XCodec2FeatureExtractor(nn.Module):
         batch, maximum = waveforms.shape
         if waveform_lengths is None:
             lengths = torch.full(
-                (batch,),
+                (batch, ),
                 maximum,
                 dtype=torch.long,
                 device=waveforms.device,
@@ -1466,20 +1330,13 @@ class XCodec2FeatureExtractor(nn.Module):
                 dtype=torch.long,
                 device=waveforms.device,
             )
-            if tuple(lengths.shape) != (batch,):
-                raise ValueError(
-                    "`waveform_lengths` must contain one value per example."
-                )
+            if tuple(lengths.shape) != (batch, ):
+                raise ValueError("`waveform_lengths` must contain one value per example.")
             if bool((lengths <= 0).any()) or bool((lengths > maximum).any()):
-                raise ValueError(
-                    "XCodec2 waveform lengths must lie inside the batch."
-                )
+                raise ValueError("XCodec2 waveform lengths must lie inside the batch.")
 
-        padded_lengths = (
-            (lengths + 1 + self.config.hop_length - 1)
-            // self.config.hop_length
-            * self.config.hop_length
-        )
+        padded_lengths = ((lengths + 1 + self.config.hop_length - 1) // self.config.hop_length *
+                          self.config.hop_length)
         padded_width = int(padded_lengths.max().item())
         input_values = waveforms.new_zeros((batch, 1, padded_width))
         padding_mask = torch.zeros(
@@ -1493,7 +1350,7 @@ class XCodec2FeatureExtractor(nn.Module):
             copied = int(length)
             input_values[index, 0, :copied] = waveforms[index, :copied]
             # The official processor appends one valid zero before padding.
-            padding_mask[index, : copied + 1] = 1
+            padding_mask[index, :copied + 1] = 1
             padded_length = int(padded_lengths[index].item())
             semantic_waveform = F.pad(
                 input_values[index, :, :padded_length],
@@ -1507,12 +1364,9 @@ class XCodec2FeatureExtractor(nn.Module):
                 self.kaldi_config,
             )
             if features.shape[0] < 2:
-                raise ValueError(
-                    "XCodec2 audio is too short to normalize semantic frames."
-                )
-            features = (features - features.mean(dim=0)) / torch.sqrt(
-                features.var(dim=0, unbiased=True) + 1e-7
-            )
+                raise ValueError("XCodec2 audio is too short to normalize semantic frames.")
+            features = (features -
+                        features.mean(dim=0)) / torch.sqrt(features.var(dim=0, unbiased=True) + 1e-7)
             feature_rows.append(features)
             feature_lengths.append(features.shape[0])
 
@@ -1529,8 +1383,8 @@ class XCodec2FeatureExtractor(nn.Module):
             device=waveforms.device,
         )
         for index, features in enumerate(feature_rows):
-            padded_features[index, : features.shape[0]] = features
-            feature_mask[index, : features.shape[0]] = 1
+            padded_features[index, :features.shape[0]] = features
+            feature_mask[index, :features.shape[0]] = 1
         input_features = padded_features.reshape(
             batch,
             maximum_frames // 2,
@@ -1559,16 +1413,10 @@ class XCodec2Model(nn.Module):
         initialize: bool = True,
     ) -> None:
         super().__init__()
-        self.config = (
-            config
-            if isinstance(config, XCodec2Config)
-            else XCodec2Config.from_dict(config)
-        )
+        self.config = (config if isinstance(config, XCodec2Config) else XCodec2Config.from_dict(config))
         self.hop_length = self.config.hop_length
         self.feature_extractor = XCodec2FeatureExtractor(self.config)
-        self.semantic_encoder = Wav2Vec2BertSemanticModel(
-            self.config.semantic_model_config
-        )
+        self.semantic_encoder = Wav2Vec2BertSemanticModel(self.config.semantic_model_config)
         self.semantic_adapter = XCodec2SemanticAdapter(self.config)
         self.acoustic_encoder = XCodec2Encoder(self.config)
         self.fc_encoder = nn.Linear(
@@ -1622,12 +1470,9 @@ class XCodec2Model(nn.Module):
                         module.n_fft,
                         device=module.window.device,
                         dtype=module.window.dtype,
-                    )
-                )
+                    ))
             elif isinstance(module, XCodec2FiniteScalarQuantization):
-                levels, basis, codebook = module._compute_buffers(
-                    device=module.levels.device
-                )
+                levels, basis, codebook = module._compute_buffers(device=module.levels.device)
                 module.levels.copy_(levels)
                 module.basis.copy_(basis)
                 module.codebook.copy_(codebook)
@@ -1637,16 +1482,14 @@ class XCodec2Model(nn.Module):
                         module.cutoff,
                         module.half_width,
                         module.kernel_size,
-                    ).to(module.filter.device)
-                )
+                    ).to(module.filter.device))
             elif isinstance(module, XCodec2UpSample1d):
                 module.filter.copy_(
                     kaiser_sinc_filter1d(
                         0.5 / module.ratio,
                         0.6 / module.ratio,
                         module.kernel_size,
-                    ).to(module.filter.device)
-                )
+                    ).to(module.filter.device))
 
     def encode(
         self,
@@ -1667,8 +1510,7 @@ class XCodec2Model(nn.Module):
         if semantic.shape[-1] != acoustic.shape[-1]:
             raise RuntimeError(
                 "XCodec2 frontend produced misaligned semantic and acoustic "
-                f"frames ({semantic.shape[-1]} != {acoustic.shape[-1]})."
-            )
+                f"frames ({semantic.shape[-1]} != {acoustic.shape[-1]}).")
         hidden_states = torch.cat((semantic, acoustic), dim=1)
         hidden_states = self.fc_encoder(hidden_states.transpose(1, 2))
         latents, audio_codes = self.quantizer(hidden_states)
@@ -1710,8 +1552,7 @@ class XCodec2Model(nn.Module):
         if sample_rate != self.sampling_rate:
             raise ValueError(
                 f"XCodec2 requires {self.sampling_rate} Hz audio; received "
-                f"{sample_rate} Hz."
-            )
+                f"{sample_rate} Hz.")
         return self.encode_audio(input_waveform).audio_codes
 
     def decode(
@@ -1721,26 +1562,16 @@ class XCodec2Model(nn.Module):
         latents: Tensor | None = None,
     ) -> XCodec2DecoderOutput:
         if (audio_codes is None) == (latents is None):
-            raise ValueError(
-                "Specify exactly one of `audio_codes` or `latents`."
-            )
+            raise ValueError("Specify exactly one of `audio_codes` or `latents`.")
         if audio_codes is not None:
             if audio_codes.ndim != 3 or audio_codes.shape[1] != 1:
-                raise ValueError(
-                    "XCodec2 `audio_codes` must have shape [batch, 1, frames]."
-                )
-            decoded_latents = self.quantizer.from_codes(
-                audio_codes.transpose(1, 2)
-            )
+                raise ValueError("XCodec2 `audio_codes` must have shape [batch, 1, frames].")
+            decoded_latents = self.quantizer.from_codes(audio_codes.transpose(1, 2))
         else:
             if latents.ndim != 3:
-                raise ValueError(
-                    "XCodec2 `latents` must have shape [batch, channels, frames]."
-                )
+                raise ValueError("XCodec2 `latents` must have shape [batch, channels, frames].")
             decoded_latents = latents.transpose(1, 2)
-        return XCodec2DecoderOutput(
-            audio_values=self.acoustic_decoder(decoded_latents)
-        )
+        return XCodec2DecoderOutput(audio_values=self.acoustic_decoder(decoded_latents))
 
     def decode_code(self, audio_codes: Tensor) -> Tensor:
         return self.decode(audio_codes=audio_codes).audio_values
@@ -1796,8 +1627,7 @@ class XCodec2Model(nn.Module):
                 },
                 indent=2,
                 sort_keys=True,
-            )
-            + "\n",
+            ) + "\n",
             encoding="utf-8",
         )
         save_safetensors(
@@ -1818,7 +1648,7 @@ class XCodec2Model(nn.Module):
         *,
         device: str | torch.device = "cpu",
         strict: bool = True,
-    ) -> "XCodec2Model":
+    ) -> XCodec2Model:
         from voicehub.checkpointing import SafeTensorReader
         from voicehub.models.llasa.checkpoint import XCodec2CheckpointAdapter
 
@@ -1826,13 +1656,9 @@ class XCodec2Model(nn.Module):
         config_path = root / "config.json"
         checkpoint = root / "model.safetensors"
         if not config_path.is_file():
-            raise FileNotFoundError(
-                f"XCodec2 config was not found: {config_path}."
-            )
+            raise FileNotFoundError(f"XCodec2 config was not found: {config_path}.")
         if not checkpoint.is_file():
-            raise FileNotFoundError(
-                f"XCodec2 checkpoint was not found: {checkpoint}."
-            )
+            raise FileNotFoundError(f"XCodec2 checkpoint was not found: {checkpoint}.")
         try:
             values = json.loads(config_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -1848,6 +1674,7 @@ class XCodec2Model(nn.Module):
                 strict=strict,
             )
         return model
+
 
 __all__ = [
     "Wav2Vec2BertSemanticConfig",

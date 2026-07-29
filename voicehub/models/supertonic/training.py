@@ -6,9 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from voicehub.architectures.supertonic.runtime import (
-    NativeSupertonicRuntime,
-)
+from voicehub.architectures.supertonic.runtime import NativeSupertonicRuntime
 from voicehub.training.adapters import FlowMatchingTrainingAdapter
 from voicehub.training.datasets import SpeechDataset
 
@@ -17,8 +15,9 @@ class SupertonicTrainingAdapter(FlowMatchingTrainingAdapter):
     """Fine-tune released graph components from prepared supervision.
 
     This adapter does not claim to reproduce Supertone's unpublished
-    raw-audio recipe. It trains the exact published duration, text-to-latent,
-    flow-step, and vocoder graph with explicit duration/latent/style targets.
+    raw-audio recipe. It trains the exact published duration, text-to-
+    latent, flow-step, and vocoder graph with explicit
+    duration/latent/style targets.
     """
 
     supports_custom_recipe = True
@@ -26,28 +25,23 @@ class SupertonicTrainingAdapter(FlowMatchingTrainingAdapter):
 
     def validate_support(self) -> None:
         if not bool(getattr(
-            self.model.config,
-            "enable_preprocessed_training",
-            False,
+                self.model.config,
+                "enable_preprocessed_training",
+                False,
         )):
             raise ValueError(
                 "Supertonic fine-tuning is an explicitly reconstructed "
                 "published-graph recipe. Set "
                 "`enable_preprocessed_training=True` and provide style "
-                "tensors plus duration and/or latent targets."
-            )
+                "tensors plus duration and/or latent targets.")
         super().validate_support()
 
-    def setup(self) -> "SupertonicTrainingAdapter":
+    def setup(self) -> SupertonicTrainingAdapter:
         super().setup()
         if not isinstance(self.primary_model, NativeSupertonicRuntime):
-            raise TypeError(
-                "Supertonic training must target NativeSupertonicRuntime."
-            )
+            raise TypeError("Supertonic training must target NativeSupertonicRuntime.")
         if self.primary_model is not self.model.model:
-            raise ValueError(
-                "Supertonic training runtime is detached from its wrapper."
-            )
+            raise ValueError("Supertonic training runtime is detached from its wrapper.")
         return self
 
     def create_dataset(

@@ -1,4 +1,5 @@
 """Exact Inflect v2 character inventory derived from the VITS frontend."""
+
 '''
 Defines the set of symbols used in text input to the model.
 '''

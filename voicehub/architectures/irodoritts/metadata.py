@@ -63,7 +63,9 @@ IRODORI_CHECKPOINTS = {
         "tensors": 637,
         "parameters": 512_049_441,
         "tensor_data_bytes": 2_048_197_764,
-        "dtype_counts": {"F32": 637},
+        "dtype_counts": {
+            "F32": 637
+        },
     },
     "v3-voice-design": {
         "model_id": "Aratako/Irodori-TTS-600M-v3-VoiceDesign",
@@ -77,7 +79,9 @@ IRODORI_CHECKPOINTS = {
         "tensors": 790,
         "parameters": 617_060_641,
         "tensor_data_bytes": 2_468_242_564,
-        "dtype_counts": {"F32": 790},
+        "dtype_counts": {
+            "F32": 790
+        },
     },
     "v2": {
         "model_id": "Aratako/Irodori-TTS-500M-v2",
@@ -91,7 +95,9 @@ IRODORI_CHECKPOINTS = {
         "tensors": 613,
         "parameters": 494_993_952,
         "tensor_data_bytes": 1_979_975_808,
-        "dtype_counts": {"F32": 613},
+        "dtype_counts": {
+            "F32": 613
+        },
     },
     "v2-voice-design": {
         "model_id": "Aratako/Irodori-TTS-500M-v2-VoiceDesign",
@@ -105,7 +111,9 @@ IRODORI_CHECKPOINTS = {
         "tensors": 636,
         "parameters": 511_249_952,
         "tensor_data_bytes": 2_044_999_808,
-        "dtype_counts": {"F32": 636},
+        "dtype_counts": {
+            "F32": 636
+        },
     },
 }
 

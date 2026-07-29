@@ -25,17 +25,9 @@ class XTTS2Tokenizer:
     """Execute the BPE graph stored in XTTS's immutable ``vocab.json``."""
 
     def __init__(self, vocabulary: dict[str, int], merges: list[str]) -> None:
-        if (
-            not vocabulary
-            or any(
-                not isinstance(token, str)
-                or not token
-                or isinstance(token_id, bool)
-                or not isinstance(token_id, int)
-                or token_id < 0
-                for token, token_id in vocabulary.items()
-            )
-        ):
+        if (not vocabulary or any(not isinstance(token, str) or not token or isinstance(token_id, bool) or
+                                  not isinstance(token_id, int) or token_id < 0
+                                  for token, token_id in vocabulary.items())):
             raise ValueError("XTTS v2 vocabulary contains an invalid token record.")
         if len(set(vocabulary.values())) != len(vocabulary):
             raise ValueError("XTTS v2 vocabulary contains duplicate token IDs.")
@@ -52,10 +44,7 @@ class XTTS2Tokenizer:
         self.vocabulary = dict(vocabulary)
         # The released vocabulary repeats some merge pairs. The reference
         # tokenizer resolves them to the final occurrence.
-        self.merge_ranks = {
-            pair: rank
-            for rank, pair in enumerate(merge_pairs)
-        }
+        self.merge_ranks = {pair: rank for rank, pair in enumerate(merge_pairs)}
         self.unknown_id = self.vocabulary["[UNK]"]
         self.start_id = self.vocabulary["[START]"]
         self.stop_id = self.vocabulary["[STOP]"]
@@ -66,12 +55,10 @@ class XTTS2Tokenizer:
     def from_file(cls, path: str | Path) -> XTTS2Tokenizer:
         source = Path(path).expanduser().resolve()
         try:
-            value = json.loads(
-                read_bounded_asset(
-                    source,
-                    max_bytes=4 * 1024 * 1024,
-                ).decode("utf-8")
-            )
+            value = json.loads(read_bounded_asset(
+                source,
+                max_bytes=4 * 1024 * 1024,
+            ).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
             raise ValueError(f"Invalid XTTS v2 vocabulary JSON: {error}.") from error
         if not isinstance(value, dict):
@@ -81,14 +68,9 @@ class XTTS2Tokenizer:
         if value.get("pre_tokenizer") != {"type": "Whitespace"}:
             raise ValueError("XTTS v2 requires the released Whitespace pre-tokenizer.")
         model = value.get("model")
-        if (
-            not isinstance(model, dict)
-            or model.get("type") != "BPE"
-            or model.get("unk_token") != "[UNK]"
-            or model.get("continuing_subword_prefix") is not None
-            or model.get("end_of_word_suffix") is not None
-            or model.get("fuse_unk") is not False
-        ):
+        if (not isinstance(model, dict) or model.get("type") != "BPE" or model.get("unk_token") != "[UNK]" or
+                model.get("continuing_subword_prefix") is not None or
+                model.get("end_of_word_suffix") is not None or model.get("fuse_unk") is not False):
             raise ValueError("XTTS v2 vocabulary must contain a BPE model.")
         vocabulary = model.get("vocab")
         merges = model.get("merges")
@@ -96,10 +78,7 @@ class XTTS2Tokenizer:
             raise ValueError("XTTS v2 BPE vocabulary is incomplete.")
         missing_specials = sorted(_SOURCE_SPECIALS - set(vocabulary))
         if missing_specials:
-            raise ValueError(
-                "XTTS v2 vocabulary is missing required tokens: "
-                + ", ".join(missing_specials)
-            )
+            raise ValueError("XTTS v2 vocabulary is missing required tokens: " + ", ".join(missing_specials))
         return cls(vocabulary, merges)
 
     @staticmethod
@@ -117,21 +96,15 @@ class XTTS2Tokenizer:
             raise ValueError(
                 f"XTTS {language!r} requires author-compatible "
                 "transliteration. Pass source-normalized romanized text with "
-                "`text_is_normalized=True`."
-            )
+                "`text_is_normalized=True`.")
         if any(character.isdigit() for character in normalized):
             raise ValueError(
                 "XTTS numeric text requires language-specific verbalization. "
                 "Spell numbers out or pass source-normalized text with "
-                "`text_is_normalized=True`."
-            )
+                "`text_is_normalized=True`.")
         normalized = normalized.replace('"', "")
         if base_language == "tr":
-            normalized = (
-                normalized.replace("İ", "i")
-                .replace("Ö", "ö")
-                .replace("Ü", "ü")
-            )
+            normalized = (normalized.replace("İ", "i").replace("Ö", "ö").replace("Ü", "ü"))
         normalized = normalized.lower()
         return _WHITESPACE_PATTERN.sub(" ", normalized)
 
@@ -162,10 +135,7 @@ class XTTS2Tokenizer:
             if index:
                 result.append(self.space_id)
             for token in _PRETOKEN_PATTERN.findall(word):
-                result.extend(
-                    self.vocabulary.get(piece, self.unknown_id)
-                    for piece in self._bpe(token)
-                )
+                result.extend(self.vocabulary.get(piece, self.unknown_id) for piece in self._bpe(token))
         return result
 
     def _bpe(self, token: str) -> tuple[str, ...]:

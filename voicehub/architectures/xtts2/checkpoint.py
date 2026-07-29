@@ -74,25 +74,17 @@ def load_xtts2_checkpoint(
             for name in sorted(expected):
                 value = reader.get_tensor(name)
                 if not value.is_floating_point():
-                    raise CheckpointCompatibilityError(
-                        f"XTTS v2 tensor {name!r} is not floating-point."
-                    )
+                    raise CheckpointCompatibilityError(f"XTTS v2 tensor {name!r} is not floating-point.")
                 target_dtype = dtype if dtype is not None and value.is_floating_point() else value.dtype
                 model.load_state_dict(
                     {name: value.to(device=device, dtype=target_dtype)},
                     strict=False,
                     assign=True,
                 )
-    remaining = [
-        name
-        for name, value in model.state_dict().items()
-        if value.device.type == "meta"
-    ]
+    remaining = [name for name, value in model.state_dict().items() if value.device.type == "meta"]
     if remaining:
         raise CheckpointCompatibilityError(
-            "XTTS v2 checkpoint assignment left meta tensors: "
-            + ", ".join(remaining[:8])
-        )
+            "XTTS v2 checkpoint assignment left meta tensors: " + ", ".join(remaining[:8]))
     return inventory
 
 
@@ -141,22 +133,12 @@ def convert_trusted_legacy_xtts2_checkpoint(
         if not isinstance(value, torch.Tensor):
             raise TypeError(f"Legacy XTTS v2 state item {name!r} is not a tensor.")
         if name in normalized:
-            raise ValueError(
-                f"Legacy XTTS v2 conversion produced duplicate tensor {name!r}."
-            )
-        if (
-            not value.is_floating_point()
-            or value.is_quantized
-            or value.is_complex()
-        ):
-            raise TypeError(
-                f"Legacy XTTS v2 tensor {name!r} is not a portable "
-                "floating-point weight."
-            )
+            raise ValueError(f"Legacy XTTS v2 conversion produced duplicate tensor {name!r}.")
+        if (not value.is_floating_point() or value.is_quantized or value.is_complex()):
+            raise TypeError(f"Legacy XTTS v2 tensor {name!r} is not a portable "
+                            "floating-point weight.")
         if not torch.isfinite(value.detach()).all().item():
-            raise ValueError(
-                f"Legacy XTTS v2 tensor {name!r} contains non-finite values."
-            )
+            raise ValueError(f"Legacy XTTS v2 tensor {name!r} contains non-finite values.")
         normalized[name] = value.detach().cpu().contiguous()
     return save_safetensors(
         normalized,
@@ -172,17 +154,11 @@ def save_xtts2_checkpoint(model: nn.Module, path: str | Path) -> Path:
     state = {}
     for name, value in model.state_dict().items():
         if value.device.type == "meta":
-            raise CheckpointCompatibilityError(
-                f"XTTS v2 tensor {name!r} is not materialized."
-            )
+            raise CheckpointCompatibilityError(f"XTTS v2 tensor {name!r} is not materialized.")
         if not value.is_floating_point() or value.is_quantized or value.is_complex():
-            raise CheckpointCompatibilityError(
-                f"XTTS v2 tensor {name!r} is not a portable floating tensor."
-            )
+            raise CheckpointCompatibilityError(f"XTTS v2 tensor {name!r} is not a portable floating tensor.")
         if not torch.isfinite(value.detach()).all().item():
-            raise CheckpointCompatibilityError(
-                f"XTTS v2 tensor {name!r} contains non-finite values."
-            )
+            raise CheckpointCompatibilityError(f"XTTS v2 tensor {name!r} contains non-finite values.")
         state[name] = value.detach().cpu().contiguous()
     return save_safetensors(
         state,

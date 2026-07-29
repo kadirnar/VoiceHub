@@ -34,16 +34,14 @@ class BarkTokenObjective(nn.Module):
     @staticmethod
     def _scalar_codebook_index(value: Any) -> int:
         if value is None:
-            raise ValueError(
-                "Bark fine training requires `codebook_idx`.")
+            raise ValueError("Bark fine training requires `codebook_idx`.")
         if isinstance(value, Tensor):
             flattened = value.detach().reshape(-1)
             if flattened.numel() == 0:
                 raise ValueError("Bark `codebook_idx` cannot be empty.")
             first = int(flattened[0].item())
             if not bool((flattened == first).all().item()):
-                raise ValueError(
-                    "One Bark fine batch may target only one codebook.")
+                raise ValueError("One Bark fine batch may target only one codebook.")
             return first
         if isinstance(value, bool) or not isinstance(value, int):
             raise TypeError("Bark `codebook_idx` must be an integer.")
@@ -71,9 +69,8 @@ class BarkTokenObjective(nn.Module):
             )
         else:
             if input_ids.ndim != 2 or labels.ndim != 2:
-                raise ValueError(
-                    "Bark causal training expects IDs and labels shaped "
-                    "[batch, tokens].")
+                raise ValueError("Bark causal training expects IDs and labels shaped "
+                                 "[batch, tokens].")
             outputs = self.component(
                 input_ids,
                 attention_mask=attention_mask,
@@ -83,8 +80,7 @@ class BarkTokenObjective(nn.Module):
         common = min(logits.shape[-2], labels.shape[-1])
         if self.shift_labels:
             if common < 2:
-                raise ValueError(
-                    "Bark causal training requires at least two aligned tokens.")
+                raise ValueError("Bark causal training requires at least two aligned tokens.")
             predictions = logits[:, :common - 1].contiguous()
             targets = labels[:, 1:common].contiguous()
         else:
@@ -93,12 +89,7 @@ class BarkTokenObjective(nn.Module):
         valid = targets.ne(-100)
         if not bool(valid.any().item()):
             raise ValueError("Bark training batch contains no supervised tokens.")
-        if bool(
-            (
-                (targets[valid] < 0)
-                | (targets[valid] >= predictions.shape[-1])
-            ).any().item()
-        ):
+        if bool(((targets[valid] < 0) | (targets[valid] >= predictions.shape[-1])).any().item()):
             raise ValueError("Bark labels contain token IDs outside the stage vocabulary.")
         loss = F.cross_entropy(
             predictions.reshape(-1, predictions.shape[-1]),
@@ -156,8 +147,7 @@ class BarkTrainingAdapter(CompositeTrainingAdapter):
         codec.requires_grad_(False)
         training_model = getattr(self.model, "training_model", None)
         if not isinstance(training_model, BarkTrainingModel):
-            raise TypeError(
-                "Bark wrapper did not expose the native stage training graph.")
+            raise TypeError("Bark wrapper did not expose the native stage training graph.")
         return self
 
     def prepare_training_inputs(

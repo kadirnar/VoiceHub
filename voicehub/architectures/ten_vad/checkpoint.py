@@ -136,8 +136,7 @@ def _inventory_fingerprint(model: Any) -> str:
 
 
 def native_ten_vad_tensor_shapes(
-    config: TENVADConfig | Mapping[str, Any] | None = None,
-) -> dict[str, tuple[int, ...]]:
+    config: TENVADConfig | Mapping[str, Any] | None = None, ) -> dict[str, tuple[int, ...]]:
     from voicehub.architectures.ten_vad.modeling import TENVADModel
 
     resolved = TENVADConfig.coerce(config or {})
@@ -273,8 +272,10 @@ def convert_ten_vad_onnx_checkpoint(
 ) -> Path:
     """Convert one reviewed TEN graph into Safetensors and JSON.
 
-    Parsing does not import or execute ONNX.  Explicit acknowledgement is still required because the source
-    license is non-standard and callers must review the artifact's origin before creating a derivative.
+    Parsing does not import or execute ONNX.  Explicit acknowledgement
+    is still required because the source license is non-standard and
+    callers must review the artifact's origin before creating a
+    derivative.
     """
     if trust_onnx_checkpoint is not True:
         raise ValueError(

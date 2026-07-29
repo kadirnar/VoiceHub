@@ -26,8 +26,7 @@ def normalize_speaker_embedding_tensor(
         raise ValueError(f"{field_name} must contain at least one token.")
     if int(tensor.shape[1]) != int(speaker_dim):
         raise ValueError(
-            f"{field_name} dim mismatch: expected {int(speaker_dim)}, got {int(tensor.shape[1])}"
-        )
+            f"{field_name} dim mismatch: expected {int(speaker_dim)}, got {int(tensor.shape[1])}")
 
     return tensor.detach().float().contiguous()
 
@@ -37,7 +36,8 @@ def is_speaker_inversion_safetensors_path(path: str | Path) -> bool:
 
 
 class SpeakerInversionEmbedding(nn.Module):
-    """Learned speaker/style tokens that bypass the reference latent speaker encoder."""
+    """Learned speaker/style tokens that bypass the reference latent speaker
+    encoder."""
 
     def __init__(
         self,
@@ -69,8 +69,7 @@ class SpeakerInversionEmbedding(nn.Module):
             if int(embedding.shape[0]) != num_tokens:
                 raise ValueError(
                     "speaker inversion init embedding token mismatch: "
-                    f"expected {num_tokens}, got {int(embedding.shape[0])}"
-                )
+                    f"expected {num_tokens}, got {int(embedding.shape[0])}")
         self.embedding = nn.Parameter(embedding)
 
     @property
@@ -88,36 +87,32 @@ class SpeakerInversionEmbedding(nn.Module):
         device: torch.device,
         dtype: torch.dtype,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        state = self.embedding.to(device=device, dtype=dtype)[None, :, :].expand(
-            int(batch_size),
-            -1,
-            -1,
-        )
+        state = self.embedding.to(
+            device=device, dtype=dtype)[None, :, :].expand(
+                int(batch_size),
+                -1,
+                -1,
+            )
         mask = torch.ones((int(batch_size), self.num_tokens), dtype=torch.bool, device=device)
         return state, mask
 
 
 def _extract_embedding_payload(raw: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     if not isinstance(raw, dict):
-        raise ValueError(
-            f"Speaker inversion file must contain a tensor dictionary, got {type(raw)!r}."
-        )
+        raise ValueError(f"Speaker inversion file must contain a tensor dictionary, got {type(raw)!r}.")
 
     if SPEAKER_EMBEDDING_KEY in raw:
         embedding = raw[SPEAKER_EMBEDDING_KEY]
         if not isinstance(embedding, torch.Tensor):
             raise ValueError(
                 f"Speaker inversion '{SPEAKER_EMBEDDING_KEY}' must be a tensor, "
-                f"got {type(embedding)!r}."
-            )
+                f"got {type(embedding)!r}.")
         return {SPEAKER_EMBEDDING_KEY: embedding}
 
     raise ValueError(f"Speaker inversion file is missing '{SPEAKER_EMBEDDING_KEY}'.")
 
 
-def normalize_speaker_inversion_payload(
-    raw: dict[str, torch.Tensor],
-) -> dict[str, torch.Tensor]:
+def normalize_speaker_inversion_payload(raw: dict[str, torch.Tensor], ) -> dict[str, torch.Tensor]:
     payload = _extract_embedding_payload(raw)
     embedding = payload[SPEAKER_EMBEDDING_KEY]
 
@@ -128,15 +123,12 @@ def normalize_speaker_inversion_payload(
     return out
 
 
-def load_speaker_inversion_payload(
-    path: str | Path,
-) -> dict[str, torch.Tensor]:
+def load_speaker_inversion_payload(path: str | Path, ) -> dict[str, torch.Tensor]:
     source = Path(path).expanduser()
     if not is_speaker_inversion_safetensors_path(source):
         raise ValueError(
             "Speaker Inversion embeddings must use the "
-            f"{SPEAKER_INVERSION_SAFETENSORS_SUFFIX!r} suffix: {source}"
-        )
+            f"{SPEAKER_INVERSION_SAFETENSORS_SUFFIX!r} suffix: {source}")
     with SafeTensorReader(source) as reader:
         raw = reader.state_dict(device="cpu")
 
@@ -154,8 +146,7 @@ def save_speaker_inversion_safetensors(
     if not is_speaker_inversion_safetensors_path(target):
         raise ValueError(
             "Speaker Inversion safetensors output must use the "
-            f"{SPEAKER_INVERSION_SAFETENSORS_SUFFIX!r} suffix: {target}"
-        )
+            f"{SPEAKER_INVERSION_SAFETENSORS_SUFFIX!r} suffix: {target}")
     normalized = normalize_speaker_inversion_payload(payload)
     tensors = {
         SPEAKER_EMBEDDING_KEY: normalized[SPEAKER_EMBEDDING_KEY].to(dtype=dtype),

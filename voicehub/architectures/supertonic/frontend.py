@@ -13,9 +13,7 @@ import torch
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
 
-from voicehub.architectures.supertonic.metadata import (
-    SUPERTONIC_LANGUAGES,
-)
+from voicehub.architectures.supertonic.metadata import SUPERTONIC_LANGUAGES
 
 AVAILABLE_LANGUAGES = SUPERTONIC_LANGUAGES
 _MAX_INDEXER_BYTES = 8 * 1024 * 1024
@@ -62,15 +60,11 @@ def _json_file(path: str | Path, *, maximum_bytes: int):
         raise FileNotFoundError(f"Supertonic asset was not found: {source}.")
     size = source.stat().st_size
     if size <= 0 or size > maximum_bytes:
-        raise ValueError(
-            f"Supertonic asset {source.name!r} has unsafe size {size}."
-        )
+        raise ValueError(f"Supertonic asset {source.name!r} has unsafe size {size}.")
     try:
         return json.loads(source.read_text(encoding="utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError(
-            f"Supertonic asset {source.name!r} is invalid JSON."
-        ) from error
+        raise ValueError(f"Supertonic asset {source.name!r} is invalid JSON.") from error
 
 
 def length_mask(lengths: Tensor, maximum: int | None = None) -> Tensor:
@@ -81,20 +75,14 @@ def length_mask(lengths: Tensor, maximum: int | None = None) -> Tensor:
         raise TypeError("`lengths` must use an integer dtype.")
     if (lengths <= 0).any():
         raise ValueError("All sequence lengths must be positive.")
-    resolved_maximum = (
-        int(lengths.max().item())
-        if maximum is None
-        else int(maximum)
-    )
+    resolved_maximum = (int(lengths.max().item()) if maximum is None else int(maximum))
     if resolved_maximum < int(lengths.max().item()):
         raise ValueError("Mask maximum is shorter than a sequence.")
     positions = torch.arange(
         resolved_maximum,
         device=lengths.device,
     )
-    return (
-        positions.unsqueeze(0) < lengths.unsqueeze(1)
-    ).unsqueeze(1).to(dtype=torch.float32)
+    return (positions.unsqueeze(0) < lengths.unsqueeze(1)).unsqueeze(1).to(dtype=torch.float32)
 
 
 class SupertonicUnicodeProcessor:
@@ -103,22 +91,15 @@ class SupertonicUnicodeProcessor:
     def __init__(self, indexer: tuple[int, ...]) -> None:
         if not indexer:
             raise ValueError("Supertonic Unicode indexer cannot be empty.")
-        if any(
-            isinstance(value, bool)
-            or not isinstance(value, int)
-            or value < -1
-            for value in indexer
-        ):
-            raise ValueError(
-                "Supertonic Unicode indexer must contain integer IDs >= -1."
-            )
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < -1 for value in indexer):
+            raise ValueError("Supertonic Unicode indexer must contain integer IDs >= -1.")
         self.indexer = indexer
 
     @classmethod
     def from_file(
         cls,
         path: str | Path,
-    ) -> "SupertonicUnicodeProcessor":
+    ) -> SupertonicUnicodeProcessor:
         value = _json_file(path, maximum_bytes=_MAX_INDEXER_BYTES)
         if not isinstance(value, list):
             raise ValueError("Supertonic Unicode indexer must be an array.")
@@ -133,10 +114,8 @@ class SupertonicUnicodeProcessor:
         language = language.strip().lower()
         if language not in AVAILABLE_LANGUAGES:
             supported = ", ".join(sorted(AVAILABLE_LANGUAGES))
-            raise ValueError(
-                f"Unsupported Supertonic language {language!r}. "
-                f"Supported: {supported}."
-            )
+            raise ValueError(f"Unsupported Supertonic language {language!r}. "
+                             f"Supported: {supported}.")
         value = _EMOJI.sub("", normalize("NFKD", text))
         for source, replacement in _REPLACEMENTS.items():
             value = value.replace(source, replacement)
@@ -153,7 +132,8 @@ class SupertonicUnicodeProcessor:
             while repeated in value:
                 value = value.replace(repeated, replacement)
         value = re.sub(r"\s+", " ", value).strip()
-        if not re.search(r"""[.!?;:,'"')\]}…。」』】〉》›»]$""", value):
+        if not re.search(r"""[.!?;:,'"')\]}…。」』】〉》›»]$"""
+                                                         , value):
             value += "."
         return f"<{language}>{value}</{language}>"
 
@@ -167,10 +147,8 @@ class SupertonicUnicodeProcessor:
         texts = tuple(texts)
         languages = tuple(languages)
         if not texts or len(texts) != len(languages):
-            raise ValueError(
-                "Supertonic texts and languages must have equal non-zero "
-                "lengths."
-            )
+            raise ValueError("Supertonic texts and languages must have equal non-zero "
+                             "lengths.")
         encoded = []
         for text, language in zip(texts, languages):
             normalized = self.normalize_text(text, language)
@@ -183,8 +161,7 @@ class SupertonicUnicodeProcessor:
                 if codepoint >= len(self.indexer):
                     raise ValueError(
                         f"Character U+{codepoint:04X} is outside the "
-                        "released Supertonic indexer."
-                    )
+                        "released Supertonic indexer.")
                 ids.append(self.indexer[codepoint])
             encoded.append(torch.tensor(
                 ids,
@@ -219,20 +196,12 @@ class SupertonicStyle:
             if not isinstance(value, Tensor) or value.ndim != 3:
                 raise ValueError(
                     f"Supertonic style `{name}` must have shape "
-                    f"[batch, {shape[0]}, {shape[1]}]."
-                )
+                    f"[batch, {shape[0]}, {shape[1]}].")
             if tuple(value.shape[1:]) != shape:
-                raise ValueError(
-                    f"Supertonic style `{name}` has invalid shape "
-                    f"{tuple(value.shape)}."
-                )
-            if (
-                not value.is_floating_point()
-                or not torch.isfinite(value).all()
-            ):
-                raise ValueError(
-                    f"Supertonic style `{name}` must contain finite floats."
-                )
+                raise ValueError(f"Supertonic style `{name}` has invalid shape "
+                                 f"{tuple(value.shape)}.")
+            if (not value.is_floating_point() or not torch.isfinite(value).all()):
+                raise ValueError(f"Supertonic style `{name}` must contain finite floats.")
         if self.ttl.shape[0] != self.duration.shape[0]:
             raise ValueError("Supertonic style batch dimensions differ.")
 
@@ -241,14 +210,14 @@ class SupertonicStyle:
         *,
         device: torch.device | str | None = None,
         dtype: torch.dtype | None = None,
-    ) -> "SupertonicStyle":
+    ) -> SupertonicStyle:
         return SupertonicStyle(
             ttl=self.ttl.to(device=device, dtype=dtype),
             duration=self.duration.to(device=device, dtype=dtype),
         )
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "SupertonicStyle":
+    def from_file(cls, path: str | Path) -> SupertonicStyle:
         payload = _json_file(path, maximum_bytes=_MAX_STYLE_BYTES)
         if not isinstance(payload, dict):
             raise ValueError("Supertonic style must contain an object.")
@@ -256,28 +225,21 @@ class SupertonicStyle:
         def tensor(section_name: str, shape: tuple[int, ...]) -> Tensor:
             section = payload.get(section_name)
             if not isinstance(section, dict):
-                raise ValueError(
-                    f"Supertonic style is missing {section_name!r}."
-                )
+                raise ValueError(f"Supertonic style is missing {section_name!r}.")
             declared = section.get("dims")
             if declared != list(shape):
                 raise ValueError(
                     f"Supertonic style {section_name!r} declares invalid "
-                    f"dimensions {declared!r}."
-                )
+                    f"dimensions {declared!r}.")
             try:
                 value = torch.tensor(
                     section["data"],
                     dtype=torch.float32,
                 ).reshape(shape)
             except (KeyError, TypeError, ValueError, RuntimeError) as error:
-                raise ValueError(
-                    f"Supertonic style {section_name!r} has invalid data."
-                ) from error
+                raise ValueError(f"Supertonic style {section_name!r} has invalid data.") from error
             if not torch.isfinite(value).all():
-                raise ValueError(
-                    f"Supertonic style {section_name!r} is not finite."
-                )
+                raise ValueError(f"Supertonic style {section_name!r} is not finite.")
             return value
 
         return cls(

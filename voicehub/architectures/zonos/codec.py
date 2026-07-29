@@ -9,15 +9,10 @@ from typing import Protocol, runtime_checkable
 import torch
 from torch import Tensor
 
-from voicehub.architectures.dac.checkpoint import (
-    HuggingFaceDacCheckpointAdapter,
-)
+from voicehub.architectures.dac.checkpoint import HuggingFaceDacCheckpointAdapter
 from voicehub.architectures.dac.configuration import DacConfig
 from voicehub.architectures.dac.modeling import DacModel
-from voicehub.architectures.zonos.metadata import (
-    ZONOS_DAC_REPOSITORY,
-    ZONOS_DAC_REVISION,
-)
+from voicehub.architectures.zonos.metadata import ZONOS_DAC_REPOSITORY, ZONOS_DAC_REVISION
 from voicehub.checkpointing import SafeTensorReader
 from voicehub.hub import read_json_file, resolve_pretrained_file
 from voicehub.processing.waveform import resample_waveform
@@ -47,16 +42,11 @@ def load_zonos_dac_model(
 ) -> DacModel:
     values = read_json_file(config_path)
     config = DacConfig.from_dict(values)
-    if (
-        config.sampling_rate != 44_100
-        or config.n_codebooks != 9
-        or config.codebook_size != 1_024
-        or config.hop_length != 512
-    ):
+    if (config.sampling_rate != 44_100 or config.n_codebooks != 9 or config.codebook_size != 1_024 or
+            config.hop_length != 512):
         raise ValueError(
             "Zonos requires the 44.1 kHz DAC graph with nine 1,024-entry "
-            "codebooks and a 512-sample hop."
-        )
+            "codebooks and a 512-sample hop.")
     with torch.device("meta"):
         model = DacModel(config)
     with SafeTensorReader(checkpoint_path) as reader:
@@ -66,16 +56,9 @@ def load_zonos_dac_model(
             values,
             strict=True,
         )
-    remaining = [
-        name
-        for name, value in model.state_dict().items()
-        if value.device.type == "meta"
-    ]
+    remaining = [name for name, value in model.state_dict().items() if value.device.type == "meta"]
     if remaining:
-        raise RuntimeError(
-            "Native DAC loading left meta tensors: "
-            + ", ".join(remaining[:12])
-        )
+        raise RuntimeError("Native DAC loading left meta tensors: " + ", ".join(remaining[:12]))
     return model.to(device=device).eval().requires_grad_(False)
 
 
@@ -116,14 +99,12 @@ class ZonosDACCodec:
             raise TypeError("Injected Zonos codec model must be DacModel.")
         config = model.config
         if (
-            config.sampling_rate,
-            config.n_codebooks,
-            config.codebook_size,
-            config.hop_length,
+                config.sampling_rate,
+                config.n_codebooks,
+                config.codebook_size,
+                config.hop_length,
         ) != (44_100, 9, 1_024, 512):
-            raise ValueError(
-                "Injected DAC graph is not compatible with Zonos v0.1."
-            )
+            raise ValueError("Injected DAC graph is not compatible with Zonos v0.1.")
 
     @property
     def model(self) -> DacModel:
@@ -161,13 +142,8 @@ class ZonosDACCodec:
         if not isinstance(waveform, Tensor) or waveform.ndim not in {1, 2, 3}:
             raise ValueError(
                 "Zonos DAC waveform must have shape [time], "
-                "[batch, time], or [batch, 1, time]."
-            )
-        if (
-            isinstance(sample_rate, bool)
-            or not isinstance(sample_rate, int)
-            or sample_rate <= 0
-        ):
+                "[batch, time], or [batch, 1, time].")
+        if (isinstance(sample_rate, bool) or not isinstance(sample_rate, int) or sample_rate <= 0):
             raise ValueError("Zonos DAC sample rate must be positive.")
         if waveform.ndim == 1:
             waveform = waveform.reshape(1, 1, -1)
@@ -179,19 +155,13 @@ class ZonosDACCodec:
         if not bool(torch.isfinite(waveform).all()):
             raise ValueError("Zonos DAC waveform must contain finite samples.")
         if sample_rate != self.sample_rate:
-            waveform = torch.stack([
-                resample_waveform(
+            waveform = torch.stack(
+                [resample_waveform(
                     row[0],
                     sample_rate,
                     self.sample_rate,
-                )
-                for row in waveform
-            ]).unsqueeze(1)
-        padding = (
-            math.ceil(waveform.shape[-1] / self.hop_length)
-            * self.hop_length
-            - waveform.shape[-1]
-        )
+                ) for row in waveform]).unsqueeze(1)
+        padding = (math.ceil(waveform.shape[-1] / self.hop_length) * self.hop_length - waveform.shape[-1])
         return torch.nn.functional.pad(
             waveform,
             (0, padding),
@@ -208,26 +178,20 @@ class ZonosDACCodec:
     @torch.inference_mode()
     def decode(self, codes: Tensor) -> Tensor:
         if not isinstance(codes, Tensor) or codes.ndim != 3:
-            raise ValueError(
-                "Zonos DAC codes must have shape "
-                "[batch, codebook, time]."
-            )
+            raise ValueError("Zonos DAC codes must have shape "
+                             "[batch, codebook, time].")
         if codes.shape[1] != self.num_codebooks:
-            raise ValueError(
-                f"Zonos DAC requires {self.num_codebooks} codebooks."
-            )
+            raise ValueError(f"Zonos DAC requires {self.num_codebooks} codebooks.")
         if codes.dtype == torch.bool or codes.is_floating_point():
             raise TypeError("Zonos DAC codes must use an integer dtype.")
         if bool(((codes < 0) | (codes >= self.codebook_size)).any()):
             raise ValueError("Zonos DAC code values must be in [0, 1023].")
         model = self.model
-        latents, _, _ = model.quantizer.from_codes(
-            codes.to(device=self.device, dtype=torch.long),
-        )
+        latents, _, _ = model.quantizer.from_codes(codes.to(device=self.device, dtype=torch.long), )
         with torch.autocast(
-            self.device.type,
-            torch.float16,
-            enabled=self.device.type != "cpu",
+                self.device.type,
+                torch.float16,
+                enabled=self.device.type != "cpu",
         ):
             return model.decode_output(latents).audio_values.float()
 

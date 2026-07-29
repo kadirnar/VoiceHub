@@ -1,8 +1,10 @@
 """Portable fine-tuning for VoiceHub-native TEN and Silero VAD.
 
-TEN does not publish the training recipe used for its released graph. VoiceHub therefore keeps the released
-graph and reviewed Sherpa frontend exact, while declaring this window-level binary-cross-entropy recipe as a
-reconstruction.  This module must not be presented as source-recipe parity.
+TEN does not publish the training recipe used for its released graph.
+VoiceHub therefore keeps the released graph and reviewed Sherpa frontend
+exact, while declaring this window-level binary-cross-entropy recipe as
+a reconstruction.  This module must not be presented as source-recipe
+parity.
 """
 
 from __future__ import annotations

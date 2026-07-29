@@ -4,10 +4,7 @@ import unittest
 
 import torch
 
-from voicehub.architectures import (
-    ArchitectureRegistry,
-    register_builtin_architectures,
-)
+from voicehub.architectures import ArchitectureRegistry, register_builtin_architectures
 from voicehub.architectures.dac.checkpoint import (
     DESCRIPT_DAC_44KHZ_HEADER_FINGERPRINT,
     HuggingFaceDacCheckpointAdapter,
@@ -72,9 +69,7 @@ class NativeDACModelTests(unittest.TestCase):
         self.assertEqual(len(source_names), 223)
         self.assertEqual(len(model.state_dict()), 301)
         self.assertEqual(
-            dac_tensor_inventory_fingerprint(
-                huggingface_dac_tensor_shapes(config)
-            ),
+            dac_tensor_inventory_fingerprint(huggingface_dac_tensor_shapes(config)),
             DESCRIPT_DAC_44KHZ_HEADER_FINGERPRINT,
         )
 
@@ -89,9 +84,7 @@ class NativeDACModelTests(unittest.TestCase):
             if isinstance(rule, CopyTensor):
                 checkpoint[rule.source] = source_state[rule.target].clone()
             elif isinstance(rule, WeightNormalizedTensor):
-                checkpoint[rule.source] = source_state[
-                    rule.weight_target
-                ].clone()
+                checkpoint[rule.source] = source_state[rule.weight_target].clone()
             else:  # pragma: no cover - conversion plan is intentionally closed.
                 self.fail(f"Unexpected DAC tensor rule {type(rule).__name__}")
 
@@ -114,9 +107,7 @@ class NativeDACModelTests(unittest.TestCase):
         waveform = torch.randn(1, 1, 64, requires_grad=True)
 
         output = model(waveform, sample_rate=16_000)
-        encoded = model.encode_output(
-            model.preprocess(waveform, sample_rate=16_000)
-        )
+        encoded = model.encode_output(model.preprocess(waveform, sample_rate=16_000))
         decoded = model.decode_output(encoded.quantized_representation)
         loss = output["audio"].square().mean() + model.quantizer_loss(encoded)
         loss.backward()

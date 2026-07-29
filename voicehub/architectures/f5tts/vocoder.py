@@ -66,6 +66,7 @@ class NativeMelScale(nn.Module):
 
 
 class NativeMelTransform(nn.Module):
+
     def __init__(
         self,
         *,
@@ -114,6 +115,7 @@ class MelSpectrogramFeatures(nn.Module):
 
 
 class VocosConvNeXtBlock(nn.Module):
+
     def __init__(
         self,
         *,
@@ -147,6 +149,7 @@ class VocosConvNeXtBlock(nn.Module):
 
 
 class VocosBackbone(nn.Module):
+
     def __init__(
         self,
         *,
@@ -160,15 +163,11 @@ class VocosBackbone(nn.Module):
         self.embed = nn.Conv1d(input_channels, dim, kernel_size=7, padding=3)
         self.norm = nn.LayerNorm(dim, eps=1e-6)
         self.convnext = nn.ModuleList(
-            (
-                VocosConvNeXtBlock(
-                    dim=dim,
-                    intermediate_dim=intermediate_dim,
-                    layer_scale_init_value=1 / num_layers,
-                )
-                for _ in range(num_layers)
-            )
-        )
+            VocosConvNeXtBlock(
+                dim=dim,
+                intermediate_dim=intermediate_dim,
+                layer_scale_init_value=1 / num_layers,
+            ) for _ in range(num_layers))
         self.final_layer_norm = nn.LayerNorm(dim, eps=1e-6)
         self.apply(self._initialize_weights)
 
@@ -188,6 +187,7 @@ class VocosBackbone(nn.Module):
 
 
 class NativeISTFT(nn.Module):
+
     def __init__(
         self,
         *,
@@ -216,6 +216,7 @@ class NativeISTFT(nn.Module):
 
 
 class ISTFTHead(nn.Module):
+
     def __init__(
         self,
         *,
@@ -236,12 +237,10 @@ class ISTFTHead(nn.Module):
         magnitude, phase = predicted.chunk(2, dim=1)
         magnitude = magnitude.exp().clamp_max(1e2)
         spectrum = magnitude * (
-            torch.cos(phase)
-            + torch.complex(
+            torch.cos(phase) + torch.complex(
                 torch.zeros_like(phase),
                 torch.sin(phase),
-            )
-        )
+            ))
         return self.istft(spectrum)
 
 

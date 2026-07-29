@@ -43,11 +43,10 @@ def sample_stratified_logit_normal_t(
     u ~ stratified U(0, 1), z = mean + std * Phi^{-1}(u), t = sigmoid(z)
     """
     if batch_size <= 0:
-        return torch.empty((0,), device=device)
+        return torch.empty((0, ), device=device)
     u = (
-        torch.arange(batch_size, device=device, dtype=torch.float32)
-        + torch.rand(batch_size, device=device)
-    ) / float(batch_size)
+        torch.arange(batch_size, device=device, dtype=torch.float32) +
+        torch.rand(batch_size, device=device)) / float(batch_size)
     u = u.clamp(1e-6, 1.0 - 1e-6)
     # Phi^{-1}(u) = sqrt(2) * erfinv(2u - 1)
     z = torch.erfinv(2.0 * u - 1.0) * (2.0**0.5)
@@ -98,9 +97,7 @@ def scale_speaker_kv_cache(
     scale: float,
     max_layers: int | None = None,
 ) -> None:
-    """
-    In-place scaling of speaker K/V tensors in precomputed context cache.
-    """
+    """In-place scaling of speaker K/V tensors in precomputed context cache."""
     if max_layers is None:
         n_layers = len(context_kv_cache)
     else:
@@ -108,9 +105,7 @@ def scale_speaker_kv_cache(
     for i in range(n_layers):
         layer_kv = context_kv_cache[i]
         if len(layer_kv) < 4:
-            raise ValueError(
-                f"Expected at least 4 tensors in context KV cache entry, got {len(layer_kv)}"
-            )
+            raise ValueError(f"Expected at least 4 tensors in context KV cache entry, got {len(layer_kv)}")
         k_speaker = layer_kv[2]
         v_speaker = layer_kv[3]
         k_speaker.mul_(scale)
@@ -149,8 +144,7 @@ def sample_euler_rf_cfg(
     t_schedule_mode: str = "linear",
     sway_coeff: float = -1.0,
 ) -> torch.Tensor:
-    """
-    Euler sampling over RF ODE with text/reference/caption conditioning CFG.
+    """Euler sampling over RF ODE with text/reference/caption conditioning CFG.
 
     Returns:
       latent sequence in patched space, shape (B, sequence_length, patched_latent_dim)
@@ -161,9 +155,10 @@ def sample_euler_rf_cfg(
     latent_dim = model.cfg.patched_latent_dim
 
     rng, rng_device = _make_rng(seed=seed, device=device)
-    x_t = torch.randn(
-        (batch_size, sequence_length, latent_dim), device=rng_device, dtype=dtype, generator=rng
-    )
+    x_t = torch.randn((batch_size, sequence_length, latent_dim),
+                      device=rng_device,
+                      dtype=dtype,
+                      generator=rng)
     if rng_device != device:
         x_t = x_t.to(device=device)
     if truncation_factor is not None:
@@ -181,15 +176,13 @@ def sample_euler_rf_cfg(
     if speaker_uncond_mode not in SPEAKER_INVERSION_UNCOND_MODES:
         raise ValueError(
             f"speaker_uncond_mode must be one of {sorted(SPEAKER_INVERSION_UNCOND_MODES)}, "
-            f"got {speaker_uncond_mode!r}"
-        )
+            f"got {speaker_uncond_mode!r}")
 
     cfg_guidance_mode = str(cfg_guidance_mode).strip().lower()
     if cfg_guidance_mode not in {"independent", "joint", "alternating"}:
         raise ValueError(
             f"Unsupported cfg_guidance_mode={cfg_guidance_mode!r}. "
-            "Expected one of: independent, joint, alternating."
-        )
+            "Expected one of: independent, joint, alternating.")
 
     init_scale = 0.999
     t_schedule_mode_norm = str(t_schedule_mode).strip().lower()
@@ -205,9 +198,7 @@ def sample_euler_rf_cfg(
         u = u + sway_coeff_value * (torch.cos(0.5 * math.pi * u) + u - 1.0)
         u = u.clamp(0.0, 1.0)
     else:
-        raise ValueError(
-            f"Unsupported t_schedule_mode={t_schedule_mode!r}. Expected 'linear' or 'sway'."
-        )
+        raise ValueError(f"Unsupported t_schedule_mode={t_schedule_mode!r}. Expected 'linear' or 'sway'.")
     t_schedule = (1.0 - u) * init_scale
     if not bool(torch.all(t_schedule[:-1] > t_schedule[1:]).item()):
         raise ValueError("t_schedule must be strictly decreasing; adjust num_steps or sway_coeff.")
@@ -239,9 +230,7 @@ def sample_euler_rf_cfg(
     speaker_mask_uncond = None
     if model.cfg.use_speaker_condition_resolved:
         if speaker_state_cond is None or speaker_mask_cond is None:
-            raise RuntimeError(
-                "Speaker conditioning is enabled but encoded speaker state is missing."
-            )
+            raise RuntimeError("Speaker conditioning is enabled but encoded speaker state is missing.")
         if speaker_uncond_mode == "noise":
             speaker_noise = torch.randn(
                 speaker_state_cond.shape,
@@ -260,19 +249,14 @@ def sample_euler_rf_cfg(
     caption_mask_uncond = None
     if model.cfg.use_caption_condition:
         if caption_state_cond is None or caption_mask_cond is None:
-            raise RuntimeError(
-                "Caption conditioning is enabled but encoded caption state is missing."
-            )
+            raise RuntimeError("Caption conditioning is enabled but encoded caption state is missing.")
         caption_state_uncond = torch.zeros_like(caption_state_cond)
         caption_mask_uncond = torch.zeros_like(caption_mask_cond)
 
     has_text_cfg = cfg_scale_text > 0
     has_caption_cfg = (
-        model.cfg.use_caption_condition
-        and cfg_scale_caption > 0
-        and caption_mask_cond is not None
-        and bool(caption_mask_cond.any().item())
-    )
+        model.cfg.use_caption_condition and cfg_scale_caption > 0 and caption_mask_cond is not None and
+        bool(caption_mask_cond.any().item()))
     has_speaker_cfg = cfg_scale_speaker > 0
 
     def _bundle(
@@ -284,12 +268,12 @@ def sample_euler_rf_cfg(
         caption_state: torch.Tensor | None,
         caption_mask_val: torch.Tensor | None,
     ) -> tuple[
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor | None,
-        torch.Tensor | None,
-        torch.Tensor | None,
-        torch.Tensor | None,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor | None,
+            torch.Tensor | None,
+            torch.Tensor | None,
+            torch.Tensor | None,
     ]:
         return (
             text_state,
@@ -329,20 +313,11 @@ def sample_euler_rf_cfg(
                 _bundle(
                     text_state=text_state_uncond if name == "text" else text_state_cond,
                     text_mask_val=text_mask_uncond if name == "text" else text_mask_cond,
-                    speaker_state=(
-                        speaker_state_uncond if name == "speaker" else speaker_state_cond
-                    ),
-                    speaker_mask_val=(
-                        speaker_mask_uncond if name == "speaker" else speaker_mask_cond
-                    ),
-                    caption_state=(
-                        caption_state_uncond if name == "caption" else caption_state_cond
-                    ),
-                    caption_mask_val=(
-                        caption_mask_uncond if name == "caption" else caption_mask_cond
-                    ),
-                )
-            )
+                    speaker_state=(speaker_state_uncond if name == "speaker" else speaker_state_cond),
+                    speaker_mask_val=(speaker_mask_uncond if name == "speaker" else speaker_mask_cond),
+                    caption_state=(caption_state_uncond if name == "caption" else caption_state_cond),
+                    caption_mask_val=(caption_mask_uncond if name == "caption" else caption_mask_cond),
+                ))
     cfg_batch_mult = len(independent_bundles)
 
     def _cat_optional_tensors(values: list[torch.Tensor | None]) -> torch.Tensor | None:
@@ -380,7 +355,8 @@ def sample_euler_rf_cfg(
             torch.Tensor | None,
         ],
     ] = {
-        "text": _bundle(
+        "text":
+        _bundle(
             text_state=text_state_uncond,
             text_mask_val=text_mask_uncond,
             speaker_state=speaker_state_cond,
@@ -388,7 +364,8 @@ def sample_euler_rf_cfg(
             caption_state=caption_state_cond,
             caption_mask_val=caption_mask_cond,
         ),
-        "caption": _bundle(
+        "caption":
+        _bundle(
             text_state=text_state_cond,
             text_mask_val=text_mask_cond,
             speaker_state=speaker_state_cond,
@@ -464,7 +441,7 @@ def sample_euler_rf_cfg(
     for i in range(num_steps):
         t = t_schedule[i]
         t_next = t_schedule[i + 1]
-        tt = torch.full((batch_size,), t, device=device, dtype=dtype)
+        tt = torch.full((batch_size, ), t, device=device, dtype=dtype)
 
         use_cfg = bool(enabled_cfg_names) and (cfg_min_t <= t.item() <= cfg_max_t)
         if use_cfg:
@@ -504,8 +481,7 @@ def sample_euler_rf_cfg(
                         if max(joint_scales) - min(joint_scales) > 1e-6:
                             raise ValueError(
                                 "cfg_guidance_mode='joint' expects equal enabled guidance scales; "
-                                "set matching text/speaker/caption scales or use --cfg-scale."
-                            )
+                                "set matching text/speaker/caption scales or use --cfg-scale.")
                     joint_scale = cfg_scales[enabled_cfg_names[0]]
                     v_uncond_joint = model.forward_with_encoded_conditions(
                         x_t=x_t.to(dtype),
@@ -558,12 +534,8 @@ def sample_euler_rf_cfg(
                 rescale_sigma=float(rescale_sigma),
             )
 
-        if (
-            speaker_kv_active
-            and speaker_kv_min_t is not None
-            and (t_next < speaker_kv_min_t)
-            and (t >= speaker_kv_min_t)
-        ):
+        if (speaker_kv_active and speaker_kv_min_t is not None and (t_next < speaker_kv_min_t) and
+            (t >= speaker_kv_min_t)):
             inv_scale = 1.0 / float(speaker_kv_scale)
             scale_speaker_kv_cache(
                 context_kv_cache=context_kv_cond,

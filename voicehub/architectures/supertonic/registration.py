@@ -4,14 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from voicehub.architectures.registry import (
-    ARCHITECTURE_REGISTRY,
-    ArchitectureRegistry,
-)
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.architectures.supertonic.metadata import (
     SUPERTONIC_CHECKPOINT_LICENSE,
     SUPERTONIC_CHECKPOINT_REPOSITORY,
@@ -33,45 +27,28 @@ def create_supertonic_architecture_spec() -> ArchitectureSpec:
     return ArchitectureSpec(
         architecture_id="supertonic",
         version="1.7.3",
-        model_builder=(
-            "voicehub.architectures.supertonic.runtime:"
-            "NativeSupertonicRuntime"
-        ),
-        config=(
-            "voicehub.architectures.supertonic.configuration:"
-            "SupertonicArchitectureConfig"
-        ),
-        processor=(
-            "voicehub.architectures.supertonic.frontend:"
-            "SupertonicUnicodeProcessor"
-        ),
-        decoder=(
-            "voicehub.architectures.supertonic.runtime:"
-            "NativeSupertonicRuntime.synthesize"
-        ),
-        objective=(
-            "voicehub.architectures.supertonic.runtime:"
-            "NativeSupertonicRuntime.fine_tuning_loss"
-        ),
-        checkpoint_adapter=(
-            "voicehub.architectures.supertonic.checkpoint:"
-            "load_supertonic_native_weights"
-        ),
+        model_builder=("voicehub.architectures.supertonic.runtime:"
+                       "NativeSupertonicRuntime"),
+        config=("voicehub.architectures.supertonic.configuration:"
+                "SupertonicArchitectureConfig"),
+        processor=("voicehub.architectures.supertonic.frontend:"
+                   "SupertonicUnicodeProcessor"),
+        decoder=("voicehub.architectures.supertonic.runtime:"
+                 "NativeSupertonicRuntime.synthesize"),
+        objective=("voicehub.architectures.supertonic.runtime:"
+                   "NativeSupertonicRuntime.fine_tuning_loss"),
+        checkpoint_adapter=("voicehub.architectures.supertonic.checkpoint:"
+                            "load_supertonic_native_weights"),
         components={
-            "artifact-resolver": (
-                "voicehub.architectures.supertonic.artifacts:"
-                "resolve_supertonic_artifacts"
-            ),
-            "onnx-graph-runtime": (
-                "voicehub.neural.onnx:NativeONNXGraph"
-            ),
-            "style-loader": (
-                "voicehub.architectures.supertonic.frontend:"
-                "SupertonicStyle"
-            ),
+            "artifact-resolver":
+            ("voicehub.architectures.supertonic.artifacts:"
+             "resolve_supertonic_artifacts"),
+            "onnx-graph-runtime": ("voicehub.neural.onnx:NativeONNXGraph"),
+            "style-loader": ("voicehub.architectures.supertonic.frontend:"
+                             "SupertonicStyle"),
         },
         capabilities=ArchitectureCapabilities(
-            tasks=(SpeechTask.TEXT_TO_SPEECH,),
+            tasks=(SpeechTask.TEXT_TO_SPEECH, ),
             devices=("cpu", "cuda", "mps"),
             dtypes=("float32", "float16", "bfloat16"),
             checkpoint_formats=("onnx", "safetensors"),
@@ -79,7 +56,7 @@ def create_supertonic_architecture_spec() -> ArchitectureSpec:
             streaming=False,
             batched_inference=True,
             distributed_training=True,
-            export_formats=("safetensors",),
+            export_formats=("safetensors", ),
             features=(
                 "multilingual-unicode-frontend",
                 "reviewed-onnx-import",
@@ -94,28 +71,17 @@ def create_supertonic_architecture_spec() -> ArchitectureSpec:
         upstream_revision=SUPERTONIC_SOURCE_REVISION,
         license_id=SUPERTONIC_SOURCE_LICENSE,
         metadata={
-            "family":
-            "flow-matching-tts",
-            "implementation":
-            "voicehub-native",
-            "tensor_backend":
-            "pytorch",
-            "source":
-            SUPERTONIC_SOURCE_REPOSITORY,
-            "checkpoint":
-            SUPERTONIC_CHECKPOINT_REPOSITORY,
-            "checkpoint_revision":
-            SUPERTONIC_CHECKPOINT_REVISION,
-            "checkpoint_license":
-            SUPERTONIC_CHECKPOINT_LICENSE,
-            "training_scope":
-            "published-inference-graph-with-precomputed-latents",
-            "full_raw_audio_finetuning_ready":
-            False,
-            "author_training_recipe_published":
-            False,
-            "parity_reference":
-            "onnxruntime-cpu",
+            "family": "flow-matching-tts",
+            "implementation": "voicehub-native",
+            "tensor_backend": "pytorch",
+            "source": SUPERTONIC_SOURCE_REPOSITORY,
+            "checkpoint": SUPERTONIC_CHECKPOINT_REPOSITORY,
+            "checkpoint_revision": SUPERTONIC_CHECKPOINT_REVISION,
+            "checkpoint_license": SUPERTONIC_CHECKPOINT_LICENSE,
+            "training_scope": "published-inference-graph-with-precomputed-latents",
+            "full_raw_audio_finetuning_ready": False,
+            "author_training_recipe_published": False,
+            "parity_reference": "onnxruntime-cpu",
             "measured_max_absolute_error": {
                 "duration_predictor": 5.9604645e-08,
                 "text_encoder": 2.682209e-05,

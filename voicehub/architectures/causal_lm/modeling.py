@@ -461,10 +461,8 @@ class CausalLMDecoderLayer(nn.Module):
         hidden_states = residual + attention_output * self.config.residual_multiplier
         residual = hidden_states
         hidden_states = (
-            residual
-            + self.mlp(self.post_attention_layernorm(hidden_states))
-            * self.config.residual_multiplier
-        )
+            residual +
+            self.mlp(self.post_attention_layernorm(hidden_states)) * self.config.residual_multiplier)
         return hidden_states, attention, cache
 
 
@@ -747,10 +745,7 @@ class CausalLMForCausalLM(nn.Module):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
         )
-        logits = (
-            self.lm_head(decoder_output.last_hidden_state)
-            / self.config.logits_scaling
-        ).float()
+        logits = (self.lm_head(decoder_output.last_hidden_state) / self.config.logits_scaling).float()
         loss = None
         if labels is not None:
             if not isinstance(labels, Tensor) or labels.ndim != 2:

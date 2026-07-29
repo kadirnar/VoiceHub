@@ -1,9 +1,10 @@
 """Dependency-free, explicit phoneme frontend for Inflect v2.
 
 The released models were trained with eSpeak's ``en-us`` phoneme output.
-VoiceHub does not silently replace that versioned native frontend with an
-approximate grapheme-to-phoneme implementation.  Applications must provide the
-phoneme string produced during data preparation, or exact token IDs.
+VoiceHub does not silently replace that versioned native frontend with
+an approximate grapheme-to-phoneme implementation.  Applications must
+provide the phoneme string produced during data preparation, or exact
+token IDs.
 """
 
 from __future__ import annotations

@@ -1,10 +1,10 @@
 """Validated configuration for the VoiceHub-native Zonos v0.1 graph.
 
-The public Zonos checkpoints describe both a dense Transformer and a hybrid
-Mamba-2 model with the same JSON envelope.  VoiceHub currently implements the
-dense Transformer exactly.  Hybrid configurations are rejected before model
-allocation instead of being routed through a graph with incompatible tensor
-names or numerics.
+The public Zonos checkpoints describe both a dense Transformer and a
+hybrid Mamba-2 model with the same JSON envelope.  VoiceHub currently
+implements the dense Transformer exactly.  Hybrid configurations are
+rejected before model allocation instead of being routed through a graph
+with incompatible tensor names or numerics.
 """
 
 from __future__ import annotations
@@ -24,12 +24,8 @@ def _positive_integer(name: str, value: Any) -> int:
 
 
 def _finite_positive(name: str, value: Any) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-        or value <= 0
-    ):
+    if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or
+            value <= 0):
         raise ValueError(f"`{name}` must be finite and greater than zero.")
     return float(value)
 
@@ -50,44 +46,39 @@ class ZonosBackboneConfig:
     n_layer: int = 26
     ssm_cfg: Mapping[str, Any] = field(default_factory=dict)
     attn_layer_idx: tuple[int, ...] = tuple(range(26))
-    attn_cfg: Mapping[str, Any] = field(default_factory=lambda: {
-        "causal": True,
-        "num_heads": 16,
-        "num_heads_kv": 4,
-        "rotary_emb_dim": 128,
-        "rotary_emb_interleaved": True,
-        "qkv_proj_bias": False,
-        "out_proj_bias": False,
-    })
+    attn_cfg: Mapping[str, Any] = field(
+        default_factory=lambda: {
+            "causal": True,
+            "num_heads": 16,
+            "num_heads_kv": 4,
+            "rotary_emb_dim": 128,
+            "rotary_emb_interleaved": True,
+            "qkv_proj_bias": False,
+            "out_proj_bias": False,
+        })
     rms_norm: bool = False
     residual_in_fp32: bool = False
     norm_epsilon: float = 1e-5
 
     def __post_init__(self) -> None:
         for name in (
-            "d_model",
-            "attn_mlp_d_intermediate",
-            "n_layer",
+                "d_model",
+                "attn_mlp_d_intermediate",
+                "n_layer",
         ):
             _positive_integer(name, getattr(self, name))
-        if (
-            isinstance(self.d_intermediate, bool)
-            or not isinstance(self.d_intermediate, int)
-            or self.d_intermediate < 0
-        ):
+        if (isinstance(self.d_intermediate, bool) or not isinstance(self.d_intermediate, int) or
+                self.d_intermediate < 0):
             raise ValueError("`d_intermediate` must be a non-negative integer.")
         object.__setattr__(self, "ssm_cfg", _mapping("ssm_cfg", self.ssm_cfg))
         object.__setattr__(self, "attn_cfg", _mapping("attn_cfg", self.attn_cfg))
         if isinstance(self.attn_layer_idx, (str, bytes)) or not isinstance(
-            self.attn_layer_idx,
-            Sequence,
+                self.attn_layer_idx,
+                Sequence,
         ):
             raise TypeError("`attn_layer_idx` must be an integer sequence.")
         layer_indices = tuple(self.attn_layer_idx)
-        if any(
-            isinstance(index, bool) or not isinstance(index, int)
-            for index in layer_indices
-        ):
+        if any(isinstance(index, bool) or not isinstance(index, int) for index in layer_indices):
             raise TypeError("`attn_layer_idx` must contain integers.")
         object.__setattr__(self, "attn_layer_idx", layer_indices)
         object.__setattr__(
@@ -105,29 +96,22 @@ class ZonosBackboneConfig:
             raise NotImplementedError(
                 "VoiceHub native Zonos supports the published v0.1 dense "
                 "Transformer checkpoint. The hybrid Mamba-2 checkpoint has a "
-                "different state-space graph and is intentionally rejected."
-            )
+                "different state-space graph and is intentionally rejected.")
         expected_layers = tuple(range(self.n_layer))
         if self.attn_layer_idx != expected_layers:
             raise ValueError(
                 "Dense Zonos requires every layer to be an attention layer; "
                 f"expected {expected_layers!r}, received "
-                f"{self.attn_layer_idx!r}."
-            )
+                f"{self.attn_layer_idx!r}.")
         if self.d_intermediate != 0:
-            raise ValueError(
-                "The native dense Zonos graph requires `d_intermediate=0`."
-            )
+            raise ValueError("The native dense Zonos graph requires `d_intermediate=0`.")
         if self.rms_norm:
-            raise ValueError(
-                "The published dense Zonos checkpoint uses LayerNorm, not "
-                "RMSNorm."
-            )
+            raise ValueError("The published dense Zonos checkpoint uses LayerNorm, not "
+                             "RMSNorm.")
         if self.residual_in_fp32:
             raise ValueError(
                 "The published dense Zonos checkpoint does not use fp32 "
-                "residual accumulation."
-            )
+                "residual accumulation.")
         required = {
             "causal",
             "num_heads",
@@ -138,10 +122,8 @@ class ZonosBackboneConfig:
         }
         missing = required - set(self.attn_cfg)
         if missing:
-            raise ValueError(
-                "Zonos attention configuration is missing "
-                f"{sorted(missing)!r}."
-            )
+            raise ValueError("Zonos attention configuration is missing "
+                             f"{sorted(missing)!r}.")
         if self.attn_cfg["causal"] is not True:
             raise ValueError("The Zonos acoustic language model must be causal.")
         num_heads = _positive_integer(
@@ -160,13 +142,10 @@ class ZonosBackboneConfig:
         if self.attn_cfg["rotary_emb_dim"] != head_dim:
             raise ValueError(
                 "Native Zonos requires rotary embeddings over the complete "
-                f"head dimension ({head_dim})."
-            )
+                f"head dimension ({head_dim}).")
         if self.attn_cfg.get("rotary_emb_interleaved", True) is not True:
-            raise ValueError(
-                "Native Zonos implements the published interleaved rotary "
-                "layout only."
-            )
+            raise ValueError("Native Zonos implements the published interleaved rotary "
+                             "layout only.")
         if self.attn_cfg["qkv_proj_bias"] is not False:
             raise ValueError("The published Zonos QKV projection has no bias.")
         if self.attn_cfg["out_proj_bias"] is not False:
@@ -263,14 +242,11 @@ class ZonosPrefixConditionerConfig:
 
     def __post_init__(self) -> None:
         if isinstance(self.conditioners, (str, bytes)) or not isinstance(
-            self.conditioners,
-            Sequence,
+                self.conditioners,
+                Sequence,
         ):
             raise TypeError("`conditioners` must be a sequence of mappings.")
-        conditioners = tuple(
-            _mapping("conditioner", value)
-            for value in self.conditioners
-        )
+        conditioners = tuple(_mapping("conditioner", value) for value in self.conditioners)
         if not conditioners:
             raise ValueError("Zonos requires at least one prefix conditioner.")
         names: list[str] = []
@@ -284,28 +260,19 @@ class ZonosPrefixConditionerConfig:
             name = conditioner.get("name")
             kind = conditioner.get("type")
             if not isinstance(name, str) or not name:
-                raise ValueError(
-                    f"Zonos conditioner {index} requires a non-empty `name`."
-                )
+                raise ValueError(f"Zonos conditioner {index} requires a non-empty `name`.")
             if kind not in supported:
-                raise ValueError(
-                    f"Unsupported Zonos conditioner type {kind!r}."
-                )
+                raise ValueError(f"Unsupported Zonos conditioner type {kind!r}.")
             names.append(name)
         if len(names) != len(set(names)):
             raise ValueError("Zonos conditioner names must be unique.")
         if self.projection not in {"none", "linear", "mlp"}:
-            raise ValueError(
-                "`prefix_conditioner.projection` must be none, linear, or mlp."
-            )
+            raise ValueError("`prefix_conditioner.projection` must be none, linear, or mlp.")
         object.__setattr__(self, "conditioners", conditioners)
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "conditioners": [
-                copy.deepcopy(dict(conditioner))
-                for conditioner in self.conditioners
-            ],
+            "conditioners": [copy.deepcopy(dict(conditioner)) for conditioner in self.conditioners],
             "projection": self.projection,
         }
 
@@ -327,9 +294,7 @@ class ZonosArchitectureConfig:
     """Complete, strict configuration for ``Zonos-v0.1-transformer``."""
 
     backbone: ZonosBackboneConfig = field(default_factory=ZonosBackboneConfig)
-    prefix_conditioner: ZonosPrefixConditionerConfig = field(
-        default_factory=ZonosPrefixConditionerConfig,
-    )
+    prefix_conditioner: ZonosPrefixConditionerConfig = field(default_factory=ZonosPrefixConditionerConfig, )
     eos_token_id: int = 1_024
     masked_token_id: int = 1_025
     pad_vocab_to_multiple_of: int = 8
@@ -343,27 +308,21 @@ class ZonosArchitectureConfig:
         if not isinstance(self.backbone, ZonosBackboneConfig):
             raise TypeError("`backbone` must be a ZonosBackboneConfig.")
         if not isinstance(
-            self.prefix_conditioner,
-            ZonosPrefixConditionerConfig,
+                self.prefix_conditioner,
+                ZonosPrefixConditionerConfig,
         ):
-            raise TypeError(
-                "`prefix_conditioner` must be a "
-                "ZonosPrefixConditionerConfig."
-            )
+            raise TypeError("`prefix_conditioner` must be a "
+                            "ZonosPrefixConditionerConfig.")
         for name in (
-            "eos_token_id",
-            "masked_token_id",
-            "pad_vocab_to_multiple_of",
+                "eos_token_id",
+                "masked_token_id",
+                "pad_vocab_to_multiple_of",
         ):
             _positive_integer(name, getattr(self, name))
         if self.eos_token_id != self.codebook_size:
-            raise ValueError(
-                "The published Zonos graph requires EOS token 1024."
-            )
+            raise ValueError("The published Zonos graph requires EOS token 1024.")
         if self.masked_token_id != self.codebook_size + 1:
-            raise ValueError(
-                "The published Zonos graph requires mask token 1025."
-            )
+            raise ValueError("The published Zonos graph requires mask token 1025.")
         object.__setattr__(
             self,
             "extra_config",
@@ -403,19 +362,13 @@ class ZonosArchitectureConfig:
             raise TypeError("Zonos architecture configuration must be a mapping.")
         source = copy.deepcopy(dict(values))
         backbone = ZonosBackboneConfig.from_dict(source.pop("backbone"))
-        prefix = ZonosPrefixConditionerConfig.from_dict(
-            source.pop("prefix_conditioner"),
-        )
+        prefix = ZonosPrefixConditionerConfig.from_dict(source.pop("prefix_conditioner"), )
         known = {
             "eos_token_id",
             "masked_token_id",
             "pad_vocab_to_multiple_of",
         }
-        resolved = {
-            name: source.pop(name)
-            for name in tuple(source)
-            if name in known
-        }
+        resolved = {name: source.pop(name) for name in tuple(source) if name in known}
         supplied_extras = source.pop("extra_config", None)
         if supplied_extras is not None:
             if not isinstance(supplied_extras, Mapping):

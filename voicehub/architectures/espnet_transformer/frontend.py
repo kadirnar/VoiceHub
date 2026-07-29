@@ -5,9 +5,7 @@ from __future__ import annotations
 from torch import Tensor, nn
 from torch.nn import functional
 
-from voicehub.architectures.espnet_transformer.configuration import (
-    ESPnetLibriSpeechTransformerConfig,
-)
+from voicehub.architectures.espnet_transformer.configuration import ESPnetLibriSpeechTransformerConfig
 from voicehub.processing.audio import mel_filter_bank
 
 
@@ -90,12 +88,10 @@ class ESPnetDefaultFrontend(nn.Module):
         if waveforms.ndim != 2:
             raise ValueError("ESPnet waveforms must have shape [batch, samples].")
         if waveforms.shape[-1] <= self.config.n_fft // 2:
-            raise ValueError(
-                "ESPnet waveforms must be longer than the centered STFT padding."
-            )
+            raise ValueError("ESPnet waveforms must be longer than the centered STFT padding.")
         if waveform_lengths is None:
             lengths = torch.full(
-                (waveforms.shape[0],),
+                (waveforms.shape[0], ),
                 waveforms.shape[-1],
                 dtype=torch.long,
                 device=waveforms.device,
@@ -124,16 +120,8 @@ class ESPnetDefaultFrontend(nn.Module):
             return_complex=True,
         ).transpose(1, 2)
         power = spectrum.real.square() + spectrum.imag.square()
-        padded_lengths = (
-            lengths + self.config.win_length
-            if self.config.center
-            else lengths
-        )
-        frame_lengths = (
-            (padded_lengths - self.config.win_length)
-            // self.config.hop_length
-            + 1
-        )
+        padded_lengths = (lengths + self.config.win_length if self.config.center else lengths)
+        frame_lengths = ((padded_lengths - self.config.win_length) // self.config.hop_length + 1)
         return self.logmel(power, frame_lengths)
 
 
@@ -154,10 +142,8 @@ class ESPnetGlobalMVN(nn.Module):
         feature_lengths: Tensor,
     ) -> tuple[Tensor, Tensor]:
         if features.ndim != 3 or features.shape[-1] != self.config.n_mels:
-            raise ValueError(
-                "ESPnet features must have shape "
-                f"[batch, frames, {self.config.n_mels}]."
-            )
+            raise ValueError("ESPnet features must have shape "
+                             f"[batch, frames, {self.config.n_mels}].")
         mask = make_pad_mask(
             feature_lengths.to(features.device),
             features.shape[1],
@@ -182,22 +168,18 @@ def _time_warp(values: Tensor, *, window: int) -> Tensor:
     time = image.shape[-2]
     if time - window <= window:
         return values
-    center = int(
-        torch.randint(
-            window,
-            time - window,
-            (1,),
-            device=values.device,
-        ).item()
-    )
-    warped = int(
-        torch.randint(
-            center - window,
-            center + window,
-            (1,),
-            device=values.device,
-        ).item()
-    ) + 1
+    center = int(torch.randint(
+        window,
+        time - window,
+        (1, ),
+        device=values.device,
+    ).item())
+    warped = int(torch.randint(
+        center - window,
+        center + window,
+        (1, ),
+        device=values.device,
+    ).item()) + 1
     left = functional.interpolate(
         image[..., :center, :],
         size=(warped, image.shape[-1]),
@@ -238,10 +220,7 @@ def _mask_along_axis(
         device=values.device,
     )
     positions = torch.arange(size, device=values.device).view(1, 1, size)
-    mask = (
-        (starts.unsqueeze(-1) <= positions)
-        & (positions < starts.add(widths).unsqueeze(-1))
-    ).any(dim=1)
+    mask = ((starts.unsqueeze(-1) <= positions) & (positions < starts.add(widths).unsqueeze(-1))).any(dim=1)
     mask = mask.unsqueeze(-1) if axis == 1 else mask.unsqueeze(1)
     return values.masked_fill(mask, 0.0)
 
@@ -270,10 +249,9 @@ class ESPnetSpecAugment(nn.Module):
         else:
             rows = [
                 _time_warp(
-                    features[index : index + 1, : int(length.item())],
+                    features[index:index + 1, :int(length.item())],
                     window=self.config.time_warp_window,
-                ).squeeze(0)
-                for index, length in enumerate(feature_lengths)
+                ).squeeze(0) for index, length in enumerate(feature_lengths)
             ]
             values = nn.utils.rnn.pad_sequence(rows, batch_first=True)
         values = _mask_along_axis(

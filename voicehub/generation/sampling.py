@@ -15,7 +15,8 @@ _TORCH_SEED_MAX = 2**64 - 1
 
 
 def create_generator(device: torch.device | str, seed: int | None = None) -> torch.Generator:
-    """Create an isolated random generator without touching global RNG state."""
+    """Create an isolated random generator without touching global RNG
+    state."""
     if seed is not None:
         if isinstance(seed, bool) or not isinstance(seed, Integral):
             raise TypeError("`seed` must be an integer or None.")

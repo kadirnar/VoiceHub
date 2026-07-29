@@ -454,14 +454,11 @@ class HubTransportTests(unittest.TestCase):
         }
         responses = [
             self._json_response({"sha": commit}),
-            self._json_response([
-                {
-                    "path": path,
-                    "size": len(content),
-                    "type": "file",
-                }
-                for path, content in files.items()
-            ]),
+            self._json_response([{
+                "path": path,
+                "size": len(content),
+                "type": "file",
+            } for path, content in files.items()]),
             *[
                 _Response(
                     content,
@@ -469,8 +466,7 @@ class HubTransportTests(unittest.TestCase):
                         "Content-Length": str(len(content)),
                         "X-Repo-Commit": commit,
                     },
-                )
-                for content in files.values()
+                ) for content in files.values()
             ],
         ]
         requests = []
@@ -498,9 +494,7 @@ class HubTransportTests(unittest.TestCase):
                 (snapshot / "weights" / "model.bin").read_bytes(),
                 files["weights/model.bin"],
             )
-            manifests = tuple(
-                Path(directory).glob(
-                    "voicehub/repos/*/snapshot_refs/*.json"))
+            manifests = tuple(Path(directory).glob("voicehub/repos/*/snapshot_refs/*.json"))
             self.assertEqual(len(manifests), 1)
             manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
             self.assertEqual(manifest["commit"], commit)
@@ -521,8 +515,8 @@ class HubTransportTests(unittest.TestCase):
                 )
 
             serialized_cache = "\n".join(
-                path.read_text(encoding="utf-8", errors="ignore")
-                for path in Path(directory).rglob("*") if path.is_file())
+                path.read_text(encoding="utf-8", errors="ignore") for path in Path(directory).rglob("*")
+                if path.is_file())
             self.assertNotIn("hf_runtime_only", serialized_cache)
 
         self.assertEqual(offline, snapshot)
@@ -540,8 +534,7 @@ class HubTransportTests(unittest.TestCase):
     def test_snapshot_tree_pagination_and_patterns_are_bounded_and_deterministic(self):
         commit = "2" * 40
         api_path = f"/api/models/owner/model/tree/{commit}"
-        next_link = (
-            f"<https://huggingface.co{api_path}?cursor=next>; rel=\"next\"")
+        next_link = (f"<https://huggingface.co{api_path}?cursor=next>; rel=\"next\"")
         selected = b"configuration"
         responses = [
             self._json_response({"sha": commit}),
@@ -592,8 +585,7 @@ class HubTransportTests(unittest.TestCase):
             )
             resolved_content = (snapshot / "config.json").read_bytes()
             readme_exists = (snapshot / "README.md").exists()
-            private_config_exists = (
-                snapshot / "private" / "config.json").exists()
+            private_config_exists = (snapshot / "private" / "config.json").exists()
 
         self.assertEqual(resolved_content, selected)
         self.assertFalse(readme_exists)
@@ -667,9 +659,7 @@ class HubTransportTests(unittest.TestCase):
                     "owner/model",
                     cache_dir=directory,
                 )
-            self.assertFalse(tuple(
-                Path(directory).glob(
-                    "voicehub/repos/*/snapshot_refs/*.json")))
+            self.assertFalse(tuple(Path(directory).glob("voicehub/repos/*/snapshot_refs/*.json")))
 
     def test_snapshot_offline_reads_an_existing_legacy_repository(self):
         commit = "5" * 40

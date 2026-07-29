@@ -1,7 +1,8 @@
 """Lightweight alias-free waveform blocks derived from NVIDIA BigVGAN.
 
-BigVGAN and alias-free-torch are MIT/Apache-2.0 licensed. The implementation
-is kept local so Inflect can train without BigVGAN's optional CUDA extension.
+BigVGAN and alias-free-torch are MIT/Apache-2.0 licensed. The
+implementation is kept local so Inflect can train without BigVGAN's
+optional CUDA extension.
 """
 
 import math

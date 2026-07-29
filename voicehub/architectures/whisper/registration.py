@@ -29,9 +29,7 @@ def create_whisper_architecture_spec() -> ArchitectureSpec:
         version="1",
         model_builder=("voicehub.architectures.whisper.modeling:WhisperModel"),
         config=("voicehub.architectures.whisper.configuration:WhisperConfig"),
-        processor=(
-            "voicehub.architectures.whisper.tokenization:WhisperTokenizer"
-        ),
+        processor=("voicehub.architectures.whisper.tokenization:WhisperTokenizer"),
         decoder=("voicehub.architectures.whisper.decoding:"
                  "WhisperGenerationAdapter"),
         objective=("voicehub.objectives.sequence:Seq2SeqCrossEntropyLoss"),

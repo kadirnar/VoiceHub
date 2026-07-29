@@ -10,9 +10,7 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 
-from voicehub.architectures.conversationtts.metadata import (
-    NATIVE_CONVERSATIONTTS_FORMAT,
-)
+from voicehub.architectures.conversationtts.metadata import NATIVE_CONVERSATIONTTS_FORMAT
 from voicehub.checkpointing import SafeTensorReader, save_safetensors
 from voicehub.checkpointing.errors import CheckpointCompatibilityError
 
@@ -43,8 +41,7 @@ def exportable_state_dict(model: nn.Module) -> dict[str, Tensor]:
         raise TypeError("`model` must be a torch.nn.Module.")
     state = {
         name: value.detach()
-        for name, value in model.state_dict().items()
-        if not _is_runtime_state(name)
+        for name, value in model.state_dict().items() if not _is_runtime_state(name)
     }
     if not state:
         raise ValueError("ConversationTTS model state is empty.")
@@ -55,19 +52,14 @@ def _normalize_legacy_state(state: Mapping[Any, Any]) -> dict[str, Tensor]:
     normalized: dict[str, Tensor] = {}
     for key, value in state.items():
         if not isinstance(key, str):
-            raise TypeError(
-                "ConversationTTS checkpoint keys must be strings."
-            )
+            raise TypeError("ConversationTTS checkpoint keys must be strings.")
         name = key.removeprefix("module.")
         if name in normalized:
             raise CheckpointCompatibilityError(
                 "ConversationTTS checkpoint contains colliding keys after "
-                f"removing the DataParallel prefix: {name!r}."
-            )
+                f"removing the DataParallel prefix: {name!r}.")
         if not isinstance(value, Tensor):
-            raise TypeError(
-                f"ConversationTTS state value {name!r} is not a tensor."
-            )
+            raise TypeError(f"ConversationTTS state value {name!r} is not a tensor.")
         normalized[name] = value
     return normalized
 
@@ -86,21 +78,16 @@ def _validate_inventory(
     available_names = set(available)
     missing = sorted(expected_names - available_names)
     unexpected = sorted(available_names - expected_names)
-    mismatched = sorted(
-        (
-            name,
-            available[name],
-            tuple(expected[name].shape),
-        )
-        for name in expected_names & available_names
-        if available[name] != tuple(expected[name].shape)
-    )
+    mismatched = sorted((
+        name,
+        available[name],
+        tuple(expected[name].shape),
+    ) for name in expected_names & available_names if available[name] != tuple(expected[name].shape))
     if missing or unexpected or mismatched:
         raise CheckpointCompatibilityError(
             f"ConversationTTS checkpoint {path} is incompatible: "
             f"missing={missing!r}, unexpected={unexpected!r}, "
-            f"shape_mismatches={mismatched!r}."
-        )
+            f"shape_mismatches={mismatched!r}.")
 
 
 def _copy_state(
@@ -110,12 +97,10 @@ def _copy_state(
     with torch.no_grad():
         for name, target in expected.items():
             source = state[name]
-            target.copy_(
-                source.to(
-                    device=target.device,
-                    dtype=target.dtype,
-                )
-            )
+            target.copy_(source.to(
+                device=target.device,
+                dtype=target.dtype,
+            ))
 
 
 def _load_safetensors(
@@ -124,24 +109,16 @@ def _load_safetensors(
 ) -> ConversationTTSCheckpointReport:
     expected = _expected_state(model)
     with SafeTensorReader(path) as reader:
-        available = {
-            name: tuple(reader.tensor_shape(name))
-            for name in reader.keys()
-        }
+        available = {name: tuple(reader.tensor_shape(name)) for name in reader.keys()}
         _validate_inventory(expected, available, path=path)
         with torch.no_grad():
             for name, target in expected.items():
-                target.copy_(
-                    reader.get_tensor(
-                        name,
-                        device=target.device,
-                        dtype=target.dtype,
-                    )
-                )
-        parameter_count = sum(
-            reader.record(name).number_of_elements
-            for name in reader.keys()
-        )
+                target.copy_(reader.get_tensor(
+                    name,
+                    device=target.device,
+                    dtype=target.dtype,
+                ))
+        parameter_count = sum(reader.record(name).number_of_elements for name in reader.keys())
         tensor_count = len(reader)
     return ConversationTTSCheckpointReport(
         path=path,
@@ -171,24 +148,16 @@ def _load_restricted_legacy(
         raise RuntimeError(
             "This PyTorch build cannot load the published ConversationTTS "
             "checkpoint safely. Upgrade PyTorch or convert the trusted "
-            "artifact to Safetensors in a supported environment."
-        ) from exc
+            "artifact to Safetensors in a supported environment.") from exc
     if not isinstance(payload, Mapping):
-        raise TypeError(
-            "ConversationTTS legacy checkpoint must contain a mapping."
-        )
+        raise TypeError("ConversationTTS legacy checkpoint must contain a mapping.")
     raw_state = payload.get("model")
     if not isinstance(raw_state, Mapping):
-        raise TypeError(
-            "ConversationTTS legacy checkpoint is missing its `model` "
-            "state dictionary."
-        )
+        raise TypeError("ConversationTTS legacy checkpoint is missing its `model` "
+                        "state dictionary.")
     state = _normalize_legacy_state(raw_state)
     expected = _expected_state(model)
-    available = {
-        name: tuple(value.shape)
-        for name, value in state.items()
-    }
+    available = {name: tuple(value.shape) for name, value in state.items()}
     _validate_inventory(expected, available, path=path)
     _copy_state(expected, state)
     return ConversationTTSCheckpointReport(
@@ -209,9 +178,7 @@ def load_conversationtts_checkpoint(
     torch.device(device)
     path = Path(checkpoint).expanduser().resolve()
     if not path.is_file():
-        raise FileNotFoundError(
-            f"ConversationTTS checkpoint was not found: {path}."
-        )
+        raise FileNotFoundError(f"ConversationTTS checkpoint was not found: {path}.")
     if path.suffix.lower() == ".safetensors":
         return _load_safetensors(model, path)
     return _load_restricted_legacy(model, path)

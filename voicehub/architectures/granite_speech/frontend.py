@@ -39,87 +39,66 @@ class GraniteSpeechFeatureExtractor:
             ("projector_window_size", projector_window_size),
             ("projector_downsample_rate", projector_downsample_rate),
         ):
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, Integral)
-                or int(value) <= 0
-            ):
+            if (isinstance(value, bool) or not isinstance(value, Integral) or int(value) <= 0):
                 raise ValueError(f"`{name}` must be a positive integer.")
         if win_length > n_fft:
             raise ValueError("`win_length` cannot exceed `n_fft`.")
         if projector_window_size % projector_downsample_rate:
-            raise ValueError(
-                "`projector_window_size` must be divisible by "
-                "`projector_downsample_rate`.")
+            raise ValueError("`projector_window_size` must be divisible by "
+                             "`projector_downsample_rate`.")
         self.sampling_rate = int(sampling_rate)
         self.n_fft = int(n_fft)
         self.win_length = int(win_length)
         self.hop_length = int(hop_length)
         self.n_mels = int(n_mels)
         self.projector_window_size = int(projector_window_size)
-        self.projector_downsample_rate = int(
-            projector_downsample_rate,
-        )
+        self.projector_downsample_rate = int(projector_downsample_rate, )
 
     @property
     def input_dim(self) -> int:
         return self.n_mels * 2
 
     def num_audio_features(self, raw_length: int) -> int:
-        if (
-            isinstance(raw_length, bool)
-            or not isinstance(raw_length, Integral)
-            or int(raw_length) <= 0
-        ):
+        if (isinstance(raw_length, bool) or not isinstance(raw_length, Integral) or int(raw_length) <= 0):
             raise ValueError("Audio length must be a positive integer.")
         mel_length = int(raw_length) // self.hop_length + 1
         encoder_length = mel_length // 2
-        block_count = math.ceil(
-            encoder_length / self.projector_window_size,
-        )
-        return block_count * (
-            self.projector_window_size
-            // self.projector_downsample_rate
-        )
+        block_count = math.ceil(encoder_length / self.projector_window_size, )
+        return block_count * (self.projector_window_size // self.projector_downsample_rate)
 
     @staticmethod
     def _broadcast_rates(
         sampling_rates: int | None | Sequence[int | None],
         batch_size: int,
     ) -> tuple[int | None, ...]:
-        if (
-            isinstance(sampling_rates, Sequence)
-            and not isinstance(sampling_rates, (str, bytes, bytearray))
-        ):
+        if (isinstance(sampling_rates, Sequence) and not isinstance(sampling_rates, (str, bytes, bytearray))):
             rates = tuple(sampling_rates)
             if len(rates) != batch_size:
-                raise ValueError(
-                    "`sampling_rates` must contain one value per waveform.")
+                raise ValueError("`sampling_rates` must contain one value per waveform.")
             return rates
-        return (sampling_rates,) * batch_size
+        return (sampling_rates, ) * batch_size
 
     @staticmethod
     def _audio_rows(audios: Any) -> tuple[Any, ...]:
         if isinstance(audios, Tensor):
             if audios.ndim == 1:
-                return (audios,)
+                return (audios, )
             if audios.ndim == 2:
                 return tuple(audios[index] for index in range(audios.shape[0]))
-            raise ValueError(
-                "Granite Speech audio tensors must have shape [time] or "
-                "[batch, time].")
+            raise ValueError("Granite Speech audio tensors must have shape [time] or "
+                             "[batch, time].")
         if isinstance(audios, NativeAudio):
-            return (audios,)
+            return (audios, )
         if isinstance(audios, (str, bytes, bytearray)):
-            return (audios,)
+            return (audios, )
         if isinstance(audios, Sequence):
             values = tuple(audios)
             if not values:
                 raise ValueError("Granite Speech audio cannot be empty.")
             if all(isinstance(value, (int, float)) for value in values):
-                return (values,)
+                return (values, )
             return values
-        return (audios,)
+        return (audios, )
 
     def materialize(
         self,
@@ -134,9 +113,7 @@ class GraniteSpeechFeatureExtractor:
                 audio,
                 sampling_rate=rate,
                 target_sampling_rate=self.sampling_rate,
-            )
-            for audio, rate in zip(rows, rates)
-        )
+            ) for audio, rate in zip(rows, rates))
         if any(item.waveform.numel() == 0 for item in materialized):
             raise ValueError("Granite Speech audio cannot be empty.")
         return materialized
@@ -153,17 +130,10 @@ class GraniteSpeechFeatureExtractor:
             audios,
             sampling_rates=sampling_rates,
         )
-        lengths = tuple(
-            int(item.waveform.numel())
-            for item in materialized
-        )
+        lengths = tuple(int(item.waveform.numel()) for item in materialized)
         minimum_length = self.n_fft // 2 + 1
         maximum = max(max(lengths), minimum_length)
-        resolved_device = (
-            materialized[0].waveform.device
-            if device is None
-            else torch.device(device)
-        )
+        resolved_device = (materialized[0].waveform.device if device is None else torch.device(device))
         waveforms = torch.zeros(
             len(materialized),
             maximum,
@@ -220,10 +190,7 @@ class GraniteSpeechFeatureExtractor:
             self.input_dim,
         )
         audio_embed_sizes = torch.tensor(
-            [
-                self.num_audio_features(length)
-                for length in lengths
-            ],
+            [self.num_audio_features(length) for length in lengths],
             dtype=torch.long,
             device=resolved_device,
         )
@@ -231,9 +198,7 @@ class GraniteSpeechFeatureExtractor:
             torch.arange(
                 int(audio_embed_sizes.max().item()),
                 device=resolved_device,
-            ).unsqueeze(0)
-            < audio_embed_sizes.unsqueeze(1)
-        )
+            ).unsqueeze(0) < audio_embed_sizes.unsqueeze(1))
         return {
             "input_features": input_features,
             "input_features_mask": mask,

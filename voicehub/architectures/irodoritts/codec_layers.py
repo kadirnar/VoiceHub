@@ -5,7 +5,6 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 # Keep compatibility with older PyTorch versions
 # where weight_norm is in a different place.
 # try:
@@ -36,6 +35,7 @@ def activation(act: str, **act_params):
 
 
 class Snake1d(nn.Module):
+
     def __init__(self, channels):
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(1, channels, 1))
@@ -51,21 +51,21 @@ def apply_parametrization_norm(module: nn.Module, norm: str = "none"):
     else:
         return module
 
+
 class NormConv1d(nn.Conv1d):
-    """1D Causal Convolution with padding"""
+    """1D Causal Convolution with padding."""
 
     def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: int,
-        stride: int = 1,
-        dilation: int = 1,
-        norm: str = "weight_norm",  # Normalization method, value: "none", "weight_norm", "spectral_norm"
-        causal: bool = False,
-        pad_mode: str = "none",  # Padding mode, value: "none", "auto"
-        **kwargs
-    ):
+            self,
+            in_channels: int,
+            out_channels: int,
+            kernel_size: int,
+            stride: int = 1,
+            dilation: int = 1,
+            norm: str = "weight_norm",  # Normalization method, value: "none", "weight_norm", "spectral_norm"
+            causal: bool = False,
+            pad_mode: str = "none",  # Padding mode, value: "none", "auto"
+            **kwargs):
         if pad_mode == "none":
             pad = (kernel_size - stride) * dilation // 2
         else:
@@ -78,8 +78,7 @@ class NormConv1d(nn.Conv1d):
             stride=stride,
             padding=pad,
             dilation=dilation,
-            **kwargs
-        )
+            **kwargs)
 
         apply_parametrization_norm(self, norm)
 
@@ -114,21 +113,21 @@ class NormConv1d(nn.Conv1d):
         x = self.pad(x)
         return super().forward(x)
 
+
 class NormConvTranspose1d(nn.ConvTranspose1d):
-    """1D Transposed Convolution with padding"""
+    """1D Transposed Convolution with padding."""
 
     def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: int,
-        stride: int = 1,
-        dilation: int = 1,
-        norm: str = "weight_norm",  # Normalization method, value: "none", "weight_norm", "spectral_norm"
-        causal: bool = False,
-        pad_mode: str = "none",  # Padding mode, value: "none", "auto"
-        **kwargs
-    ):
+            self,
+            in_channels: int,
+            out_channels: int,
+            kernel_size: int,
+            stride: int = 1,
+            dilation: int = 1,
+            norm: str = "weight_norm",  # Normalization method, value: "none", "weight_norm", "spectral_norm"
+            causal: bool = False,
+            pad_mode: str = "none",  # Padding mode, value: "none", "auto"
+            **kwargs):
         if pad_mode == "none":
             padding = (stride + 1) // 2
             output_padding = 1 if stride % 2 else 0
@@ -144,8 +143,7 @@ class NormConvTranspose1d(nn.ConvTranspose1d):
             dilation=dilation,
             padding=padding,
             output_padding=output_padding,
-            **kwargs
-        )
+            **kwargs)
 
         self = apply_parametrization_norm(self, norm)
         self.causal = causal
@@ -177,8 +175,8 @@ class NormConvTranspose1d(nn.ConvTranspose1d):
 
 
 class MsgProcessor(torch.nn.Module):
-    """
-    Apply the secret message to the encoder output.
+    """Apply the secret message to the encoder output.
+
     Args:
         nbits: Number of bits used to generate the message. Must be non-zero
         hidden_size: Dimension of the encoder output
@@ -205,8 +203,6 @@ class MsgProcessor(torch.nn.Module):
         indices = (indices + msg).long()
         msg_aux = self.msg_processor(indices)  # b x k -> b x k x h
         msg_aux = msg_aux.sum(dim=-2)  # b x k x h -> b x h
-        msg_aux = msg_aux.unsqueeze(-1).repeat(
-            1, 1, hidden.shape[2]
-        )  # b x h -> b x h x t/f
+        msg_aux = msg_aux.unsqueeze(-1).repeat(1, 1, hidden.shape[2])  # b x h -> b x h x t/f
         hidden = hidden + msg_aux  # -> b x h x t/f
         return hidden

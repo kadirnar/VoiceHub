@@ -49,43 +49,36 @@ class ESPnetArtifacts:
 
     def __post_init__(self) -> None:
         for name in (
-            "checkpoint",
-            "language_model_checkpoint",
-            "tokenizer",
-            "tokens",
-            "config",
+                "checkpoint",
+                "language_model_checkpoint",
+                "tokenizer",
+                "tokens",
+                "config",
         ):
             value = Path(getattr(self, name)).expanduser().resolve()
             if not value.is_file():
-                raise FileNotFoundError(
-                    f"ESPnet {name} file was not found: {value}."
-                )
+                raise FileNotFoundError(f"ESPnet {name} file was not found: {value}.")
             object.__setattr__(self, name, value)
         try:
             values = json.loads(self.config.read_text(encoding="utf-8"))
         except (
-            OSError,
-            UnicodeDecodeError,
-            json.JSONDecodeError,
+                OSError,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
         ) as error:
-            raise ValueError(
-                f"ESPnet native config is not valid JSON: {self.config}."
-            ) from error
+            raise ValueError(f"ESPnet native config is not valid JSON: {self.config}.") from error
         if not isinstance(values, dict):
             raise TypeError("ESPnet native config root must be a JSON object.")
 
 
 def _is_complete_native(root: Path) -> bool:
-    return all(
-        (root / name).is_file()
-        for name in (
-            NATIVE_ESPNET_FILENAME,
-            NATIVE_ESPNET_LM_FILENAME,
-            NATIVE_ESPNET_TOKENIZER,
-            NATIVE_ESPNET_TOKENS,
-            "config.json",
-        )
-    )
+    return all((root / name).is_file() for name in (
+        NATIVE_ESPNET_FILENAME,
+        NATIVE_ESPNET_LM_FILENAME,
+        NATIVE_ESPNET_TOKENIZER,
+        NATIVE_ESPNET_TOKENS,
+        "config.json",
+    ))
 
 
 def _native_artifacts(
@@ -141,11 +134,8 @@ def _local_artifacts(
     if upstream is None:
         raise FileNotFoundError(
             f"No complete native or audited upstream ESPnet artifact was "
-            f"found in {root}."
-        )
-    destination = root / ".voicehub-native" / (
-        "espnet-librispeech-transformer-e18"
-    )
+            f"found in {root}.")
+    destination = root / ".voicehub-native" / ("espnet-librispeech-transformer-e18")
     if not _is_complete_native(destination):
         convert_espnet_librispeech_checkpoints(
             asr_checkpoint=upstream["asr"],
@@ -188,9 +178,7 @@ def resolve_espnet_artifacts(
             trust_pickle_checkpoint=trust_pickle_checkpoint,
         )
     if is_explicit_local_path(source):
-        raise FileNotFoundError(
-            f"Local ESPnet model path was not found: {source_path}."
-        )
+        raise FileNotFoundError(f"Local ESPnet model path was not found: {source_path}.")
     source_name = str(source)
     if source_name not in _OFFICIAL_ALIASES:
         checkpoint = resolve_pretrained_file(
@@ -202,10 +190,10 @@ def resolve_espnet_artifacts(
             local_files_only=local_files_only,
         )
         for filename in (
-            NATIVE_ESPNET_LM_FILENAME,
-            NATIVE_ESPNET_TOKENIZER,
-            NATIVE_ESPNET_TOKENS,
-            "config.json",
+                NATIVE_ESPNET_LM_FILENAME,
+                NATIVE_ESPNET_TOKENIZER,
+                NATIVE_ESPNET_TOKENS,
+                "config.json",
         ):
             resolve_pretrained_file(
                 source_name,
@@ -224,8 +212,7 @@ def resolve_espnet_artifacts(
         raise ValueError(
             "The official ESPnet alias is pinned to immutable revision "
             f"{ESPNET_REVISION}; use a custom native repository for another "
-            "checkpoint."
-        )
+            "checkpoint.")
     config_path = resolve_pretrained_file(
         ESPNET_REPOSITORY,
         ESPNET_CONFIG_FILENAME,
@@ -235,9 +222,7 @@ def resolve_espnet_artifacts(
         local_files_only=local_files_only,
     )
     snapshot = _snapshot_root(config_path, ESPNET_CONFIG_FILENAME)
-    destination = snapshot / ".voicehub-native" / (
-        "espnet-librispeech-transformer-e18"
-    )
+    destination = snapshot / ".voicehub-native" / ("espnet-librispeech-transformer-e18")
     if _is_complete_native(destination):
         return _native_artifacts(
             destination,
@@ -250,11 +235,12 @@ def resolve_espnet_artifacts(
             "The official ESPnet release publishes pickle-based ASR and LM "
             "checkpoints. Review the pinned CC-BY-4.0 artifact and pass "
             "`trust_pickle_checkpoint=True` for one-time restricted "
-            "conversion. Cached Safetensors reloads require no trust flag."
-        )
+            "conversion. Cached Safetensors reloads require no trust flag.")
     upstream = {
-        "config": config_path,
-        "asr": resolve_pretrained_file(
+        "config":
+        config_path,
+        "asr":
+        resolve_pretrained_file(
             ESPNET_REPOSITORY,
             ESPNET_ASR_FILENAME,
             cache_dir=cache_dir,
@@ -262,7 +248,8 @@ def resolve_espnet_artifacts(
             token=token,
             local_files_only=local_files_only,
         ),
-        "lm": resolve_pretrained_file(
+        "lm":
+        resolve_pretrained_file(
             ESPNET_REPOSITORY,
             ESPNET_LM_FILENAME,
             cache_dir=cache_dir,
@@ -270,7 +257,8 @@ def resolve_espnet_artifacts(
             token=token,
             local_files_only=local_files_only,
         ),
-        "tokenizer": resolve_pretrained_file(
+        "tokenizer":
+        resolve_pretrained_file(
             ESPNET_REPOSITORY,
             ESPNET_TOKENIZER_FILENAME,
             cache_dir=cache_dir,

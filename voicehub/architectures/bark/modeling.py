@@ -1,9 +1,9 @@
 """VoiceHub-owned Bark transformer and generation runtime.
 
-The tensor-bearing module names intentionally match the pinned Hugging Face
-Bark graph for the semantic, coarse, and fine stages.  The embedded Encodec
-uses VoiceHub's native implementation; checkpoint.py owns the audited,
-bijective namespace translation for the provider checkpoint.
+The tensor-bearing module names intentionally match the pinned Hugging
+Face Bark graph for the semantic, coarse, and fine stages.  The embedded
+Encodec uses VoiceHub's native implementation; checkpoint.py owns the
+audited, bijective namespace translation for the provider checkpoint.
 """
 
 from __future__ import annotations
@@ -78,12 +78,11 @@ class BarkSelfAttention(nn.Module):
         )
         self.is_causal = is_causal
         if is_causal:
-            causal = torch.tril(
-                torch.ones(
-                    config.block_size,
-                    config.block_size,
-                    dtype=torch.bool,
-                )).view(1, 1, config.block_size, config.block_size)
+            causal = torch.tril(torch.ones(
+                config.block_size,
+                config.block_size,
+                dtype=torch.bool,
+            )).view(1, 1, config.block_size, config.block_size)
             self.register_buffer("bias", causal)
 
     def _split_heads(self, value: Tensor) -> Tensor:
@@ -92,7 +91,7 @@ class BarkSelfAttention(nn.Module):
 
     def _merge_heads(self, value: Tensor) -> Tensor:
         value = value.transpose(1, 2).contiguous()
-        return value.view(value.shape[:-2] + (self.embed_dim,))
+        return value.view(value.shape[:-2] + (self.embed_dim, ))
 
     def forward(
         self,
@@ -103,9 +102,9 @@ class BarkSelfAttention(nn.Module):
         use_cache: bool = False,
         output_attentions: bool = False,
     ) -> tuple[
-        Tensor,
-        tuple[Tensor, Tensor] | None,
-        Tensor | None,
+            Tensor,
+            tuple[Tensor, Tensor] | None,
+            Tensor | None,
     ]:
         query, key, value = self.att_proj(hidden_states).split(
             self.embed_dim,
@@ -125,8 +124,7 @@ class BarkSelfAttention(nn.Module):
             query_length = query.shape[-2]
             key_length = key.shape[-2]
             if key_length > self.bias.shape[-1]:
-                raise ValueError(
-                    "Bark sequence length exceeds the configured block size.")
+                raise ValueError("Bark sequence length exceeds the configured block size.")
             causal = self.bias[
                 :,
                 :,
@@ -148,6 +146,7 @@ class BarkSelfAttention(nn.Module):
 
 
 class BarkMLP(nn.Module):
+
     def __init__(self, config: BarkSubModelConfig) -> None:
         super().__init__()
         self.in_proj = nn.Linear(
@@ -168,6 +167,7 @@ class BarkMLP(nn.Module):
 
 
 class BarkBlock(nn.Module):
+
     def __init__(
         self,
         config: BarkSubModelConfig,
@@ -204,8 +204,7 @@ class BarkBlock(nn.Module):
             output_attentions=output_attentions,
         )
         hidden_states = hidden_states + attended
-        hidden_states = hidden_states + self.mlp(
-            self.layernorm_2(hidden_states))
+        hidden_states = hidden_states + self.mlp(self.layernorm_2(hidden_states))
         return hidden_states, present, weights
 
 
@@ -220,8 +219,7 @@ def _additive_attention_mask(
     if attention_mask.ndim != 2:
         raise ValueError("Bark attention masks must have shape [batch, tokens].")
     if attention_mask.shape[-1] != key_length:
-        raise ValueError(
-            "Bark attention mask length must match the cached key length.")
+        raise ValueError("Bark attention mask length must match the cached key length.")
     mask = attention_mask[:, None, None, :].to(dtype=dtype)
     return (1.0 - mask) * torch.finfo(dtype).min
 
@@ -241,10 +239,7 @@ class BarkCausalModel(nn.Module):
             config.hidden_size,
         )
         self.drop = nn.Dropout(config.dropout)
-        self.layers = nn.ModuleList([
-            BarkBlock(config, is_causal=True)
-            for _ in range(config.num_layers)
-        ])
+        self.layers = nn.ModuleList([BarkBlock(config, is_causal=True) for _ in range(config.num_layers)])
         self.layernorm_final = nn.LayerNorm(
             config.hidden_size,
             bias=config.bias,
@@ -285,8 +280,7 @@ class BarkCausalModel(nn.Module):
         **_: Any,
     ) -> BarkCausalOutput | tuple[Any, ...]:
         if (input_ids is None) == (inputs_embeds is None):
-            raise ValueError(
-                "Pass exactly one of `input_ids` or `inputs_embeds` to Bark.")
+            raise ValueError("Pass exactly one of `input_ids` or `inputs_embeds` to Bark.")
         if inputs_embeds is None:
             inputs_embeds = self.input_embeds_layer(input_ids)
         if inputs_embeds.ndim != 3 or inputs_embeds.shape[1] == 0:
@@ -296,8 +290,7 @@ class BarkCausalModel(nn.Module):
             raise TypeError("Bark `use_cache` must be a boolean.")
         if past_key_values is not None and len(past_key_values) != len(self.layers):
             raise ValueError("Bark cache depth does not match the transformer.")
-        past_length = (
-            0 if past_key_values is None else past_key_values[0][0].shape[-2])
+        past_length = (0 if past_key_values is None else past_key_values[0][0].shape[-2])
         sequence_length = inputs_embeds.shape[1]
         total_length = past_length + sequence_length
         if total_length > self.config.block_size:
@@ -313,8 +306,7 @@ class BarkCausalModel(nn.Module):
             ).unsqueeze(0)
         if position_ids.shape[-1] != sequence_length:
             raise ValueError("Bark position IDs must align with the input tokens.")
-        hidden_states = self.drop(
-            inputs_embeds + self.position_embeds_layer(position_ids))
+        hidden_states = self.drop(inputs_embeds + self.position_embeds_layer(position_ids))
         additive_mask = _additive_attention_mask(
             attention_mask,
             dtype=hidden_states.dtype,
@@ -326,8 +318,7 @@ class BarkCausalModel(nn.Module):
         for index, layer in enumerate(self.layers):
             if hidden_history is not None:
                 hidden_history.append(hidden_states)
-            layer_past = (
-                None if past_key_values is None else past_key_values[index])
+            layer_past = (None if past_key_values is None else past_key_values[index])
             hidden_states, present, weights = layer(
                 hidden_states,
                 attention_mask=additive_mask,
@@ -344,29 +335,19 @@ class BarkCausalModel(nn.Module):
             hidden_history.append(hidden_states)
         output = BarkCausalOutput(
             logits=self.lm_head(hidden_states),
-            past_key_values=(
-                tuple(present_values)
-                if present_values is not None
-                else None),
-            hidden_states=(
-                tuple(hidden_history) if hidden_history is not None else None),
-            attentions=(
-                tuple(attention_history)
-                if attention_history is not None
-                else None),
+            past_key_values=(tuple(present_values) if present_values is not None else None),
+            hidden_states=(tuple(hidden_history) if hidden_history is not None else None),
+            attentions=(tuple(attention_history) if attention_history is not None else None),
         )
         if return_dict:
             return output
         return tuple(
-            item
-            for item in (
+            item for item in (
                 output.logits,
                 output.past_key_values,
                 output.hidden_states,
                 output.attentions,
-            )
-            if item is not None
-        )
+            ) if item is not None)
 
     def _autoregressive_generate(
         self,
@@ -385,11 +366,7 @@ class BarkCausalModel(nn.Module):
     ) -> Tensor:
         if prefix_ids.ndim != 2 or prefix_ids.shape[1] == 0:
             raise ValueError("Bark generation prefix must be a non-empty token batch.")
-        if (
-            isinstance(max_new_tokens, bool)
-            or not isinstance(max_new_tokens, int)
-            or max_new_tokens < 0
-        ):
+        if (isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or max_new_tokens < 0):
             raise ValueError("Bark `max_new_tokens` must be non-negative.")
         if not 0 < temperature:
             raise ValueError("Bark temperature must be greater than zero.")
@@ -543,8 +520,7 @@ class BarkSemanticModel(BarkCausalModel):
         if history_prompt is not None:
             history = history_prompt.get("semantic_prompt")
             if not isinstance(history, Tensor) or history.ndim != 1:
-                raise ValueError(
-                    "Bark semantic history must be a one-dimensional tensor.")
+                raise ValueError("Bark semantic history must be a one-dimensional tensor.")
             history = history[-maximum:].to(
                 device=self.device,
                 dtype=torch.long,
@@ -556,7 +532,7 @@ class BarkSemanticModel(BarkCausalModel):
             )
         else:
             history = torch.full(
-                (maximum,),
+                (maximum, ),
                 generation_config.semantic_pad_token,
                 device=self.device,
                 dtype=torch.long,
@@ -570,8 +546,7 @@ class BarkSemanticModel(BarkCausalModel):
         )
         embeddings = torch.cat(
             (
-                self.input_embeds_layer(input_ids)
-                + self.input_embeds_layer(history),
+                self.input_embeds_layer(input_ids) + self.input_embeds_layer(history),
                 self.input_embeds_layer(infer),
             ),
             dim=1,
@@ -585,25 +560,13 @@ class BarkSemanticModel(BarkCausalModel):
         output = self._autoregressive_generate(
             prefix,
             inputs_embeds=embeddings,
-            max_new_tokens=(
-                generation_config.max_new_tokens
-                if max_new_tokens is None
-                else max_new_tokens),
-            do_sample=(
-                generation_config.do_sample
-                if do_sample is None
-                else do_sample),
-            temperature=(
-                generation_config.temperature
-                if temperature is None
-                else temperature),
+            max_new_tokens=(generation_config.max_new_tokens if max_new_tokens is None else max_new_tokens),
+            do_sample=(generation_config.do_sample if do_sample is None else do_sample),
+            temperature=(generation_config.temperature if temperature is None else temperature),
             top_k=generation_config.top_k if top_k is None else top_k,
             top_p=generation_config.top_p if top_p is None else top_p,
             eos_token_id=generation_config.eos_token_id,
-            min_eos_p=(
-                generation_config.min_eos_p
-                if min_eos_p is None
-                else min_eos_p),
+            min_eos_p=(generation_config.min_eos_p if min_eos_p is None else min_eos_p),
             allowed_token_range=(
                 0,
                 generation_config.semantic_pad_token + 1,
@@ -635,16 +598,10 @@ class BarkCoarseModel(BarkCausalModel):
             return empty, empty
         semantic = history_prompt.get("semantic_prompt")
         coarse = history_prompt.get("coarse_prompt")
-        if (
-            not isinstance(semantic, Tensor)
-            or semantic.ndim != 1
-            or not isinstance(coarse, Tensor)
-            or coarse.ndim != 2
-            or coarse.shape[0] != 2
-        ):
-            raise ValueError(
-                "Bark history requires semantic [tokens] and coarse "
-                "[2, frames] tensors.")
+        if (not isinstance(semantic, Tensor) or semantic.ndim != 1 or not isinstance(coarse, Tensor) or
+                coarse.ndim != 2 or coarse.shape[0] != 2):
+            raise ValueError("Bark history requires semantic [tokens] and coarse "
+                             "[2, frames] tensors.")
         semantic = semantic.to(device=self.device, dtype=torch.long)
         semantic = semantic.unsqueeze(0).expand(batch_size, -1)
         coarse = coarse.to(device=self.device, dtype=torch.long).clone()
@@ -652,8 +609,7 @@ class BarkCoarseModel(BarkCausalModel):
         coarse = coarse.transpose(0, 1).reshape(-1)
         coarse = coarse + semantic_config.semantic_vocab_size
         coarse = coarse.unsqueeze(0).expand(batch_size, -1)
-        max_semantic_history = math.floor(
-            max_coarse_history / semantic_to_coarse_ratio)
+        max_semantic_history = math.floor(max_coarse_history / semantic_to_coarse_ratio)
         semantic_count = min(
             max_semantic_history,
             semantic.shape[1] - semantic.shape[1] % 2,
@@ -679,26 +635,18 @@ class BarkCoarseModel(BarkCausalModel):
         top_p: float | None = None,
     ) -> Tensor | tuple[Tensor, Tensor]:
         if semantic_output.ndim != 2 or semantic_output.shape[1] == 0:
-            raise ValueError(
-                "Bark semantic output must have shape [batch, tokens].")
+            raise ValueError("Bark semantic output must have shape [batch, tokens].")
         semantic_output = semantic_output.clone().long()
         semantic_output.masked_fill_(
             semantic_output == semantic_config.semantic_pad_token,
             generation_config.coarse_semantic_pad_token,
         )
         ratio = (
-            generation_config.coarse_rate_hz
-            / semantic_config.semantic_rate_hz
-            * generation_config.n_coarse_codebooks
-        )
-        output_lengths = (
-            semantic_output != generation_config.coarse_semantic_pad_token
-        ).sum(dim=1)
-        output_lengths = torch.floor(
-            output_lengths * ratio
-            / generation_config.n_coarse_codebooks)
-        output_lengths = torch.round(
-            output_lengths * generation_config.n_coarse_codebooks).int()
+            generation_config.coarse_rate_hz / semantic_config.semantic_rate_hz *
+            generation_config.n_coarse_codebooks)
+        output_lengths = (semantic_output != generation_config.coarse_semantic_pad_token).sum(dim=1)
+        output_lengths = torch.floor(output_lengths * ratio / generation_config.n_coarse_codebooks)
+        output_lengths = torch.round(output_lengths * generation_config.n_coarse_codebooks).int()
         maximum_generated = int(output_lengths.max().item())
         batch_size = semantic_output.shape[0]
         semantic_history, coarse = self._histories(
@@ -716,21 +664,14 @@ class BarkCoarseModel(BarkCausalModel):
         )
         history_length = coarse.shape[1]
         generated_length = 0
-        window_count = math.ceil(
-            maximum_generated / generation_config.sliding_window_len)
-        max_semantic_history = math.floor(
-            generation_config.max_coarse_history / ratio)
-        ranges = tuple(
-            (
-                semantic_config.semantic_vocab_size + codebook * codebook_size,
-                semantic_config.semantic_vocab_size
-                + (codebook + 1) * codebook_size,
-            )
-            for codebook in range(generation_config.n_coarse_codebooks)
-        )
+        window_count = math.ceil(maximum_generated / generation_config.sliding_window_len)
+        max_semantic_history = math.floor(generation_config.max_coarse_history / ratio)
+        ranges = tuple((
+            semantic_config.semantic_vocab_size + codebook * codebook_size,
+            semantic_config.semantic_vocab_size + (codebook + 1) * codebook_size,
+        ) for codebook in range(generation_config.n_coarse_codebooks))
         for _ in range(window_count):
-            semantic_index = (
-                base_semantic_index + round(generated_length / ratio))
+            semantic_index = (base_semantic_index + round(generated_length / ratio))
             semantic_window = semantic_output[
                 :,
                 max(0, semantic_index - max_semantic_history):,
@@ -743,8 +684,7 @@ class BarkCoarseModel(BarkCausalModel):
                 semantic_window,
                 (
                     0,
-                    generation_config.max_coarse_input_length
-                    - semantic_window.shape[1],
+                    generation_config.max_coarse_input_length - semantic_window.shape[1],
                 ),
                 value=generation_config.coarse_semantic_pad_token,
             )
@@ -769,18 +709,10 @@ class BarkCoarseModel(BarkCausalModel):
             generated = self._autoregressive_generate(
                 prefix,
                 max_new_tokens=requested,
-                do_sample=(
-                    generation_config.do_sample
-                    if do_sample is None
-                    else do_sample),
-                temperature=(
-                    generation_config.temperature
-                    if temperature is None
-                    else temperature),
-                top_k=(
-                    generation_config.top_k if top_k is None else top_k),
-                top_p=(
-                    generation_config.top_p if top_p is None else top_p),
+                do_sample=(generation_config.do_sample if do_sample is None else do_sample),
+                temperature=(generation_config.temperature if temperature is None else temperature),
+                top_k=(generation_config.top_k if top_k is None else top_k),
+                top_p=(generation_config.top_p if top_p is None else top_p),
                 alternating_ranges=ranges,
             )
             coarse = torch.cat(
@@ -800,27 +732,21 @@ class BarkFineModel(nn.Module):
     def __init__(self, config: BarkFineConfig) -> None:
         super().__init__()
         self.config = config
-        self.input_embeds_layers = nn.ModuleList([
-            nn.Embedding(config.input_vocab_size, config.hidden_size)
-            for _ in range(config.n_codes_total)
-        ])
+        self.input_embeds_layers = nn.ModuleList(
+            [nn.Embedding(config.input_vocab_size, config.hidden_size) for _ in range(config.n_codes_total)])
         self.position_embeds_layer = nn.Embedding(
             config.block_size,
             config.hidden_size,
         )
         self.drop = nn.Dropout(config.dropout)
-        self.layers = nn.ModuleList([
-            BarkBlock(config, is_causal=False)
-            for _ in range(config.num_layers)
-        ])
+        self.layers = nn.ModuleList([BarkBlock(config, is_causal=False) for _ in range(config.num_layers)])
         self.layernorm_final = nn.LayerNorm(config.hidden_size)
         self.lm_heads = nn.ModuleList([
             nn.Linear(
                 config.hidden_size,
                 config.output_vocab_size,
                 bias=False,
-            )
-            for _ in range(
+            ) for _ in range(
                 config.n_codes_given,
                 config.n_codes_total,
             )
@@ -858,27 +784,17 @@ class BarkFineModel(nn.Module):
         return_dict: bool = True,
         **_: Any,
     ) -> BarkFineOutput | tuple[Any, ...]:
-        if (
-            isinstance(codebook_idx, bool)
-            or not isinstance(codebook_idx, int)
-            or not self.config.n_codes_given <= codebook_idx < self.config.n_codes_total
-        ):
-            raise ValueError(
-                "Bark `codebook_idx` must identify a fine codebook.")
+        if (isinstance(codebook_idx, bool) or not isinstance(codebook_idx, int) or
+                not self.config.n_codes_given <= codebook_idx < self.config.n_codes_total):
+            raise ValueError("Bark `codebook_idx` must identify a fine codebook.")
         if (input_ids is None) == (inputs_embeds is None):
-            raise ValueError(
-                "Pass exactly one of `input_ids` or `inputs_embeds` to Bark fine.")
+            raise ValueError("Pass exactly one of `input_ids` or `inputs_embeds` to Bark fine.")
         if input_ids is not None:
-            if (
-                input_ids.ndim != 3
-                or input_ids.shape[-1] != self.config.n_codes_total
-            ):
-                raise ValueError(
-                    "Bark fine IDs must have shape "
-                    "[batch, tokens, n_codes_total].")
+            if (input_ids.ndim != 3 or input_ids.shape[-1] != self.config.n_codes_total):
+                raise ValueError("Bark fine IDs must have shape "
+                                 "[batch, tokens, n_codes_total].")
             pieces = [
-                embedding(input_ids[:, :, index])
-                for index, embedding in enumerate(self.input_embeds_layers)
+                embedding(input_ids[:, :, index]) for index, embedding in enumerate(self.input_embeds_layers)
                 if index <= codebook_idx
             ]
             inputs_embeds = torch.stack(pieces, dim=-1).sum(dim=-1)
@@ -891,8 +807,7 @@ class BarkFineModel(nn.Module):
                 device=inputs_embeds.device,
                 dtype=torch.long,
             ).unsqueeze(0)
-        hidden_states = self.drop(
-            inputs_embeds + self.position_embeds_layer(position_ids))
+        hidden_states = self.drop(inputs_embeds + self.position_embeds_layer(position_ids))
         additive_mask = _additive_attention_mask(
             attention_mask,
             dtype=hidden_states.dtype,
@@ -914,26 +829,18 @@ class BarkFineModel(nn.Module):
         if hidden_history is not None:
             hidden_history.append(hidden_states)
         output = BarkFineOutput(
-            logits=self.lm_heads[
-                codebook_idx - self.config.n_codes_given](hidden_states),
-            hidden_states=(
-                tuple(hidden_history) if hidden_history is not None else None),
-            attentions=(
-                tuple(attention_history)
-                if attention_history is not None
-                else None),
+            logits=self.lm_heads[codebook_idx - self.config.n_codes_given](hidden_states),
+            hidden_states=(tuple(hidden_history) if hidden_history is not None else None),
+            attentions=(tuple(attention_history) if attention_history is not None else None),
         )
         if return_dict:
             return output
         return tuple(
-            item
-            for item in (
+            item for item in (
                 output.logits,
                 output.hidden_states,
                 output.attentions,
-            )
-            if item is not None
-        )
+            ) if item is not None)
 
     @torch.no_grad()
     def generate(
@@ -947,16 +854,9 @@ class BarkFineModel(nn.Module):
         history_prompt: dict[str, Tensor] | None = None,
         temperature: float | None = None,
     ) -> Tensor:
-        if (
-            coarse_output.ndim != 2
-            or coarse_output.shape[1] % coarse_config.n_coarse_codebooks
-        ):
-            raise ValueError(
-                "Bark coarse output must contain complete interleaved frames.")
-        temperature = (
-            generation_config.temperature
-            if temperature is None
-            else temperature)
+        if (coarse_output.ndim != 2 or coarse_output.shape[1] % coarse_config.n_coarse_codebooks):
+            raise ValueError("Bark coarse output must contain complete interleaved frames.")
+        temperature = (generation_config.temperature if temperature is None else temperature)
         coarse = coarse_output.view(
             coarse_output.shape[0],
             -1,
@@ -971,21 +871,16 @@ class BarkFineModel(nn.Module):
             coarse,
             (
                 0,
-                generation_config.n_fine_codebooks
-                - coarse_config.n_coarse_codebooks,
+                generation_config.n_fine_codebooks - coarse_config.n_coarse_codebooks,
             ),
             value=codebook_size,
         )
         history = None
         if history_prompt is not None:
             history = history_prompt.get("fine_prompt")
-            if (
-                not isinstance(history, Tensor)
-                or history.ndim != 2
-                or history.shape[0] != generation_config.n_fine_codebooks
-            ):
-                raise ValueError(
-                    "Bark fine history must have shape [8, frames].")
+            if (not isinstance(history, Tensor) or history.ndim != 2 or
+                    history.shape[0] != generation_config.n_fine_codebooks):
+                raise ValueError("Bark fine history must have shape [8, frames].")
             history = history.T.unsqueeze(0).expand(batch_size, -1, -1)
             history = history.to(device=self.device, dtype=torch.long)
             history = history[:, -generation_config.max_fine_history_length:]
@@ -1000,9 +895,8 @@ class BarkFineModel(nn.Module):
                 value=codebook_size,
             )
         loops = (
-            coarse.shape[1]
-            - (generation_config.max_fine_input_length - history_length)
-        ) / generation_config.max_fine_history_length
+            coarse.shape[1] - (generation_config.max_fine_input_length -
+                               history_length)) / generation_config.max_fine_history_length
         loops = max(0, math.ceil(loops)) + 1
         n_coarse = coarse_config.n_coarse_codebooks
         for outer in range(loops):
@@ -1011,8 +905,7 @@ class BarkFineModel(nn.Module):
                 fine.shape[1] - generation_config.max_fine_input_length,
             )
             fill = min(
-                history_length
-                + outer * generation_config.max_fine_history_length,
+                history_length + outer * generation_config.max_fine_history_length,
                 fine.shape[1] - generation_config.max_fine_history_length,
             )
             relative_fill = fill - start
@@ -1022,8 +915,8 @@ class BarkFineModel(nn.Module):
                 :,
             ].clone()
             for codebook in range(
-                n_coarse,
-                generation_config.n_fine_codebooks,
+                    n_coarse,
+                    generation_config.n_fine_codebooks,
             ):
                 logits = self(
                     buffer,
@@ -1034,8 +927,7 @@ class BarkFineModel(nn.Module):
                     prediction = relevant.argmax(dim=-1)
                 else:
                     if temperature <= 0:
-                        raise ValueError(
-                            "Bark fine temperature must be greater than zero.")
+                        raise ValueError("Bark fine temperature must be greater than zero.")
                     probabilities = F.softmax(
                         relevant / temperature,
                         dim=-1,
@@ -1044,10 +936,8 @@ class BarkFineModel(nn.Module):
                         probabilities.reshape(-1, codebook_size),
                         num_samples=1,
                     ).view(batch_size, -1)
-                buffer[:, relative_fill:, codebook] = prediction.to(
-                    dtype=buffer.dtype)
-            length = (
-                generation_config.max_fine_input_length - relative_fill)
+                buffer[:, relative_fill:, codebook] = prediction.to(dtype=buffer.dtype)
+            length = (generation_config.max_fine_input_length - relative_fill)
             fine[:, fill:fill + length, n_coarse:] = buffer[
                 :,
                 relative_fill:,
@@ -1057,8 +947,7 @@ class BarkFineModel(nn.Module):
         if remove_end:
             fine = fine[:, :, :-remove_end]
         if fine.shape[-1] != coarse.shape[1]:
-            raise RuntimeError(
-                "Bark fine generation changed the acoustic frame count.")
+            raise RuntimeError("Bark fine generation changed the acoustic frame count.")
         return fine
 
 
@@ -1076,56 +965,28 @@ class BarkModel(nn.Module):
         self.config = config
         self.generation_config = generation_config or BarkGenerationConfig()
         if self.generation_config.sample_rate != config.codec.sample_rate:
-            raise ValueError(
-                "Bark generation and codec sample rates must match.")
+            raise ValueError("Bark generation and codec sample rates must match.")
         if self.generation_config.codebook_size != config.codec.bins:
-            raise ValueError(
-                "Bark generation and codec codebook sizes must match.")
-        if (
-            self.generation_config.fine.n_fine_codebooks
-            != config.fine.n_codes_total
-        ):
-            raise ValueError(
-                "Bark fine generation and model codebook counts must match.")
-        if (
-            self.generation_config.coarse.n_coarse_codebooks
-            > self.generation_config.fine.n_fine_codebooks
-        ):
-            raise ValueError(
-                "Bark coarse codebooks cannot exceed fine codebooks.")
-        if (
-            config.codec.resolved_n_q
-            < self.generation_config.fine.n_fine_codebooks
-        ):
-            raise ValueError(
-                "Bark codec has fewer quantizers than the fine stage.")
+            raise ValueError("Bark generation and codec codebook sizes must match.")
+        if (self.generation_config.fine.n_fine_codebooks != config.fine.n_codes_total):
+            raise ValueError("Bark fine generation and model codebook counts must match.")
+        if (self.generation_config.coarse.n_coarse_codebooks > self.generation_config.fine.n_fine_codebooks):
+            raise ValueError("Bark coarse codebooks cannot exceed fine codebooks.")
+        if (config.codec.resolved_n_q < self.generation_config.fine.n_fine_codebooks):
+            raise ValueError("Bark codec has fewer quantizers than the fine stage.")
         semantic_generation = self.generation_config.semantic
-        if (
-            semantic_generation.semantic_infer_token
-            >= config.semantic.input_vocab_size
-            or semantic_generation.text_pad_token
-            >= config.semantic.input_vocab_size
-            or semantic_generation.semantic_pad_token
-            >= config.semantic.output_vocab_size
-        ):
-            raise ValueError(
-                "Bark semantic special tokens exceed the model vocabulary.")
+        if (semantic_generation.semantic_infer_token >= config.semantic.input_vocab_size or
+                semantic_generation.text_pad_token >= config.semantic.input_vocab_size or
+                semantic_generation.semantic_pad_token >= config.semantic.output_vocab_size):
+            raise ValueError("Bark semantic special tokens exceed the model vocabulary.")
         coarse_generation = self.generation_config.coarse
-        if (
-            coarse_generation.coarse_infer_token
-            >= config.coarse.input_vocab_size
-            or coarse_generation.coarse_semantic_pad_token
-            >= config.coarse.input_vocab_size
-        ):
-            raise ValueError(
-                "Bark coarse special tokens exceed the model vocabulary.")
+        if (coarse_generation.coarse_infer_token >= config.coarse.input_vocab_size or
+                coarse_generation.coarse_semantic_pad_token >= config.coarse.input_vocab_size):
+            raise ValueError("Bark coarse special tokens exceed the model vocabulary.")
         self.semantic = BarkSemanticModel(config.semantic)
         self.coarse_acoustics = BarkCoarseModel(config.coarse)
         self.fine_acoustics = BarkFineModel(config.fine)
-        self.codec_model = (
-            EncodecModel.from_config(config.codec)
-            if codec_model is None
-            else codec_model)
+        self.codec_model = (EncodecModel.from_config(config.codec) if codec_model is None else codec_model)
 
     @property
     def device(self) -> torch.device:
@@ -1139,22 +1000,17 @@ class BarkModel(nn.Module):
         if not isinstance(self.codec_model, EncodecModel):
             decode_codes = getattr(self.codec_model, "decode_codes", None)
             if not callable(decode_codes):
-                raise TypeError(
-                    "Injected Bark codecs must implement `decode_codes`.")
+                raise TypeError("Injected Bark codecs must implement `decode_codes`.")
             return decode_codes(fine_output, output_lengths=output_lengths)
         if fine_output.ndim != 3:
-            raise ValueError(
-                "Bark fine codes must have shape [batch, codebooks, frames].")
-        embeddings = self.codec_model.quantizer.decode(
-            fine_output.transpose(0, 1))
+            raise ValueError("Bark fine codes must have shape [batch, codebooks, frames].")
+        embeddings = self.codec_model.quantizer.decode(fine_output.transpose(0, 1))
         if output_lengths is None:
             return self.codec_model.decoder(embeddings).squeeze(1)
         audio: list[Tensor] = []
         for sample, length in zip(embeddings, output_lengths, strict=True):
             frames = int(length.item())
-            audio.append(
-                self.codec_model.decoder(
-                    sample[:, :frames].unsqueeze(0)).squeeze())
+            audio.append(self.codec_model.decoder(sample[:, :frames].unsqueeze(0)).squeeze())
         return audio
 
     @torch.no_grad()
@@ -1187,9 +1043,7 @@ class BarkModel(nn.Module):
         output_lengths = None
         if return_output_lengths:
             coarse, output_lengths = coarse_result
-            output_lengths = (
-                output_lengths
-                // self.generation_config.coarse.n_coarse_codebooks)
+            output_lengths = (output_lengths // self.generation_config.coarse.n_coarse_codebooks)
         else:
             coarse = coarse_result
         fine = self.fine_acoustics.generate(
@@ -1205,15 +1059,12 @@ class BarkModel(nn.Module):
         if not return_output_lengths:
             return audio
         if not isinstance(audio, list):
-            raise RuntimeError(
-                "Bark length-aware codec decoding must return a sample list.")
+            raise RuntimeError("Bark length-aware codec decoding must return a sample list.")
         lengths = [sample.numel() for sample in audio]
         return nn.utils.rnn.pad_sequence(audio, batch_first=True), lengths
 
 
-def _split_options(
-    options: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _split_options(options: dict[str, Any], ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     semantic: dict[str, Any] = {}
     coarse: dict[str, Any] = {}
     fine: dict[str, Any] = {}

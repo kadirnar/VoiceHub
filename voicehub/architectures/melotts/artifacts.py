@@ -1,4 +1,5 @@
-"""Deterministic artifact resolution for native and official MeloTTS releases."""
+"""Deterministic artifact resolution for native and official MeloTTS
+releases."""
 
 from __future__ import annotations
 

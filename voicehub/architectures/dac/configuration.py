@@ -51,12 +51,12 @@ class DacConfig:
 
     def __post_init__(self) -> None:
         for name in (
-            "encoder_hidden_size",
-            "decoder_hidden_size",
-            "n_codebooks",
-            "codebook_size",
-            "codebook_dim",
-            "sampling_rate",
+                "encoder_hidden_size",
+                "decoder_hidden_size",
+                "n_codebooks",
+                "codebook_size",
+                "codebook_dim",
+                "sampling_rate",
         ):
             _positive_integer(name, getattr(self, name))
         object.__setattr__(
@@ -68,17 +68,13 @@ class DacConfig:
             ),
         )
         for name in (
-            "quantizer_dropout",
-            "commitment_loss_weight",
-            "codebook_loss_weight",
+                "quantizer_dropout",
+                "commitment_loss_weight",
+                "codebook_loss_weight",
         ):
             value = getattr(self, name)
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                or value < 0.0
-            ):
+            if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or
+                    value < 0.0):
                 raise ValueError(f"`{name}` must be finite and non-negative.")
         if self.quantizer_dropout > 1.0:
             raise ValueError("`quantizer_dropout` cannot exceed one.")
@@ -98,28 +94,16 @@ class DacConfig:
         source = copy.deepcopy(dict(values))
         model_type = source.get("model_type", "dac")
         if str(model_type).strip().lower() != "dac":
-            raise ValueError(
-                f"Native DAC requires `model_type='dac'`; found {model_type!r}."
-            )
+            raise ValueError(f"Native DAC requires `model_type='dac'`; found {model_type!r}.")
         architectures = source.get("architectures", ())
         if isinstance(architectures, str):
-            architectures = (architectures,)
+            architectures = (architectures, )
         if architectures and "DacModel" not in architectures:
-            raise ValueError(
-                "Native DAC requires a `DacModel` checkpoint architecture."
-            )
-        canonical = {
-            item.name for item in fields(cls) if item.name != "extra_config"
-        }
-        resolved = {
-            name: source[name]
-            for name in canonical
-            if name in source
-        }
+            raise ValueError("Native DAC requires a `DacModel` checkpoint architecture.")
+        canonical = {item.name for item in fields(cls) if item.name != "extra_config"}
+        resolved = {name: source[name] for name in canonical if name in source}
         if "downsampling_ratios" in resolved:
-            resolved["downsampling_ratios"] = tuple(
-                resolved["downsampling_ratios"]
-            )
+            resolved["downsampling_ratios"] = tuple(resolved["downsampling_ratios"])
         provisional = cls(**resolved)
         declared_values = {
             "hidden_size": provisional.hidden_size,
@@ -130,8 +114,7 @@ class DacConfig:
             if name in source and source[name] != expected:
                 raise ValueError(
                     f"DAC configuration `{name}` is inconsistent: expected "
-                    f"{expected!r}, found {source[name]!r}."
-                )
+                    f"{expected!r}, found {source[name]!r}.")
         consumed = canonical | {
             "architectures",
             "extra_config",
@@ -140,11 +123,7 @@ class DacConfig:
             "model_type",
             "upsampling_ratios",
         }
-        extras = {
-            name: value
-            for name, value in source.items()
-            if name not in consumed
-        }
+        extras = {name: value for name, value in source.items() if name not in consumed}
         supplied_extras = source.get("extra_config")
         if supplied_extras is not None:
             if not isinstance(supplied_extras, Mapping):
@@ -164,23 +143,19 @@ class DacConfig:
             if item.name == "extra_config":
                 continue
             value = getattr(self, item.name)
-            result[item.name] = (
-                list(value) if isinstance(value, tuple) else value
-            )
-        result.update(
-            {
-                "architectures": ["DacModel"],
-                "hidden_size": self.hidden_size,
-                "hop_length": self.hop_length,
-                "model_type": "dac",
-                "upsampling_ratios": list(self.upsampling_ratios),
-            }
-        )
+            result[item.name] = (list(value) if isinstance(value, tuple) else value)
+        result.update({
+            "architectures": ["DacModel"],
+            "hidden_size": self.hidden_size,
+            "hop_length": self.hop_length,
+            "model_type": "dac",
+            "upsampling_ratios": list(self.upsampling_ratios),
+        })
         return result
 
     @property
     def hidden_size(self) -> int:
-        return self.encoder_hidden_size * 2 ** len(self.downsampling_ratios)
+        return self.encoder_hidden_size * 2**len(self.downsampling_ratios)
 
     @property
     def upsampling_ratios(self) -> tuple[int, ...]:

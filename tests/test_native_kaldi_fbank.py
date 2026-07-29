@@ -170,8 +170,8 @@ class KaldiFbankTests(unittest.TestCase):
         for case_index, config in enumerate(cases):
             for sample_count in (4_001, 8_123, 16_000):
                 with self.subTest(
-                    case=case_index,
-                    sample_count=sample_count,
+                        case=case_index,
+                        sample_count=sample_count,
                 ):
                     waveform = torch.randn(
                         1,
@@ -190,14 +190,10 @@ class KaldiFbankTests(unittest.TestCase):
                         low_freq=config.low_frequency,
                         min_duration=config.minimum_duration,
                         num_mel_bins=config.num_mel_bins,
-                        preemphasis_coefficient=(
-                            config.preemphasis_coefficient
-                        ),
+                        preemphasis_coefficient=(config.preemphasis_coefficient),
                         raw_energy=config.raw_energy,
                         remove_dc_offset=config.remove_dc_offset,
-                        round_to_power_of_two=(
-                            config.round_to_power_of_two
-                        ),
+                        round_to_power_of_two=(config.round_to_power_of_two),
                         sample_frequency=config.sample_frequency,
                         snip_edges=config.snip_edges,
                         subtract_mean=config.subtract_mean,

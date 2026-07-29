@@ -5,14 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from voicehub.architectures.marblenet_vad.metadata import NEMO_SOURCE_REVISION
-from voicehub.architectures.registry import (
-    ARCHITECTURE_REGISTRY,
-    ArchitectureRegistry,
-)
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.tasks import SpeechTask
 
 DEFAULT_MARBLENET_VAD_ALIASES = (
@@ -26,35 +20,25 @@ def create_marblenet_vad_architecture_spec() -> ArchitectureSpec:
     return ArchitectureSpec(
         architecture_id="marblenet-vad",
         version="1",
-        model_builder=(
-            "voicehub.architectures.marblenet_vad.modeling:MarbleNetVADModel"
-        ),
-        config=(
-            "voicehub.architectures.marblenet_vad.configuration:"
-            "MarbleNetVADConfig"
-        ),
-        objective=(
-            "voicehub.architectures.marblenet_vad.objective:"
-            "marblenet_vad_loss"
-        ),
+        model_builder=("voicehub.architectures.marblenet_vad.modeling:MarbleNetVADModel"),
+        config=("voicehub.architectures.marblenet_vad.configuration:"
+                "MarbleNetVADConfig"),
+        objective=("voicehub.architectures.marblenet_vad.objective:"
+                   "marblenet_vad_loss"),
         checkpoint_adapter=(
             "voicehub.architectures.marblenet_vad.checkpoint:"
-            "MarbleNetVADSafeTensorsCheckpointAdapter"
-        ),
+            "MarbleNetVADSafeTensorsCheckpointAdapter"),
         components={
-            "frontend": (
-                "voicehub.architectures.marblenet_vad.frontend:"
-                "MarbleNetFilterbankFeatures"
-            ),
-            "pickle-converter": (
-                "voicehub.architectures.marblenet_vad.checkpoint:"
-                "convert_nemo_marblenet_checkpoint"
-            ),
+            "frontend": ("voicehub.architectures.marblenet_vad.frontend:"
+                         "MarbleNetFilterbankFeatures"),
+            "pickle-converter":
+            ("voicehub.architectures.marblenet_vad.checkpoint:"
+             "convert_nemo_marblenet_checkpoint"),
         },
         capabilities=ArchitectureCapabilities(
-            tasks=(SpeechTask.VOICE_ACTIVITY_DETECTION,),
+            tasks=(SpeechTask.VOICE_ACTIVITY_DETECTION, ),
             devices=("cpu", "cuda"),
-            dtypes=("float32",),
+            dtypes=("float32", ),
             checkpoint_formats=(
                 "safetensors",
                 "trusted-pickle-conversion",
@@ -73,14 +57,16 @@ def create_marblenet_vad_architecture_spec() -> ArchitectureSpec:
         upstream_revision=NEMO_SOURCE_REVISION,
         license_id="Apache-2.0",
         metadata={
-            "family": "marblenet-vad",
-            "implementation": "voicehub-native",
-            "tensor_backend": "pytorch",
+            "family":
+            "marblenet-vad",
+            "implementation":
+            "voicehub-native",
+            "tensor_backend":
+            "pytorch",
             "training_boundary": (
                 "VoiceHub reproduces the published graph, frame cross-entropy, "
                 "optimizer schedule, and documented augmentations. The "
-                "original training corpora are not redistributed."
-            ),
+                "original training corpora are not redistributed."),
         },
     )
 

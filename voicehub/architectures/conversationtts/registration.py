@@ -17,14 +17,8 @@ from voicehub.architectures.conversationtts.metadata import (
     CONVERSATIONTTS_SOURCE_REPOSITORY,
     CONVERSATIONTTS_SOURCE_REVISION,
 )
-from voicehub.architectures.registry import (
-    ARCHITECTURE_REGISTRY,
-    ArchitectureRegistry,
-)
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.tasks import SpeechTask
 
 DEFAULT_CONVERSATIONTTS_ALIASES = (
@@ -39,45 +33,31 @@ def create_conversationtts_architecture_spec() -> ArchitectureSpec:
     return ArchitectureSpec(
         architecture_id="conversationtts",
         version="1",
-        model_builder=(
-            "voicehub.architectures.conversationtts.modeling:"
-            "ConversationTTSModel"
-        ),
-        config=(
-            "voicehub.architectures.conversationtts.modeling:"
-            "ConversationTTSArchitectureConfig"
-        ),
-        processor=(
-            "voicehub.architectures.conversationtts.processing:"
-            "build_conversationtts_sequence"
-        ),
+        model_builder=("voicehub.architectures.conversationtts.modeling:"
+                       "ConversationTTSModel"),
+        config=("voicehub.architectures.conversationtts.modeling:"
+                "ConversationTTSArchitectureConfig"),
+        processor=("voicehub.architectures.conversationtts.processing:"
+                   "build_conversationtts_sequence"),
         decoder=(
             "voicehub.models.conversationtts.source.conversationtts.tools."
-            "tokenizer.MimiCodec.mimi_tokenizer:MimiTokenizer"
-        ),
-        objective=(
-            "voicehub.training.recipes:ConversationTTSTrainingAdapter"
-        ),
+            "tokenizer.MimiCodec.mimi_tokenizer:MimiTokenizer"),
+        objective=("voicehub.training.recipes:ConversationTTSTrainingAdapter"),
         checkpoint_adapter=(
             "voicehub.architectures.conversationtts.checkpoint:"
-            "load_conversationtts_checkpoint"
-        ),
+            "load_conversationtts_checkpoint"),
         components={
-            "checkpoint-exporter": (
-                "voicehub.architectures.conversationtts.checkpoint:"
-                "export_conversationtts_checkpoint"
-            ),
-            "decoder-core": (
-                "voicehub.architectures.conversationtts.decoder:"
-                "ConversationDecoder"
-            ),
+            "checkpoint-exporter":
+            ("voicehub.architectures.conversationtts.checkpoint:"
+             "export_conversationtts_checkpoint"),
+            "decoder-core": ("voicehub.architectures.conversationtts.decoder:"
+                             "ConversationDecoder"),
             "text-tokenizer": (
                 "voicehub.models.conversationtts.source.conversationtts."
-                "tools.tokenizer.Text2ID.text_tokenizer:TextTokenizer"
-            ),
+                "tools.tokenizer.Text2ID.text_tokenizer:TextTokenizer"),
         },
         capabilities=ArchitectureCapabilities(
-            tasks=(SpeechTask.TEXT_TO_SPEECH,),
+            tasks=(SpeechTask.TEXT_TO_SPEECH, ),
             devices=("cpu", "cuda"),
             dtypes=("float32", "float16", "bfloat16"),
             checkpoint_formats=(
@@ -88,7 +68,7 @@ def create_conversationtts_architecture_spec() -> ArchitectureSpec:
             streaming=False,
             batched_inference=False,
             distributed_training=True,
-            export_formats=("safetensors",),
+            export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
                 "autoregressive-32-codebook-audio",
@@ -106,40 +86,38 @@ def create_conversationtts_architecture_spec() -> ArchitectureSpec:
         upstream_revision=CONVERSATIONTTS_SOURCE_REVISION,
         license_id=CONVERSATIONTTS_LICENSE,
         metadata={
-            "implementation": "voicehub-native",
-            "tensor_backend": "pytorch",
-            "source": CONVERSATIONTTS_SOURCE_REPOSITORY,
-            "source_revision": CONVERSATIONTTS_SOURCE_REVISION,
-            "reference_checkpoint": CONVERSATIONTTS_CHECKPOINT_REPOSITORY,
-            "reference_checkpoint_revision": (
-                CONVERSATIONTTS_CHECKPOINT_REVISION
-            ),
-            "reference_checkpoint_filename": (
-                CONVERSATIONTTS_CHECKPOINT_FILENAME
-            ),
-            "reference_checkpoint_sha256": (
-                CONVERSATIONTTS_CHECKPOINT_SHA256
-            ),
-            "reference_checkpoint_size": (
-                CONVERSATIONTTS_CHECKPOINT_SIZE
-            ),
+            "implementation":
+            "voicehub-native",
+            "tensor_backend":
+            "pytorch",
+            "source":
+            CONVERSATIONTTS_SOURCE_REPOSITORY,
+            "source_revision":
+            CONVERSATIONTTS_SOURCE_REVISION,
+            "reference_checkpoint":
+            CONVERSATIONTTS_CHECKPOINT_REPOSITORY,
+            "reference_checkpoint_revision": (CONVERSATIONTTS_CHECKPOINT_REVISION),
+            "reference_checkpoint_filename": (CONVERSATIONTTS_CHECKPOINT_FILENAME),
+            "reference_checkpoint_sha256": (CONVERSATIONTTS_CHECKPOINT_SHA256),
+            "reference_checkpoint_size": (CONVERSATIONTTS_CHECKPOINT_SIZE),
             "reference_checkpoint_boundary": (
                 "The published checkpoint is a PyTorch archive. VoiceHub "
                 "loads it only through weights_only=True and exports "
-                "steady-state artifacts as Safetensors."
-            ),
-            "codec_checkpoint": CONVERSATIONTTS_MIMI_REPOSITORY,
-            "codec_checkpoint_revision": CONVERSATIONTTS_MIMI_REVISION,
-            "codec_checkpoint_filename": CONVERSATIONTTS_MIMI_FILENAME,
-            "training_objective": (
-                "published-two-level-masked-codebook-cross-entropy"
-            ),
-            "training_inputs": (
-                "raw-text-audio-or-source-framed-token-streams"
-            ),
-            "full_finetuning_ready": True,
-            "inference_reloadable_export": True,
-            "commercial_use": False,
+                "steady-state artifacts as Safetensors."),
+            "codec_checkpoint":
+            CONVERSATIONTTS_MIMI_REPOSITORY,
+            "codec_checkpoint_revision":
+            CONVERSATIONTTS_MIMI_REVISION,
+            "codec_checkpoint_filename":
+            CONVERSATIONTTS_MIMI_FILENAME,
+            "training_objective": ("published-two-level-masked-codebook-cross-entropy"),
+            "training_inputs": ("raw-text-audio-or-source-framed-token-streams"),
+            "full_finetuning_ready":
+            True,
+            "inference_reloadable_export":
+            True,
+            "commercial_use":
+            False,
         },
     )
 
@@ -152,9 +130,7 @@ def register_conversationtts_architecture(
 ) -> ArchitectureSpec:
     target = ARCHITECTURE_REGISTRY if registry is None else registry
     if not isinstance(target, ArchitectureRegistry):
-        raise TypeError(
-            "`registry` must be an ArchitectureRegistry or None."
-        )
+        raise TypeError("`registry` must be an ArchitectureRegistry or None.")
     spec = create_conversationtts_architecture_spec()
     target.register(spec, aliases=aliases, exist_ok=exist_ok)
     return spec

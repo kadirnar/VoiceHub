@@ -12,10 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from voicehub.checkpointing.errors import (
-    CheckpointFormatError,
-    CheckpointIntegrityError,
-)
+from voicehub.checkpointing.errors import CheckpointFormatError, CheckpointIntegrityError
 
 MANIFEST_NAME = "voicehub_manifest.json"
 CURRENT_FORMAT_VERSION = 1
@@ -27,8 +24,7 @@ def _identifier(value: str, *, field_name: str) -> str:
     if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
         raise ValueError(
             f"`{field_name}` must contain lowercase letters, digits, dots, "
-            "underscores, or hyphens and begin with a letter or digit."
-        )
+            "underscores, or hyphens and begin with a letter or digit.")
     return value
 
 
@@ -69,7 +65,7 @@ class ArtifactFile:
         relative_path: str | Path,
         *,
         chunk_size: int = 1024 * 1024,
-    ) -> "ArtifactFile":
+    ) -> ArtifactFile:
         root_path = Path(root).expanduser().resolve()
         normalized = _safe_relative_path(relative_path)
         source = (root_path / normalized).resolve()
@@ -95,7 +91,7 @@ class ArtifactFile:
         }
 
     @classmethod
-    def from_dict(cls, value: Any) -> "ArtifactFile":
+    def from_dict(cls, value: Any) -> ArtifactFile:
         if not isinstance(value, dict):
             raise CheckpointFormatError("Manifest file record must be an object.")
         try:
@@ -105,9 +101,7 @@ class ArtifactFile:
                 sha256=value["sha256"],
             )
         except (KeyError, TypeError, ValueError) as error:
-            raise CheckpointFormatError(
-                f"Invalid manifest file record: {error}."
-            ) from error
+            raise CheckpointFormatError(f"Invalid manifest file record: {error}.") from error
 
 
 @dataclass(frozen=True)
@@ -130,11 +124,8 @@ class VoiceHubManifest:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if (
-            isinstance(self.format_version, bool)
-            or not isinstance(self.format_version, int)
-            or self.format_version <= 0
-        ):
+        if (isinstance(self.format_version, bool) or not isinstance(self.format_version, int) or
+                self.format_version <= 0):
             raise ValueError("Manifest `format_version` must be a positive integer.")
         object.__setattr__(
             self,
@@ -157,11 +148,11 @@ class VoiceHubManifest:
                 raise ValueError(f"Manifest `{name}` must be a non-empty string.")
             object.__setattr__(self, name, value.strip())
         for name in (
-            "source",
-            "source_revision",
-            "source_license",
-            "weight_license",
-            "training_recipe",
+                "source",
+                "source_revision",
+                "source_license",
+                "weight_license",
+                "training_recipe",
         ):
             object.__setattr__(
                 self,
@@ -188,9 +179,7 @@ class VoiceHubManifest:
         try:
             json.dumps(self.metadata, allow_nan=False)
         except (TypeError, ValueError) as error:
-            raise TypeError(
-                "Manifest `metadata` must contain finite JSON values."
-            ) from error
+            raise TypeError("Manifest `metadata` must contain finite JSON values.") from error
         object.__setattr__(self, "metadata", dict(self.metadata))
 
     def to_dict(self) -> dict[str, Any]:
@@ -210,8 +199,7 @@ class VoiceHubManifest:
                     "revision": self.source_revision,
                     "source_license": self.source_license,
                     "weight_license": self.weight_license,
-                }.items()
-                if value is not None
+                }.items() if value is not None
             },
             "processor_assets": list(self.processor_assets),
             "training_recipe": self.training_recipe,
@@ -220,15 +208,13 @@ class VoiceHubManifest:
         }
 
     @classmethod
-    def from_dict(cls, value: Any) -> "VoiceHubManifest":
+    def from_dict(cls, value: Any) -> VoiceHubManifest:
         if not isinstance(value, dict):
             raise CheckpointFormatError("VoiceHub manifest must be a JSON object.")
         checkpoint = value.get("checkpoint")
         source = value.get("source", {})
         if not isinstance(checkpoint, dict) or not isinstance(source, dict):
-            raise CheckpointFormatError(
-                "Manifest `checkpoint` and `source` must be JSON objects."
-            )
+            raise CheckpointFormatError("Manifest `checkpoint` and `source` must be JSON objects.")
         files = value.get("files", [])
         if not isinstance(files, list):
             raise CheckpointFormatError("Manifest `files` must be a JSON array.")
@@ -245,9 +231,7 @@ class VoiceHubManifest:
         }
         unknown = sorted(set(value) - known)
         if unknown:
-            raise CheckpointFormatError(
-                f"Manifest contains unknown top-level fields: {unknown!r}."
-            )
+            raise CheckpointFormatError(f"Manifest contains unknown top-level fields: {unknown!r}.")
         try:
             manifest = cls(
                 format_version=value["format_version"],
@@ -270,12 +254,11 @@ class VoiceHubManifest:
         if manifest.format_version > CURRENT_FORMAT_VERSION:
             raise CheckpointFormatError(
                 f"Manifest format {manifest.format_version} is newer than "
-                f"supported format {CURRENT_FORMAT_VERSION}."
-            )
+                f"supported format {CURRENT_FORMAT_VERSION}.")
         return manifest
 
     @classmethod
-    def load(cls, path_or_directory: str | Path) -> "VoiceHubManifest":
+    def load(cls, path_or_directory: str | Path) -> VoiceHubManifest:
         source = Path(path_or_directory).expanduser()
         path = source / MANIFEST_NAME if source.is_dir() else source
         if not path.is_file():
@@ -283,9 +266,7 @@ class VoiceHubManifest:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise CheckpointFormatError(
-                f"Could not parse VoiceHub manifest {path}: {error}."
-            ) from error
+            raise CheckpointFormatError(f"Could not parse VoiceHub manifest {path}: {error}.") from error
         return cls.from_dict(value)
 
     def save(self, directory: str | Path) -> Path:
@@ -299,18 +280,16 @@ class VoiceHubManifest:
                 indent=2,
                 sort_keys=True,
                 allow_nan=False,
-            )
-            + "\n"
-        )
+            ) + "\n")
         temporary_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=root,
-                prefix=f".{MANIFEST_NAME}.",
-                suffix=".tmp",
-                delete=False,
+                    mode="w",
+                    encoding="utf-8",
+                    dir=root,
+                    prefix=f".{MANIFEST_NAME}.",
+                    suffix=".tmp",
+                    delete=False,
             ) as stream:
                 temporary_path = Path(stream.name)
                 stream.write(encoded)
@@ -324,35 +303,28 @@ class VoiceHubManifest:
         return path
 
     def verify(self, directory: str | Path) -> None:
-        """Verify all recorded files and processor assets under ``directory``."""
+        """Verify all recorded files and processor assets under
+        ``directory``."""
         root = Path(directory).expanduser().resolve()
         file_records = {record.path: record for record in self.files}
         missing_assets = sorted(set(self.processor_assets) - set(file_records))
         if missing_assets:
             raise CheckpointIntegrityError(
                 "Processor assets are not covered by manifest file records: "
-                f"{missing_assets!r}."
-            )
+                f"{missing_assets!r}.")
         for record in self.files:
             path = (root / record.path).resolve()
             if path.parent != root and root not in path.parents:
-                raise CheckpointIntegrityError(
-                    f"Manifest file escapes artifact directory: {record.path!r}."
-                )
+                raise CheckpointIntegrityError(f"Manifest file escapes artifact directory: {record.path!r}.")
             if not path.is_file():
-                raise CheckpointIntegrityError(
-                    f"Manifest file is missing: {record.path!r}."
-                )
+                raise CheckpointIntegrityError(f"Manifest file is missing: {record.path!r}.")
             if path.stat().st_size != record.size:
                 raise CheckpointIntegrityError(
                     f"Manifest size mismatch for {record.path!r}: expected "
-                    f"{record.size}, found {path.stat().st_size}."
-                )
+                    f"{record.size}, found {path.stat().st_size}.")
             actual = ArtifactFile.from_path(root, record.path).sha256
             if actual != record.sha256:
-                raise CheckpointIntegrityError(
-                    f"Manifest SHA-256 mismatch for {record.path!r}."
-                )
+                raise CheckpointIntegrityError(f"Manifest SHA-256 mismatch for {record.path!r}.")
 
 
 def build_manifest_files(
@@ -363,7 +335,4 @@ def build_manifest_files(
     normalized = tuple(_safe_relative_path(path) for path in paths)
     if len(normalized) != len(set(normalized)):
         raise ValueError("Artifact paths cannot contain duplicates.")
-    return tuple(
-        ArtifactFile.from_path(directory, path)
-        for path in sorted(normalized)
-    )
+    return tuple(ArtifactFile.from_path(directory, path) for path in sorted(normalized))

@@ -1,10 +1,10 @@
 """Strict, dependency-free reader for numeric NumPy ``.npy`` tensors.
 
 The NPY container is small and documented, so requiring the full NumPy
-runtime merely to read a SpeechT5 speaker vector is unnecessary.  This reader
-accepts only dense, numeric arrays and materializes them as PyTorch tensors.
-Object arrays, structured dtypes, trailing payloads, and oversized headers are
-rejected before tensor construction.
+runtime merely to read a SpeechT5 speaker vector is unnecessary.  This
+reader accepts only dense, numeric arrays and materializes them as
+PyTorch tensors. Object arrays, structured dtypes, trailing payloads,
+and oversized headers are rejected before tensor construction.
 """
 
 from __future__ import annotations
@@ -29,9 +29,7 @@ def _torch():
     try:
         import torch
     except ModuleNotFoundError as error:  # pragma: no cover - package invariant
-        raise RuntimeError(
-            "Native NPY loading requires PyTorch, VoiceHub's compute runtime."
-        ) from error
+        raise RuntimeError("Native NPY loading requires PyTorch, VoiceHub's compute runtime.") from error
     return torch
 
 
@@ -40,8 +38,7 @@ def _read_exact(stream, size: int, *, context: str) -> bytes:
     if len(payload) != size:
         raise CheckpointFormatError(
             f"NPY file ended while reading {context}: expected {size} bytes, "
-            f"found {len(payload)}."
-        )
+            f"found {len(payload)}.")
     return payload
 
 
@@ -53,17 +50,14 @@ def _parse_header(
     try:
         header = ast.literal_eval(encoded.decode(encoding).strip())
     except (SyntaxError, ValueError, UnicodeDecodeError) as error:
-        raise CheckpointFormatError(
-            f"NPY header is not a valid literal dictionary: {error}."
-        ) from error
+        raise CheckpointFormatError(f"NPY header is not a valid literal dictionary: {error}.") from error
     if not isinstance(header, dict):
         raise CheckpointFormatError("NPY header must be a dictionary.")
     required = {"descr", "fortran_order", "shape"}
     if set(header) != required:
         raise CheckpointFormatError(
             "NPY header must contain exactly `descr`, `fortran_order`, and "
-            "`shape`."
-        )
+            "`shape`.")
     descriptor = header["descr"]
     fortran_order = header["fortran_order"]
     raw_shape = header["shape"]
@@ -71,18 +65,10 @@ def _parse_header(
         raise CheckpointFormatError("NPY `descr` must be a string.")
     if not isinstance(fortran_order, bool):
         raise CheckpointFormatError("NPY `fortran_order` must be a boolean.")
-    if (
-        not isinstance(raw_shape, tuple)
-        or any(
-            isinstance(dimension, bool)
-            or not isinstance(dimension, int)
-            or dimension < 0
-            for dimension in raw_shape
-        )
-    ):
-        raise CheckpointFormatError(
-            "NPY `shape` must be a tuple of non-negative integers."
-        )
+    if (not isinstance(raw_shape, tuple) or
+            any(isinstance(dimension, bool) or not isinstance(dimension, int) or dimension < 0
+                for dimension in raw_shape)):
+        raise CheckpointFormatError("NPY `shape` must be a tuple of non-negative integers.")
     return descriptor, fortran_order, tuple(raw_shape)
 
 
@@ -91,24 +77,18 @@ def _dtype(descriptor: str) -> tuple[Any, int]:
     if match is None:
         raise CheckpointFormatError(
             f"Unsupported NPY dtype descriptor {descriptor!r}; VoiceHub "
-            "accepts dense boolean, integer, and floating-point arrays."
-        )
+            "accepts dense boolean, integer, and floating-point arrays.")
     byte_order = match.group("byte_order")
     kind = match.group("kind")
     size = int(match.group("size"))
     if byte_order == ">" and size > 1:
-        raise CheckpointFormatError(
-            "Big-endian multi-byte NPY tensors are not supported."
-        )
+        raise CheckpointFormatError("Big-endian multi-byte NPY tensors are not supported.")
     if byte_order == "=" and sys.byteorder != "little" and size > 1:
-        raise CheckpointFormatError(
-            "Native-endian NPY tensors on big-endian hosts are not supported."
-        )
+        raise CheckpointFormatError("Native-endian NPY tensors on big-endian hosts are not supported.")
     if byte_order == "|" and size > 1:
         raise CheckpointFormatError(
             "Byte-order-independent NPY descriptors may only use one-byte "
-            "elements."
-        )
+            "elements.")
     torch = _torch()
     mapping = {
         ("b", 1): torch.bool,
@@ -128,8 +108,7 @@ def _dtype(descriptor: str) -> tuple[Any, int]:
     if dtype is None:
         raise CheckpointFormatError(
             f"PyTorch does not expose the NPY dtype {descriptor!r} on this "
-            "runtime."
-        )
+            "runtime.")
     return dtype, size
 
 
@@ -143,8 +122,8 @@ def load_numpy_tensor(
 ):
     """Load one numeric NPY array as a PyTorch tensor.
 
-    The implementation supports NPY versions 1, 2, and 3.  It never enables
-    pickle and therefore cannot load object arrays.
+    The implementation supports NPY versions 1, 2, and 3.  It never
+    enables pickle and therefore cannot load object arrays.
     """
     if max_header_bytes <= 0 or max_tensor_bytes <= 0:
         raise ValueError("NPY parser limits must be positive.")
@@ -168,14 +147,11 @@ def load_numpy_tensor(
             )[0]
             encoding = "utf-8" if major == 3 else "latin1"
         else:
-            raise CheckpointFormatError(
-                f"Unsupported NPY version {major}.{minor}."
-            )
+            raise CheckpointFormatError(f"Unsupported NPY version {major}.{minor}.")
         if header_size <= 0 or header_size > max_header_bytes:
             raise CheckpointFormatError(
                 f"NPY header length {header_size} is outside the allowed "
-                f"range 1..{max_header_bytes}."
-            )
+                f"range 1..{max_header_bytes}.")
         encoded_header = _read_exact(
             stream,
             header_size,
@@ -193,13 +169,10 @@ def load_numpy_tensor(
         if payload_size > max_tensor_bytes:
             raise CheckpointFormatError(
                 f"NPY tensor payload is {payload_size} bytes; the limit is "
-                f"{max_tensor_bytes}."
-            )
+                f"{max_tensor_bytes}.")
         payload = _read_exact(stream, payload_size, context="tensor payload")
         if stream.read(1):
-            raise CheckpointFormatError(
-                "NPY file contains trailing bytes after its tensor payload."
-            )
+            raise CheckpointFormatError("NPY file contains trailing bytes after its tensor payload.")
 
     torch = _torch()
     if element_count == 0:
@@ -212,9 +185,7 @@ def load_numpy_tensor(
         ).clone()
         if fortran_order and len(shape) > 1:
             reversed_dimensions = tuple(reversed(shape))
-            tensor = tensor.reshape(reversed_dimensions).permute(
-                *reversed(range(len(shape)))
-            )
+            tensor = tensor.reshape(reversed_dimensions).permute(*reversed(range(len(shape))))
         else:
             tensor = tensor.reshape(shape)
         tensor = tensor.contiguous()

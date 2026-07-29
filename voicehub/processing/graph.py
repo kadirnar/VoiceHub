@@ -1,8 +1,8 @@
 """Serializable, audited preprocessing graphs.
 
-Graphs contain registered operations rather than arbitrary Python callbacks.
-Artifacts can therefore describe their processor exactly without executing
-repository code or serializing callables.
+Graphs contain registered operations rather than arbitrary Python
+callbacks. Artifacts can therefore describe their processor exactly
+without executing repository code or serializing callables.
 """
 
 from __future__ import annotations
@@ -44,8 +44,7 @@ class ProcessingOperation(ABC):
             if not isinstance(value, str) or not value.strip():
                 raise TypeError(
                     f"Processing operation {cls.__name__} must declare "
-                    f"a non-empty `{name}`."
-                )
+                    f"a non-empty `{name}`.")
 
     @property
     @abstractmethod
@@ -66,7 +65,7 @@ class ProcessingOperation(ABC):
         return {}
 
     @classmethod
-    def from_config(cls, config: Mapping[str, Any]) -> "ProcessingOperation":
+    def from_config(cls, config: Mapping[str, Any]) -> ProcessingOperation:
         if not isinstance(config, Mapping):
             raise TypeError("Processing operation config must be a mapping.")
         return cls(**dict(config))
@@ -88,9 +87,7 @@ class ProcessingOperationRegistry:
         self._view = MappingProxyType(self._operations)
 
     @property
-    def operations(
-        self,
-    ) -> Mapping[tuple[str, str], type[ProcessingOperation]]:
+    def operations(self, ) -> Mapping[tuple[str, str], type[ProcessingOperation]]:
         return self._view
 
     def register(
@@ -100,16 +97,14 @@ class ProcessingOperationRegistry:
         exist_ok: bool = False,
     ) -> None:
         if not isinstance(operation, type) or not issubclass(
-            operation,
-            ProcessingOperation,
+                operation,
+                ProcessingOperation,
         ):
             raise TypeError("Only ProcessingOperation classes can be registered.")
         key = (operation.operation_id, operation.operation_version)
         with self._lock:
             if key in self._operations and not exist_ok:
-                raise ValueError(
-                    f"Processing operation {key[0]}@{key[1]} is already registered."
-                )
+                raise ValueError(f"Processing operation {key[0]}@{key[1]} is already registered.")
             self._operations[key] = operation
 
     def create(
@@ -122,9 +117,7 @@ class ProcessingOperationRegistry:
         with self._lock:
             operation = self._operations.get(key)
         if operation is None:
-            raise LookupError(
-                f"Unknown processing operation {operation_id}@{version}."
-            )
+            raise LookupError(f"Unknown processing operation {operation_id}@{version}.")
         return operation.from_config(config)
 
 
@@ -154,15 +147,10 @@ class ProcessorGraph:
         )
         operations = tuple(self.operations)
         if any(not isinstance(item, ProcessingOperation) for item in operations):
-            raise TypeError(
-                "`operations` must contain ProcessingOperation instances."
-            )
+            raise TypeError("`operations` must contain ProcessingOperation instances.")
         object.__setattr__(self, "operations", operations)
-        if (
-            isinstance(self.graph_version, bool)
-            or not isinstance(self.graph_version, int)
-            or self.graph_version <= 0
-        ):
+        if (isinstance(self.graph_version, bool) or not isinstance(self.graph_version, int) or
+                self.graph_version <= 0):
             raise ValueError("`graph_version` must be a positive integer.")
         if not isinstance(self.metadata, Mapping):
             raise TypeError("`metadata` must be a mapping.")
@@ -183,21 +171,17 @@ class ProcessorGraph:
             if missing:
                 raise ValueError(
                     f"Processing operation {operation.operation_id!r} reads "
-                    f"unavailable keys: {missing!r}."
-                )
+                    f"unavailable keys: {missing!r}.")
             collisions = sorted(set(operation_outputs) & available)
             if collisions:
                 raise ValueError(
                     f"Processing operation {operation.operation_id!r} "
-                    f"overwrites existing keys: {collisions!r}."
-                )
+                    f"overwrites existing keys: {collisions!r}.")
             available.update(operation_outputs)
         missing_outputs = sorted(set(self.outputs) - available)
         if missing_outputs:
-            raise ValueError(
-                f"Processor graph outputs are never produced: "
-                f"{missing_outputs!r}."
-            )
+            raise ValueError(f"Processor graph outputs are never produced: "
+                             f"{missing_outputs!r}.")
 
     def run(self, values: Mapping[str, Any]) -> dict[str, Any]:
         """Run all operations and return only declared graph outputs."""
@@ -208,22 +192,18 @@ class ProcessorGraph:
         if missing or unexpected:
             raise ValueError(
                 "Processor graph input mismatch: "
-                f"missing={missing!r}, unexpected={unexpected!r}."
-            )
+                f"missing={missing!r}, unexpected={unexpected!r}.")
         context = dict(values)
         for operation in self.operations:
             result = operation.process(MappingProxyType(context))
             if not isinstance(result, Mapping):
-                raise TypeError(
-                    f"Processing operation {operation.operation_id!r} must "
-                    "return a mapping."
-                )
+                raise TypeError(f"Processing operation {operation.operation_id!r} must "
+                                "return a mapping.")
             if set(result) != set(operation.outputs):
                 raise ValueError(
                     f"Processing operation {operation.operation_id!r} returned "
                     f"{sorted(result)!r}; expected "
-                    f"{sorted(operation.outputs)!r}."
-                )
+                    f"{sorted(operation.outputs)!r}.")
             context.update(result)
         return {name: context[name] for name in self.outputs}
 
@@ -232,10 +212,7 @@ class ProcessorGraph:
             "graph_version": self.graph_version,
             "inputs": list(self.inputs),
             "outputs": list(self.outputs),
-            "operations": [
-                operation.descriptor()
-                for operation in self.operations
-            ],
+            "operations": [operation.descriptor() for operation in self.operations],
             "metadata": dict(self.metadata),
         }
 
@@ -245,7 +222,7 @@ class ProcessorGraph:
         value: Mapping[str, Any],
         *,
         registry: ProcessingOperationRegistry = PROCESSING_OPERATIONS,
-    ) -> "ProcessorGraph":
+    ) -> ProcessorGraph:
         if not isinstance(value, Mapping):
             raise TypeError("Serialized processor graph must be a mapping.")
         descriptors = value.get("operations")
@@ -261,12 +238,9 @@ class ProcessorGraph:
                         descriptor["operation"],
                         descriptor["version"],
                         descriptor.get("config", {}),
-                    )
-                )
+                    ))
             except KeyError as error:
-                raise ValueError(
-                    f"Processing operation descriptor is missing {error.args[0]!r}."
-                ) from error
+                raise ValueError(f"Processing operation descriptor is missing {error.args[0]!r}.") from error
         return cls(
             graph_version=value.get("graph_version", 1),
             inputs=tuple(value.get("inputs", ())),

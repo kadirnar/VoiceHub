@@ -59,13 +59,13 @@ class NativeBarkTests(unittest.TestCase):
                 n_codes_given=1,
             ),
             codec=EncodecConfig(
-                target_bandwidths=(1.0,),
+                target_bandwidths=(1.0, ),
                 sample_rate=8_000,
                 channels=1,
                 dimension=4,
                 n_filters=2,
                 n_residual_layers=0,
-                ratios=(2,),
+                ratios=(2, ),
                 kernel_size=1,
                 last_kernel_size=1,
                 residual_kernel_size=1,
@@ -116,9 +116,7 @@ class NativeBarkTests(unittest.TestCase):
             tensor_inventory_fingerprint,
             verify_native_graph_contract,
         )
-        from voicehub.architectures.bark.configuration import (
-            BarkArchitectureConfig,
-        )
+        from voicehub.architectures.bark.configuration import BarkArchitectureConfig
         from voicehub.architectures.bark.metadata import (
             BARK_INVENTORY_FINGERPRINT,
             BARK_STATE_VALUES,
@@ -170,13 +168,8 @@ class NativeBarkTests(unittest.TestCase):
 
         self.assertTrue(torch.isfinite(loss))
         self.assertIsNotNone(model.semantic.lm_head.weight.grad)
-        self.assertIsNotNone(
-            model.fine_acoustics.input_embeds_layers[2].weight.grad)
-        self.assertTrue(
-            all(
-                parameter.grad is None
-                for parameter in model.codec_model.parameters()
-            ))
+        self.assertIsNotNone(model.fine_acoustics.input_embeds_layers[2].weight.grad)
+        self.assertTrue(all(parameter.grad is None for parameter in model.codec_model.parameters()))
 
     def test_causal_cache_matches_full_prefix_and_coarse_ranges_alternate(self):
         import torch
@@ -273,10 +266,7 @@ class NativeBarkTests(unittest.TestCase):
     def test_safe_loader_rejects_incomplete_namespace(self):
         import torch
 
-        from voicehub.architectures.bark.checkpoint import (
-            load_bark_safetensors,
-            provider_state_dict,
-        )
+        from voicehub.architectures.bark.checkpoint import load_bark_safetensors, provider_state_dict
         from voicehub.architectures.bark.modeling import BarkModel
         from voicehub.checkpointing import save_safetensors
 
@@ -295,11 +285,7 @@ class NativeBarkTests(unittest.TestCase):
     def test_wordpiece_and_numpy_prompt_loading_need_no_provider(self):
         import torch
 
-        from voicehub.architectures.bark.processing import (
-            BarkProcessor,
-            BarkWordPieceTokenizer,
-            _read_npy_integer,
-        )
+        from voicehub.architectures.bark.processing import BarkProcessor, BarkWordPieceTokenizer, _read_npy_integer
 
         tokenizer = BarkWordPieceTokenizer([
             "[PAD]",
@@ -319,19 +305,13 @@ class NativeBarkTests(unittest.TestCase):
         self.assertEqual(mask, [1, 0, 0, 0])
 
         values = [1, 2, 3, 4, 5, 6]
-        header = (
-            "{'descr': '<i8', 'fortran_order': False, "
-            "'shape': (2, 3), }"
-        ).encode("latin-1")
+        header = (b"{'descr': '<i8', 'fortran_order': False, "
+                  b"'shape': (2, 3), }")
         padding = 16 - ((10 + len(header) + 1) % 16)
         header += b" " * padding + b"\n"
         payload = (
-            b"\x93NUMPY"
-            + bytes((1, 0))
-            + struct.pack("<H", len(header))
-            + header
-            + struct.pack("<6q", *values)
-        )
+            b"\x93NUMPY" + bytes(
+                (1, 0)) + struct.pack("<H", len(header)) + header + struct.pack("<6q", *values))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "prompt.npy"
             path.write_bytes(payload)
@@ -366,9 +346,7 @@ class NativeBarkTests(unittest.TestCase):
             processor.load_voice_preset("bad")
 
     def test_legacy_conversion_requires_explicit_trust_before_reading(self):
-        from voicehub.architectures.bark.checkpoint import (
-            convert_official_bark_checkpoint,
-        )
+        from voicehub.architectures.bark.checkpoint import convert_official_bark_checkpoint
 
         architecture, generation = self._tiny_config()
         with self.assertRaisesRegex(PermissionError, "trust_official_pickle"):
@@ -380,9 +358,7 @@ class NativeBarkTests(unittest.TestCase):
             )
 
     def test_architecture_spec_is_native_and_truthful_about_training(self):
-        from voicehub.architectures.bark.registration import (
-            create_bark_architecture_spec,
-        )
+        from voicehub.architectures.bark.registration import create_bark_architecture_spec
         from voicehub.registry import get_model_spec
         from voicehub.training.contracts import TrainingSupport
         from voicehub.training.specs import get_training_spec
@@ -404,11 +380,7 @@ class NativeBarkTests(unittest.TestCase):
         self.assertTrue(training_spec.native_training)
         self.assertIs(training_spec.support, TrainingSupport.PREPROCESSED)
         self.assertFalse(
-            any(
-                entrypoint.startswith("transformers")
-                for entrypoint in training_spec.source_entrypoints
-            )
-        )
+            any(entrypoint.startswith("transformers") for entrypoint in training_spec.source_entrypoints))
 
 
 class NativeBarkImportTests(unittest.TestCase):
@@ -416,8 +388,7 @@ class NativeBarkImportTests(unittest.TestCase):
     def test_public_import_is_lazy_and_never_imports_transformers(self):
         script = (
             "import sys; import voicehub.models.bark; "
-            "print('torch' in sys.modules, 'transformers' in sys.modules)"
-        )
+            "print('torch' in sys.modules, 'transformers' in sys.modules)")
         completed = subprocess.run(
             [sys.executable, "-c", script],
             cwd=PROJECT_ROOT,
@@ -429,8 +400,7 @@ class NativeBarkImportTests(unittest.TestCase):
 
     def test_native_runtime_has_no_external_model_runtime_imports(self):
         files = [
-            PROJECT_ROOT / "voicehub/architectures/bark" / name
-            for name in (
+            PROJECT_ROOT / "voicehub/architectures/bark" / name for name in (
                 "artifacts.py",
                 "checkpoint.py",
                 "configuration.py",
@@ -447,11 +417,7 @@ class NativeBarkImportTests(unittest.TestCase):
 
     def test_source_manifest_is_pinned(self):
         source = json.loads(
-            (
-                PROJECT_ROOT
-                / "voicehub/architectures/bark/SOURCE.json"
-            ).read_text(encoding="utf-8")
-        )
+            (PROJECT_ROOT / "voicehub/architectures/bark/SOURCE.json").read_text(encoding="utf-8"))
         self.assertEqual(
             source["checkpoint"]["revision"],
             "1dbd7a128513b8ae4a4e2130fed57b7ac9da5bcd",

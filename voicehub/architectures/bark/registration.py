@@ -4,14 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from voicehub.architectures.registry import (
-    ARCHITECTURE_REGISTRY,
-    ArchitectureRegistry,
-)
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.tasks import SpeechTask
 
 from .metadata import (
@@ -37,47 +31,36 @@ def create_bark_architecture_spec() -> ArchitectureSpec:
         architecture_id="bark",
         version="1",
         model_builder="voicehub.architectures.bark.modeling:BarkModel",
-        config=(
-            "voicehub.architectures.bark.configuration:"
-            "BarkArchitectureConfig"),
+        config=("voicehub.architectures.bark.configuration:"
+                "BarkArchitectureConfig"),
         processor="voicehub.architectures.bark.processing:BarkProcessor",
-        decoder=(
-            "voicehub.components.audio.codecs.encodec.model:"
-            "EncodecModel"),
-        objective=(
-            "voicehub.architectures.bark.training:"
-            "BarkTrainingAdapter"),
-        checkpoint_adapter=(
-            "voicehub.architectures.bark.checkpoint:"
-            "load_bark_safetensors"),
+        decoder=("voicehub.components.audio.codecs.encodec.model:"
+                 "EncodecModel"),
+        objective=("voicehub.architectures.bark.training:"
+                   "BarkTrainingAdapter"),
+        checkpoint_adapter=("voicehub.architectures.bark.checkpoint:"
+                            "load_bark_safetensors"),
         components={
-            "artifact-resolver": (
-                "voicehub.architectures.bark.artifacts:"
-                "resolve_bark_artifacts"),
-            "checkpoint-converter": (
-                "voicehub.architectures.bark.checkpoint:"
-                "convert_official_bark_checkpoint"),
-            "checkpoint-exporter": (
-                "voicehub.architectures.bark.checkpoint:"
-                "save_bark_safetensors"),
-            "coarse-model": (
-                "voicehub.architectures.bark.modeling:"
-                "BarkCoarseModel"),
-            "fine-model": (
-                "voicehub.architectures.bark.modeling:"
-                "BarkFineModel"),
-            "inference-runtime": (
-                "voicehub.models.bark.inference:"
-                "BarkForTextToSpeech"),
-            "semantic-model": (
-                "voicehub.architectures.bark.modeling:"
-                "BarkSemanticModel"),
-            "wordpiece-tokenizer": (
-                "voicehub.architectures.bark.processing:"
-                "BarkWordPieceTokenizer"),
+            "artifact-resolver": ("voicehub.architectures.bark.artifacts:"
+                                  "resolve_bark_artifacts"),
+            "checkpoint-converter":
+            ("voicehub.architectures.bark.checkpoint:"
+             "convert_official_bark_checkpoint"),
+            "checkpoint-exporter": ("voicehub.architectures.bark.checkpoint:"
+                                    "save_bark_safetensors"),
+            "coarse-model": ("voicehub.architectures.bark.modeling:"
+                             "BarkCoarseModel"),
+            "fine-model": ("voicehub.architectures.bark.modeling:"
+                           "BarkFineModel"),
+            "inference-runtime": ("voicehub.models.bark.inference:"
+                                  "BarkForTextToSpeech"),
+            "semantic-model": ("voicehub.architectures.bark.modeling:"
+                               "BarkSemanticModel"),
+            "wordpiece-tokenizer": ("voicehub.architectures.bark.processing:"
+                                    "BarkWordPieceTokenizer"),
         },
         capabilities=ArchitectureCapabilities(
-            tasks=(SpeechTask.TEXT_TO_SPEECH,),
+            tasks=(SpeechTask.TEXT_TO_SPEECH, ),
             devices=("cpu", "cuda", "mps"),
             dtypes=("float32", "float16", "bfloat16"),
             checkpoint_formats=("safetensors", "pytorch"),
@@ -85,8 +68,8 @@ def create_bark_architecture_spec() -> ArchitectureSpec:
             streaming=False,
             batched_inference=True,
             distributed_training=True,
-            export_formats=("safetensors",),
-            optimization_passes=("compile",),
+            export_formats=("safetensors", ),
+            optimization_passes=("compile", ),
             features=(
                 "three-stage-token-generation",
                 "native-multilingual-wordpiece",
@@ -112,17 +95,14 @@ def create_bark_architecture_spec() -> ArchitectureSpec:
             "reference_checkpoint_revision": BARK_CHECKPOINT_REVISION,
             "reference_tensor_count": BARK_TENSOR_COUNT,
             "reference_state_values": BARK_STATE_VALUES,
-            "reference_inventory_fingerprint": (
-                BARK_INVENTORY_FINGERPRINT),
-            "transformers_reference_revision": (
-                BARK_TRANSFORMERS_SOURCE_REVISION),
+            "reference_inventory_fingerprint": (BARK_INVENTORY_FINGERPRINT),
+            "transformers_reference_revision": (BARK_TRANSFORMERS_SOURCE_REVISION),
             "official_safetensors_published": False,
-            "checkpoint_import_boundary": (
-                "digest-pinned-weights-only-explicit-trust"),
+            "checkpoint_import_boundary": ("digest-pinned-weights-only-explicit-trust"),
             "training_scope": "pretokenized-stage-specific",
             "raw_audio_finetuning_ready": False,
             "full_finetuning_ready": False,
-            "always_frozen_components": ("codec_model",),
+            "always_frozen_components": ("codec_model", ),
             "sampling_rate": 24_000,
             "languages": (
                 "de",

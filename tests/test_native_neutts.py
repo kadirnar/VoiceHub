@@ -86,8 +86,7 @@ class NativeNeuTTSTests(unittest.TestCase):
                     "print(*(int(name in sys.modules) for name in ("
                     "'voicehub.models.neutts.inference', "
                     "'voicehub.architectures.neutts.modeling', "
-                    "'voicehub.architectures.neutts.neucodec')))"
-                ),
+                    "'voicehub.architectures.neutts.neucodec')))"),
             ],
             cwd=PROJECT_ROOT,
             check=True,

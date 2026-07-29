@@ -56,10 +56,7 @@ class ESPnetLibriSpeechTokenizer:
             raise ValueError("ESPnet tokens must end with <sos/eos>.")
         self.sentencepiece = sentencepiece
         self.tokens = tokens
-        self._piece_to_id = {
-            piece: token_id
-            for token_id, piece in enumerate(tokens)
-        }
+        self._piece_to_id = {piece: token_id for token_id, piece in enumerate(tokens)}
         self.blank_token_id = 0
         self.unknown_token_id = 1
         self.sos_eos_token_id = len(tokens) - 1
@@ -82,39 +79,27 @@ class ESPnetLibriSpeechTokenizer:
 
     def _validate_release(self) -> None:
         if len(self.tokens) != 5_000:
-            raise ValueError(
-                "The audited ESPnet LibriSpeech release requires 5,000 tokens."
-            )
+            raise ValueError("The audited ESPnet LibriSpeech release requires 5,000 tokens.")
         if self.sentencepiece.vocabulary_size != 5_000:
-            raise ValueError(
-                "The audited ESPnet tokenizer requires 5,000 SentencePiece entries."
-            )
+            raise ValueError("The audited ESPnet tokenizer requires 5,000 SentencePiece entries.")
         sentencepiece_values = {
             self.sentencepiece.id_to_piece(index)
             for index in range(self.sentencepiece.vocabulary_size)
         }
         expected_values = set(self.tokens)
-        if (
-            expected_values - sentencepiece_values
-            != {"<blank>", "<sos/eos>"}
-            or sentencepiece_values - expected_values
-            != {"<s>", "</s>"}
-        ):
+        if (expected_values - sentencepiece_values != {"<blank>", "<sos/eos>"} or
+                sentencepiece_values - expected_values != {"<s>", "</s>"}):
             raise ValueError(
                 "ESPnet token list and SentencePiece vocabulary do not "
-                "describe the audited remapping."
-            )
+                "describe the audited remapping.")
 
     @property
     def vocabulary_size(self) -> int:
         return len(self.tokens)
 
     def id_to_piece(self, token_id: int) -> str:
-        if (
-            isinstance(token_id, bool)
-            or not isinstance(token_id, int)
-            or not 0 <= token_id < len(self.tokens)
-        ):
+        if (isinstance(token_id, bool) or not isinstance(token_id, int) or
+                not 0 <= token_id < len(self.tokens)):
             raise ValueError("ESPnet token ID is outside the vocabulary.")
         return self.tokens[token_id]
 
@@ -135,9 +120,7 @@ class ESPnetLibriSpeechTokenizer:
 
     def encode_as_ids(self, text: str) -> tuple[int, ...]:
         return tuple(
-            self._piece_to_id.get(piece, self.unknown_token_id)
-            for piece in self.encode_as_pieces(text)
-        )
+            self._piece_to_id.get(piece, self.unknown_token_id) for piece in self.encode_as_pieces(text))
 
     def decode_ids(self, token_ids: Iterable[int]) -> str:
         pieces = []
@@ -147,9 +130,7 @@ class ESPnetLibriSpeechTokenizer:
             piece = self.id_to_piece(raw_id)
             if raw_id in {self.blank_token_id, self.sos_eos_token_id}:
                 continue
-            pieces.append(
-                _UNKNOWN_SURFACE if raw_id == self.unknown_token_id else piece
-            )
+            pieces.append(_UNKNOWN_SURFACE if raw_id == self.unknown_token_id else piece)
         return "".join(pieces).replace(_WHITESPACE, " ").strip()
 
     def save_pretrained(

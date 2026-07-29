@@ -62,9 +62,9 @@ def _contraction_end(text: str, index: int) -> int | None:
 def qwen2_pretokenize(text: str) -> tuple[str, ...]:
     """Implement Qwen2's Unicode pre-tokenization without ``regex``.
 
-    In particular, numbers are emitted one Unicode number at a time.  That
-    differs from GPT-2's grouped-number rule and is required for exact Qwen2
-    token IDs.
+    In particular, numbers are emitted one Unicode number at a time.
+    That differs from GPT-2's grouped-number rule and is required for
+    exact Qwen2 token IDs.
     """
     if not isinstance(text, str):
         raise TypeError("`text` must be a string.")

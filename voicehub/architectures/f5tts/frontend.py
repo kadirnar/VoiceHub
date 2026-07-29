@@ -11,15 +11,13 @@ from torch.nn.utils.rnn import pad_sequence
 TokenSequence = Sequence[str]
 TextNormalizer = Callable[[str], TokenSequence]
 
-_PUNCTUATION_TRANSLATION = str.maketrans(
-    {
-        ";": ",",
-        "“": '"',
-        "”": '"',
-        "‘": "'",
-        "’": "'",
-    }
-)
+_PUNCTUATION_TRANSLATION = str.maketrans({
+    ";": ",",
+    "“": '"',
+    "”": '"',
+    "‘": "'",
+    "’": "'",
+})
 
 
 def _contains_chinese(text: str) -> bool:
@@ -34,22 +32,17 @@ class F5Vocabulary:
         if not resolved:
             raise ValueError("F5-TTS vocabulary cannot be empty.")
         if resolved[0] != " ":
-            raise ValueError(
-                "F5-TTS vocabulary index 0 must be a space/unknown token."
-            )
+            raise ValueError("F5-TTS vocabulary index 0 must be a space/unknown token.")
         if len(set(resolved)) != len(resolved):
             raise ValueError("F5-TTS vocabulary contains duplicate tokens.")
         self.tokens = resolved
-        self.token_to_id = {
-            token: index
-            for index, token in enumerate(resolved)
-        }
+        self.token_to_id = {token: index for index, token in enumerate(resolved)}
 
     def __len__(self) -> int:
         return len(self.tokens)
 
     @classmethod
-    def from_file(cls, path: str | Path) -> "F5Vocabulary":
+    def from_file(cls, path: str | Path) -> F5Vocabulary:
         source = Path(path).expanduser()
         if not source.is_file():
             raise FileNotFoundError(f"F5-TTS vocabulary was not found: {source}.")
@@ -72,12 +65,13 @@ class F5Vocabulary:
 class NativeF5TextFrontend:
     """F5 tokenizer with an explicit Chinese G2P boundary.
 
-    The released multilingual vocabulary stores Chinese syllables with tone
-    numbers. Reproducing jieba segmentation and tone-sandhi through a hidden
-    optional dependency would make the native runtime inaccurate and
-    non-reproducible. Callers may therefore inject a VoiceHub-owned normalizer
-    or pass already-normalized token sequences. Non-Chinese character input is
-    handled directly and matches the released character path.
+    The released multilingual vocabulary stores Chinese syllables with
+    tone numbers. Reproducing jieba segmentation and tone-sandhi through
+    a hidden optional dependency would make the native runtime
+    inaccurate and non-reproducible. Callers may therefore inject a
+    VoiceHub-owned normalizer or pass already-normalized token
+    sequences. Non-Chinese character input is handled directly and
+    matches the released character path.
     """
 
     def __init__(
@@ -106,8 +100,7 @@ class NativeF5TextFrontend:
                     raise ValueError(
                         "Chinese F5-TTS input requires pinyin-with-tone tokens "
                         "or an explicit native text normalizer. VoiceHub does "
-                        "not silently substitute a non-equivalent G2P."
-                    )
+                        "not silently substitute a non-equivalent G2P.")
                 tokens = tuple(translated)
         elif isinstance(text, Sequence) and not isinstance(text, (bytes, bytearray)):
             tokens = tuple(text)

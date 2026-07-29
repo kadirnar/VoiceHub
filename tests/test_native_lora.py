@@ -49,7 +49,7 @@ class NativeLoRATests(unittest.TestCase):
         model = _AttentionModel()
         injection = inject_lora(
             model,
-            LoRAConfig(rank=2, target_modules=("q_proj",), dropout=0.0),
+            LoRAConfig(rank=2, target_modules=("q_proj", ), dropout=0.0),
         )
         with torch.no_grad():
             model.q_proj.lora_b.fill_(0.25)
@@ -70,7 +70,7 @@ class NativeLoRATests(unittest.TestCase):
         model = _AttentionModel()
         injection = inject_lora(
             model,
-            LoRAConfig(rank=2, target_modules=("q_proj",)),
+            LoRAConfig(rank=2, target_modules=("q_proj", )),
         )
         original = injection.adapter_state_dict()
         invalid = dict(original)
@@ -88,7 +88,7 @@ class NativeLoRATests(unittest.TestCase):
         original_q = model.q_proj
         injection = inject_lora(
             model,
-            LoRAConfig(rank=2, target_modules=("q_proj",)),
+            LoRAConfig(rank=2, target_modules=("q_proj", )),
         )
 
         restored = injection.restore()
@@ -105,7 +105,7 @@ class NativeLoRATests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "rank"):
             inject_lora(
                 model,
-                LoRAConfig(rank=5, target_modules=("q_proj",)),
+                LoRAConfig(rank=5, target_modules=("q_proj", )),
             )
         self.assertIs(model.q_proj, original_q)
 

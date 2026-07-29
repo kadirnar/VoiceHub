@@ -12,36 +12,25 @@ import torch
 
 from voicehub import AutoConfig, AutoModelForSpeechRecognition
 from voicehub.architectures.whisper import WhisperConfig, WhisperModel
-from voicehub.architectures.whisper.checkpoint import (
-    huggingface_whisper_tensor_mapping,
-)
-from voicehub.architectures.whisper.tokenization import (
-    build_openai_whisper_special_tokens,
-)
+from voicehub.architectures.whisper.checkpoint import huggingface_whisper_tensor_mapping
+from voicehub.architectures.whisper.tokenization import build_openai_whisper_special_tokens
 from voicehub.checkpointing import save_safetensors
+from voicehub.models.asr_native.configuration import FasterWhisperConfig, OpenAIWhisperConfig
+from voicehub.models.asr_native.faster_whisper import FasterWhisperForSpeechRecognition
+from voicehub.models.asr_native.openai_whisper import OpenAIWhisperForSpeechRecognition
 from voicehub.models.asr_whisper_native import (
     NativeWhisperTrainingAdapter,
     WhisperASRConfig,
     WhisperForSpeechRecognition,
 )
-from voicehub.models.asr_native.configuration import (
-    FasterWhisperConfig,
-    OpenAIWhisperConfig,
-)
-from voicehub.models.asr_native.faster_whisper import (
-    FasterWhisperForSpeechRecognition,
-)
-from voicehub.models.asr_native.openai_whisper import (
-    OpenAIWhisperForSpeechRecognition,
-)
-from voicehub.training.auto import AutoTrainingAdapter
 from voicehub.tokenization import encode_gpt2_token
+from voicehub.training.auto import AutoTrainingAdapter
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _tokenizer_document(timestamp_count=1_501):
-    mergeable = {bytes((value,)): value for value in range(256)}
+    mergeable = {bytes((value, )): value for value in range(256)}
     mergeable.update({
         b"he": 256,
         b"hel": 257,
@@ -49,35 +38,28 @@ def _tokenizer_document(timestamp_count=1_501):
         b"hello": 259,
         b"": 260,
     })
-    vocabulary = {
-        encode_gpt2_token(token): token_id
-        for token, token_id in mergeable.items()
-    }
+    vocabulary = {encode_gpt2_token(token): token_id for token, token_id in mergeable.items()}
     special = dict(
         build_openai_whisper_special_tokens(
             len(mergeable),
             num_languages=3,
             timestamp_count=timestamp_count,
-        )
-    )
+        ))
     no_speech = special.pop("<|nospeech|>")
     special["<|nocaptions|>"] = no_speech
     vocabulary["<|endoftext|>"] = special["<|endoftext|>"]
-    added_tokens = [
-        {
-            "id": token_id,
-            "content": token,
-            "single_word": False,
-            "lstrip": False,
-            "rstrip": False,
-            "normalized": token.startswith("<|0."),
-            "special": not token.startswith("<|0."),
-        }
-        for token, token_id in sorted(
-            special.items(),
-            key=lambda item: item[1],
-        )
-    ]
+    added_tokens = [{
+        "id": token_id,
+        "content": token,
+        "single_word": False,
+        "lstrip": False,
+        "rstrip": False,
+        "normalized": token.startswith("<|0."),
+        "special": not token.startswith("<|0."),
+    } for token, token_id in sorted(
+        special.items(),
+        key=lambda item: item[1],
+    )]
     return {
         "version": "1.0",
         "added_tokens": added_tokens,
@@ -176,9 +158,7 @@ def _tiny_artifact(root: Path):
     native_state = reference.state_dict()
     source = {
         source_name: native_state[target_name]
-        for source_name, target_name in huggingface_whisper_tensor_mapping(
-            values
-        )
+        for source_name, target_name in huggingface_whisper_tensor_mapping(values)
     }
     save_safetensors(source, root / "model.safetensors")
     return config, reference
@@ -246,9 +226,7 @@ print(json.dumps({name: name in sys.modules for name in names}))
             self.assertIsNotNone(output.loss)
             self.assertTrue(torch.isfinite(output.loss))
             output.loss.backward()
-            self.assertIsNotNone(
-                wrapper.model.decoder.token_embedding.weight.grad
-            )
+            self.assertIsNotNone(wrapper.model.decoder.token_embedding.weight.grad)
 
             token_set = wrapper.generation_adapter.token_set
 
@@ -261,9 +239,7 @@ print(json.dumps({name: name in sys.modules for name in names}))
                     self.features = features
                     self.config = config
                     return SimpleNamespace(
-                        generated_sequences=torch.tensor(
-                            [[272, 259, 274, 261]]
-                        ),
+                        generated_sequences=torch.tensor([[272, 259, 274, 261]]),
                         language_token_ids=torch.tensor([263]),
                     )
 
@@ -298,9 +274,7 @@ print(json.dumps({name: name in sys.modules for name in names}))
 
             export = root / "export"
             adapter.save_pretrained(export)
-            exported_config = json.loads(
-                (export / "config.json").read_text(encoding="utf-8")
-            )
+            exported_config = json.loads((export / "config.json").read_text(encoding="utf-8"))
             auto_config = AutoConfig.from_pretrained(export)
             reloaded = AutoModelForSpeechRecognition.from_pretrained(
                 export,
@@ -335,9 +309,7 @@ print(json.dumps({name: name in sys.modules for name in names}))
                 "voicehub-native-whisper-safetensors-and-processor",
             )
 
-    def test_openai_compatibility_provider_fine_tunes_and_round_trips_natively(
-        self,
-    ):
+    def test_openai_compatibility_provider_fine_tunes_and_round_trips_natively(self, ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             _tiny_artifact(root)
@@ -366,15 +338,11 @@ print(json.dumps({name: name in sys.modules for name in names}))
                 OpenAIWhisperForSpeechRecognition,
             )
             self.assertEqual(
-                json.loads(
-                    (export / "config.json").read_text(encoding="utf-8")
-                )["model_type"],
+                json.loads((export / "config.json").read_text(encoding="utf-8"))["model_type"],
                 "asr_openai_whisper",
             )
 
-    def test_faster_whisper_compatibility_round_trips_without_ctranslate2(
-        self,
-    ):
+    def test_faster_whisper_compatibility_round_trips_without_ctranslate2(self, ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             _tiny_artifact(root)

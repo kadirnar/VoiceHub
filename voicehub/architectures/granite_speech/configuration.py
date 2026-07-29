@@ -48,16 +48,8 @@ def _extras(
     values: Mapping[str, Any],
     config_type: type[Any],
 ) -> dict[str, Any]:
-    canonical = {
-        item.name
-        for item in fields(config_type)
-        if item.name != "extra_config"
-    }
-    return {
-        name: copy.deepcopy(value)
-        for name, value in values.items()
-        if name not in canonical
-    }
+    canonical = {item.name for item in fields(config_type) if item.name != "extra_config"}
+    return {name: copy.deepcopy(value) for name, value in values.items() if name not in canonical}
 
 
 def _freeze(values: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -89,20 +81,19 @@ class GraniteSpeechEncoderConfig:
 
     def __post_init__(self) -> None:
         if self.model_type != "granite_speech_encoder":
-            raise ValueError(
-                "GraniteSpeechEncoderConfig requires "
-                "`model_type='granite_speech_encoder'`.")
+            raise ValueError("GraniteSpeechEncoderConfig requires "
+                             "`model_type='granite_speech_encoder'`.")
         for name in (
-            "input_dim",
-            "num_layers",
-            "hidden_dim",
-            "feedforward_mult",
-            "num_heads",
-            "output_dim",
-            "context_size",
-            "max_pos_emb",
-            "conv_kernel_size",
-            "conv_expansion_factor",
+                "input_dim",
+                "num_layers",
+                "hidden_dim",
+                "feedforward_mult",
+                "num_heads",
+                "output_dim",
+                "context_size",
+                "max_pos_emb",
+                "conv_kernel_size",
+                "conv_expansion_factor",
         ):
             _integer(name, getattr(self, name), minimum=1)
         dim_head = self.dim_head
@@ -133,16 +124,8 @@ class GraniteSpeechEncoderConfig:
         if not isinstance(values, Mapping):
             raise TypeError("Granite Speech encoder configuration must be a mapping.")
         source = copy.deepcopy(dict(values))
-        canonical = {
-            item.name
-            for item in fields(cls)
-            if item.name != "extra_config"
-        }
-        resolved = {
-            name: source[name]
-            for name in canonical
-            if name in source
-        }
+        canonical = {item.name for item in fields(cls) if item.name != "extra_config"}
+        resolved = {name: source[name] for name in canonical if name in source}
         extras = _extras(source, cls)
         supplied = source.get("extra_config")
         if supplied is not None:
@@ -188,12 +171,12 @@ class GraniteSpeechProjectorConfig:
                 "Granite Speech requires `projector_config.model_type` to be "
                 "'blip_2_qformer'.")
         for name in (
-            "hidden_size",
-            "encoder_hidden_size",
-            "num_hidden_layers",
-            "num_attention_heads",
-            "intermediate_size",
-            "cross_attention_frequency",
+                "hidden_size",
+                "encoder_hidden_size",
+                "num_hidden_layers",
+                "num_attention_heads",
+                "intermediate_size",
+                "cross_attention_frequency",
         ):
             _integer(name, getattr(self, name), minimum=1)
         if self.hidden_size % self.num_attention_heads:
@@ -248,16 +231,8 @@ class GraniteSpeechProjectorConfig:
         if not isinstance(values, Mapping):
             raise TypeError("Granite Speech projector configuration must be a mapping.")
         source = copy.deepcopy(dict(values))
-        canonical = {
-            item.name
-            for item in fields(cls)
-            if item.name != "extra_config"
-        }
-        resolved = {
-            name: source[name]
-            for name in canonical
-            if name in source
-        }
+        canonical = {item.name for item in fields(cls) if item.name != "extra_config"}
+        resolved = {name: source[name] for name in canonical if name in source}
         extras = _extras(source, cls)
         supplied = source.get("extra_config")
         if supplied is not None:
@@ -279,15 +254,11 @@ class GraniteSpeechArchitectureConfig:
     """Complete executable Granite Speech architecture configuration."""
 
     model_type: str = "granite_speech"
-    text_config: GraniteConfig | Mapping[str, Any] = field(
-        default_factory=GraniteConfig,
-    )
+    text_config: GraniteConfig | Mapping[str, Any] = field(default_factory=GraniteConfig, )
     encoder_config: GraniteSpeechEncoderConfig | Mapping[str, Any] = field(
-        default_factory=GraniteSpeechEncoderConfig,
-    )
+        default_factory=GraniteSpeechEncoderConfig, )
     projector_config: GraniteSpeechProjectorConfig | Mapping[str, Any] = field(
-        default_factory=GraniteSpeechProjectorConfig,
-    )
+        default_factory=GraniteSpeechProjectorConfig, )
     audio_token_index: int = 49_155
     initializer_range: float = 0.02
     has_lora_adapter: bool = False
@@ -306,20 +277,14 @@ class GraniteSpeechArchitectureConfig:
                 "Only the `granite_speech` architecture is supported; "
                 "`granite_speech_plus` has a different graph.")
         text_config = (
-            self.text_config
-            if isinstance(self.text_config, GraniteConfig)
-            else GraniteConfig.from_dict(self.text_config)
-        )
+            self.text_config if isinstance(self.text_config, GraniteConfig) else GraniteConfig.from_dict(
+                self.text_config))
         encoder_config = (
-            self.encoder_config
-            if isinstance(self.encoder_config, GraniteSpeechEncoderConfig)
-            else GraniteSpeechEncoderConfig.from_dict(self.encoder_config)
-        )
+            self.encoder_config if isinstance(self.encoder_config, GraniteSpeechEncoderConfig) else
+            GraniteSpeechEncoderConfig.from_dict(self.encoder_config))
         projector_config = (
-            self.projector_config
-            if isinstance(self.projector_config, GraniteSpeechProjectorConfig)
-            else GraniteSpeechProjectorConfig.from_dict(self.projector_config)
-        )
+            self.projector_config if isinstance(self.projector_config, GraniteSpeechProjectorConfig) else
+            GraniteSpeechProjectorConfig.from_dict(self.projector_config))
         object.__setattr__(self, "text_config", text_config)
         object.__setattr__(self, "encoder_config", encoder_config)
         object.__setattr__(self, "projector_config", projector_config)
@@ -349,8 +314,7 @@ class GraniteSpeechArchitectureConfig:
                 "The Q-Former `encoder_hidden_size` must match the audio "
                 "encoder `hidden_dim`.")
         if self.tie_word_embeddings != text_config.tie_word_embeddings:
-            raise ValueError(
-                "Top-level and text `tie_word_embeddings` values must agree.")
+            raise ValueError("Top-level and text `tie_word_embeddings` values must agree.")
         if not isinstance(self.extra_config, Mapping):
             raise TypeError("`extra_config` must be a mapping.")
         object.__setattr__(self, "extra_config", _freeze(self.extra_config))
@@ -373,18 +337,9 @@ class GraniteSpeechArchitectureConfig:
         source = copy.deepcopy(dict(values))
         model_type = str(source.get("model_type", "granite_speech"))
         if model_type != "granite_speech":
-            raise ValueError(
-                f"Unsupported Granite Speech `model_type` {model_type!r}.")
-        canonical = {
-            item.name
-            for item in fields(cls)
-            if item.name != "extra_config"
-        }
-        resolved = {
-            name: source[name]
-            for name in canonical
-            if name in source
-        }
+            raise ValueError(f"Unsupported Granite Speech `model_type` {model_type!r}.")
+        canonical = {item.name for item in fields(cls) if item.name != "extra_config"}
+        resolved = {name: source[name] for name in canonical if name in source}
         extras = _extras(source, cls)
         supplied = source.get("extra_config")
         if supplied is not None:
