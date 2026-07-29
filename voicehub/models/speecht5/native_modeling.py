@@ -19,6 +19,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from voicehub.models.speecht5.native_configuration import NativeSpeechT5Config, NativeSpeechT5HifiGanConfig
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 def _activation(name: str, values: Tensor) -> Tensor:
@@ -1181,6 +1182,43 @@ class SpeechT5ForTextToSpeechModel(nn.Module):
                 nn.init.uniform_(module.bias, -bound, bound)
         elif isinstance(module, SpeechT5ScaledPositionalEncoding):
             nn.init.ones_(module.alpha)
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the tensor graph actually used by SpeechT5 synthesis."""
+        if mode == "training":
+            return (OptimizationCompileTarget(
+                "acoustic_model.forward",
+                self,
+                "forward",
+            ), )
+        if mode == "inference":
+            return (
+                OptimizationCompileTarget(
+                    "encoder.forward",
+                    self.speecht5.encoder,
+                    "forward",
+                ),
+                OptimizationCompileTarget(
+                    "decoder.prenet.forward",
+                    self.speecht5.decoder.prenet,
+                    "forward",
+                ),
+                OptimizationCompileTarget(
+                    "decoder.forward",
+                    self.speecht5.decoder.wrapped_decoder,
+                    "forward",
+                ),
+                OptimizationCompileTarget(
+                    "postnet.forward",
+                    self.speech_decoder_postnet,
+                    "postnet",
+                ),
+            )
+        raise ValueError("SpeechT5 compile targets require 'inference' or 'training' "
+                         "mode.")
 
     def forward(
         self,

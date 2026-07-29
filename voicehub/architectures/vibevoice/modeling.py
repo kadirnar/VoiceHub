@@ -21,6 +21,7 @@ from voicehub.architectures.vibevoice.configuration import VibeVoiceASRConfig, V
 from voicehub.architectures.vibevoice.diffusion import VibeVoiceDiffusionHead, VibeVoiceDPMSolver
 from voicehub.neural.cache import DynamicKVCache
 from voicehub.neural.normalization import RMSNorm
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 @dataclass(frozen=True)
@@ -557,6 +558,21 @@ class VibeVoiceForConditionalGeneration(nn.Module):
             dtype=dtype,
         )
 
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose training while rejecting unsupported public inference."""
+        if mode == "inference":
+            return ()
+        if mode != "training":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            "vibevoice.forward",
+            self,
+            "forward",
+        ), )
+
     @property
     def output_embedding(self) -> Tensor:
         # The published checkpoint ties output projection to input embedding
@@ -919,6 +935,15 @@ class VibeVoiceRealtimeForConditionalGeneration(nn.Module):
         )
         if initialize:
             self.tts_eos_classifier.apply(self.model._initialize_module)
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Fail closed until the staged realtime API is publicly supported."""
+        if mode not in {"inference", "training"}:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return ()
 
     def forward_lm(
         self,

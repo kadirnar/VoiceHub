@@ -61,6 +61,7 @@ def _adversarial_training_spec(spec: Any) -> Any:
         required_inputs=("input_ids", "audio_values"),
         kind=TrainingPhaseKind.DISCRIMINATOR,
         frozen_component_paths=("training_model.native_model", ),
+        optimizer_step_after_phase=True,
     )
     generator = TrainingPhaseSpec(
         name="generator",
@@ -74,6 +75,7 @@ def _adversarial_training_spec(spec: Any) -> Any:
         required_inputs=("input_ids", "audio_values"),
         kind=TrainingPhaseKind.GENERATOR,
         frozen_component_paths=("training_model.discriminator", ),
+        optimizer_step_after_phase=True,
     )
     return replace(
         spec,

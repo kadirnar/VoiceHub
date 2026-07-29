@@ -20,20 +20,20 @@ from voicehub.optimization.capabilities import (
 _JSON_SCALARS = (str, int, float, bool, type(None))
 
 
-def _canonical_json_tree(value: Any, *, path: str) -> Any:
+def canonical_json_tree(value: Any, *, path: str) -> Any:
     """Return a strict JSON tree without coercing keys or custom objects."""
     if isinstance(value, Mapping):
         if any(not isinstance(key, str) for key in value):
             raise TypeError(f"{path} contains a non-string mapping key.")
         output = {}
         for key in sorted(value):
-            output[key] = _canonical_json_tree(
+            output[key] = canonical_json_tree(
                 value[key],
                 path=f"{path}.{key}",
             )
         return output
     if isinstance(value, (tuple, list)):
-        return [_canonical_json_tree(item, path=f"{path}[{index}]") for index, item in enumerate(value)]
+        return [canonical_json_tree(item, path=f"{path}[{index}]") for index, item in enumerate(value)]
     if isinstance(value, float) and not math.isfinite(value):
         raise ValueError(f"{path} contains a non-finite number.")
     if isinstance(value, _JSON_SCALARS):
@@ -42,8 +42,9 @@ def _canonical_json_tree(value: Any, *, path: str) -> Any:
                     "JSON value.")
 
 
-def _canonical_json_string(value: Any, *, path: str) -> str:
-    normalized = _canonical_json_tree(value, path=path)
+def canonical_json_string(value: Any, *, path: str) -> str:
+    """Encode a deterministic strict-JSON tree without implicit coercions."""
+    normalized = canonical_json_tree(value, path=path)
     encoded = json.dumps(
         normalized,
         allow_nan=False,
@@ -187,6 +188,22 @@ class OptimizationPass(ABC):
         mutated model.
         """
 
+    def runtime_manifest_status(
+        self,
+        result: PassResult,
+    ) -> Mapping[str, Any] | None:
+        """Optionally report evolving state after one application.
+
+        Configuration and application metadata are immutable snapshots.
+        Runtime state may evolve later—for example, a lazy compiler can
+        select eager fallback—so passes may override this hook.
+        Returning ``None`` omits the separate ``runtime_status``
+        manifest field.
+        """
+        if not isinstance(result, PassResult):
+            raise TypeError("`result` must be a PassResult.")
+        return None
+
     def validate(self, model: Any, context: OptimizationContext) -> None:
         """Reject incompatible runtime properties without mutating
         ``model``."""
@@ -255,8 +272,20 @@ class AppliedPass:
         return self.optimization_pass.qualified_id
 
     def manifest_entry(self) -> dict[str, Any]:
-        """Return a fresh copy of the immutable application snapshot."""
-        return json.loads(self._manifest_json)
+        """Return immutable configuration plus current runtime outcome."""
+        declaration = json.loads(self._manifest_json)
+        runtime_status = self.optimization_pass.runtime_manifest_status(self.result, )
+        if runtime_status is None:
+            return declaration
+        if not isinstance(runtime_status, Mapping):
+            raise TypeError(f"Optimization pass {self.pass_id!r} runtime status "
+                            "must be a mapping.")
+        declaration["runtime_status"] = runtime_status
+        return json.loads(
+            canonical_json_string(
+                declaration,
+                path=f"optimization pass {self.pass_id!r} manifest",
+            ))
 
 
 @dataclass(frozen=True)
@@ -307,7 +336,7 @@ class OptimizationResult:
             },
             "passes": list(self.manifest_metadata()),
         }
-        return json.loads(_canonical_json_string(
+        return json.loads(canonical_json_string(
             manifest,
             path="optimization manifest",
         ))
@@ -347,6 +376,29 @@ class OptimizationResult:
         if any(not isinstance(name, str) or not name for name in result):
             raise TypeError("Portable optimization state keys must be non-empty strings.")
         return result
+
+
+def snapshot_optimization_pass_declaration(optimization_pass: OptimizationPass, ) -> str:
+    """Snapshot one pass declaration as deterministic strict JSON."""
+    if not isinstance(optimization_pass, OptimizationPass):
+        raise TypeError("`optimization_pass` must be an OptimizationPass.")
+    optimization_pass.validate_declaration()
+    configuration = optimization_pass.manifest_configuration()
+    if not isinstance(configuration, Mapping):
+        raise TypeError(
+            f"Optimization pass {optimization_pass.qualified_id!r} "
+            "manifest_configuration() must return a mapping.")
+    return canonical_json_string(
+        {
+            "pass": optimization_pass.pass_id,
+            "kind": optimization_pass.compatibility_kind,
+            "version": optimization_pass.pass_version,
+            "configuration": configuration,
+            "capabilities": _capability_manifest(optimization_pass.capabilities),
+        },
+        path=(f"optimization pass {optimization_pass.qualified_id!r} "
+              "declaration"),
+    )
 
 
 class OptimizationPassManager:
@@ -415,6 +467,8 @@ class OptimizationPassManager:
         model: Any,
         passes: Iterable[OptimizationPass],
         context: OptimizationContext,
+        *,
+        declaration_snapshots: Iterable[str] | None = None,
     ) -> OptimizationResult:
         if not isinstance(context, OptimizationContext):
             raise TypeError("`context` must be an OptimizationContext.")
@@ -435,7 +489,20 @@ class OptimizationPassManager:
         if len(qualified_ids) != len(set(qualified_ids)):
             raise ValueError("An optimization plan cannot repeat the same pass.")
 
-        declaration_snapshots = tuple(self._snapshot_pass_declaration(item) for item in pass_sequence)
+        if declaration_snapshots is None:
+            resolved_declaration_snapshots = tuple(
+                snapshot_optimization_pass_declaration(item) for item in pass_sequence)
+        else:
+            resolved_declaration_snapshots = tuple(declaration_snapshots)
+            if len(resolved_declaration_snapshots) != len(pass_sequence):
+                raise ValueError(
+                    "Optimization pass declaration snapshots must have "
+                    "the same length as the pass sequence.")
+            resolved_declaration_snapshots = tuple(
+                self._validate_pass_declaration_snapshot(item, snapshot) for item, snapshot in zip(
+                    pass_sequence,
+                    resolved_declaration_snapshots,
+                ))
 
         # Every compatibility check and configuration snapshot is deliberately
         # completed before the first model transformation.
@@ -452,7 +519,7 @@ class OptimizationPassManager:
         applied: list[AppliedPass] = []
         for item, declaration_json in zip(
                 pass_sequence,
-                declaration_snapshots,
+                resolved_declaration_snapshots,
         ):
             try:
                 result = item.apply(current, context)
@@ -468,15 +535,17 @@ class OptimizationPassManager:
                 )
                 applied.append(provisional)
                 declaration = json.loads(declaration_json)
-                declaration["metadata"] = dict(result.metadata)
+                declaration["metadata"] = result.metadata
                 applied[-1] = replace(
                     provisional,
-                    _manifest_json=_canonical_json_string(
+                    _manifest_json=canonical_json_string(
                         declaration,
-                        path=(f"optimization pass "
-                              f"{item.qualified_id!r} manifest"),
+                        path=(f"optimization pass {item.qualified_id!r} "
+                              "manifest"),
                     ),
                 )
+                # Validate metadata before publishing the transformed graph.
+                applied[-1].manifest_entry()
             except BaseException as error:
                 rollback_errors = self._rollback(
                     current,
@@ -496,23 +565,58 @@ class OptimizationPassManager:
 
     @staticmethod
     def _snapshot_pass_declaration(optimization_pass: OptimizationPass, ) -> str:
-        optimization_pass.validate_declaration()
-        configuration = optimization_pass.manifest_configuration()
-        if not isinstance(configuration, Mapping):
-            raise TypeError(
-                f"Optimization pass {optimization_pass.qualified_id!r} "
-                "manifest_configuration() must return a mapping.")
-        return _canonical_json_string(
-            {
-                "pass": optimization_pass.pass_id,
-                "kind": optimization_pass.compatibility_kind,
-                "version": optimization_pass.pass_version,
-                "configuration": dict(configuration),
-                "capabilities": _capability_manifest(optimization_pass.capabilities),
-            },
+        return snapshot_optimization_pass_declaration(optimization_pass, )
+
+    @staticmethod
+    def _validate_pass_declaration_snapshot(
+        optimization_pass: OptimizationPass,
+        snapshot: str,
+    ) -> str:
+        """Validate a resolver-owned snapshot without re-reading pass
+        config."""
+        if not isinstance(snapshot, str):
+            raise TypeError("Optimization pass declaration snapshots must be strings.")
+        try:
+            declaration = json.loads(snapshot)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Optimization pass declaration snapshot is not valid JSON.") from error
+        canonical = canonical_json_string(
+            declaration,
             path=(f"optimization pass {optimization_pass.qualified_id!r} "
-                  "declaration"),
+                  "declaration snapshot"),
         )
+        if canonical != snapshot:
+            raise ValueError(
+                "Optimization pass declaration snapshots must use canonical "
+                "strict-JSON encoding.")
+        expected = {
+            "pass": optimization_pass.pass_id,
+            "kind": optimization_pass.compatibility_kind,
+            "version": optimization_pass.pass_version,
+            "capabilities": _capability_manifest(optimization_pass.capabilities),
+        }
+        if not isinstance(declaration, dict):
+            raise TypeError("Optimization pass declaration snapshot must contain an "
+                            "object.")
+        if set(declaration) != {
+                "pass",
+                "kind",
+                "version",
+                "configuration",
+                "capabilities",
+        }:
+            raise ValueError("Optimization pass declaration snapshot has an invalid "
+                             "schema.")
+        for name, value in expected.items():
+            if declaration[name] != value:
+                raise ValueError(
+                    "Optimization pass declaration snapshot no longer "
+                    f"matches {name!r} for "
+                    f"{optimization_pass.qualified_id!r}.")
+        if not isinstance(declaration["configuration"], dict):
+            raise TypeError("Optimization pass declaration configuration must contain "
+                            "an object.")
+        return snapshot
 
     @staticmethod
     def _validate_architecture_context(

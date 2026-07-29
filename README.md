@@ -88,6 +88,8 @@ provides searchable, task-oriented guides:
 - [ASR and VAD data](https://kadirnar.github.io/voicehub/guides/speech-data/)
 - [Data preparation](https://kadirnar.github.io/voicehub/guides/data-preparation/)
 - [Training](https://kadirnar.github.io/voicehub/guides/training/)
+- [TTS optimization](https://kadirnar.github.io/voicehub/guides/tts-optimization/)
+- [vLLM and SGLang TTS serving](https://kadirnar.github.io/voicehub/guides/llm-serving/)
 - [Notebook gallery](https://kadirnar.github.io/voicehub/guides/notebook/)
 - [TTS training support](https://kadirnar.github.io/voicehub/models/training-support/)
 - [ASR and VAD support](https://kadirnar.github.io/voicehub/models/asr-vad-support/)
@@ -281,6 +283,25 @@ Every synthesis call returns `TTSOutput`, containing `audio`, `sample_rate`,
 `<Architecture>Config`, and all TTS wrappers inherit the same `forward` and
 `generate` signatures.
 
+Verified LLM-based models can use an isolated vLLM or SGLang server without
+installing either engine into VoiceHub:
+
+```python
+qwen = AutoModelForTextToSpeech.from_pretrained(
+    "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    model_type="qwen3tts",
+    llm_backend="vllm",
+    llm_backend_config={
+        "endpoint": "http://127.0.0.1:8091",
+        "model": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    },
+)
+output = qwen.generate("Server-backed speech.", speaker="ryan")
+```
+
+The [vLLM and SGLang serving guide](https://kadirnar.github.io/voicehub/guides/llm-serving/)
+lists the verified token and complete-speech pairings.
+
 ASR uses `AutoModelForSpeechRecognition` and returns `ASROutput`; VAD uses
 `AutoModelForVoiceActivityDetection` and returns `VADOutput`. Both accept file,
 array, tensor, mapping, or `AudioInput` audio. See the
@@ -329,6 +350,50 @@ trainer = Trainer(
 )
 trainer.train()
 ```
+
+Every registered TTS model uses the same capability-driven execution policy.
+Automatic selections retain native PyTorch behavior when an architecture or
+runtime cannot use a faster backend:
+
+```python
+from voicehub import AutoModelForTextToSpeech, TTSOptimizationConfig
+
+optimization = TTSOptimizationConfig(
+    attn_implementation="auto",
+    kernel_backend="auto",
+    compile="auto",
+)
+model = AutoModelForTextToSpeech.from_pretrained(
+    "F5TTS_v1_Base",
+    model_type="f5tts",
+    device="cuda",
+    optimization_config=optimization,
+)
+```
+
+`TTSOptimizationConfig` covers all 34 current TTS registry entries, records
+attention, custom-kernel, compilation, and fallback decisions in a manifest,
+and applies reversible built-in passes. Compilation binds to each loaded
+runtime's declared execution stages; `auto` stays eager when a mode has no
+valid target, while `required` fails. VITS, codec/LLM, and diffusion/flow
+models additionally expose separate, opt-in source-backed *training* profiles:
+
+```python
+from voicehub import get_tts_training_optimization_profile
+
+profile = get_tts_training_optimization_profile("f5tts")
+optimized_dataset = profile.prepare_dataset(train_dataset)
+arguments = profile.training_arguments("runs/f5tts-optimized")
+accelerators = profile.acceleration_plan(
+    kernel_backend="triton",
+    attention_policy="auto",
+)
+```
+
+See [TTS optimization](https://kadirnar.github.io/voicehub/guides/tts-optimization/)
+for universal configuration and the VITS latent-window, LLM token-budget/SDPA,
+and diffusion frame-budget/checkpointing/EMA policies, plus `torch.compile`,
+Triton, custom CUDA kernels, and FlashAttention-4.
 
 Enable first-class Weights & Biases reporting through the same training
 arguments:

@@ -24,6 +24,8 @@ from voicehub.architectures.qwen3_tts.configuration import (
     Qwen3TTSSpeakerEncoderConfig,
     Qwen3TTSTalkerConfig,
 )
+from voicehub.kernels import KernelBackend, gated_silu
+from voicehub.neural.backends import FlashAttention4Policy, flash_attention4_or_sdpa
 from voicehub.neural.normalization import RMSNorm
 from voicehub.neural.rotary import RotaryEmbedding, apply_rotary_embedding
 from voicehub.objectives.sequence import sequence_cross_entropy
@@ -32,6 +34,7 @@ from voicehub.objectives.sequence import sequence_cross_entropy
 @dataclass(frozen=True, slots=True)
 class Qwen3TTSTalkerOutput:
     logits: Tensor
+    last_hidden_state: Tensor
     loss: Tensor | None = None
     hidden_states: tuple[tuple[Tensor, ...], Tensor | None] | None = None
 
@@ -351,6 +354,93 @@ def _expand_kv(hidden_states: Tensor, groups: int) -> Tensor:
                                          dimension).reshape(batch, heads * groups, time, dimension))
 
 
+_SDPA_SUPPORTS_GQA = "enable_gqa" in (functional.scaled_dot_product_attention.__doc__ or "")
+
+
+def _scaled_dot_product_attention(
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        *,
+        attention_bias: Tensor | None,
+        scale: float,
+        dropout_p: float,
+        groups: int,
+        is_causal: bool = False,
+        flash_attention4_policy: FlashAttention4Policy | str = (FlashAttention4Policy.DISABLED),
+) -> Tensor:
+    """Run the selected exact-attention backend with a safe SDPA fallback.
+
+    Native grouped-query attention avoids materializing repeated
+    key/value heads on recent PyTorch CUDA and math backends. Older
+    PyTorch releases do not expose ``enable_gqa``; MPS likewise needs
+    the established eager head expansion. Both paths still use PyTorch
+    SDPA for the attention calculation. FlashAttention-4 is an explicit
+    opt-in (or capability-gated ``auto`` policy) and receives the same
+    canonical Qwen scale.
+    """
+    policy = FlashAttention4Policy.coerce(flash_attention4_policy)
+    mask = (None if attention_bias is None else attention_bias.to(device=query.device, dtype=query.dtype))
+    if (policy is not FlashAttention4Policy.DISABLED or (is_causal and query.shape[-2] != key.shape[-2])):
+        return flash_attention4_or_sdpa(
+            query,
+            key,
+            value,
+            attention_mask=mask,
+            dropout_p=dropout_p,
+            is_causal=is_causal,
+            scale=scale,
+            policy=policy,
+        )
+
+    if groups == 1:
+        return functional.scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            attn_mask=mask,
+            dropout_p=dropout_p,
+            is_causal=is_causal,
+            scale=scale,
+        )
+
+    if _SDPA_SUPPORTS_GQA and query.device.type != "mps":
+        try:
+            return functional.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=mask,
+                dropout_p=dropout_p,
+                is_causal=is_causal,
+                scale=scale,
+                enable_gqa=True,
+            )
+        except RuntimeError as error:
+            # Some device/dtype combinations expose the keyword but have no
+            # grouped-query kernel. Only compatibility failures fall back;
+            # unrelated failures such as OOM must remain visible.
+            message = str(error).lower()
+            if not any(token in message for token in (
+                    "grouped query",
+                    "gqa",
+                    "number of heads",
+                    "num_heads",
+                    "no available kernel",
+            )):
+                raise
+
+    return functional.scaled_dot_product_attention(
+        query,
+        _expand_kv(key, groups),
+        _expand_kv(value, groups),
+        attn_mask=mask,
+        dropout_p=dropout_p,
+        is_causal=is_causal,
+        scale=scale,
+    )
+
+
 def _causal_bias(
     attention_mask: Tensor | None,
     *,
@@ -359,7 +449,9 @@ def _causal_bias(
     past_length: int = 0,
     sliding_window: int | None,
     device: torch.device,
-) -> Tensor:
+) -> Tensor | None:
+    if (attention_mask is None and sliding_window is None):
+        return None
     key_length = past_length + time
     key_positions = torch.arange(key_length, device=device)
     query_positions = torch.arange(
@@ -401,6 +493,7 @@ class Qwen3TTSMLP(nn.Module):
         factory_kwargs: dict[str, Any],
     ) -> None:
         super().__init__()
+        self.kernel_backend = KernelBackend.TORCH
         self.gate_proj = nn.Linear(
             hidden_size,
             intermediate_size,
@@ -420,8 +513,17 @@ class Qwen3TTSMLP(nn.Module):
             **factory_kwargs,
         )
 
+    def set_kernel_backend(self, backend: KernelBackend | str) -> None:
+        """Select a registered fused SwiGLU implementation."""
+        self.kernel_backend = KernelBackend.coerce(backend)
+
     def forward(self, hidden_states: Tensor) -> Tensor:
-        return self.down_proj(functional.silu(self.gate_proj(hidden_states)) * self.up_proj(hidden_states))
+        return self.down_proj(
+            gated_silu(
+                self.gate_proj(hidden_states),
+                self.up_proj(hidden_states),
+                backend=self.kernel_backend,
+            ))
 
 
 class Qwen3TTSSelfAttention(nn.Module):
@@ -439,6 +541,7 @@ class Qwen3TTSSelfAttention(nn.Module):
         self.groups = self.num_heads // self.num_kv_heads
         self.scale = self.head_dim**-0.5
         self.dropout = config.attention_dropout
+        self.flash_attention4_policy = FlashAttention4Policy.DISABLED
         self.q_proj = nn.Linear(
             config.hidden_size,
             self.num_heads * self.head_dim,
@@ -474,13 +577,20 @@ class Qwen3TTSSelfAttention(nn.Module):
             **factory_kwargs,
         )
 
+    def set_flash_attention4_policy(
+        self,
+        policy: FlashAttention4Policy | str,
+    ) -> None:
+        """Select disabled, automatic, or required FlashAttention-4."""
+        self.flash_attention4_policy = FlashAttention4Policy.coerce(policy)
+
     def forward(
         self,
         hidden_states: Tensor,
         *,
         cosine: Tensor,
         sine: Tensor,
-        attention_bias: Tensor,
+        attention_bias: Tensor | None,
     ) -> Tensor:
         output, _ = self.forward_with_cache(
             hidden_states,
@@ -496,7 +606,7 @@ class Qwen3TTSSelfAttention(nn.Module):
         *,
         cosine: Tensor,
         sine: Tensor,
-        attention_bias: Tensor,
+        attention_bias: Tensor | None,
         past_key_value: tuple[Tensor, Tensor] | None = None,
     ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         batch, time, _ = hidden_states.shape
@@ -524,22 +634,17 @@ class Qwen3TTSSelfAttention(nn.Module):
             key = torch.cat((past_key, key), dim=2)
             value = torch.cat((past_value, value), dim=2)
         present = (key, value)
-        expanded_key = _expand_kv(key, self.groups)
-        expanded_value = _expand_kv(value, self.groups)
-        weights = torch.matmul(
+        output = _scaled_dot_product_attention(
             query,
-            expanded_key.transpose(-1, -2),
-        ) * self.scale
-        weights = torch.softmax(
-            weights.float() + attention_bias,
-            dim=-1,
-        ).to(dtype=query.dtype)
-        weights = functional.dropout(
-            weights,
-            p=self.dropout,
-            training=self.training,
+            key,
+            value,
+            attention_bias=attention_bias,
+            scale=self.scale,
+            dropout_p=self.dropout if self.training else 0.0,
+            groups=self.groups,
+            is_causal=attention_bias is None,
+            flash_attention4_policy=self.flash_attention4_policy,
         )
-        output = torch.matmul(weights, expanded_value)
         output = output.transpose(1, 2).reshape(
             batch,
             time,
@@ -583,7 +688,7 @@ class Qwen3TTSDecoderLayer(nn.Module):
         *,
         cosine: Tensor,
         sine: Tensor,
-        attention_bias: Tensor,
+        attention_bias: Tensor | None,
     ) -> Tensor:
         hidden_states = hidden_states + self.self_attn(
             self.input_layernorm(hidden_states),
@@ -599,7 +704,7 @@ class Qwen3TTSDecoderLayer(nn.Module):
         *,
         cosine: Tensor,
         sine: Tensor,
-        attention_bias: Tensor,
+        attention_bias: Tensor | None,
         past_key_value: tuple[Tensor, Tensor] | None,
     ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         attention_output, present = self.self_attn.forward_with_cache(
@@ -646,7 +751,7 @@ class Qwen3TTSDecoderBackbone(nn.Module):
         attention_mask: Tensor | None,
         position_ids: Tensor | None,
         past_length: int,
-    ) -> tuple[Tensor, Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Tensor | None]:
         if (inputs_embeds.ndim != 3 or inputs_embeds.shape[-1] != self.config.hidden_size):
             raise ValueError("Decoder embeddings must have shape [batch, time, hidden_size].")
         batch, time, _ = inputs_embeds.shape
@@ -1019,6 +1124,7 @@ class Qwen3TTSTalker(nn.Module):
         wrapped_history = (None if history is None else (history, None))
         return Qwen3TTSTalkerOutput(
             logits=logits,
+            last_hidden_state=hidden_states,
             loss=loss,
             hidden_states=wrapped_history,
         )

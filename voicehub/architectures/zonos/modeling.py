@@ -21,6 +21,7 @@ from voicehub.architectures.zonos.configuration import (
     ZonosPrefixConditionerConfig,
 )
 from voicehub.architectures.zonos.pattern import add_endpoint_and_delay
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 @dataclass
@@ -630,6 +631,32 @@ class ZonosForCausalLM(nn.Module):
                 bias=False,
             ) for _ in range(config.num_codebooks)
         ])
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose teacher-forced or incremental execution boundaries."""
+        if mode == "training":
+            return (OptimizationCompileTarget(
+                "zonos.forward",
+                self,
+                "forward",
+            ), )
+        if mode != "inference":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (
+            OptimizationCompileTarget(
+                "zonos.prefill",
+                self,
+                "prefill",
+            ),
+            OptimizationCompileTarget(
+                "zonos.decode_step",
+                self,
+                "decode_step",
+            ),
+        )
 
     @property
     def device(self) -> torch.device:

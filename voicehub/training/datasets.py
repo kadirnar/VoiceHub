@@ -32,6 +32,7 @@ from voicehub.training.data_contracts import (
     list_tts_dataset_specs,
 )
 from voicehub.training.dataset_base import SpeechDataset
+from voicehub.training.tts_batching import EpochLengthBatchSampler, TTSBatchingConfig, TTSBatchingStrategy
 from voicehub.training.tts_datasets import TTSDataset
 
 __all__ = [
@@ -41,8 +42,11 @@ __all__ = [
     "ASRDatasetSpec",
     "ASRRecordVariant",
     "EpochGroupedBatchSampler",
+    "EpochLengthBatchSampler",
     "SpeechDataset",
     "TTSDataArchitecture",
+    "TTSBatchingConfig",
+    "TTSBatchingStrategy",
     "TTSDataReadiness",
     "TTSDataset",
     "TTSDatasetSpec",

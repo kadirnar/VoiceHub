@@ -124,6 +124,12 @@ class F5DiT(nn.Module):
         self._text_cond = None
         self._text_uncond = None
 
+    def set_gradient_checkpointing(self, enabled: bool) -> None:
+        """Enable or disable non-reentrant transformer-block checkpointing."""
+        if not isinstance(enabled, bool):
+            raise TypeError("`enabled` must be a boolean.")
+        self.checkpoint_activations = enabled
+
     def _input_embedding(
         self,
         hidden_states: torch.Tensor,
@@ -268,6 +274,18 @@ class F5ConditionalFlowMatcher(nn.Module):
     @property
     def device(self) -> torch.device:
         return next(self.parameters()).device
+
+    @property
+    def gradient_checkpointing(self) -> bool:
+        return self.transformer.checkpoint_activations
+
+    def gradient_checkpointing_enable(self) -> None:
+        """Delegate activation checkpointing to the native DiT."""
+        self.transformer.set_gradient_checkpointing(True)
+
+    def gradient_checkpointing_disable(self) -> None:
+        """Disable activation checkpointing on the native DiT."""
+        self.transformer.set_gradient_checkpointing(False)
 
     def _velocity(
         self,

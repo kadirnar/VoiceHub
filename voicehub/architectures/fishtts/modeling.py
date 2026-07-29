@@ -24,6 +24,7 @@ from torch.nn import functional as F
 from torch.utils.checkpoint import checkpoint
 
 from voicehub.architectures.fishtts.configuration import FishS2Config, FishTransformerConfig
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 def _causal_attention_mask(
@@ -484,6 +485,32 @@ class FishS2ForConditionalGeneration(nn.Module):
             block.attention.kv_cache = None
         self.max_batch_size = -1
         self.max_sequence_length = -1
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Declare the Dual-AR boundaries used by each execution mode."""
+        if mode == "inference":
+            return (
+                OptimizationCompileTarget(
+                    "semantic.forward_generate",
+                    self,
+                    "forward_generate",
+                ),
+                OptimizationCompileTarget(
+                    "semantic.forward_generate_fast",
+                    self,
+                    "forward_generate_fast",
+                ),
+            )
+        if mode == "training":
+            return (OptimizationCompileTarget(
+                "semantic.forward",
+                self,
+                "forward",
+            ), )
+        raise ValueError("Fish compile targets require 'inference' or 'training' mode.")
 
     def reset_fast_caches(self) -> None:
         for block in self.fast_layers:

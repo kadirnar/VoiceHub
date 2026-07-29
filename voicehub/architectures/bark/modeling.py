@@ -17,6 +17,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from voicehub.components.audio.codecs.encodec import EncodecModel
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 from .configuration import (
     BarkArchitectureConfig,
@@ -991,6 +992,31 @@ class BarkModel(nn.Module):
     @property
     def device(self) -> torch.device:
         return self.semantic.device
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Declare Bark's three executed transformer stage boundaries."""
+        if mode not in {"inference", "training"}:
+            raise ValueError("Bark compile targets require 'inference' or 'training' mode.")
+        return (
+            OptimizationCompileTarget(
+                "semantic.forward",
+                self.semantic,
+                "forward",
+            ),
+            OptimizationCompileTarget(
+                "coarse.forward",
+                self.coarse_acoustics,
+                "forward",
+            ),
+            OptimizationCompileTarget(
+                "fine.forward",
+                self.fine_acoustics,
+                "forward",
+            ),
+        )
 
     def codec_decode(
         self,

@@ -22,6 +22,9 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
+from voicehub.kernels import KernelBackend, gated_silu
+from voicehub.neural.backends import FlashAttention4Policy, flash_attention4_or_sdpa
+
 
 class ConversationRMSNorm(nn.Module):
     """RMS normalization with the parameter namespace used by the
@@ -55,9 +58,18 @@ class ConversationFeedForward(nn.Module):
         self.w1 = nn.Linear(dimension, intermediate_dimension, bias=False)
         self.w2 = nn.Linear(intermediate_dimension, dimension, bias=False)
         self.w3 = nn.Linear(dimension, intermediate_dimension, bias=False)
+        self.kernel_backend = KernelBackend.TORCH
+
+    def set_kernel_backend(self, backend: KernelBackend | str) -> None:
+        """Select the SwiGLU implementation without changing parameters."""
+        self.kernel_backend = KernelBackend.coerce(backend)
 
     def forward(self, inputs: Tensor) -> Tensor:
-        return self.w2(functional.silu(self.w1(inputs)) * self.w3(inputs))
+        return self.w2(gated_silu(
+            self.w1(inputs),
+            self.w3(inputs),
+            backend=self.kernel_backend,
+        ))
 
 
 class Llama3ScaledRotaryEmbedding(nn.Module):
@@ -287,6 +299,14 @@ class ConversationMultiHeadAttention(nn.Module):
         self.pos_embeddings = rotary_embedding
         self.kv_cache: ConversationKVCache | None = None
         self.cache_enabled = False
+        self.flash_attention4_policy = FlashAttention4Policy.DISABLED
+
+    def set_flash_attention4_policy(
+        self,
+        policy: FlashAttention4Policy | str,
+    ) -> None:
+        """Select FA4 or SDPA without altering checkpoint parameters."""
+        self.flash_attention4_policy = FlashAttention4Policy.coerce(policy)
 
     def setup_cache(
         self,
@@ -356,7 +376,6 @@ class ConversationMultiHeadAttention(nn.Module):
             raise ValueError("Attention key/value inputs have an invalid shape.")
         batch_size, query_length, _ = inputs.shape
         value_length = values.shape[1]
-        queries_per_key = self.num_heads // self.num_kv_heads
 
         query = self.q_proj(inputs).view(
             batch_size,
@@ -389,21 +408,6 @@ class ConversationMultiHeadAttention(nn.Module):
         if self.kv_cache is not None and self.cache_enabled:
             key, value = self.kv_cache.update(key, value)
         key_length = key.shape[2]
-        if self.num_heads != self.num_kv_heads:
-            key = key[:, :, None].expand(
-                batch_size,
-                self.num_kv_heads,
-                queries_per_key,
-                key_length,
-                self.head_dim,
-            ).flatten(1, 2)
-            value = value[:, :, None].expand(
-                batch_size,
-                self.num_kv_heads,
-                queries_per_key,
-                key_length,
-                self.head_dim,
-            ).flatten(1, 2)
 
         attention_mask = self._normalize_mask(
             mask,
@@ -412,13 +416,14 @@ class ConversationMultiHeadAttention(nn.Module):
             key_length=key_length,
             device=inputs.device,
         )
-        attended = functional.scaled_dot_product_attention(
+        attended = flash_attention4_or_sdpa(
             query,
             key,
             value,
-            attn_mask=attention_mask,
+            attention_mask=attention_mask,
             dropout_p=self.attn_dropout if self.training else 0.0,
             is_causal=(attention_mask is None and self.kv_cache is None),
+            policy=self.flash_attention4_policy,
         )
         attended = attended.transpose(1, 2).contiguous().view(
             batch_size,

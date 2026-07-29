@@ -38,6 +38,13 @@ Inspect a profile before loading weights through
 the [ASR/VAD matrix](../models/asr-vad-support.md) and
 [speech data guide](speech-data.md).
 
+Once a one-step baseline is correct, use the
+[TTS optimization guide](tts-optimization.md) to choose between two separate
+layers. `TTSOptimizationConfig` selects execution backends for every
+registered TTS architecture. Source-specific VITS, codec/LLM, and
+diffusion/flow training profiles select optimizer, batching, precision, and
+memory policies only for the recipes that justify them.
+
 ## Understand the support levels
 
 | Level            | Guarantee                                                                                                                |
@@ -804,6 +811,84 @@ strategy           -> device, precision, backward, optimizer execution
 
 This boundary lets future execution engines optimize training without
 rewriting every model adapter. See the [trainer architecture](../concepts/trainer.md).
+
+### Configure universal TTS execution
+
+`Trainer(optimization_config=...)` uses the same capability resolver as
+`BaseTTSModel.optimize()`. The policy is available for all 34 current TTS
+registry entries; architecture capabilities decide whether attention remains
+native, uses built-in SDPA, or exposes the selectable FlashAttention-4 path,
+and whether architecture-owned fused activations are available.
+
+```python
+from voicehub import Trainer, TTSOptimizationConfig
+
+execution_optimization = TTSOptimizationConfig(
+    attn_implementation="auto",
+    kernel_backend="auto",
+    compile="auto",
+    compile_config={
+        "backend": "inductor",
+        "mode": "max-autotune-no-cudagraphs",
+        "fullgraph": False,
+        "dynamic": True,
+    },
+)
+
+trainer = Trainer(
+    model=model,
+    args=training_arguments,
+    train_dataset=train_dataset,
+    eval_dataset=validation_dataset,
+    optimization_config=execution_optimization,
+)
+trainer.train()
+```
+
+Trainer derives device, dtype, distributed state, and persistent-checkpoint
+requirements from its training configuration. It resolves the policy after
+the differentiable graph is moved to its device and before strategy wrapping
+or optimizer creation. Checkpoints retain both the resolution decisions and
+the applied pass manifest:
+
+```python
+print(trainer.tts_optimization_plan)
+print(trainer.optimization_manifest())
+```
+
+Automatic settings are safe fallbacks, not promises that an accelerator will
+run. They retain exact SDPA/native attention, registered Torch kernels, or
+eager execution when the architecture or runtime cannot satisfy a faster
+path. Explicit `flash_attention_4`, `triton`, `cuda_extension`, and
+`compile="required"` requests fail closed. Pass
+`optimization_config` or `optimization_plan`, never both. If an explicit
+`OptimizationContext` is supplied, it must use training mode and
+`persist_result=True`.
+
+Execution optimization does not choose learning rates, GAN phase ordering,
+batch-length budgets, checkpointing, or EMA. Resolve those separately for the
+four source-verified recipes:
+
+```python
+from voicehub import get_tts_training_optimization_profile
+
+profile = get_tts_training_optimization_profile("f5tts")
+train_dataset = profile.prepare_dataset(train_dataset)
+training_arguments = profile.training_arguments("runs/f5tts-optimized")
+
+trainer = Trainer(
+    model=model,
+    args=training_arguments,
+    train_dataset=train_dataset,
+    optimization_config=execution_optimization,
+)
+```
+
+The return type is `TTSTrainingOptimizationProfile`, a union of
+`VITSOptimizationConfig`, `LLMTTSOptimizationConfig`, and
+`DiffusionTTSOptimizationConfig`. The compatibility alias
+`TTSOptimizationProfile` denotes that same training union; the constructible
+universal runtime class is `TTSOptimizationConfig`.
 
 For smaller, composable transformations, pass an explicit optimization plan
 to `Trainer`:

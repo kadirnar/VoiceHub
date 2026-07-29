@@ -21,6 +21,7 @@ from voicehub.models.chatterbox.models.tokenizers import EnTokenizer
 from voicehub.models.chatterbox.models.voice_encoder import VoiceEncoder
 from voicehub.models.chatterbox.native_audio import load_waveform
 from voicehub.models.chatterbox.watermark import NativePerthWatermarker
+from voicehub.optimization.protocols import OptimizationCompileTarget
 from voicehub.processing.waveform import resample_waveform
 
 REPO_ID = CHECKPOINT_REPOSITORY
@@ -141,6 +142,33 @@ class ChatterboxTTS:
         self.device = device
         self.conds = conds
         self.watermarker = NativePerthWatermarker(device=device)
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the two inference stages that ``generate`` always calls.
+
+        Chatterbox training selects either the T3 or S3Gen objective in
+        its training adapter, so there is no single runtime-owned
+        training boundary to declare here.
+        """
+        if mode == "training":
+            return ()
+        if mode != "inference":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (
+            OptimizationCompileTarget(
+                "t3.inference",
+                self.t3,
+                "inference",
+            ),
+            OptimizationCompileTarget(
+                "s3gen.inference",
+                self.s3gen,
+                "inference",
+            ),
+        )
 
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':

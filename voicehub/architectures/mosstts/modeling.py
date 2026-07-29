@@ -21,6 +21,7 @@ from voicehub.architectures.mosstts.local_transformer import MossGPT2Model, Moss
 from voicehub.architectures.mosstts.sampling import sample_token
 from voicehub.neural.cache import DynamicKVCache
 from voicehub.neural.normalization import RMSNorm
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 MossCache: TypeAlias = DynamicKVCache | tuple[tuple[Tensor, Tensor], ...]
 
@@ -216,6 +217,23 @@ class MossDelayModel(nn.Module):
                     mean=0.0,
                     std=config.initializer_range,
                 )
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the uniform MOSS execution boundary for this variant."""
+        if mode == "training":
+            attribute = "forward"
+        elif mode == "inference":
+            attribute = "generate"
+        else:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            f"mosstts.{attribute}",
+            self,
+            attribute,
+        ), )
 
     def _input_embeddings(self, input_ids: Tensor) -> Tensor:
         hidden_states = self.language_model.embed_tokens(input_ids[..., 0])
@@ -610,6 +628,23 @@ class MossOldLocalModel(nn.Module):
                     std=config.initializer_range,
                 )
 
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the uniform MOSS execution boundary for this variant."""
+        if mode == "training":
+            attribute = "forward"
+        elif mode == "inference":
+            attribute = "generate"
+        else:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            f"mosstts.{attribute}",
+            self,
+            attribute,
+        ), )
+
     def _project_local(
         self,
         global_hidden: Tensor,
@@ -888,6 +923,23 @@ class MossLocalV15Model(nn.Module):
                     mean=0.0,
                     std=config.initializer_range,
                 )
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the uniform MOSS execution boundary for this variant."""
+        if mode == "training":
+            attribute = "forward"
+        elif mode == "inference":
+            attribute = "generate"
+        else:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            f"mosstts.{attribute}",
+            self,
+            attribute,
+        ), )
 
     def tie_weights(self) -> None:
         """Restore the source-declared embedding/head aliases after loading."""
@@ -1268,6 +1320,23 @@ class MossRealtimeModel(nn.Module):
                     mean=0.0,
                     std=config.initializer_range,
                 )
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the uniform MOSS execution boundary for this variant."""
+        if mode == "training":
+            attribute = "forward"
+        elif mode == "inference":
+            attribute = "generate"
+        else:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            f"mosstts.{attribute}",
+            self,
+            attribute,
+        ), )
 
     def _input_embeddings(self, input_ids: Tensor) -> Tensor:
         _validate_multichannel_ids(input_ids, channels=self.config.channels)

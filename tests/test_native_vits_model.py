@@ -96,6 +96,10 @@ print(spec.metadata["full_finetuning_ready"])
             "full-adversarial-fine-tuning",
             spec.capabilities.features,
         )
+        self.assertEqual(
+            spec.capabilities.optimization_passes,
+            ("compile", "custom-kernels"),
+        )
         registry = ArchitectureRegistry()
         register_vits_architecture(registry=registry)
         self.assertIs(registry.get("mms-tts"), registry.get("vits"))
@@ -316,6 +320,60 @@ class VitsCheckpointTests(unittest.TestCase):
 
 
 @unittest.skipUnless(TORCH_AVAILABLE, "native VITS requires PyTorch")
+class VitsWaveNetKernelTests(unittest.TestCase):
+
+    def test_torch_backend_matches_the_original_gated_activation(self):
+        from voicehub.architectures.vits.modeling import VitsWaveNet
+        from voicehub.kernels import KernelBackend
+
+        torch.manual_seed(19)
+        wavenet = VitsWaveNet(_tiny_config(), num_layers=2).eval()
+        inputs = torch.randn(2, 8, 5)
+        padding_mask = torch.tensor([
+            [[1.0, 1.0, 1.0, 1.0, 1.0]],
+            [[1.0, 1.0, 1.0, 1.0, 0.0]],
+        ])
+
+        expected_inputs = inputs
+        expected_outputs = torch.zeros_like(inputs)
+        for index, (input_layer, output_layer) in enumerate(zip(wavenet.in_layers, wavenet.res_skip_layers)):
+            hidden = input_layer(expected_inputs)
+            activation = torch.tanh(hidden[:, :wavenet.hidden_size])
+            gate = torch.sigmoid(hidden[:, wavenet.hidden_size:])
+            residual_skip = output_layer(wavenet.dropout(activation * gate))
+            if index < wavenet.num_layers - 1:
+                expected_inputs = (expected_inputs + residual_skip[:, :wavenet.hidden_size]) * padding_mask
+                expected_outputs = (expected_outputs + residual_skip[:, wavenet.hidden_size:])
+            else:
+                expected_outputs = expected_outputs + residual_skip
+        expected = expected_outputs * padding_mask
+
+        self.assertIs(wavenet.kernel_backend, KernelBackend.TORCH)
+        torch.testing.assert_close(
+            wavenet(inputs, padding_mask),
+            expected,
+            rtol=0,
+            atol=0,
+        )
+
+    def test_backend_selection_does_not_change_checkpoint_keys(self):
+        from voicehub.architectures.vits.modeling import VitsWaveNet
+        from voicehub.kernels import KernelBackend
+
+        wavenet = VitsWaveNet(_tiny_config(), num_layers=2)
+        before = {name: tensor.detach().clone() for name, tensor in wavenet.state_dict().items()}
+
+        self.assertIsNone(wavenet.set_kernel_backend("triton"))
+        self.assertIs(wavenet.kernel_backend, KernelBackend.TRITON)
+        self.assertEqual(tuple(wavenet.state_dict()), tuple(before))
+        for name, expected in before.items():
+            torch.testing.assert_close(wavenet.state_dict()[name], expected)
+
+        with self.assertRaisesRegex(ValueError, "Unknown kernel backend"):
+            wavenet.set_kernel_backend("not-a-kernel")
+
+
+@unittest.skipUnless(TORCH_AVAILABLE, "native VITS requires PyTorch")
 class VitsAlignmentTests(unittest.TestCase):
 
     def test_duration_expansion_and_monotonic_search_agree(self):
@@ -433,6 +491,10 @@ class VitsRuntimeTests(unittest.TestCase):
         self.assertEqual(output.alignment.shape, (1, 1, 5, 3))
         self.assertEqual(output.durations.sum().item(), 5.0)
         self.assertEqual(output.waveform.shape, (1, 10))
+        torch.testing.assert_close(
+            output.segment_start_frames,
+            torch.zeros(1, dtype=torch.long),
+        )
         kl = vits_kl_loss(
             output.prior_latents,
             output.posterior_log_variances,
@@ -445,6 +507,73 @@ class VitsRuntimeTests(unittest.TestCase):
         loss.backward()
         self.assertIsNotNone(model.text_encoder.embed_tokens.weight.grad)
         self.assertIsNotNone(model.decoder.conv_post.weight.grad)
+
+    def test_windowed_training_slices_latents_before_decoder_deterministically(self):
+        from voicehub.architectures.vits.modeling import VitsModel
+
+        model = VitsModel(_tiny_config()).train()
+        spectrogram = torch.randn(2, 5, 7)
+        spectrogram_mask = torch.tensor([
+            [1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 0],
+        ])
+        durations = torch.tensor([
+            [[2.0, 2.0, 3.0]],
+            [[2.0, 2.0, 2.0]],
+        ])
+        decoder_inputs = []
+        handle = model.decoder.register_forward_pre_hook(
+            lambda _module, inputs: decoder_inputs.append(inputs[0].detach().clone()))
+        try:
+            first = model(
+                torch.tensor([
+                    [1, 2, 3],
+                    [1, 2, 3],
+                ]),
+                spectrogram=spectrogram,
+                spectrogram_attention_mask=spectrogram_mask,
+                durations=durations,
+                segment_frames=4,
+                generator=torch.Generator().manual_seed(17),
+            )
+            second = model(
+                torch.tensor([
+                    [1, 2, 3],
+                    [1, 2, 3],
+                ]),
+                spectrogram=spectrogram,
+                spectrogram_attention_mask=spectrogram_mask,
+                durations=durations,
+                segment_frames=4,
+                generator=torch.Generator().manual_seed(17),
+            )
+        finally:
+            handle.remove()
+
+        self.assertEqual(
+            [value.shape[-1] for value in decoder_inputs],
+            [4, 4],
+        )
+        self.assertEqual(first.posterior_latents.shape[-1], 7)
+        self.assertEqual(first.waveform.shape, (2, 8))
+        torch.testing.assert_close(
+            first.sequence_lengths,
+            torch.tensor([8, 8]),
+        )
+        torch.testing.assert_close(
+            first.segment_start_frames,
+            second.segment_start_frames,
+        )
+        self.assertTrue((first.segment_start_frames >= 0).all())
+        self.assertTrue((first.segment_start_frames + 4 <= torch.tensor([7, 6])).all())
+        expected_decoder_input = torch.stack([
+            first.posterior_latents[index, :, start:start + 4]
+            for index, start in enumerate(first.segment_start_frames.tolist())
+        ])
+        torch.testing.assert_close(
+            decoder_inputs[0],
+            expected_decoder_input,
+        )
 
     def test_stochastic_duration_training_graph_is_differentiable(self):
         from voicehub.architectures.vits.modeling import VitsModel
@@ -691,6 +820,51 @@ class VitsAdversarialTrainingTests(unittest.TestCase):
         self.assertTrue(
             any(parameter.grad is not None for parameter in training_model.native_model.parameters()))
 
+    def test_windowed_training_aligns_real_waveform_and_mel_to_model_offsets(self):
+        from torch import nn
+
+        from voicehub.architectures.vits.modeling import VitsModel
+        from voicehub.architectures.vits.training import VitsAdversarialTrainingModel
+
+        training_model = VitsAdversarialTrainingModel(
+            VitsModel(_tiny_config()),
+            self._acoustic_config(),
+            discriminator=nn.Identity(),
+        )
+        audio = torch.arange(32, dtype=torch.float32).reshape(2, 16)
+        spectrogram = torch.linspace(
+            0.1,
+            1.0,
+            steps=80,
+        ).reshape(2, 5, 8)
+        batch = training_model._training_batch(
+            torch.tensor([
+                [1, 2, 3],
+                [1, 2, 3],
+            ]),
+            audio_values=audio,
+            spectrogram=spectrogram,
+            durations=torch.tensor([
+                [[2.0, 3.0, 3.0]],
+                [[3.0, 2.0, 3.0]],
+            ]),
+            generator=torch.Generator().manual_seed(23),
+        )
+
+        starts = batch.output.segment_start_frames.tolist()
+        expected_real = torch.stack(
+            [audio[index, start * 2:start * 2 + 8] for index, start in enumerate(starts)])
+        target_mel = training_model.acoustic_frontend.spectrogram_to_mel(spectrogram, )
+        expected_mel = torch.stack(
+            [target_mel[index, :, start:start + 4] for index, start in enumerate(starts)])
+        torch.testing.assert_close(batch.real_waveform, expected_real)
+        torch.testing.assert_close(batch.target_mel, expected_mel)
+        torch.testing.assert_close(
+            batch.generated_waveform,
+            batch.output.waveform,
+        )
+        self.assertEqual(batch.generated_waveform.shape, (2, 8))
+
     def test_adapter_routes_and_freezes_the_two_optimizer_phases(self):
         from torch import nn
 
@@ -750,6 +924,7 @@ class VitsAdversarialTrainingTests(unittest.TestCase):
             wrapper,
             get_training_spec("vits"),
         )
+        self.assertTrue(all(phase.optimizer_step_after_phase for phase in adapter.spec.phases))
         inputs = {
             "input_ids": torch.tensor([[1, 2, 3]]),
             "audio_values": torch.randn(1, 16),

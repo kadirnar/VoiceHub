@@ -103,6 +103,7 @@ class Trainer:
                             | OptimizationPass
                             | Iterable[str | OptimizationPass]
                             | None) = None,
+        optimization_config=None,
         optimization_context: OptimizationContext | None = None,
         optimization_pass_registry: OptimizationPassRegistry | None = None,
     ):
@@ -127,10 +128,19 @@ class Trainer:
             raise ValueError(
                 "Supplied optimizer objects are tied to one model instance and "
                 "cannot be combined with `model_init`.")
+        if optimization_plan is not None and optimization_config is not None:
+            raise ValueError("Pass `optimization_plan` or `optimization_config`, not both.")
 
         self.args = args or TrainingArguments()
         self.training_strategy = get_training_strategy(training_strategy)
         self._optimization_plan = self._normalize_optimization_plan(optimization_plan)
+        if optimization_config is None:
+            self._tts_optimization_config = None
+        else:
+            from voicehub.optimization import coerce_tts_optimization_config
+
+            self._tts_optimization_config = (coerce_tts_optimization_config(optimization_config))
+        self._tts_optimization_plan = None
         if (optimization_context is not None and not isinstance(optimization_context, OptimizationContext)):
             raise TypeError("`optimization_context` must be an OptimizationContext.")
         if (optimization_context is not None and optimization_context.mode is not OptimizationMode.TRAINING):
@@ -139,9 +149,11 @@ class Trainer:
             raise ValueError(
                 "Trainer optimization contexts must set "
                 "`persist_result=True` for exact checkpoint resume.")
-        if optimization_context is not None and not self._optimization_plan:
-            raise ValueError("`optimization_context` requires an explicit "
-                             "`optimization_plan`.")
+        if (optimization_context is not None and not self._optimization_plan and
+                self._tts_optimization_config is None):
+            raise ValueError(
+                "`optimization_context` requires an explicit "
+                "`optimization_plan` or `optimization_config`.")
         if (optimization_pass_registry is not None and not isinstance(
                 optimization_pass_registry,
                 OptimizationPassRegistry,
@@ -407,7 +419,22 @@ class Trainer:
         return output
 
     def _apply_training_optimization_plan(self) -> None:
-        if (not self._optimization_plan or self._training_optimization_result is not None):
+        if self._training_optimization_result is not None:
+            return
+        if (self._tts_optimization_config is not None and self._tts_optimization_plan is None):
+            from voicehub.optimization import resolve_tts_optimization
+
+            context = (self._optimization_context or self._default_training_optimization_context())
+            self._tts_optimization_plan = resolve_tts_optimization(
+                self.model,
+                self._tts_optimization_config,
+                mode=OptimizationMode.TRAINING,
+                context=context,
+                registry=self._optimization_pass_registry,
+            )
+            self._optimization_plan = (self._tts_optimization_plan.passes)
+            self._optimization_context = (self._tts_optimization_plan.context)
+        if not self._optimization_plan:
             return
         manager = OptimizationPassManager()
         resolved_passes = manager.resolve(
@@ -427,6 +454,9 @@ class Trainer:
             self.model_wrapped,
             resolved_passes,
             context,
+            declaration_snapshots=(
+                None if self._tts_optimization_plan is None else
+                self._tts_optimization_plan.pass_declaration_snapshots),
         )
         # Fail before publishing a transformed execution handle if a pass
         # emitted metadata that cannot be persisted for exact resume.
@@ -450,7 +480,42 @@ class Trainer:
     def optimization_manifest(self) -> dict[str, Any] | None:
         """Return the exact applied training-plan manifest."""
         result = self._training_optimization_result
+        if self._tts_optimization_plan is not None:
+            return {
+                "format_version": 1,
+                "kind": "tts-optimization",
+                "resolution": self._tts_optimization_plan.manifest(),
+                "application": (None if result is None else result.manifest()),
+            }
         return None if result is None else result.manifest()
+
+    @staticmethod
+    def _optimization_resume_identity(manifest: dict[str, Any] | None, ) -> dict[str, Any] | None:
+        """Return static plan identity without runtime outcome metadata."""
+        if manifest is None:
+            return None
+        normalized = json.loads(
+            json.dumps(
+                manifest,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ))
+
+        application = (
+            normalized.get("application") if normalized.get("kind") == "tts-optimization" else normalized)
+        if isinstance(application, dict):
+            passes = application.get("passes")
+            if isinstance(passes, list):
+                for item in passes:
+                    if isinstance(item, dict):
+                        item.pop("runtime_status", None)
+        return normalized
+
+    @property
+    def tts_optimization_plan(self):
+        """Return the resolved universal TTS plan, if configured."""
+        return self._tts_optimization_plan
 
     def _move_model_to_device(self) -> None:
         if self._model_prepared:
@@ -700,11 +765,21 @@ class Trainer:
             },
         ]
         groups = [group for group in groups if group["params"]]
+        optimizer_kwargs = {}
+        if self.args.adamw_fused:
+            parameters = [parameter for group in groups for parameter in group["params"]]
+            supports_fused = ("fused" in inspect.signature(torch.optim.AdamW).parameters)
+            all_cuda = bool(parameters) and all(
+                getattr(parameter, "device", None) is not None and parameter.device.type == "cuda"
+                for parameter in parameters)
+            if supports_fused and all_cuda:
+                optimizer_kwargs["fused"] = True
         return torch.optim.AdamW(
             groups,
             lr=self.args.learning_rate,
             betas=(self.args.adam_beta1, self.args.adam_beta2),
             eps=self.args.adam_epsilon,
+            **optimizer_kwargs,
         )
 
     def create_scheduler(self, num_training_steps: int, optimizer=None):
@@ -760,6 +835,8 @@ class Trainer:
                     self.args.lr_scheduler_type,
                     num_warmup_steps=self.args.get_warmup_steps(optimizer_steps),
                     num_training_steps=optimizer_steps,
+                    exponential_gamma=self.args.lr_scheduler_gamma,
+                    num_train_epochs=self.args.num_train_epochs,
                 )
                 schedulers[name] = torch.optim.lr_scheduler.LambdaLR(
                     named_optimizer,
@@ -781,6 +858,8 @@ class Trainer:
                     self.args.lr_scheduler_type,
                     num_warmup_steps=self.args.get_warmup_steps(num_training_steps),
                     num_training_steps=num_training_steps,
+                    exponential_gamma=self.args.lr_scheduler_gamma,
+                    num_train_epochs=self.args.num_train_epochs,
                 )
                 self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(
                     optimizer,
@@ -1256,6 +1335,9 @@ class Trainer:
             self._model_prepared = False
             self._optimization_prepared = False
             self._training_optimization_result = None
+            self._tts_optimization_plan = None
+            if self._tts_optimization_config is not None:
+                self._optimization_plan = ()
             self._optimized_parameter_groups = None
             self._uses_named_optimizers = False
             self._optimizer_names = ("default", )
@@ -2472,10 +2554,11 @@ class Trainer:
             "schedule": {
                 "max_steps": self._resume_topology["max_steps"],
                 "lr_scheduler_type": self.args.lr_scheduler_type.value,
+                "lr_scheduler_gamma": self.args.lr_scheduler_gamma,
                 "optimizer_steps": optimizer_steps,
             },
             "optimization": {
-                "passes": self.optimization_manifest(),
+                "passes": self._optimization_resume_identity(self.optimization_manifest()),
                 "optimizer": self._runtime_object_signature(
                     self.optimizer,
                     collection_attribute="optimizers",
@@ -2484,6 +2567,14 @@ class Trainer:
                     self.lr_scheduler,
                     collection_attribute="schedulers",
                 ),
+                "adamw_fused": self.args.adamw_fused,
+                "learning_rate": self.args.learning_rate,
+                "weight_decay": self.args.weight_decay,
+                "adam_betas": [
+                    self.args.adam_beta1,
+                    self.args.adam_beta2,
+                ],
+                "adam_epsilon": self.args.adam_epsilon,
                 "max_grad_norm": self.args.max_grad_norm,
                 "gradient_checkpointing": self.args.gradient_checkpointing,
             },
@@ -2768,7 +2859,8 @@ class Trainer:
                 f"not {self.training_strategy.name!r}.")
         checkpoint_optimization = manifest.get("optimization_plan")
         current_optimization = self.optimization_manifest()
-        if checkpoint_optimization != current_optimization:
+        if (self._optimization_resume_identity(checkpoint_optimization)
+                != self._optimization_resume_identity(current_optimization)):
             raise ValueError("Checkpoint optimization plan does not match the current "
                              "explicit plan.")
         adapter = self.training_adapter

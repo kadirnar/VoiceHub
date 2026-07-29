@@ -29,7 +29,7 @@ class LlasaArtifacts:
     revision: str | None
     config: Path
     tokenizer: Path
-    checkpoint: Path
+    checkpoint: Path | None
     tokenizer_config: Path | None = None
 
     @property
@@ -206,6 +206,7 @@ def resolve_llasa_artifacts(
     cache_dir: str | None = None,
     token: str | bool | None = None,
     local_files_only: bool = False,
+    include_checkpoint: bool = True,
 ) -> LlasaArtifacts:
     """Resolve one LLaSA LM/tokenizer snapshot without a Hub SDK."""
     if not isinstance(source, (str, Path)) or not str(source).strip():
@@ -214,6 +215,8 @@ def resolve_llasa_artifacts(
         checkpoint_filename,
         name="checkpoint_filename",
     )
+    if not isinstance(include_checkpoint, bool):
+        raise TypeError("`include_checkpoint` must be a boolean.")
     source_path = Path(source).expanduser()
     if source_path.exists():
         if not source_path.is_dir():
@@ -225,11 +228,12 @@ def resolve_llasa_artifacts(
             config=_required(root, _CONFIG, owner="LLaSA"),
             tokenizer=_required(root, _TOKENIZER, owner="LLaSA"),
             tokenizer_config=_optional(root, _TOKENIZER_CONFIG),
-            checkpoint=_local_checkpoint(
-                root,
-                filename=checkpoint_filename,
-                owner="LLaSA",
-            ),
+            checkpoint=(
+                _local_checkpoint(
+                    root,
+                    filename=checkpoint_filename,
+                    owner="LLaSA",
+                ) if include_checkpoint else None),
         )
     if is_explicit_local_path(source):
         raise FileNotFoundError(f"LLaSA model path was not found: {source_path}.")
@@ -272,15 +276,16 @@ def resolve_llasa_artifacts(
             token=token,
             local_files_only=local_files_only,
         ),
-        checkpoint=_remote_checkpoint(
-            repo_id,
-            filename=checkpoint_filename,
-            revision=resolved,
-            cache_dir=cache_dir,
-            token=token,
-            local_files_only=local_files_only,
-            owner="LLaSA",
-        ),
+        checkpoint=(
+            _remote_checkpoint(
+                repo_id,
+                filename=checkpoint_filename,
+                revision=resolved,
+                cache_dir=cache_dir,
+                token=token,
+                local_files_only=local_files_only,
+                owner="LLaSA",
+            ) if include_checkpoint else None),
     )
 
 

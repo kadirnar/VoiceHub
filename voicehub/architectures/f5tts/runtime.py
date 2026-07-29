@@ -14,6 +14,7 @@ from voicehub.architectures.f5tts.audio import cross_fade, normalize_reference_r
 from voicehub.architectures.f5tts.frontend import NativeF5TextFrontend, TokenSequence
 from voicehub.architectures.f5tts.modeling import F5ConditionalFlowMatcher
 from voicehub.architectures.f5tts.vocoder import NativeVocos
+from voicehub.optimization.protocols import OptimizationCompileTarget, OptimizationModuleRoot
 from voicehub.processing.waveform import load_native_audio
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[;:,.!?])\s+|(?<=[；：，。！？])")
@@ -84,6 +85,40 @@ class NativeF5TTSRuntime(nn.Module):
     @property
     def device(self) -> torch.device:
         return self.ema_model.device
+
+    def optimization_module_roots(self):
+        """Expose architecture-owned modules to selector optimizations."""
+        roots = [
+            OptimizationModuleRoot("flow_model", self.ema_model),
+        ]
+        if self.vocoder is not None:
+            roots.append(OptimizationModuleRoot("vocoder", self.vocoder))
+        return tuple(roots)
+
+    def optimization_compile_targets(self, mode: str):
+        """Compile graph boundaries invoked by the selected execution mode."""
+        if mode == "training":
+            return (OptimizationCompileTarget(
+                "flow_model.forward",
+                self.ema_model,
+                "forward",
+            ), )
+        if mode != "inference":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        targets = [
+            OptimizationCompileTarget(
+                "flow_model.sample",
+                self.ema_model,
+                "sample",
+            ),
+        ]
+        if self.vocoder is not None:
+            targets.append(OptimizationCompileTarget(
+                "vocoder.decode",
+                self.vocoder,
+                "decode",
+            ))
+        return tuple(targets)
 
     def prepare_for_training(self) -> None:
         self.ema_model.train()

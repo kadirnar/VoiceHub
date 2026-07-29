@@ -13,6 +13,9 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from voicehub.kernels import KernelBackend, fused_bias_gelu
+from voicehub.neural.backends import FlashAttention4Policy, flash_attention4_or_sdpa
+
 
 class SinusPositionEmbedding(nn.Module):
 
@@ -214,6 +217,7 @@ class FeedForward(nn.Module):
     ) -> None:
         super().__init__()
         inner_dim = int(dim * mult)
+        self.kernel_backend = KernelBackend.TORCH
         self.ff = nn.Sequential(
             nn.Sequential(
                 nn.Linear(dim, inner_dim),
@@ -223,8 +227,25 @@ class FeedForward(nn.Module):
             nn.Linear(inner_dim, dim),
         )
 
+    def set_kernel_backend(self, backend: KernelBackend | str) -> None:
+        """Select a registered fused bias/GELU implementation."""
+        self.kernel_backend = KernelBackend.coerce(backend)
+
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        return self.ff(hidden_states)
+        projection = self.ff[0][0]
+        if not isinstance(projection, nn.Linear) or projection.bias is None:
+            raise RuntimeError("F5 feed-forward input projection must be a biased Linear.")
+        hidden_states = F.linear(
+            hidden_states,
+            projection.weight,
+            bias=None,
+        )
+        hidden_states = fused_bias_gelu(
+            hidden_states,
+            projection.bias,
+            backend=self.kernel_backend,
+        )
+        return self.ff[2](self.ff[1](hidden_states))
 
 
 def _rotate_half_interleaved(hidden_states: torch.Tensor) -> torch.Tensor:
@@ -297,6 +318,7 @@ class Attention(nn.Module):
         self.dropout = dropout
         self.pe_attn_head = pe_attn_head
         self.attn_mask_enabled = attn_mask_enabled
+        self.flash_attention4_policy = FlashAttention4Policy.DISABLED
         self.to_q = nn.Linear(dim, self.inner_dim)
         self.to_k = nn.Linear(dim, self.inner_dim)
         self.to_v = nn.Linear(dim, self.inner_dim)
@@ -307,6 +329,13 @@ class Attention(nn.Module):
             self.q_norm = None
             self.k_norm = None
         self.to_out = nn.ModuleList((nn.Linear(self.inner_dim, dim), nn.Dropout(dropout)))
+
+    def set_flash_attention4_policy(
+        self,
+        policy: FlashAttention4Policy | str,
+    ) -> None:
+        """Select disabled, automatic, or required FlashAttention-4."""
+        self.flash_attention4_policy = FlashAttention4Policy.coerce(policy)
 
     def forward(
         self,
@@ -355,13 +384,14 @@ class Attention(nn.Module):
                 sequence_length,
                 sequence_length,
             )
-        attended = F.scaled_dot_product_attention(
+        attended = flash_attention4_or_sdpa(
             query,
             key,
             value,
-            attn_mask=attention_mask,
+            attention_mask=attention_mask,
             dropout_p=0.0,
             is_causal=False,
+            policy=self.flash_attention4_policy,
         )
         attended = attended.transpose(1, 2).reshape(
             batch,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from importlib import import_module
 from pathlib import Path
 
@@ -138,18 +139,73 @@ class _BaseAutoModel:
         config: VoiceHubConfig,
         *,
         inference_strategy: str | InferenceStrategy | None = None,
+        llm_backend=None,
+        llm_backend_config=None,
+        optimization_config=None,
+        attn_implementation: str | None = None,
+        kernel_backend: str | None = None,
+        torch_compile: bool | str | None = None,
+        compile_config=None,
         **kwargs,
     ):
         spec = cls._get_spec(config.model_type)
         model_class = _load_class(spec.module, spec.class_name)
+        from voicehub.optimization import tts_optimization_config_from_options
+
+        resolved_optimization_config = (
+            tts_optimization_config_from_options(
+                optimization_config,
+                attn_implementation=attn_implementation,
+                kernel_backend=kernel_backend,
+                torch_compile=torch_compile,
+                compile_config=compile_config,
+            ) if cls.task is SpeechTask.TEXT_TO_SPEECH else None)
+        if cls.task is not SpeechTask.TEXT_TO_SPEECH and any(value is not None for value in (
+                optimization_config,
+                attn_implementation,
+                kernel_backend,
+                torch_compile,
+                compile_config,
+                llm_backend,
+                llm_backend_config,
+        )):
+            raise TypeError(
+                "TTS optimization and LLM-serving arguments are available only through "
+                "AutoModelForTextToSpeech.")
         eager_load = kwargs.get("lazy_load", True) is False
-        if inference_strategy is not None and eager_load:
+        configure_external_backend = (llm_backend is not None or llm_backend_config is not None)
+        if configure_external_backend and resolved_optimization_config is not None:
+            raise ValueError(
+                "Choose either an external LLM backend or an in-process TTS "
+                "optimization configuration.")
+        if ((inference_strategy is not None or resolved_optimization_config is not None or
+             configure_external_backend) and eager_load):
             kwargs["lazy_load"] = True
         model = model_class(config, **kwargs)
         if inference_strategy is not None:
             model.set_inference_strategy(inference_strategy)
-            if eager_load:
-                model.load()
+        if resolved_optimization_config is not None:
+            model.set_optimization_config(resolved_optimization_config)
+        if configure_external_backend:
+            configured_backend = llm_backend
+            if configured_backend is None and isinstance(llm_backend_config, Mapping):
+                configured_backend = llm_backend_config.get("backend")
+            if configured_backend is None:
+                from voicehub.llm_serving import LLMBackendConfig
+
+                if isinstance(llm_backend_config, LLMBackendConfig):
+                    configured_backend = llm_backend_config.backend
+            if configured_backend is None:
+                raise ValueError(
+                    "`llm_backend` is required when "
+                    "`llm_backend_config` does not declare a backend.")
+            model.set_llm_backend(
+                configured_backend,
+                config=llm_backend_config,
+            )
+        if eager_load and (inference_strategy is not None or resolved_optimization_config is not None or
+                           configure_external_backend):
+            model.load()
         return model
 
     @classmethod

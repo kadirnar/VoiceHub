@@ -21,6 +21,7 @@ from torch.nn import functional
 
 from voicehub.architectures.vits.alignment import generate_path, maximum_path, sequence_mask
 from voicehub.architectures.vits.configuration import VitsConfig
+from voicehub.kernels import KernelBackend, tanh_sigmoid_gate
 
 
 class VitsInputError(ValueError):
@@ -113,6 +114,7 @@ class VitsTrainingOutput:
     posterior_log_variances: Tensor
     text_mask: Tensor
     spectrogram_mask: Tensor
+    segment_start_frames: Tensor | None = None
 
 
 def _activation(name: str, value: Tensor) -> Tensor:
@@ -143,6 +145,42 @@ def _randn(
             device=reference.device,
         )
     return output.normal_(generator=generator)
+
+
+def _random_segment_slices(
+    inputs: Tensor,
+    lengths: Tensor,
+    segment_frames: int,
+    *,
+    generator: torch.Generator | None,
+) -> tuple[Tensor, Tensor]:
+    """Select one source-style random latent window per batch item."""
+    if isinstance(segment_frames, bool) or not isinstance(segment_frames, Integral):
+        raise TypeError("`segment_frames` must be an integer.")
+    segment_frames = int(segment_frames)
+    if segment_frames < 1:
+        raise ValueError("`segment_frames` must be positive.")
+    maximum_starts = lengths - segment_frames
+    if (maximum_starts < 0).any():
+        shortest = int(lengths.min().item())
+        raise VitsInputError(
+            "Every target spectrogram must contain at least "
+            f"{segment_frames} frames for windowed generator training; "
+            f"the shortest item contains {shortest}.")
+    random_values = torch.rand(
+        tuple(lengths.shape),
+        dtype=torch.float32,
+        device=inputs.device,
+        generator=generator,
+    )
+    start_frames = (random_values * (maximum_starts + 1).to(dtype=random_values.dtype)).long()
+    frame_indices = (
+        start_frames.unsqueeze(1) + torch.arange(segment_frames, device=inputs.device).unsqueeze(0))
+    segments = inputs.gather(
+        2,
+        frame_indices.unsqueeze(1).expand(-1, inputs.shape[1], -1),
+    )
+    return segments, start_frames
 
 
 def _local_generator(
@@ -350,6 +388,7 @@ class VitsWaveNet(nn.Module):
         self.hidden_size = config.hidden_size
         self.num_layers = num_layers
         self.speaker_embedding_size = config.speaker_embedding_size
+        self.kernel_backend = KernelBackend.TORCH
         self.dropout = nn.Dropout(config.wavenet_dropout)
         self.in_layers = nn.ModuleList()
         self.res_skip_layers = nn.ModuleList()
@@ -377,6 +416,10 @@ class VitsWaveNet(nn.Module):
                 1,
             ))
 
+    def set_kernel_backend(self, backend: KernelBackend | str) -> None:
+        """Select a registered fused WaveNet gate implementation."""
+        self.kernel_backend = KernelBackend.coerce(backend)
+
     def forward(
         self,
         inputs: Tensor,
@@ -392,9 +435,12 @@ class VitsWaveNet(nn.Module):
             else:
                 start = index * 2 * self.hidden_size
                 condition = conditioning[:, start:start + 2 * self.hidden_size]
-            activations = (
-                torch.tanh((hidden + condition)[:, :self.hidden_size]) * torch.sigmoid(
-                    (hidden + condition)[:, self.hidden_size:]))
+            activation, gate = (hidden + condition).split(self.hidden_size, dim=1)
+            activations = tanh_sigmoid_gate(
+                activation,
+                gate,
+                backend=self.kernel_backend,
+            )
             activations = self.dropout(activations)
             residual_skip = output_layer(activations)
             if index < self.num_layers - 1:
@@ -1409,6 +1455,7 @@ class VitsModel(nn.Module):
         spectrogram: Tensor | None = None,
         spectrogram_attention_mask: Tensor | None = None,
         durations: Tensor | None = None,
+        segment_frames: int | None = None,
         sampling: VitsSamplingConfig | None = None,
         generator: torch.Generator | None = None,
         output_attentions: bool = False,
@@ -1421,7 +1468,10 @@ class VitsModel(nn.Module):
         complete VITS generator-side objective. Adversarial and feature-
         matching losses live in
         :mod:`voicehub.architectures.vits.losses` because discriminator
-        and generator optimizers must remain separate.
+        and generator optimizers must remain separate. ``segment_frames``
+        applies the original VITS windowed-generator optimization: the
+        complete posterior remains available to the latent objectives,
+        while only a random per-item latent window reaches the decoder.
         """
         input_ids, attention_mask, padding_mask = _validate_text_inputs(
             input_ids,
@@ -1435,10 +1485,11 @@ class VitsModel(nn.Module):
             device=input_ids.device,
         )
         if spectrogram is None:
-            if spectrogram_attention_mask is not None or durations is not None:
+            if (spectrogram_attention_mask is not None or durations is not None or
+                    segment_frames is not None):
                 raise VitsInputError(
-                    "Spectrogram masks and supervised durations require a "
-                    "target spectrogram.")
+                    "Spectrogram masks, supervised durations, and training "
+                    "segments require a target spectrogram.")
             return self._synthesize(
                 input_ids,
                 attention_mask,
@@ -1460,6 +1511,7 @@ class VitsModel(nn.Module):
             spectrogram=spectrogram,
             spectrogram_attention_mask=spectrogram_attention_mask,
             durations=durations,
+            segment_frames=segment_frames,
             generator=generator,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
@@ -1602,6 +1654,7 @@ class VitsModel(nn.Module):
         spectrogram: Tensor,
         spectrogram_attention_mask: Tensor | None,
         durations: Tensor | None,
+        segment_frames: int | None,
         generator: torch.Generator | None,
         output_attentions: bool,
         output_hidden_states: bool,
@@ -1707,11 +1760,25 @@ class VitsModel(nn.Module):
             alignment.squeeze(1),
             encoded.prior_log_variances,
         ).transpose(1, 2)
+        decoder_latents = posterior * spectrogram_mask
+        if segment_frames is None:
+            segment_start_frames = torch.zeros_like(spectrogram_lengths)
+            sample_lengths = spectrogram_lengths * self.config.upsample_factor
+        else:
+            decoder_latents, segment_start_frames = _random_segment_slices(
+                decoder_latents,
+                spectrogram_lengths,
+                segment_frames,
+                generator=generator,
+            )
+            sample_lengths = torch.full_like(
+                spectrogram_lengths,
+                int(segment_frames) * self.config.upsample_factor,
+            )
         waveform = self.decoder(
-            posterior * spectrogram_mask,
+            decoder_latents,
             conditioning,
         ).squeeze(1)
-        sample_lengths = spectrogram_lengths * self.config.upsample_factor
         waveform = waveform * sequence_mask(
             sample_lengths,
             waveform.shape[1],
@@ -1730,6 +1797,7 @@ class VitsModel(nn.Module):
             posterior_log_variances=posterior_logs,
             text_mask=padding_mask,
             spectrogram_mask=spectrogram_mask,
+            segment_start_frames=segment_start_frames,
         )
 
     def _speaker_conditioning(

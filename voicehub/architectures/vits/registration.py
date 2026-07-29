@@ -50,6 +50,7 @@ def create_vits_architecture_spec() -> ArchitectureSpec:
             streaming=False,
             batched_inference=True,
             distributed_training=True,
+            optimization_passes=("compile", "custom-kernels"),
             features=(
                 "character-frontend",
                 "declarative-language-providers",

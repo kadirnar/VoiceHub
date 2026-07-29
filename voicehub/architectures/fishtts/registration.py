@@ -62,7 +62,7 @@ def create_fish_s2_architecture_spec() -> ArchitectureSpec:
             batched_inference=False,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("sdpa", ),
+            optimization_passes=("compile", "sdpa"),
             features=(
                 "dual-autoregressive-generation",
                 "ten-codebook-modified-dac",

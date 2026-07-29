@@ -30,6 +30,7 @@ from voicehub.architectures.qwen3_tts.metadata import QWEN3_TTS_CHECKPOINTS
 from voicehub.architectures.qwen3_tts.modeling import Qwen3TTSForConditionalGeneration
 from voicehub.architectures.qwen3_tts.tokenization import Qwen3TTSTextTokenizer
 from voicehub.hub import read_json_file
+from voicehub.optimization.protocols import OptimizationCompileTarget, OptimizationModuleRoot
 from voicehub.processing import NativeAudio, load_native_audio, mel_filter_bank
 
 _MAX_REFERENCE_AUDIO_BYTES = 64 * 1024 * 1024
@@ -300,6 +301,61 @@ class NativeQwen3TTSRuntime:
     @property
     def device(self) -> torch.device:
         return self.model.device
+
+    def parameters(self):
+        """Iterate optimizer-owned modules for runtime capability discovery."""
+        yield from self.model.parameters()
+        yield from self.speech_decoder.parameters()
+
+    def state_dict(self) -> dict[str, Tensor]:
+        """Return canonical keys across the runtime-owned native modules."""
+        state = {f"model.{name}": value for name, value in self.model.state_dict().items()}
+        state.update({
+            f"speech_decoder.{name}": value
+            for name, value in self.speech_decoder.state_dict().items()
+        })
+        return state
+
+    def optimization_module_roots(self):
+        """Expose the exact native module roots owned by this runtime."""
+        return (
+            OptimizationModuleRoot("model", self.model),
+            OptimizationModuleRoot(
+                "speech_decoder",
+                self.speech_decoder,
+            ),
+        )
+
+    def optimization_compile_targets(self, mode: str):
+        """Expose graph boundaries that synthesis or training really
+        invokes."""
+        if mode == "training":
+            return (
+                OptimizationCompileTarget(
+                    "model.talker.forward",
+                    self.model.talker,
+                    "forward",
+                ),
+                OptimizationCompileTarget(
+                    "model.talker.forward_sub_talker_finetune",
+                    self.model.talker,
+                    "forward_sub_talker_finetune",
+                ),
+            )
+        if mode != "inference":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (
+            OptimizationCompileTarget(
+                "model.talker.generate_codes",
+                self.model.talker,
+                "generate_codes",
+            ),
+            OptimizationCompileTarget(
+                "speech_decoder.chunked_decode",
+                self.speech_decoder,
+                "chunked_decode",
+            ),
+        )
 
     def _speaker_embedding(self, reference_audio: Any) -> Tensor:
         if self.model.speaker_encoder is None:

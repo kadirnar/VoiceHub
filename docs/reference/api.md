@@ -32,11 +32,13 @@ python -m pip install "voicehub[training]"
 | ASR inference | `AutoModelForSpeechRecognition`, `ASRInferenceConfig`, `ASROutput` |
 | VAD inference | `AutoModelForVoiceActivityDetection`, `VADInferenceConfig`, `VADOutput` |
 | Inference execution | `InferenceStrategy`, `EagerInferenceStrategy` |
+| LLM TTS serving | `LLMBackendConfig`, `list_llm_backend_support()`, token and Omni speech transports |
 | Training discovery | `get_training_spec()`, `list_training_specs()`, `ModelTrainingSpec` |
 | Training adaptation | `AutoTrainingAdapter`, `BaseTrainingAdapter`, family adapters |
 | Training loop | `TrainingArguments`, `Trainer`, callbacks, trainer outputs |
 | Training execution | `TrainingStrategy`, `TorchTrainingStrategy` |
-| TTS datasets | `TTSDataset`, `TTSDatasetSpec`, `TTSDataArchitecture`, `TTSDataReadiness` |
+| TTS datasets | `TTSDataset`, `TTSDatasetSpec`, `TTSDataArchitecture`, `TTSDataReadiness`, length-aware batching |
+| TTS optimization | Universal `TTSOptimizationConfig`, capability discovery/resolution, plus separate source-specific training profiles |
 | ASR datasets | `ASRDataset`, `ASRDatasetSpec`, `ASRDataArchitecture`, `ASRDataReadiness` |
 | TTS objectives | Multi-codebook CE, diffusion/flow pair builders, VITS loss primitives |
 | Collation | `default_data_collator`, `DefaultDataCollator`, `DataCollatorForTTSTraining`, `DataCollatorForAudioTraining` |
@@ -355,6 +357,9 @@ Models based on `PreTrainedTTSModel` provide:
 | `sample_rate` | Configured sample rate; generated output still reports the runtime's actual rate |
 | `is_loaded` | Whether the checkpoint-backed runtime has been constructed |
 | `inference_strategy` | Active inference policy |
+| `llm_backend` | `native`, `vllm`, or `sglang` |
+| `llm_backend_config` | Runtime-only external connection settings, or `None` |
+| `llm_backend_transport` | Resolved `auto`, `tokens`, or `speech` transport |
 | `training_default_model_name_or_path` | Recommended differentiable starting checkpoint from the training spec |
 
 ```python
@@ -365,6 +370,13 @@ PreTrainedTTSModel.from_pretrained(
     device="auto",
     lazy_load=True,
     inference_strategy=None,
+    llm_backend=None,
+    llm_backend_config=None,
+    optimization_config=None,
+    attn_implementation=None,
+    kernel_backend=None,
+    torch_compile=None,
+    compile_config=None,
     config_kwargs=None,
     **kwargs,
 )
@@ -376,12 +388,19 @@ PreTrainedTTSModel.from_pretrained(
 | `load_for_training()` | Validate and construct or restore a differentiable runtime |
 | `validate_training_support()` | Validate the exact configured backend/checkpoint without loading weights; return `ModelTrainingSpec` |
 | `set_inference_strategy(strategy)` | Select a policy before an inference runtime is active |
+| `set_llm_backend(backend, config=None, **config_kwargs)` | Select and validate a vLLM/SGLang server before loading |
+| `clear_llm_backend()` | Detach an idle speech backend or an unloaded token backend |
+| `set_optimization_config(config)` | Schedule a universal TTS policy before the next inference load |
+| `clear_optimization_config()` | Return and remove a still-pending policy, including after runtime-dependent load failure |
 | `prepare_inputs_for_generation(text, **kwargs)` | Run the configured processor and return model inputs |
 | `forward(text, **kwargs)` | Validate, lazy-load, synthesize, and enforce `TTSOutput` |
 | `generate(text, *, generation_config=None, **kwargs)` | Merge generation defaults and call `forward()` |
 | `create_training_dataset(records, **kwargs)` | Delegate raw-data construction to the model's adapter |
 | `get_training_adapter()` | Create the unloaded adapter paired with this wrapper |
 | `save_pretrained(directory, include_native_export=True)` | Save VoiceHub metadata and optional backend-native artifacts |
+
+See [External LLM serving](../guides/llm-serving.md) for the capability
+matrix, server launch commands, request schemas, and lifecycle constraints.
 
 There is no universal `unload()` or `release()` API. A serving-to-training
 transition uses `load_for_training()`, allowing the active inference strategy
@@ -572,6 +591,217 @@ finally:
 Registry mutations are process-global. Register extensions during application
 startup, not per request.
 
+## Universal TTS optimization
+
+`TTSOptimizationConfig` is the configuration-first optimization API for all
+registered text-to-speech models:
+
+```python
+TTSOptimizationConfig(
+    attn_implementation="auto",
+    kernel_backend="auto",
+    compile="auto",
+    compile_config=None,
+    optimization_passes=(),
+)
+```
+
+Accepted attention values are `auto`, `native`, `sdpa`, and
+`flash_attention_4`. Kernel values are `auto`, `native`, `torch`, `triton`,
+and `cuda_extension`. Compile values are `auto`, `required`, and `disabled`;
+the boolean aliases `True` and `False` mean `required` and `disabled`.
+`compile_config` accepts a `TorchCompileConfig`, a mapping with the same
+fields, or `None`:
+
+```python
+TorchCompileConfig(
+    backend="inductor",
+    mode=None,
+    fullgraph=False,
+    dynamic=None,
+    options=None,
+    requirement="auto",
+)
+```
+
+The enclosing compile policy controls `requirement`, so
+`TTSOptimizationConfig(compile="required")` always produces a required
+`TorchCompileConfig`. Configuration serialization and resolution are:
+
+```python
+TTSOptimizationConfig.from_dict(values, **overrides)
+config.to_dict()
+config.to_json_string()
+config.resolve(
+    target,
+    *,
+    mode="inference",
+    context=None,
+    registry=None,
+) -> TTSOptimizationPlan
+
+get_tts_optimization_config(target, **overrides) -> TTSOptimizationConfig
+get_tts_optimization_support(target) -> TTSOptimizationSupport
+list_tts_optimization_support() -> tuple[TTSOptimizationSupport, ...]
+resolve_tts_optimization(
+    target,
+    config=None,
+    *,
+    mode="inference",
+    context=None,
+    registry=None,
+) -> TTSOptimizationPlan
+```
+
+`target` may be a registered TTS model type, a TTS architecture ID, or a
+model exposing `config.model_type`. Resolution validates the model task,
+canonical architecture, device, dtype, mode, streaming, and distributed
+context without loading weights. `TTSOptimizationPlan` contains `config`,
+`context`, `support`, ordered `passes`, and an ordered `decisions` tuple.
+`plan.manifest()` records both executable passes and native/eager fallbacks.
+
+The current 34-entry TTS registry declares the universal compile policy for
+every model. Apply-time discovery still validates that the loaded execution
+mode has a real target: an explicit empty target set selects eager execution
+for an automatic policy and fails a required policy. `conversationtts`,
+`f5tts`, and `qwen3tts` additionally declare the selectable
+FlashAttention-4 protocol; those three plus `vits` declare the
+architecture-owned custom-kernel protocol. Capability discovery is
+registry-driven, so callers should query the support functions instead of
+depending on those counts.
+
+Automatic choices are non-strict. Attention retains verified SDPA or native
+semantics, custom-kernel dispatch retains a registered Torch implementation,
+and recognized compiler availability or execution failures can retain eager
+execution. Explicit `flash_attention_4`, `triton`, `cuda_extension`, and
+required compile choices fail rather than silently selecting another
+implementation. CUDA-extension compilation/loading remains an explicit
+`load_tts_activation_cuda_extension()` operation.
+
+Every `BaseTTSModel` exposes:
+
+```python
+model.resolve_optimization(
+    config=None,
+    *,
+    mode="inference",
+    context=None,
+    registry=None,
+) -> TTSOptimizationPlan
+
+model.optimize(
+    config=None,
+    *,
+    mode="inference",
+    context=None,
+    registry=None,
+) -> TTSOptimizationResult
+
+model.tts_optimization_result(*, mode="inference")
+model.tts_optimization_manifest(*, mode=None)
+model.restore_tts_optimization(*, mode="inference")
+```
+
+`model.optimize()` loads the correct execution runtime (or the architecture
+training adapter in training mode), applies nonempty plans transactionally,
+and also publishes a result for a successful all-native plan.
+`TTSOptimizationResult.optimized` indicates that at least one executable pass
+was applied; it does not claim a benchmarked speedup or that every auxiliary
+codec/vocoder stage was compiled. `restore_tts_optimization()` reverses
+applied passes or clears a native fallback report.
+
+`PreTrainedTTSModel.from_pretrained()` additionally accepts:
+
+```python
+AutoModelForTextToSpeech.from_pretrained(
+    checkpoint,
+    model_type=model_type,
+    optimization_config=config_or_mapping,
+    attn_implementation=None,
+    kernel_backend=None,
+    torch_compile=None,
+    compile_config=None,
+)
+```
+
+The direct arguments override the corresponding complete configuration.
+Without `optimization_config`, unspecified direct attention and kernel fields
+remain native and compilation remains disabled; supplying only
+`compile_config` selects automatic compilation. The resolved policy is
+scheduled before a lazy inference load and applied after the native runtime
+and inference strategy are prepared.
+
+If runtime-dependent policy validation fails after weights load,
+`clear_optimization_config()` returns and removes the retained pending policy;
+a following `load()` reuses the native weights. A pending policy must be
+loaded or cleared before calling `optimize()` or
+`apply_optimization_plan()`. Within `compile_config`, PyTorch's `mode` and
+`options` settings are mutually exclusive.
+
+`Trainer` accepts the same policy through `optimization_config`:
+
+```python
+trainer = Trainer(
+    model=model,
+    args=training_arguments,
+    train_dataset=train_dataset,
+    optimization_config=TTSOptimizationConfig(
+        attn_implementation="auto",
+        kernel_backend="auto",
+        compile="auto",
+    ),
+)
+```
+
+It is mutually exclusive with `optimization_plan`. Trainer resolves the
+policy in training mode after device placement and before strategy wrapping
+and optimizer creation. An explicit `optimization_context` must use
+`mode="training"` and `persist_result=True`. The resolved plan is available as
+`trainer.tts_optimization_plan`; `trainer.optimization_manifest()` combines
+the resolution and application records for checkpoints.
+
+This interface follows the configuration and registry separation of
+Transformers'
+[`attn_implementation`](https://huggingface.co/docs/transformers/main_classes/model#transformers.PreTrainedModel.from_pretrained),
+[`AttentionInterface`](https://huggingface.co/docs/transformers/main/attention_interface),
+and
+[`torch.compile` training configuration](https://huggingface.co/docs/transformers/torch_compile),
+while remaining a VoiceHub-native implementation.
+
+#### Multi-stage runtime optimization protocol
+
+`OptimizationCompileTargetProvider` and `OptimizationModuleRootProvider`
+separate the two optional hooks used by runtimes whose executed graph is not
+one ordinary `nn.Module.forward()`. `OptimizationRuntimeProtocol` combines
+both with checkpoint/device discovery:
+
+```python
+OptimizationModuleRoot(label: str, module: Any)
+OptimizationCompileTarget(label: str, owner: Any, attribute: str)
+
+OptimizationModuleRootProvider
+OptimizationCompileTargetProvider
+OptimizationRuntimeProtocol
+
+runtime.optimization_module_roots()
+runtime.optimization_compile_targets(mode: str)
+runtime.parameters()
+runtime.state_dict()
+```
+
+`optimization_module_roots()` returns the module trees searched by attention
+and custom-kernel selector passes. `optimization_compile_targets()` returns
+ordered bound methods that the requested inference or training path actually
+invokes. An empty return is authoritative for an unsupported mode. Target
+labels and owner/attribute pairs must be unique, and the target
+owner/attribute must remain stable until restoration.
+`parameters()` provides device and dtype discovery, while `state_dict()` must
+return stable non-empty string keys so every pass can verify checkpoint
+identity. Simple modules with a concrete `forward()` are discovered
+automatically; inherited PyTorch `_forward_unimplemented` is never treated as
+a valid compile target. Portable resolved plans do not retain instance-bound
+targets; the pass discovers them from the loaded runtime when it is applied.
+
 ## Explicit optimization passes
 
 `voicehub.optimization` provides a dependency-light pass contract that can be
@@ -631,6 +861,38 @@ declarations do not register executable pass factories. Use
 reversible. `OptimizationResult.portable_state_dict(model=None)` returns
 canonical save state, optionally from a strategy-unwrapped execution handle.
 
+Built-in accelerator passes are available from `voicehub.optimization`:
+
+```python
+TorchCompilePass(
+    backend="inductor",
+    mode="max-autotune-no-cudagraphs",
+    fullgraph=False,
+    dynamic=True,
+    requirement="auto",  # or "required"
+)
+CustomKernelPass(
+    backend="auto",  # torch, triton, or cuda_extension
+)
+FlashAttention4Pass(
+    policy="auto",  # disabled, auto, or required
+)
+```
+
+All three are reversible configuration/execution passes and preserve canonical
+state-dict keys. `CustomKernelPass` never builds an extension. Call
+`voicehub.kernels.load_tts_activation_cuda_extension()` explicitly before
+selecting `backend="cuda_extension"`. `FlashAttention4Pass` imports the
+optional `flash_attn.cute` package only for a compatible concrete attention
+call.
+
+`voicehub.kernels` exposes `KERNEL_REGISTRY`, `register_kernel()`,
+`resolve_kernel()`, `dispatch_kernel()`, `KernelBackend`, and `KernelSupport`
+for application-defined implementations. It also exposes
+`get_kernel_capabilities()` and the explicit
+`load_tts_activation_cuda_extension()` build seam. Importing this namespace
+does not import Triton, initialize CUDA, or invoke a compiler.
+
 Pretrained speech wrappers expose:
 
 ```python
@@ -649,9 +911,10 @@ model.restore_optimization_plan(*, mode)
 `Trainer` accepts `optimization_plan`, `optimization_context`, and
 `optimization_pass_registry`. It exposes the applied result through
 `trainer.optimization_result` and its checkpoint-safe record through
-`trainer.optimization_manifest()`. These APIs are opt-in: manifests document
-an application but never cause a loader to mutate a graph implicitly. Trainer
-requires `mode="training"` and `persist_result=True`. A
+`trainer.optimization_manifest()`. These low-level APIs never select a plan
+implicitly; the separate universal `optimization_config` argument is the
+explicit request that asks a lazy TTS loader or Trainer to resolve one.
+Trainer requires `mode="training"` and `persist_result=True`. A
 topology/name-changing pass used with a separate-optimizer recipe must
 implement complete routing; a topology/name-changing pass included in a
 portable save must declare `portable_export=True` and return canonical state
@@ -981,10 +1244,12 @@ built-in execution strategy is single-process PyTorch.
 | `adam_beta1` | `0.9` | Adam first-moment coefficient |
 | `adam_beta2` | `0.999` | Adam second-moment coefficient |
 | `adam_epsilon` | `1e-8` | Adam numerical-stability value |
+| `adamw_fused` | `False` | Request fused AdamW when all parameters are on CUDA and PyTorch supports it; otherwise fall back safely |
 | `max_grad_norm` | `1.0` | Gradient clipping norm; `0` disables effective clipping |
 | `num_train_epochs` | `3.0` | Epoch target when `max_steps` is not positive |
 | `max_steps` | `-1` | Positive value overrides the epoch-derived update count |
-| `lr_scheduler_type` | `"linear"` | `linear`, `cosine`, or `constant` |
+| `lr_scheduler_type` | `"linear"` | `linear`, `cosine`, `constant`, or epoch-normalized `exponential` |
+| `lr_scheduler_gamma` | `1.0` | Per-epoch factor used by the exponential schedule |
 | `warmup_ratio` | `0.0` | Fractional warmup when `warmup_steps` is zero |
 | `warmup_steps` | `0` | Explicit warmup; takes precedence over the ratio |
 | `gradient_checkpointing` | `False` | Enable only when the resolved runtime implements it |
@@ -1339,6 +1604,7 @@ ASRDataset(
     aliases=None,
     validate=True,
     validate_files=False,
+    batching: TTSBatchingConfig | Mapping | None = None,
     transform=None,
     transform_fingerprint=None,
 )
@@ -1529,6 +1795,14 @@ model-specific reference-audio aliases, resolves paths, validates record
 variants, performs deterministic group-disjoint splits, writes portable JSON
 Lines, and fingerprints normalized record content and order.
 
+`with_batching(config)` returns a new dataset with an immutable
+`TTSBatchingConfig`. `Trainer` then requests an `EpochLengthBatchSampler`
+automatically. `length-bucket` uses fixed item counts inside ordered
+boundaries; `max-units` supports summed or padded token/frame budgets,
+optional maximum item and sequence limits, deterministic `set_epoch()`, and
+exact-resume state. Batching settings and normalized lengths are included in
+dataset and sampler fingerprints.
+
 Lazy transforms must declare a stable `transform_fingerprint` before
 `resume_fingerprint()` can be used; changing that value changes the content
 fingerprint. This prevents an exact resume from silently accepting changed
@@ -1559,6 +1833,44 @@ contract. A custom training-family string can select a generic contract
 directly with `get_tts_dataset_spec(architecture=...)`. Generic architecture
 contracts may describe raw corpus structures; model-specific contracts do not
 inherit raw support unless it is integrated.
+
+### Source-specific TTS training profiles
+
+```python
+get_tts_training_optimization_profile(
+    model_type_or_architecture,
+) -> TTSTrainingOptimizationProfile
+
+VITSOptimizationConfig().training_arguments(output_dir, **overrides)
+LLMTTSOptimizationConfig().training_arguments(output_dir, **overrides)
+LLMTTSOptimizationConfig.qwen3tts()
+DiffusionTTSOptimizationConfig().training_arguments(output_dir, **overrides)
+
+VITSOptimizationConfig().acceleration_plan(...)
+LLMTTSOptimizationConfig().acceleration_plan(...)
+DiffusionTTSOptimizationConfig().acceleration_plan(...)
+
+vits_acceleration_plan(...)
+llm_tts_acceleration_plan(...)
+diffusion_tts_acceleration_plan(...)
+```
+
+`TTSTrainingOptimizationProfile` is the union of
+`VITSOptimizationConfig`, `LLMTTSOptimizationConfig`, and
+`DiffusionTTSOptimizationConfig`. The historical
+`TTSOptimizationProfile` name is an alias for the same training union; neither
+is the universal, constructible `TTSOptimizationConfig`.
+
+Each profile exposes `batching_config()`, `prepare_dataset(dataset)`,
+`techniques`, `source_url`, and `to_dict()`. The diffusion profile additionally
+returns EMA and activation-checkpoint settings through
+`model_config_overrides()`. `acceleration_plan()` returns custom-kernel and
+attention passes followed by `TorchCompilePass`; VITS intentionally omits FA4
+because its relative-position terms are not equivalent to dense scaled
+dot-product attention. Profiles are opt-in and do not mutate a model or
+existing arguments. See
+[TTS optimization](../guides/tts-optimization.md) for the
+pinned recipes and tradeoffs.
 
 ### Specialized TTS objective primitives
 

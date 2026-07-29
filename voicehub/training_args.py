@@ -40,12 +40,14 @@ class TrainingArguments:
     adam_beta1: float = 0.9
     adam_beta2: float = 0.999
     adam_epsilon: float = 1e-8
+    adamw_fused: bool = False
     max_grad_norm: float = 1.0
     num_train_epochs: float = 3.0
     max_steps: int = -1
     lr_scheduler_type: SchedulerType | str = SchedulerType.LINEAR
     warmup_ratio: float = 0.0
     warmup_steps: int = 0
+    lr_scheduler_gamma: float = 1.0
 
     logging_strategy: IntervalStrategy | str = IntervalStrategy.STEPS
     logging_steps: int = 500
@@ -128,6 +130,7 @@ class TrainingArguments:
             "learning_rate": (self.learning_rate, 0.0, False),
             "weight_decay": (self.weight_decay, 0.0, False),
             "adam_epsilon": (self.adam_epsilon, 0.0, True),
+            "lr_scheduler_gamma": (self.lr_scheduler_gamma, 0.0, True),
             "max_grad_norm": (self.max_grad_norm, 0.0, False),
         }
         for name, (value, minimum, strict) in optimizer_values.items():
@@ -181,6 +184,8 @@ class TrainingArguments:
             raise ValueError("`warmup_steps` cannot be negative.")
         if self.fp16 and self.bf16:
             raise ValueError("At most one of `fp16` and `bf16` can be enabled.")
+        if not isinstance(self.adamw_fused, bool):
+            raise TypeError("`adamw_fused` must be a boolean.")
         if (not isinstance(self.label_names, list) or not self.label_names or
                 any(not isinstance(name, str) or not name.strip() for name in self.label_names) or
                 len(set(self.label_names)) != len(self.label_names)):

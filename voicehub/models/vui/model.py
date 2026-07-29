@@ -15,6 +15,7 @@ from voicehub.models.vui.patterns import DelayedPatternProvider
 from voicehub.models.vui.rope import apply_rotary_emb, precompute_freqs_cis
 from voicehub.models.vui.tok import CustomByT5Tokenizer
 from voicehub.models.vui.utils import load_what_you_can
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 class KVCache(nn.Module):
@@ -404,6 +405,32 @@ class Vui(nn.Module):
         for pn, p in self.named_parameters():
             if pn.endswith("out_proj.weight"):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * cfg.n_layers))
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the decoder and codec boundaries reached by Vui TTS."""
+        if mode == "training":
+            return (OptimizationCompileTarget(
+                "decoder.forward",
+                self.decoder,
+                "forward",
+            ), )
+        if mode == "inference":
+            return (
+                OptimizationCompileTarget(
+                    "decoder.forward",
+                    self.decoder,
+                    "forward",
+                ),
+                OptimizationCompileTarget(
+                    "codec.from_indices",
+                    self.codec,
+                    "from_indices",
+                ),
+            )
+        raise ValueError("Vui compile targets require 'inference' or 'training' mode.")
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):

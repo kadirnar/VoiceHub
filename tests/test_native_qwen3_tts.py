@@ -8,9 +8,11 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+from unittest import mock
 
 import torch
 
+from voicehub.architectures.qwen3_tts import modeling as qwen3_tts_modeling
 from voicehub.architectures.qwen3_tts.checkpoint import (
     export_qwen3_tts_decoder,
     export_qwen3_tts_model,
@@ -117,6 +119,62 @@ def _tiny_decoder() -> Qwen3TTSDecoderConfig:
         "upsampling_ratios": [2],
         "vector_quantization_hidden_dimension": 8,
     })
+
+
+def _eager_attention_reference(
+    attention,
+    hidden_states,
+    *,
+    cosine,
+    sine,
+    attention_bias,
+):
+    batch, time, _ = hidden_states.shape
+    query = attention.q_norm(
+        attention.q_proj(hidden_states).view(
+            batch,
+            time,
+            attention.num_heads,
+            attention.head_dim,
+        )).transpose(1, 2)
+    key = attention.k_norm(
+        attention.k_proj(hidden_states).view(
+            batch,
+            time,
+            attention.num_kv_heads,
+            attention.head_dim,
+        )).transpose(1, 2)
+    value = attention.v_proj(hidden_states).view(
+        batch,
+        time,
+        attention.num_kv_heads,
+        attention.head_dim,
+    ).transpose(1, 2)
+    query, key = qwen3_tts_modeling.apply_rotary_embedding(
+        query,
+        key,
+        cosine,
+        sine,
+    )
+    key = qwen3_tts_modeling._expand_kv(key, attention.groups)
+    value = qwen3_tts_modeling._expand_kv(value, attention.groups)
+    weights = torch.matmul(query, key.transpose(-1, -2)) * attention.scale
+    weights = torch.softmax(
+        weights.float() + attention_bias,
+        dim=-1,
+    ).to(dtype=query.dtype)
+    weights = torch.nn.functional.dropout(
+        weights,
+        p=attention.dropout,
+        training=attention.training,
+    )
+    output = torch.matmul(weights, value)
+    output = output.transpose(1, 2).reshape(
+        batch,
+        time,
+        attention.num_heads * attention.head_dim,
+    )
+    return attention.o_proj(output)
 
 
 def _portable_architecture() -> Qwen3TTSArchitectureConfig:
@@ -296,6 +354,164 @@ class NativeQwen3TTSTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(loss))
         self.assertIsNotNone(model.talker.model.layers[0].self_attn.q_proj.weight.grad)
         self.assertIsNotNone(model.talker.code_predictor.lm_head[0].weight.grad)
+
+    def test_sdpa_matches_eager_attention_forward_and_backward(self):
+        torch.manual_seed(41)
+        attention = (
+            Qwen3TTSForConditionalGeneration(_tiny_architecture()).talker.model.layers[0].self_attn.train())
+        hidden_states = torch.randn(2, 5, 8, requires_grad=True)
+        cosine = torch.ones(2, 5, attention.head_dim)
+        sine = torch.zeros_like(cosine)
+        attention_bias = qwen3_tts_modeling._causal_bias(
+            torch.tensor([
+                [1, 1, 1, 1, 1],
+                [1, 1, 1, 1, 0],
+            ]),
+            batch=2,
+            time=5,
+            sliding_window=None,
+            device=hidden_states.device,
+        )
+
+        actual = attention(
+            hidden_states,
+            cosine=cosine,
+            sine=sine,
+            attention_bias=attention_bias,
+        )
+        actual.square().mean().backward()
+        actual_input_gradient = hidden_states.grad.detach().clone()
+        actual_parameter_gradients = {
+            name: parameter.grad.detach().clone()
+            for name, parameter in attention.named_parameters() if parameter.grad is not None
+        }
+
+        attention.zero_grad(set_to_none=True)
+        reference_hidden_states = hidden_states.detach().clone().requires_grad_(True)
+        expected = _eager_attention_reference(
+            attention,
+            reference_hidden_states,
+            cosine=cosine,
+            sine=sine,
+            attention_bias=attention_bias,
+        )
+        expected.square().mean().backward()
+
+        torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-6)
+        torch.testing.assert_close(
+            actual_input_gradient,
+            reference_hidden_states.grad,
+            rtol=1e-5,
+            atol=1e-6,
+        )
+        self.assertEqual(
+            set(actual_parameter_gradients),
+            {name
+             for name, parameter in attention.named_parameters() if parameter.grad is not None},
+        )
+        for name, parameter in attention.named_parameters():
+            if parameter.grad is not None:
+                torch.testing.assert_close(
+                    actual_parameter_gradients[name],
+                    parameter.grad,
+                    rtol=1e-5,
+                    atol=1e-6,
+                )
+
+    def test_sdpa_routes_gqa_and_dropout_with_legacy_fallback(self):
+        attention = (Qwen3TTSForConditionalGeneration(_tiny_architecture()).talker.model.layers[0].self_attn)
+        attention.dropout = 0.25
+        hidden_states = torch.randn(1, 3, 8)
+        cosine = torch.ones(1, 3, attention.head_dim)
+        sine = torch.zeros_like(cosine)
+        attention_bias = qwen3_tts_modeling._causal_bias(
+            None,
+            batch=1,
+            time=3,
+            sliding_window=None,
+            device=hidden_states.device,
+        )
+        calls = []
+
+        def capture_sdpa(query, key, value, **kwargs):
+            calls.append((query.shape, key.shape, value.shape, dict(kwargs)))
+            return torch.zeros_like(query)
+
+        attention.train()
+        with (
+                mock.patch.object(qwen3_tts_modeling, "_SDPA_SUPPORTS_GQA", True),
+                mock.patch.object(
+                    qwen3_tts_modeling.functional,
+                    "scaled_dot_product_attention",
+                    side_effect=capture_sdpa,
+                ),
+        ):
+            attention(
+                hidden_states,
+                cosine=cosine,
+                sine=sine,
+                attention_bias=attention_bias,
+            )
+
+        attention.eval()
+        with (
+                mock.patch.object(qwen3_tts_modeling, "_SDPA_SUPPORTS_GQA", False),
+                mock.patch.object(
+                    qwen3_tts_modeling.functional,
+                    "scaled_dot_product_attention",
+                    side_effect=capture_sdpa,
+                ),
+        ):
+            attention(
+                hidden_states,
+                cosine=cosine,
+                sine=sine,
+                attention_bias=attention_bias,
+            )
+
+        native, fallback = calls
+        self.assertEqual(native[1][1], attention.num_kv_heads)
+        self.assertTrue(native[3]["enable_gqa"])
+        self.assertEqual(native[3]["dropout_p"], 0.25)
+        self.assertEqual(native[3]["scale"], attention.scale)
+        self.assertEqual(fallback[1][1], attention.num_heads)
+        self.assertNotIn("enable_gqa", fallback[3])
+        self.assertEqual(fallback[3]["dropout_p"], 0.0)
+        self.assertEqual(fallback[3]["scale"], attention.scale)
+
+    def test_talker_exposes_last_hidden_state_without_history(self):
+        torch.manual_seed(43)
+        talker = Qwen3TTSForConditionalGeneration(_tiny_architecture()).talker.eval()
+        embeddings = torch.randn(2, 5, 8)
+        attention_mask = torch.ones(2, 5, dtype=torch.long)
+
+        compact = talker(
+            inputs_embeds=embeddings,
+            attention_mask=attention_mask,
+        )
+        detailed = talker(
+            inputs_embeds=embeddings,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+        )
+
+        self.assertIsNone(compact.hidden_states)
+        self.assertEqual(compact.last_hidden_state.shape, (2, 5, 8))
+        self.assertIsNotNone(detailed.hidden_states)
+        assert detailed.hidden_states is not None
+        self.assertEqual(
+            len(detailed.hidden_states[0]),
+            talker.config.num_hidden_layers + 1,
+        )
+        torch.testing.assert_close(
+            compact.last_hidden_state,
+            detailed.hidden_states[0][-1],
+        )
+        torch.testing.assert_close(
+            compact.last_hidden_state,
+            detailed.last_hidden_state,
+        )
+        torch.testing.assert_close(compact.logits, detailed.logits)
 
     def test_generation_uses_checkpoint_text_pad_token(self):
         torch.manual_seed(9)
@@ -527,6 +743,7 @@ class NativeQwen3TTSTests(unittest.TestCase):
     def test_architecture_spec_is_honest_about_native_scope(self):
         spec = create_qwen3_tts_architecture_spec()
         self.assertTrue(spec.capabilities.training)
+        self.assertIn("sdpa", spec.capabilities.optimization_passes)
         self.assertIn("voice-clone-xvector", spec.capabilities.features)
         self.assertIn("not yet native", spec.metadata["icl_reference_encoder"])
 

@@ -21,6 +21,8 @@ class BaseSpeechModel(ABC):
         self.model_path = model_path
         self.device = device
         self._optimization_results_by_mode: dict[str, Any] = {}
+        self._tts_optimization_results_by_mode: dict[str, Any] = {}
+        self._tts_optimization_attaches_model_by_mode: dict[str, bool] = {}
 
     def _optimization_lifecycle_lock(self):
         lock = getattr(self, "_lifecycle_lock", None)
@@ -35,14 +37,23 @@ class BaseSpeechModel(ABC):
     def _validate_optimization_transition(self, target_mode) -> None:
         """Reject implicit transitions across active optimization plans."""
         normalized = self._optimization_mode(target_mode)
-        active_modes = tuple(
+        explicit_modes = tuple(
             mode for mode, result in self._optimization_results_by_mode.items()
             if result is not None and mode != normalized.value)
-        if active_modes:
+        universal_modes = tuple(
+            mode for mode, result in self._tts_optimization_results_by_mode.items()
+            if result is not None and mode != normalized.value)
+        if explicit_modes:
             raise RuntimeError(
                 f"Cannot enter {normalized.value!r} mode while an explicit "
-                f"{active_modes[0]!r} optimization plan is active. Restore "
+                f"{explicit_modes[0]!r} optimization plan is active. Restore "
                 "that plan explicitly with restore_optimization_plan() first.")
+        if universal_modes:
+            raise RuntimeError(
+                f"Cannot enter {normalized.value!r} mode while a universal "
+                f"{universal_modes[0]!r} TTS optimization policy is active. "
+                "Restore that policy explicitly with "
+                "restore_tts_optimization() first.")
 
     def _default_optimization_context(self, mode):
         """Describe the loaded runtime without importing optimization tools."""
@@ -84,7 +95,7 @@ class BaseSpeechModel(ABC):
         :class:`~voicehub.optimization.OptimizationResult` owns rollback
         state and a deterministic manifest for the exact application.
         """
-        from voicehub.optimization import OptimizationContext, OptimizationPassManager, bind_registered_architecture
+        from voicehub.optimization import OptimizationContext, OptimizationPassManager
 
         normalized_mode = self._optimization_mode(mode)
         if context is not None:
@@ -102,11 +113,26 @@ class BaseSpeechModel(ABC):
             raise ValueError("An optimization plan must contain at least one pass.")
 
         with self._optimization_lifecycle_lock():
+            if getattr(
+                    self,
+                    "_pending_tts_optimization_config",
+                    None,
+            ) is not None:
+                raise RuntimeError(
+                    "A universal TTS optimization configuration is pending "
+                    "for the next inference load. Call load() to apply it or "
+                    "clear_optimization_config() before applying an explicit "
+                    "plan.")
             self._validate_optimization_transition(normalized_mode)
             if normalized_mode.value in self._optimization_results_by_mode:
                 raise RuntimeError(
                     f"An explicit {normalized_mode.value!r} optimization plan "
                     "is already active. Restore it before applying another.")
+            if normalized_mode.value in self._tts_optimization_results_by_mode:
+                raise RuntimeError(
+                    f"A universal {normalized_mode.value!r} TTS optimization "
+                    "policy is already active. Restore it before applying an "
+                    "explicit plan.")
 
             loader_name = ("load_for_training" if normalized_mode.value == "training" else "load")
             loader = getattr(self, loader_name, None)
@@ -116,27 +142,53 @@ class BaseSpeechModel(ABC):
                     f"{loader_name}(), which is required for "
                     f"{normalized_mode.value} optimization.")
             loader()
-            runtime = getattr(self, "model", None)
-            if runtime is None:
-                raise RuntimeError(
-                    f"{type(self).__name__} did not expose a loaded model "
-                    "runtime for optimization.")
-            resolved_context = (
-                context if context is not None else self._default_optimization_context(normalized_mode))
-            resolved_context = bind_registered_architecture(
-                resolved_context,
-                self,
-            )
-            result = manager.apply(
-                runtime,
+            return self._apply_resolved_optimization_plan(
                 resolved_passes,
-                resolved_context,
+                mode=normalized_mode,
+                context=context,
+                manager=manager,
             )
-            # Validate manifest safety before attaching the transformed graph.
-            result.manifest()
+
+    def _apply_resolved_optimization_plan(
+        self,
+        resolved_passes,
+        *,
+        mode,
+        context=None,
+        manager=None,
+        declaration_snapshots=None,
+        runtime=None,
+        attach_to_model=True,
+    ):
+        """Apply pre-resolved passes to an already loaded runtime."""
+        from voicehub.optimization import OptimizationPassManager, bind_registered_architecture
+
+        normalized_mode = self._optimization_mode(mode)
+        if runtime is None:
+            runtime = getattr(self, "model", None)
+        if runtime is None:
+            raise RuntimeError(
+                f"{type(self).__name__} did not expose a loaded model "
+                "runtime for optimization.")
+        resolved_context = (
+            context if context is not None else self._default_optimization_context(normalized_mode))
+        resolved_context = bind_registered_architecture(
+            resolved_context,
+            self,
+        )
+        pass_manager = (OptimizationPassManager() if manager is None else manager)
+        result = pass_manager.apply(
+            runtime,
+            resolved_passes,
+            resolved_context,
+            declaration_snapshots=declaration_snapshots,
+        )
+        # Validate manifest safety before attaching the transformed graph.
+        result.manifest()
+        if attach_to_model:
             self.model = result.model
-            self._optimization_results_by_mode[normalized_mode.value] = result
-            return result
+        self._optimization_results_by_mode[normalized_mode.value] = result
+        return result
 
     def optimization_result(self, *, mode):
         """Return the active result for one mode, if a plan was applied."""
@@ -161,8 +213,21 @@ class BaseSpeechModel(ABC):
             if result is None:
                 raise RuntimeError(f"No {normalized.value!r} optimization plan is active.")
             restored = result.restore()
-            self.model = restored
+            attaches_model = self._tts_optimization_attaches_model_by_mode.get(
+                normalized.value,
+                True,
+            )
+            if attaches_model:
+                self.model = restored
             del self._optimization_results_by_mode[normalized.value]
+            self._tts_optimization_results_by_mode.pop(
+                normalized.value,
+                None,
+            )
+            self._tts_optimization_attaches_model_by_mode.pop(
+                normalized.value,
+                None,
+            )
             return restored
 
     @abstractmethod
@@ -305,6 +370,195 @@ class BaseSpeechModel(ABC):
 
 class BaseTTSModel(BaseSpeechModel):
     """Backward-compatible base class for text-to-speech models."""
+
+    def _tts_optimization_runtime(self, mode):
+        """Return the execution object transformed by a universal policy."""
+        del mode
+        return self.model
+
+    def resolve_optimization(
+        self,
+        config=None,
+        *,
+        mode="inference",
+        context=None,
+        registry=None,
+    ):
+        """Resolve a universal TTS policy without loading model weights."""
+        from voicehub.optimization import resolve_tts_optimization
+
+        return resolve_tts_optimization(
+            self,
+            config,
+            mode=mode,
+            context=context,
+            registry=registry,
+        )
+
+    def _optimize_loaded_tts_runtime(
+        self,
+        config=None,
+        *,
+        mode="inference",
+        context=None,
+        registry=None,
+    ):
+        """Apply one universal policy after the native runtime is loaded."""
+        from voicehub.optimization import OptimizationPassManager, TTSOptimizationResult
+
+        normalized_mode = self._optimization_mode(mode)
+        if normalized_mode.value in self._tts_optimization_results_by_mode:
+            raise RuntimeError(
+                f"A universal {normalized_mode.value!r} TTS optimization "
+                "policy is already active. Restore it before applying "
+                "another.")
+        if normalized_mode.value in self._optimization_results_by_mode:
+            raise RuntimeError(
+                f"An explicit {normalized_mode.value!r} optimization plan "
+                "is already active. Restore it before applying a universal "
+                "TTS policy.")
+        plan = self.resolve_optimization(
+            config,
+            mode=normalized_mode,
+            context=context,
+            registry=registry,
+        )
+        # Validate requested/resolved metadata before the first graph
+        # transformation so a non-serializable policy cannot leave a partial
+        # low-level optimization active.
+        plan.manifest()
+        application = None
+        attaches_model = True
+        if plan.passes:
+            manager = OptimizationPassManager()
+            runtime = self._tts_optimization_runtime(normalized_mode)
+            if runtime is None:
+                raise RuntimeError(
+                    f"{type(self).__name__} did not expose a loaded "
+                    f"{normalized_mode.value} runtime for optimization.")
+            attaches_model = runtime is self.model
+            application = self._apply_resolved_optimization_plan(
+                plan.passes,
+                mode=normalized_mode,
+                context=plan.context,
+                manager=manager,
+                declaration_snapshots=(plan.pass_declaration_snapshots),
+                runtime=runtime,
+                attach_to_model=attaches_model,
+            )
+        result = TTSOptimizationResult(
+            plan=plan,
+            model=(self.model if application is None or attaches_model else application.model),
+            application=application,
+        )
+        # Validate strict JSON before publishing even a native fallback.
+        result.manifest()
+        self._tts_optimization_results_by_mode[normalized_mode.value] = result
+        self._tts_optimization_attaches_model_by_mode[normalized_mode.value] = attaches_model
+        return result
+
+    def optimize(
+        self,
+        config=None,
+        *,
+        mode="inference",
+        context=None,
+        registry=None,
+    ):
+        """Load and optimize any TTS model through the universal resolver."""
+        from voicehub.optimization import validate_tts_optimization_config
+
+        normalized_mode = self._optimization_mode(mode)
+        with self._optimization_lifecycle_lock():
+            if getattr(
+                    self,
+                    "_pending_tts_optimization_config",
+                    None,
+            ) is not None:
+                raise RuntimeError(
+                    "A universal TTS optimization configuration is pending "
+                    "for the next inference load. Call load() to apply it or "
+                    "clear_optimization_config() before calling optimize().")
+            self._validate_optimization_transition(normalized_mode)
+            if (normalized_mode.value in self._tts_optimization_results_by_mode):
+                raise RuntimeError(
+                    f"A universal {normalized_mode.value!r} TTS "
+                    "optimization policy is already active. Restore it "
+                    "before applying another.")
+            resolved_config = validate_tts_optimization_config(
+                self,
+                config,
+            )
+            loader_name = ("load_for_training" if normalized_mode.value == "training" else "load")
+            loader = getattr(self, loader_name, None)
+            if not callable(loader):
+                raise TypeError(
+                    f"{type(self).__name__} does not implement "
+                    f"{loader_name}(), which is required for "
+                    f"{normalized_mode.value} optimization.")
+            loader()
+            return self._optimize_loaded_tts_runtime(
+                resolved_config,
+                mode=normalized_mode,
+                context=context,
+                registry=registry,
+            )
+
+    def tts_optimization_result(self, *, mode="inference"):
+        """Return the universal policy result for one execution mode."""
+        normalized = self._optimization_mode(mode)
+        return self._tts_optimization_results_by_mode.get(normalized.value)
+
+    def tts_optimization_manifest(self, *, mode=None):
+        """Return requested, resolved, and applied universal TTS settings."""
+        if mode is not None:
+            result = self.tts_optimization_result(mode=mode)
+            return None if result is None else result.manifest()
+        return {
+            active_mode: result.manifest()
+            for active_mode, result in sorted(self._tts_optimization_results_by_mode.items())
+        }
+
+    def restore_tts_optimization(self, *, mode="inference"):
+        """Restore a transformed policy or clear a native fallback report."""
+        normalized = self._optimization_mode(mode)
+        with self._optimization_lifecycle_lock():
+            result = self._tts_optimization_results_by_mode.get(normalized.value)
+            if result is None:
+                raise RuntimeError(
+                    f"No universal {normalized.value!r} TTS optimization "
+                    "policy is active.")
+            application = result.application
+            low_level = self._optimization_results_by_mode.get(normalized.value)
+            if application is None and low_level is not None:
+                raise RuntimeError(
+                    "A native TTS optimization policy cannot own an active "
+                    "low-level optimization result.")
+            if application is not None and low_level is not application:
+                raise RuntimeError(
+                    "The universal TTS optimization policy no longer owns "
+                    "its low-level application result.")
+            restored = result.restore()
+            attaches_model = self._tts_optimization_attaches_model_by_mode.get(
+                normalized.value,
+                True,
+            )
+            if attaches_model:
+                self.model = restored
+            self._tts_optimization_results_by_mode.pop(
+                normalized.value,
+                None,
+            )
+            self._tts_optimization_attaches_model_by_mode.pop(
+                normalized.value,
+                None,
+            )
+            if application is not None:
+                self._optimization_results_by_mode.pop(
+                    normalized.value,
+                    None,
+                )
+            return restored
 
     @property
     def sample_rate(self) -> int:

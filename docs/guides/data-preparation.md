@@ -66,6 +66,9 @@ Recommended source fields:
 | `language`           | Filtering, balancing, and language-conditioned models          |
 | `consent`            | Authorization for the intended voice use                       |
 | `license` / `source` | Provenance and redistribution constraints                      |
+| `duration`           | Positive seconds for reproducible raw-audio length batching    |
+| `num_frames`         | Prepared mel/spectrogram length for VITS or diffusion budgets  |
+| `num_tokens`         | Complete prepared text/audio sequence cost for codec/LLM TTS   |
 
 !!! danger "Treat voice data as sensitive"
 
@@ -96,6 +99,11 @@ native `reference_audio` field.
 `TTSDataset.from_ljspeech()` reads the common
 `id|text|normalized_text` layout. Use `to_jsonl()` to persist a portable
 manifest and `resume_fingerprint()` to capture its content and order.
+
+Length fields are optional for ordinary fixed-size batches and required only
+when attaching an [architecture optimization profile](tts-optimization.md).
+Compute them once during preparation; the training sampler deliberately does
+not decode every audio file at startup.
 
 Keep raw recordings immutable. Write normalized audio and resolved split
 manifests to a new, versioned prepared-data directory.

@@ -14,6 +14,7 @@ from voicehub.architectures.gptsovits.configuration import SUPPORTED_GPT_SOVITS_
 from voicehub.architectures.gptsovits.frontend import reject_raw_text, validate_prepared_inference
 from voicehub.architectures.gptsovits.modeling import GPTSoVITSSynthesizer, build_s2_generator
 from voicehub.architectures.gptsovits.semantic import GPTSoVITSSemanticModel
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 class GPTSoVITSRuntime(nn.Module):
@@ -32,6 +33,21 @@ class GPTSoVITSRuntime(nn.Module):
         self.s1 = s1
         self.s2 = s2
         self.sample_rate = s2.config.sample_rate
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose prepared synthesis; staged training owns another graph."""
+        if mode == "training":
+            return ()
+        if mode != "inference":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            "gptsovits.synthesize_prepared",
+            self,
+            "synthesize_prepared",
+        ), )
 
     @property
     def t2s_model(self) -> GPTSoVITSSemanticModel:

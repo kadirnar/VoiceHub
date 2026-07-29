@@ -17,6 +17,7 @@ from voicehub.architectures.cosyvoice_native.vocoder import (
     CosyVoiceHiFTTrainingModel,
     CosyVoiceHiFTTrainingOutput,
 )
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,23 @@ class CosyVoiceNativeModel(nn.Module):
         self.hifigan: CosyVoiceHiFTTrainingModel | None = None
         if build_discriminator:
             self.attach_discriminator(tiny=(config.hift.base_channels < 64), )
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the composite boundary invoked by synthesis or training."""
+        if mode == "training":
+            attribute = "forward"
+        elif mode == "inference":
+            attribute = "synthesize"
+        else:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            f"cosyvoice.{attribute}",
+            self,
+            attribute,
+        ), )
 
     def attach_discriminator(self, *, tiny: bool = False) -> None:
         """Attach the training-only adversarial graph exactly once."""

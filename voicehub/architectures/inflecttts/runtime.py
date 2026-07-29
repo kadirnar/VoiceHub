@@ -18,6 +18,7 @@ from voicehub.architectures.inflecttts.frontend import (
     validate_token_ids,
 )
 from voicehub.architectures.inflecttts.modeling import SynthesizerTrn
+from voicehub.optimization.protocols import OptimizationCompileTarget, OptimizationModuleRoot
 
 
 def split_phoneme_text(text: str, limit: int = 280) -> list[str]:
@@ -102,6 +103,21 @@ class InflectV2Runtime(nn.Module):
     @property
     def device(self) -> torch.device:
         return next(self.generator.parameters()).device
+
+    def optimization_module_roots(self):
+        """Expose the checkpoint-native generator owned by this runtime."""
+        return (OptimizationModuleRoot("generator", self.generator), )
+
+    def optimization_compile_targets(self, mode: str):
+        """Compile the generator boundary used by training or synthesis."""
+        attribute = "forward" if mode == "training" else "infer"
+        if mode not in {"inference", "training"}:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            f"generator.{attribute}",
+            self.generator,
+            attribute,
+        ), )
 
     @staticmethod
     def _controls(

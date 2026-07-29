@@ -33,8 +33,10 @@ from voicehub.architectures.f5tts.registration import create_f5tts_architecture_
 from voicehub.architectures.f5tts.runtime import NativeF5TTSRuntime
 from voicehub.architectures.f5tts.vocoder import NativeVocos
 from voicehub.models.f5tts.inference import F5TTSConfig, F5TTSForTextToSpeech
+from voicehub.trainer import Trainer
 from voicehub.training.recipes import F5TTSTrainingAdapter
 from voicehub.training.specs import get_training_spec
+from voicehub.training_args import TrainingArguments
 
 
 def _tiny_config() -> F5TTSArchitectureConfig:
@@ -134,6 +136,53 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
         self.assertEqual(conditioning.shape, mel.shape)
         self.assertEqual(prediction.shape, mel.shape)
         self.assertIsNotNone(model.transformer.input_embed.proj.weight.grad)
+
+    def test_training_arguments_enable_native_gradient_checkpointing(self):
+        architecture = _tiny_config()
+        flow = F5ConditionalFlowMatcher(architecture)
+        runtime = NativeF5TTSRuntime(
+            flow_model=flow,
+            vocoder=None,
+            frontend=NativeF5TextFrontend(_tiny_vocabulary()),
+        )
+        wrapper = F5TTSForTextToSpeech(
+            F5TTSConfig(
+                architecture=architecture.to_dict(),
+                model_name=architecture.model_name,
+                use_ema=False,
+            ),
+            device="cpu",
+        )
+        wrapper.model = runtime
+        adapter = F5TTSTrainingAdapter(
+            wrapper,
+            get_training_spec("f5tts"),
+        )
+        record = {
+            "mel": torch.randn(8, 20),
+            "mel_lengths": torch.tensor(20),
+            "input_ids": torch.tensor((2, 3, 4, 5)),
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            trainer = Trainer(
+                model=wrapper,
+                args=TrainingArguments(
+                    output_dir=directory,
+                    max_steps=1,
+                    per_device_train_batch_size=1,
+                    gradient_checkpointing=True,
+                    use_cpu=True,
+                ),
+                train_dataset=[record],
+                training_adapter=adapter,
+            )
+            trainer.train()
+
+        self.assertTrue(flow.gradient_checkpointing)
+        self.assertTrue(flow.transformer.checkpoint_activations)
+        adapter.gradient_checkpointing_disable()
+        self.assertFalse(flow.gradient_checkpointing)
 
     def test_native_sampler_is_seeded_and_preserves_reference_frames(self):
         model = F5ConditionalFlowMatcher(_tiny_config()).eval()
@@ -267,6 +316,54 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
             for name, tensor in fresh.state_dict().items():
                 expected = shadow.get(name, flow.state_dict()[name])
                 self.assertTrue(torch.equal(tensor, expected))
+
+    def test_ema_disabled_exports_explicit_raw_weights_without_recipe_state(self):
+        architecture = _tiny_config()
+        flow = F5ConditionalFlowMatcher(architecture)
+        runtime = NativeF5TTSRuntime(
+            flow_model=flow,
+            vocoder=None,
+            frontend=NativeF5TextFrontend(_tiny_vocabulary()),
+        )
+        wrapper = F5TTSForTextToSpeech(
+            F5TTSConfig(
+                architecture=architecture.to_dict(),
+                model_name=architecture.model_name,
+                use_ema=False,
+            ),
+            device="cpu",
+        )
+        wrapper.model = runtime
+        adapter = F5TTSTrainingAdapter(
+            wrapper,
+            get_training_spec("f5tts"),
+        ).setup()
+        with torch.no_grad():
+            next(flow.parameters()).add_(0.25)
+        raw_state = {name: tensor.detach().clone() for name, tensor in flow.state_dict().items()}
+
+        adapter.on_optimizer_step(optimizer_names=("model", ), step=1)
+
+        self.assertIsNone(adapter._ema)
+        self.assertEqual(adapter.recipe_state_dict(), {})
+        self.assertFalse(adapter.recipe_resume_configuration()["resolved_use_ema"], )
+        with self.assertRaisesRegex(ValueError, "use_ema=False"):
+            adapter.load_recipe_state_dict({"ema": {}}, strict=True)
+
+        with tempfile.TemporaryDirectory() as directory:
+            adapter.save_pretrained(directory)
+            configuration = json.loads((Path(directory) / "config.json").read_text(encoding="utf-8"))
+            self.assertFalse(configuration["use_ema"])
+            fresh = F5ConditionalFlowMatcher(architecture)
+            report = load_f5tts_checkpoint(
+                fresh,
+                Path(directory) / "model.safetensors",
+                use_ema=False,
+            )
+
+        self.assertEqual(report.prefix, "")
+        for name, tensor in fresh.state_dict().items():
+            self.assertTrue(torch.equal(tensor, raw_state[name]))
 
     def test_mel_frontend_is_pure_torch_and_has_expected_shape(self):
         mel = F5MelSpectrogram(

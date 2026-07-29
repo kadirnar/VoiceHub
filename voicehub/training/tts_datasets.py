@@ -14,6 +14,7 @@ from typing import Any
 
 from voicehub.training.data_contracts import TTSDataArchitecture, _field_present, get_tts_dataset_spec
 from voicehub.training.dataset_base import SpeechDataset
+from voicehub.training.tts_batching import EpochLengthBatchSampler, TTSBatchingConfig
 
 _COMMON_ALIASES = MappingProxyType({
     "transcript": "text",
@@ -67,6 +68,7 @@ class TTSDataset(SpeechDataset):
         aliases: Mapping[str, str] | None = None,
         validate: bool = True,
         validate_files: bool = False,
+        batching: TTSBatchingConfig | Mapping[str, Any] | None = None,
         transform: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
         transform_fingerprint: str | None = None,
     ):
@@ -82,6 +84,7 @@ class TTSDataset(SpeechDataset):
         self.aliases = self._normalize_aliases(aliases)
         self.validate = bool(validate)
         self.validate_files = bool(validate_files)
+        self.batching = (None if batching is None else TTSBatchingConfig.from_mapping(batching))
         if transform_fingerprint is not None and (not isinstance(transform_fingerprint, str) or
                                                   not transform_fingerprint.strip()):
             raise ValueError("transform_fingerprint must be a non-empty string or None.")
@@ -118,6 +121,7 @@ class TTSDataset(SpeechDataset):
         aliases: Mapping[str, str] | None = None,
         validate: bool = True,
         validate_files: bool = False,
+        batching: TTSBatchingConfig | Mapping[str, Any] | None = None,
         delimiter: str | None = None,
         transform: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
         transform_fingerprint: str | None = None,
@@ -135,6 +139,7 @@ class TTSDataset(SpeechDataset):
             aliases=aliases,
             validate=validate,
             validate_files=validate_files,
+            batching=batching,
             transform=transform,
             transform_fingerprint=transform_fingerprint,
         )
@@ -152,6 +157,7 @@ class TTSDataset(SpeechDataset):
         use_normalized_text: bool = True,
         validate: bool = True,
         validate_files: bool = False,
+        batching: TTSBatchingConfig | Mapping[str, Any] | None = None,
         transform: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
         transform_fingerprint: str | None = None,
     ) -> TTSDataset:
@@ -181,6 +187,7 @@ class TTSDataset(SpeechDataset):
             root=directory,
             validate=validate,
             validate_files=validate_files,
+            batching=batching,
             transform=transform,
             transform_fingerprint=transform_fingerprint,
         )
@@ -196,6 +203,7 @@ class TTSDataset(SpeechDataset):
         aliases: Mapping[str, str] | None = None,
         validate: bool = True,
         validate_files: bool = False,
+        batching: TTSBatchingConfig | Mapping[str, Any] | None = None,
         transform_fingerprint: str | None = None,
     ) -> TTSDataset:
         """Normalize an existing dataset, record iterable, or manifest path."""
@@ -209,7 +217,9 @@ class TTSDataset(SpeechDataset):
             stricter_validation = (
                 validate and not records_or_manifest.validate or
                 validate_files and not records_or_manifest.validate_files)
-            changed_options = (root is not None or aliases is not None or transform_fingerprint is not None)
+            changed_options = (
+                root is not None or aliases is not None or batching is not None or
+                transform_fingerprint is not None)
             if unchanged_target and not stricter_validation and not changed_options:
                 return records_or_manifest
             return cls(
@@ -220,6 +230,7 @@ class TTSDataset(SpeechDataset):
                 aliases=aliases,
                 validate=validate,
                 validate_files=validate_files,
+                batching=(records_or_manifest.batching if batching is None else batching),
                 transform=records_or_manifest.transform,
                 transform_fingerprint=(
                     records_or_manifest.transform_fingerprint
@@ -234,6 +245,7 @@ class TTSDataset(SpeechDataset):
                 aliases=aliases,
                 validate=validate,
                 validate_files=validate_files,
+                batching=batching,
                 transform_fingerprint=transform_fingerprint,
             )
         return cls(
@@ -244,6 +256,7 @@ class TTSDataset(SpeechDataset):
             aliases=aliases,
             validate=validate,
             validate_files=validate_files,
+            batching=batching,
             transform_fingerprint=transform_fingerprint,
         )
 
@@ -308,12 +321,59 @@ class TTSDataset(SpeechDataset):
             "aliases": {},
             "validate": self.validate,
             "validate_files": False,
+            "batching": self.batching,
             "transform": self.transform,
             "transform_fingerprint": self.transform_fingerprint,
         }
         return (
             type(self)(train_records, **options),
             type(self)(validation_records, **options),
+        )
+
+    def with_batching(
+        self,
+        batching: TTSBatchingConfig | Mapping[str, Any] | None,
+    ) -> TTSDataset:
+        """Return the same normalized records with a batching policy.
+
+        Passing ``None`` removes length-aware batching. The original
+        dataset remains unchanged, which makes optimization profiles
+        safe to reuse across experiments.
+        """
+        normalized = (None if batching is None else TTSBatchingConfig.from_mapping(batching))
+        if normalized == self.batching:
+            return self
+        return type(self)(
+            self._records,
+            model_type=self.model_type,
+            architecture=(None if self.model_type is not None else self.architecture),
+            root=self.root,
+            aliases={},
+            validate=self.validate,
+            validate_files=False,
+            batching=normalized,
+            transform=self.transform,
+            transform_fingerprint=self.transform_fingerprint,
+        )
+
+    def create_batch_sampler(
+        self,
+        *,
+        batch_size: int,
+        seed: int,
+        shuffle: bool,
+        drop_last: bool,
+    ) -> EpochLengthBatchSampler | None:
+        """Create deterministic architecture-length batches when configured."""
+        if self.batching is None:
+            return None
+        return EpochLengthBatchSampler(
+            self._records,
+            self.batching,
+            batch_size=batch_size,
+            seed=seed,
+            shuffle=shuffle,
+            drop_last=drop_last,
         )
 
     def to_jsonl(
@@ -357,6 +417,7 @@ class TTSDataset(SpeechDataset):
         canonical = json.dumps(
             {
                 "records": [_fingerprint_value(record) for record in self._records],
+                "batching": (None if self.batching is None else self.batching.to_dict()),
                 "transform_fingerprint": self.transform_fingerprint,
             },
             ensure_ascii=False,
@@ -367,6 +428,7 @@ class TTSDataset(SpeechDataset):
             "model_type": self.model_type,
             "architecture": self.architecture.value,
             "length": len(self),
+            "batching": (None if self.batching is None else self.batching.to_dict()),
             "transform_fingerprint": self.transform_fingerprint,
             "content_sha256": hashlib.sha256(canonical).hexdigest(),
         }

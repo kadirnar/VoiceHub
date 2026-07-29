@@ -12,6 +12,7 @@ from typing import Any
 import torch
 
 from voicehub.checkpointing import SafeTensorReader
+from voicehub.optimization.protocols import OptimizationCompileTarget
 from voicehub.processing.waveform import load_pcm_wave, resample_waveform
 
 from .checkpoint import load_irodori_safetensors
@@ -199,6 +200,32 @@ class InferenceRuntime:
         self.codec_device = codec.device
         self.default_text_max_len = 256
         self.default_caption_max_len = 512 if model_cfg.use_caption_condition else 256
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the RF-DiT boundary used by sampling or fine-tuning."""
+        if mode == "training":
+            return (OptimizationCompileTarget(
+                "model.forward",
+                self.model,
+                "forward",
+            ), )
+        if mode != "inference":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (
+            OptimizationCompileTarget(
+                "model.forward_with_encoded_conditions",
+                self.model,
+                "forward_with_encoded_conditions",
+            ),
+            OptimizationCompileTarget(
+                "codec.decode_latent",
+                self.codec,
+                "decode_latent",
+            ),
+        )
 
     @classmethod
     def from_key(cls, key: RuntimeKey) -> InferenceRuntime:

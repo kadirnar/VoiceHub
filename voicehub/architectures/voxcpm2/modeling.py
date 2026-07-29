@@ -11,6 +11,7 @@ from torch.nn import functional
 
 from voicehub.architectures.voxcpm2.configuration import VoxCPM2ArchitectureConfig, VoxCPMCFMConfig
 from voicehub.architectures.voxcpm2.minicpm import MiniCPMModel, local_transformer_config
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 class VoxCPMScalarQuantizer(nn.Module):
@@ -598,6 +599,23 @@ class VoxCPM2Model(nn.Module):
             dtype=dtype,
         )
         self.stop_loss = nn.CrossEntropyLoss(reduction="none")
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Compile the exact public graph used by inference or training."""
+        if mode == "inference":
+            attribute = "generate_features"
+        elif mode == "training":
+            attribute = "forward"
+        else:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            attribute,
+            self,
+            attribute,
+        ), )
 
     @property
     def parameter_dtype(self) -> torch.dtype:

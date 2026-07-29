@@ -17,6 +17,7 @@ from voicehub.architectures.supertonic.frontend import SupertonicStyle, Superton
 from voicehub.checkpointing import ONNXModel
 from voicehub.hub import read_json_file
 from voicehub.neural.onnx import NativeONNXGraph
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 _SENTENCE_BOUNDARY = re.compile(
     r"(?<!Mr\.)(?<!Mrs\.)(?<!Ms\.)(?<!Dr\.)(?<!Prof\.)"
@@ -94,6 +95,31 @@ class NativeSupertonicRuntime(nn.Module):
         self.vector_estimator = NativeONNXGraph(vector_estimator)
         self.vocoder = NativeONNXGraph(vocoder)
         self._validate_graph_contracts()
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose published graph boundaries reached by each runtime mode."""
+        if mode == "training":
+            return (OptimizationCompileTarget(
+                "fine_tuning_loss",
+                self,
+                "fine_tuning_loss",
+            ), )
+        if mode != "inference":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return tuple(
+            OptimizationCompileTarget(
+                f"{name}.forward",
+                getattr(self, name),
+                "forward",
+            ) for name in (
+                "duration_predictor",
+                "text_encoder",
+                "vector_estimator",
+                "vocoder",
+            ))
 
     @property
     def sample_rate(self) -> int:

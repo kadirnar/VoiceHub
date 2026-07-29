@@ -26,7 +26,7 @@ class OrpheusArtifacts:
     revision: str | None
     config: Path
     tokenizer: Path
-    checkpoint: Path
+    checkpoint: Path | None
     tokenizer_config: Path | None = None
 
     @property
@@ -35,7 +35,7 @@ class OrpheusArtifacts:
 
     @property
     def is_sharded(self) -> bool:
-        return self.checkpoint.name.endswith(".safetensors.index.json")
+        return (self.checkpoint is not None and self.checkpoint.name.endswith(".safetensors.index.json"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +191,7 @@ def resolve_orpheus_artifacts(
     revision: str | None = None,
     token: str | bool | None = None,
     local_files_only: bool = False,
+    include_checkpoint: bool = True,
 ) -> OrpheusArtifacts:
     """Resolve a local directory/file or one immutable Hub snapshot."""
     if not isinstance(source, (str, Path)) or not str(source).strip():
@@ -205,9 +206,15 @@ def resolve_orpheus_artifacts(
         name="tokenizer_filename",
         optional=False,
     )
+    if not isinstance(include_checkpoint, bool):
+        raise TypeError("`include_checkpoint` must be a boolean.")
     source_path = Path(source).expanduser()
     if source_path.exists():
         if source_path.is_file():
+            if not include_checkpoint:
+                raise ValueError(
+                    "A tokenizer-only Orpheus resolution requires an artifact "
+                    "directory or Hub repository, not a checkpoint file.")
             _validate_safe_checkpoint(source_path, owner="Orpheus")
             checkpoint = source_path.resolve()
             root = checkpoint.parent
@@ -219,11 +226,12 @@ def resolve_orpheus_artifacts(
                     _required_local(root, shard_name, owner="Orpheus")
         else:
             root = source_path.resolve()
-            checkpoint = _resolve_checkpoint_local(
-                root,
-                checkpoint_filename=checkpoint_filename,
-                owner="Orpheus",
-            )
+            checkpoint = (
+                _resolve_checkpoint_local(
+                    root,
+                    checkpoint_filename=checkpoint_filename,
+                    owner="Orpheus",
+                ) if include_checkpoint else None)
         return OrpheusArtifacts(
             source=str(source_path.resolve()),
             revision=None,
@@ -260,15 +268,16 @@ def resolve_orpheus_artifacts(
         token=token,
         local_files_only=local_files_only,
     )
-    checkpoint = _resolve_checkpoint_remote(
-        repo_id,
-        checkpoint_filename=checkpoint_filename,
-        cache_dir=cache_dir,
-        revision=resolved_revision,
-        token=token,
-        local_files_only=local_files_only,
-        owner="Orpheus",
-    )
+    checkpoint = (
+        _resolve_checkpoint_remote(
+            repo_id,
+            checkpoint_filename=checkpoint_filename,
+            cache_dir=cache_dir,
+            revision=resolved_revision,
+            token=token,
+            local_files_only=local_files_only,
+            owner="Orpheus",
+        ) if include_checkpoint else None)
     return OrpheusArtifacts(
         source=repo_id,
         revision=resolved_revision,

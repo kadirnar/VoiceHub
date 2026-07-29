@@ -12,6 +12,7 @@ from torch import nn
 
 from voicehub.architectures.kokoro.configuration import KokoroArchitectureConfig
 from voicehub.hub import resolve_pretrained_file
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 from .istftnet import Decoder
 from .modules import CustomAlbert, ProsodyPredictor, TextEncoder
@@ -352,6 +353,27 @@ class KModel(nn.Module):
             )
         decoded = self.decode_aligned(encoded, alignment)
         return {**encoded, **decoded}
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Keep text parsing outside the compiled Kokoro tensor graph."""
+        if mode == "inference":
+            return (
+                OptimizationCompileTarget(
+                    "decoder.forward_with_tokens",
+                    self,
+                    "forward_with_tokens",
+                ), )
+        if mode == "training":
+            return (
+                OptimizationCompileTarget(
+                    "decoder.forward_preprocessed",
+                    self,
+                    "forward_preprocessed",
+                ), )
+        raise ValueError("Kokoro compile targets require 'inference' or 'training' mode.")
 
     @torch.no_grad()
     def forward_with_tokens(

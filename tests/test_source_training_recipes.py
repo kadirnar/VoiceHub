@@ -218,7 +218,8 @@ class SourceTrainingRecipeTests(unittest.TestCase):
                 return SimpleNamespace(
                     loss=loss,
                     logits=logits,
-                    hidden_states=((hidden_states, ), None),
+                    last_hidden_state=hidden_states,
+                    hidden_states=(((hidden_states, ), None) if output_hidden_states else None),
                 )
 
             def forward_sub_talker_finetune(
@@ -605,6 +606,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
         self.assertEqual(projection.input_shape, (1, 10, 3))
         self.assertEqual(projection.output_shape, (1, 10, 5))
         self.assertEqual(model.talker.received_input_shape, (1, 10, 5))
+        self.assertFalse(model.talker.received_output_hidden_states)
         output.loss.backward()
         self.assertIsNotNone(projection.weight.grad)
 

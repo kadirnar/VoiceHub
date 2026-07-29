@@ -15,6 +15,7 @@ from voicehub.architectures.dac.modeling import DacModel
 from voicehub.architectures.parlertts.configuration import ParlerDecoderConfig, ParlerTTSArchitectureConfig
 from voicehub.architectures.parlertts.t5 import NativeT5EncoderModel
 from voicehub.generation import GenerationConfig, create_generator, sample_next_token
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 def apply_delay_pattern_mask(
@@ -837,6 +838,23 @@ class ParlerTTSForConditionalGeneration(nn.Module):
                 config.decoder.max_position_embeddings,
                 config.decoder.hidden_size,
             )
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the public acoustic-token boundary for the selected mode."""
+        if mode == "training":
+            attribute = "forward"
+        elif mode == "inference":
+            attribute = "generate"
+        else:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            f"parlertts.{attribute}",
+            self,
+            attribute,
+        ), )
 
     def freeze_encoders(self, freeze_text_encoder: bool = True) -> None:
         """Apply upstream encoder-freezing semantics without freezing

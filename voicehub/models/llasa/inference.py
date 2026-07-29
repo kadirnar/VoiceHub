@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import secrets
+from contextlib import nullcontext
 from numbers import Real
 from pathlib import Path
 from typing import Any
@@ -10,7 +12,7 @@ from typing import Any
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
-from voicehub.models._shared import finish_audio_output, resolve_torch_dtype, seeded_inference
+from voicehub.models._shared import finish_audio_output, resolve_torch_dtype, seeded_inference, validate_seed
 from voicehub.models.llasa.configuration_llasa import LlasaConfig
 from voicehub.models.llasa.tokenization_llasa import (
     EOT_TOKEN,
@@ -88,12 +90,7 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
         return torch.float32
 
     def _load_pretrained_model(self) -> None:
-        from voicehub.architectures.causal_lm.checkpoint import (
-            HuggingFaceCausalLMCheckpointAdapter,
-            open_causal_lm_tensor_source,
-        )
         from voicehub.architectures.causal_lm.configuration import CausalLMConfig
-        from voicehub.architectures.causal_lm.modeling import LlamaForCausalLM
         from voicehub.checkpointing import SafeTensorReader
         from voicehub.hub import read_json_file
         from voicehub.models.llasa.artifacts import resolve_llasa_artifacts, resolve_xcodec2_artifacts
@@ -114,6 +111,7 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
             cache_dir=self.config.cache_dir,
             token=self._hub_token,
             local_files_only=self.config.local_files_only,
+            include_checkpoint=not self.uses_llm_token_backend,
         )
         architecture_values = read_json_file(artifacts.config)
         native_config = CausalLMConfig.from_dict(architecture_values)
@@ -136,22 +134,33 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
                 f"space ends at {tokenizer.token_id_space_size}, model expects "
                 f"{native_config.vocab_size}.")
 
-        dtype = self._language_model_dtype(torch, architecture_values)
-        model = LlamaForCausalLM(
-            native_config,
-            initialize=False,
-            device=self.device,
-            dtype=dtype,
-        )
-        with open_causal_lm_tensor_source(artifacts.checkpoint) as reader:
-            HuggingFaceCausalLMCheckpointAdapter().load_streaming(
-                model,
-                reader,
-                architecture_values,
-                strict=True,
+        if self.uses_llm_token_backend:
+            model = self._create_remote_causal_lm_proxy()
+        else:
+            from voicehub.architectures.causal_lm.checkpoint import (
+                HuggingFaceCausalLMCheckpointAdapter,
+                open_causal_lm_tensor_source,
             )
-        if native_config.tie_word_embeddings:
-            model.tie_weights()
+            from voicehub.architectures.causal_lm.modeling import LlamaForCausalLM
+
+            if artifacts.checkpoint is None:
+                raise RuntimeError("Native LLaSA resolution returned no checkpoint.")
+            dtype = self._language_model_dtype(torch, architecture_values)
+            model = LlamaForCausalLM(
+                native_config,
+                initialize=False,
+                device=self.device,
+                dtype=dtype,
+            )
+            with open_causal_lm_tensor_source(artifacts.checkpoint) as reader:
+                HuggingFaceCausalLMCheckpointAdapter().load_streaming(
+                    model,
+                    reader,
+                    architecture_values,
+                    strict=True,
+                )
+            if native_config.tie_word_embeddings:
+                model.tie_weights()
 
         local_codec = artifacts.root / "xcodec2"
         codec_source = (str(local_codec) if local_codec.is_dir() else self.config.codec_name_or_path)
@@ -327,11 +336,14 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
         requested_tokens = (self.config.max_new_tokens if max_new_tokens is None else max_new_tokens)
         sampling_temperature = (self.config.temperature if temperature is None else float(temperature))
         nucleus_probability = (self.config.top_p if top_p is None else float(top_p))
-        with seeded_inference(
+        seed_context = (
+            nullcontext(validate_seed(seed) if seed is not None else secrets.randbits(63))
+            if self.uses_llm_token_backend else seeded_inference(
                 seed,
                 device=self.device,
                 model_type="llasa",
-        ) as effective_seed:
+            ))
+        with seed_context as effective_seed:
             prefix_ids: list[int] = []
             prompt_samples = 0
             if speaker_audio_path:
@@ -390,6 +402,8 @@ class LlasaForTextToSpeech(PreTrainedTTSModel):
             output_file=output_file,
             metadata={
                 "model_type": self.config.model_type,
+                "backend": self.llm_backend.value,
+                "engine_transport": ("tokens" if self.uses_llm_token_backend else "native"),
                 "seed": effective_seed,
                 "requested_seed": seed,
                 "voice_cloned": bool(speaker_audio_path),

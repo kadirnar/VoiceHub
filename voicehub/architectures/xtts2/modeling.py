@@ -13,6 +13,7 @@ from voicehub.architectures.xtts2.audio import cloning_mel, load_reference_audio
 from voicehub.architectures.xtts2.configuration import XTTS2Config
 from voicehub.architectures.xtts2.decoder import HifiDecoder
 from voicehub.architectures.xtts2.gpt import XTTS2GPT
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 class XTTS2Model(nn.Module):
@@ -55,6 +56,32 @@ class XTTS2Model(nn.Module):
             cond_d_vector_in_each_upsampling_layer=(args.cond_d_vector_in_each_upsampling_layer),
         )
         self.register_buffer("mel_stats", torch.ones(80))
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose GPT and vocoder boundaries reached by XTTS v2."""
+        if mode == "training":
+            return (OptimizationCompileTarget(
+                "gpt.forward",
+                self.gpt,
+                "forward",
+            ), )
+        if mode != "inference":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (
+            OptimizationCompileTarget(
+                "gpt.forward",
+                self.gpt,
+                "forward",
+            ),
+            OptimizationCompileTarget(
+                "hifigan_decoder.forward",
+                self.hifigan_decoder,
+                "forward",
+            ),
+        )
 
     @property
     def device(self) -> torch.device:

@@ -33,6 +33,8 @@ def _tokens(
     name: str,
     allow_empty: bool = False,
 ) -> tuple[str, ...]:
+    if isinstance(values, str):
+        raise TypeError(f"`{name}` must be an iterable of strings, not a string.")
     result = tuple(value.strip().lower() for value in values if isinstance(value, str) and value.strip())
     if len(result) != len(values):
         raise ValueError(f"`{name}` must contain non-empty strings.")
@@ -53,6 +55,24 @@ def normalize_optimization_kind(value: str) -> str:
     if not normalized:
         raise ValueError("Optimization kinds must be non-empty strings.")
     return normalized
+
+
+def normalize_optimization_dtype(value: str) -> str:
+    """Normalize common PyTorch dtype aliases used by optimization APIs."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Optimization dtypes must be non-empty strings.")
+    normalized = value.strip().lower()
+    if normalized.startswith("torch."):
+        normalized = normalized.removeprefix("torch.")
+    aliases = {
+        "bf16": "bfloat16",
+        "double": "float64",
+        "fp16": "float16",
+        "fp32": "float32",
+        "fp64": "float64",
+        "half": "float16",
+    }
+    return aliases.get(normalized, normalized)
 
 
 @dataclass(frozen=True)
@@ -77,11 +97,14 @@ class OptimizationContext:
                 "architecture",
                 self.architecture.strip().lower().replace("_", "-"),
             )
-        for name in ("device", "dtype"):
-            value = getattr(self, name)
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"`{name}` must be a non-empty string.")
-            object.__setattr__(self, name, value.strip().lower())
+        if not isinstance(self.device, str) or not self.device.strip():
+            raise ValueError("`device` must be a non-empty string.")
+        object.__setattr__(self, "device", self.device.strip().lower())
+        object.__setattr__(
+            self,
+            "dtype",
+            normalize_optimization_dtype(self.dtype),
+        )
         for name in ("streaming", "distributed", "persist_result"):
             if not isinstance(getattr(self, name), bool):
                 raise TypeError(f"`{name}` must be a boolean.")
@@ -158,11 +181,10 @@ class OptimizationCapabilities:
             "devices",
             _tokens(self.devices, name="devices"),
         )
-        object.__setattr__(
-            self,
-            "dtypes",
-            _tokens(self.dtypes, name="dtypes"),
-        )
+        dtypes = tuple(normalize_optimization_dtype(dtype) for dtype in _tokens(self.dtypes, name="dtypes"))
+        if len(dtypes) != len(set(dtypes)):
+            raise ValueError("`dtypes` cannot contain duplicates.")
+        object.__setattr__(self, "dtypes", dtypes)
         for name in (
                 "streaming_safe",
                 "distributed_safe",

@@ -72,6 +72,7 @@ class SchedulerType(ExplicitEnum):
     LINEAR = "linear"
     COSINE = "cosine"
     CONSTANT = "constant"
+    EXPONENTIAL = "exponential"
 
 
 class TrainOutput(NamedTuple):
@@ -260,6 +261,8 @@ def get_scheduler_lambda(
     *,
     num_warmup_steps: int,
     num_training_steps: int,
+    exponential_gamma: float = 1.0,
+    num_train_epochs: float = 1.0,
 ):
     """Build the scalar schedule used by ``torch.optim.lr_scheduler``."""
     schedule = SchedulerType(scheduler_type)
@@ -273,6 +276,24 @@ def get_scheduler_lambda(
 
     if schedule is SchedulerType.CONSTANT:
         return warmup
+
+    if schedule is SchedulerType.EXPONENTIAL:
+        if (not isinstance(exponential_gamma, (int, float)) or isinstance(exponential_gamma, bool) or
+                not math.isfinite(float(exponential_gamma)) or float(exponential_gamma) <= 0):
+            raise ValueError("`exponential_gamma` must be finite and positive.")
+        if (not isinstance(num_train_epochs, (int, float)) or isinstance(num_train_epochs, bool) or
+                not math.isfinite(float(num_train_epochs)) or float(num_train_epochs) <= 0):
+            raise ValueError("`num_train_epochs` must be finite and positive.")
+        decay_steps = max(1, total_steps - warmup_steps)
+        steps_per_epoch = decay_steps / float(num_train_epochs)
+
+        def exponential(current_step: int) -> float:
+            if current_step < warmup_steps:
+                return warmup(current_step)
+            elapsed = max(0, current_step - warmup_steps)
+            return float(exponential_gamma)**(elapsed / steps_per_epoch)
+
+        return exponential
 
     def progress(current_step: int) -> float:
         if current_step < warmup_steps:

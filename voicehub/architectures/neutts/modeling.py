@@ -27,6 +27,7 @@ from voicehub.architectures.neutts.tokenization import (
 from voicehub.generation import GenerationConfig
 from voicehub.generation.engine import AutoregressiveGenerator, GenerationStepInput, GenerationStepOutput
 from voicehub.neural.rotary import RotaryEmbedding
+from voicehub.optimization.protocols import OptimizationCompileTarget
 from voicehub.processing.waveform import load_native_audio
 
 
@@ -176,6 +177,32 @@ class NeuTTSRuntime(nn.Module):
     def forward(self, *args: Any, **kwargs: Any):
         """Delegate differentiable language-model training to the backbone."""
         return self.backbone(*args, **kwargs)
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Declare the backbone and codec calls reached by NeuTTS."""
+        if mode == "inference":
+            return (
+                OptimizationCompileTarget(
+                    "backbone.forward",
+                    self.backbone,
+                    "forward",
+                ),
+                OptimizationCompileTarget(
+                    "codec.decode_code",
+                    self.codec,
+                    "decode_code",
+                ),
+            )
+        if mode == "training":
+            return (OptimizationCompileTarget(
+                "backbone.forward",
+                self.backbone,
+                "forward",
+            ), )
+        raise ValueError("NeuTTS compile targets require 'inference' or 'training' mode.")
 
     @staticmethod
     def _normalize_codes(reference_codes: Any) -> list[int]:

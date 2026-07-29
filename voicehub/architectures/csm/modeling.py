@@ -15,6 +15,7 @@ from torch import Tensor, nn
 from torch.nn import functional
 
 from voicehub.architectures.csm.configuration import CSMArchitectureConfig, CSMTransformerConfig
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 class CSMRMSNorm(nn.Module):
@@ -734,6 +735,26 @@ class CSMModel(nn.Module):
     def reset_caches(self) -> None:
         self.backbone.reset_caches()
         self.decoder.reset_caches()
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose tensor boundaries shared by CSM generation and training."""
+        if mode not in {"inference", "training"}:
+            raise ValueError("CSM compile targets require 'inference' or 'training' mode.")
+        return (
+            OptimizationCompileTarget(
+                "backbone.forward",
+                self.backbone,
+                "forward",
+            ),
+            OptimizationCompileTarget(
+                "depth_decoder.forward",
+                self.decoder,
+                "forward",
+            ),
+        )
 
     def _embed_audio(
         self,

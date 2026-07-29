@@ -12,6 +12,7 @@ from torch import Tensor, nn
 
 from voicehub.checkpointing import VoiceHubManifest, build_manifest_files
 from voicehub.generation import GenerationConfig
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 from .artifacts import OuteTTSArtifacts, OuteTTSDacArtifacts, resolve_outetts_artifacts, resolve_outetts_dac_artifacts
 from .checkpoint import load_outetts_dac, load_outetts_language_model, save_outetts_dac
@@ -74,6 +75,32 @@ class OuteTTSRuntime(nn.Module):
         self.codec_artifacts = codec_artifacts
         self.codec.requires_grad_(False)
         self.codec.eval()
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the causal LM and DAC methods used by OuteTTS."""
+        if mode == "training":
+            return (OptimizationCompileTarget(
+                "language_model.forward",
+                self.language_model,
+                "forward",
+            ), )
+        if mode != "inference":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (
+            OptimizationCompileTarget(
+                "language_model.forward",
+                self.language_model,
+                "forward",
+            ),
+            OptimizationCompileTarget(
+                "codec.decode",
+                self.codec,
+                "decode",
+            ),
+        )
 
     @property
     def model(self):

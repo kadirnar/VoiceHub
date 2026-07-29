@@ -69,10 +69,17 @@ def create_conversationtts_architecture_spec() -> ArchitectureSpec:
             batched_inference=False,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", "sdpa"),
+            optimization_passes=(
+                "compile",
+                "sdpa",
+                "attention-backend",
+                "custom-kernels",
+            ),
             features=(
                 "autoregressive-32-codebook-audio",
+                "flash-attention-4-optional",
                 "frozen-native-mimi",
+                "fused-swiglu-kernels",
                 "multilingual",
                 "native-byte-bpe",
                 "raw-audio-fine-tuning",

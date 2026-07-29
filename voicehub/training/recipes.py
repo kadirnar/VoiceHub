@@ -278,9 +278,18 @@ class F5TTSTrainingAdapter(
         super().__init__(model, spec)
         self._ema: ExponentialMovingAverage | None = None
 
+    def _use_ema(self) -> bool:
+        config = getattr(self.model, "config", None)
+        enabled = getattr(config, "use_ema", True)
+        if not isinstance(enabled, bool):
+            raise TypeError("F5-TTS `use_ema` must be a boolean.")
+        return enabled
+
     def setup(self):
         super().setup()
-        if self._ema is None:
+        if not self._use_ema():
+            self._ema = None
+        elif self._ema is None:
             config = getattr(self.model, "config", None)
             self._ema = ExponentialMovingAverage(
                 self.primary_model,
@@ -294,6 +303,8 @@ class F5TTSTrainingAdapter(
         configuration = dict(super().recipe_resume_configuration())
         config = getattr(self.model, "config", None)
         configuration.update({
+            "resolved_use_ema":
+            self._use_ema(),
             "resolved_ema_decay":
             float(getattr(config, "ema_decay", 0.9999), ),
             "resolved_ema_update_after_step":
@@ -335,10 +346,13 @@ class F5TTSTrainingAdapter(
     ) -> None:
         del optimizer_names
         self.setup()
-        self._ema.update(step=step)
+        if self._ema is not None:
+            self._ema.update(step=step)
 
     def recipe_state_dict(self) -> Mapping[str, Any]:
         self.setup()
+        if self._ema is None:
+            return {}
         return {"ema": self._ema.state_dict()}
 
     def load_recipe_state_dict(
@@ -348,6 +362,13 @@ class F5TTSTrainingAdapter(
         strict: bool = True,
     ) -> None:
         self.setup()
+        if not isinstance(state_dict, Mapping):
+            raise TypeError("F5-TTS recipe state must be a mapping.")
+        if self._ema is None:
+            if strict and state_dict:
+                raise ValueError("F5-TTS recipe state cannot contain EMA data when "
+                                 "`use_ema=False`.")
+            return
         if not state_dict:
             return
         if strict and set(state_dict) != {"ema"}:
@@ -356,19 +377,24 @@ class F5TTSTrainingAdapter(
             self._ema.load_state_dict(state_dict["ema"], strict=strict)
 
     def save_pretrained(self, save_directory) -> None:
-        """Export an upstream-compatible, fresh-inference EMA artifact."""
+        """Export EMA weights when enabled, otherwise explicit raw weights."""
         self.setup()
         from voicehub.architectures.f5tts.checkpoint import export_f5tts_checkpoint
 
         destination = Path(save_directory)
         destination.mkdir(parents=True, exist_ok=True)
         state = self.primary_model.state_dict()
-        ema_state = self._ema.state_dict()["shadow"]
-        averaged = {name: ema_state.get(name, value) for name, value in state.items()}
+        prefix = ""
+        export_state = state
+        if self._ema is not None:
+            ema_state = self._ema.state_dict()["shadow"]
+            export_state = {name: ema_state.get(name, value) for name, value in state.items()}
+            prefix = "ema_model."
         export_f5tts_checkpoint(
             self.primary_model,
             destination / "model.safetensors",
-            state_override=averaged,
+            prefix=prefix,
+            state_override=export_state,
         )
         runtime = getattr(self.model, "model", None)
         frontend = getattr(runtime, "frontend", None)
@@ -475,9 +501,9 @@ class Qwen3TTSTrainingAdapter(
             inputs_embeds=input_embeddings,
             attention_mask=batch["attention_mask"],
             labels=batch["codec_0_labels"],
-            output_hidden_states=True,
+            output_hidden_states=False,
         )
-        hidden_states = outputs.hidden_states[0][-1]
+        hidden_states = outputs.last_hidden_state
         # The native causal loss uses hidden state t - 1 to predict target t.
         # Preserve that same pairing for the per-frame sub-talker objective.
         next_codec_mask = codec_mask[:, 1:]

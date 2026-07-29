@@ -491,6 +491,7 @@ class VitsAdversarialTrainingModel(nn.Module):
                 dtype=real_waveform.dtype,
             )
 
+        segment_frames = self.acoustic_frontend.config.segment_frames
         output = self.native_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -498,10 +499,12 @@ class VitsAdversarialTrainingModel(nn.Module):
             spectrogram=spectrogram,
             spectrogram_attention_mask=spectrogram_attention_mask,
             durations=durations,
+            segment_frames=segment_frames,
             generator=generator,
         )
         if not isinstance(output, VitsTrainingOutput):
             raise RuntimeError("Native VITS did not return a training output.")
+        hop_length = self.acoustic_frontend.config.hop_length
         generated_lengths = self._integer_lengths(
             output.sequence_lengths,
             batch_size=real_waveform.shape[0],
@@ -509,14 +512,18 @@ class VitsAdversarialTrainingModel(nn.Module):
             device=model_device,
             name="generated sequence lengths",
         )
+        spectrogram_lengths = output.spectrogram_mask.to(dtype=torch.bool, ).sum(dim=(1, 2), dtype=torch.long)
         frame_lengths = torch.minimum(
-            generated_lengths,
-            audio_lengths,
-        ) // self.acoustic_frontend.config.hop_length
+            spectrogram_lengths,
+            torch.div(
+                audio_lengths,
+                hop_length,
+                rounding_mode="floor",
+            ),
+        )
         if (frame_lengths < 1).any():
             raise ValueError("VITS waveform/spectrogram pairs contain no aligned frames.")
 
-        segment_frames = self.acoustic_frontend.config.segment_frames
         selected_frames = (int(frame_lengths.min().item()) if segment_frames is None else segment_frames)
         if (frame_lengths < selected_frames).any():
             raise ValueError(
@@ -524,25 +531,58 @@ class VitsAdversarialTrainingModel(nn.Module):
                 f"size ({self.acoustic_frontend.config.segment_size} samples).")
 
         target_mel_full = self.acoustic_frontend.spectrogram_to_mel(spectrogram)
-        hop_length = self.acoustic_frontend.config.hop_length
         sample_count = selected_frames * hop_length
+        model_start_frames = output.segment_start_frames
+        if segment_frames is not None:
+            if (not isinstance(model_start_frames, Tensor) or
+                    tuple(model_start_frames.shape) != (real_waveform.shape[0], )):
+                raise RuntimeError(
+                    "Windowed VITS training must return one segment start "
+                    "frame per batch item.")
+            if model_start_frames.dtype == torch.bool or model_start_frames.is_floating_point():
+                raise RuntimeError("VITS segment start frames must use an integer dtype.")
+            model_start_frames = model_start_frames.to(
+                device=model_device,
+                dtype=torch.long,
+            )
+            if ((model_start_frames < 0) | (model_start_frames + selected_frames > frame_lengths)).any():
+                raise ValueError(
+                    "VITS segment start frames exceed the aligned "
+                    "waveform/spectrogram lengths.")
+            expected_lengths = torch.full_like(
+                generated_lengths,
+                sample_count,
+            )
+            if (output.waveform.shape[1] != sample_count or
+                    not torch.equal(generated_lengths, expected_lengths)):
+                raise RuntimeError("Windowed VITS decoding returned an unexpected waveform "
+                                   "length.")
+
         real_segments = []
         generated_segments = []
         mel_segments = []
         for batch_index, available_frames in enumerate(frame_lengths.tolist()):
-            maximum_start = int(available_frames) - selected_frames
-            start_frame = (
-                0 if maximum_start == 0 else int(
-                    torch.randint(
-                        maximum_start + 1,
-                        (1, ),
-                        generator=generator,
-                        device=model_device,
-                    ).item()))
+            if segment_frames is None:
+                maximum_start = int(available_frames) - selected_frames
+                start_frame = (
+                    0 if maximum_start == 0 else int(
+                        torch.randint(
+                            maximum_start + 1,
+                            (1, ),
+                            generator=generator,
+                            device=model_device,
+                        ).item()))
+            else:
+                start_frame = int(model_start_frames[batch_index].item())
             start_sample = start_frame * hop_length
             end_sample = start_sample + sample_count
             real_segments.append(real_waveform[batch_index, start_sample:end_sample])
-            generated_segments.append(output.waveform[batch_index, start_sample:end_sample])
+            generated_start = start_sample if segment_frames is None else 0
+            generated_segments.append(
+                output.waveform[
+                    batch_index,
+                    generated_start:generated_start + sample_count,
+                ])
             mel_segments.append(target_mel_full[
                 batch_index,
                 :,

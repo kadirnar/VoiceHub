@@ -28,6 +28,9 @@ _DYNAMIC_IMPORT_INFRASTRUCTURE = frozenset({
 })
 _PER_FILE_ALLOWED_IMPORT_ROOTS = {
     "integrations.py": frozenset({"wandb"}),
+    "kernels/capabilities.py": frozenset({"triton"}),
+    "kernels/triton_activations.py": frozenset({"triton"}),
+    "neural/backends/flash_attention4.py": frozenset({"flash_attn"}),
 }
 NATIVE_RUNTIME_DIRECTORIES = (
     "architectures",

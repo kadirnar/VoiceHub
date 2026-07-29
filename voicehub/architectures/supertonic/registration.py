@@ -57,6 +57,7 @@ def create_supertonic_architecture_spec() -> ArchitectureSpec:
             batched_inference=True,
             distributed_training=True,
             export_formats=("safetensors", ),
+            optimization_passes=("compile", ),
             features=(
                 "multilingual-unicode-frontend",
                 "reviewed-onnx-import",

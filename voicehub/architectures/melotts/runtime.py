@@ -13,6 +13,7 @@ from voicehub.architectures.melotts.artifacts import MeloTTSArtifacts, resolve_m
 from voicehub.architectures.melotts.checkpoint import load_melotts_checkpoint, read_legacy_melotts_checkpoint
 from voicehub.architectures.melotts.frontend import NativeMeloTTSFrontend
 from voicehub.architectures.melotts.modeling import build_melotts_model
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 class MeloTTSRuntime:
@@ -50,6 +51,23 @@ class MeloTTSRuntime:
         self.dtype = parameter.dtype
         self.frontend = NativeMeloTTSFrontend(self.config)
         self.eval()
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Return the generator method used by the selected runtime mode."""
+        if mode == "inference":
+            attribute = "infer"
+        elif mode == "training":
+            attribute = "forward"
+        else:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            f"model.{attribute}",
+            self.model,
+            attribute,
+        ), )
 
     def _load_checkpoint(
         self,

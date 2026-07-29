@@ -58,11 +58,17 @@ def create_f5tts_architecture_spec() -> ArchitectureSpec:
             batched_inference=True,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", ),
+            optimization_passes=(
+                "compile",
+                "attention-backend",
+                "custom-kernels",
+            ),
             features=(
                 "voice-cloning",
                 "conditional-flow-matching",
                 "classifier-free-guidance",
+                "flash-attention-4-optional",
+                "fused-bias-gelu-kernels",
                 "native-euler-ode",
                 "native-midpoint-ode",
                 "native-vocos",

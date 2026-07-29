@@ -24,6 +24,7 @@ from voicehub.models.styletts2.source.styletts2.Modules.diffusion.sampler import
     DiffusionSampler,
     KarrasSchedule,
 )
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 class StyleTTS2Runtime:
@@ -103,6 +104,30 @@ class StyleTTS2Runtime:
                 rho=9.0,
             ),
             clamp=False,
+        )
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the diffusion and waveform graphs reached by synthesis."""
+        if mode == "training":
+            # Fine-tuning executes through StyleTTS2TrainingModel, whose
+            # phase-aware forward is discovered by the training adapter.
+            return ()
+        if mode != "inference":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (
+            OptimizationCompileTarget(
+                "sampler.forward",
+                self.sampler,
+                "forward",
+            ),
+            OptimizationCompileTarget(
+                "decoder.forward",
+                self.model.decoder,
+                "forward",
+            ),
         )
 
     def train(self, mode: bool = True) -> StyleTTS2Runtime:

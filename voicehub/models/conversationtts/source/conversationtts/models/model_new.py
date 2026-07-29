@@ -22,6 +22,7 @@ from voicehub.architectures.conversationtts.decoder import (
     ConversationDecoder,
     build_llama32_decoder,
 )
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 def select_with_fixed_mask(x: torch.Tensor, mask: torch.Tensor, k: int) -> torch.Tensor:
     """
@@ -141,9 +142,6 @@ def _prepare_transformer(model):
 def _create_causal_mask(seq_len: int, device: torch.device):
     return torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool, device=device))
 
-def _create_causal_mask_train(seq_len: int, device: torch.device):
-    return torch.tril(torch.ones(1, seq_len, seq_len, dtype=torch.bool, device=device))
-
 def _index_causal_mask(mask: torch.Tensor, input_pos: torch.Tensor):
     """ get the expected causal mask based on the position input
     Args:
@@ -200,6 +198,23 @@ class Model(nn.Module):
         nn.init.normal_(self.audio_head, mean=0.0, std=0.02)
         self.random_type = 'k_style' # or batch style
 
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the execution boundary used by each public mode."""
+        if mode == "training":
+            attribute = "forward"
+        elif mode == "inference":
+            attribute = "generate_frame"
+        else:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            f"conversationtts.{attribute}",
+            self,
+            attribute,
+        ), )
+
     def sequence_randomly_drop_based_batch(self, x: torch.Tensor, reserved_part=2) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         从输入 x 的每个序列中随机选择 1/B 的帧，并返回掩码。
@@ -239,7 +254,10 @@ class Model(nn.Module):
         if input_pos is None:
             # Training mode - full sequence processing
             seq_len = h.size(1)
-            curr_backbone_mask = _create_causal_mask_train(seq_len, h.device)
+            # The native decoder applies the same causal semantics internally.
+            # Omitting the materialized square mask also permits dense
+            # FlashAttention-4 when that optional backend is selected.
+            curr_backbone_mask = None
             g_input_pos = torch.arange(0, seq_len).unsqueeze(0).expand(b, seq_len).long().to(h.device)
         else:
             # Inference mode with caching
@@ -278,7 +296,7 @@ class Model(nn.Module):
         if input_pos is None:
             # Training mode - full sequence processing
             seq_len = curr_h.size(1)
-            curr_decoder_mask = _create_causal_mask_train(seq_len, curr_h.device)
+            curr_decoder_mask = None
             curr_pos = torch.arange(0, seq_len).unsqueeze(0).expand(curr_h.shape[0], seq_len).long().to(curr_h.device)
         else:
             # Inference mode with caching

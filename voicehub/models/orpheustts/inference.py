@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import secrets
+from contextlib import nullcontext
 from numbers import Real
 from pathlib import Path
 from typing import Any
@@ -10,7 +12,7 @@ from typing import Any
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
-from voicehub.models._shared import finish_audio_output, resolve_torch_dtype, seeded_inference
+from voicehub.models._shared import finish_audio_output, resolve_torch_dtype, seeded_inference, validate_seed
 from voicehub.models.orpheustts.configuration_orpheustts import OrpheusTTSConfig
 from voicehub.models.orpheustts.protocol import (
     AUDIO_TOKEN_OFFSET,
@@ -71,12 +73,7 @@ class OrpheusTTSForTextToSpeech(PreTrainedTTSModel):
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     def _load_pretrained_model(self) -> None:
-        from voicehub.architectures.causal_lm.checkpoint import (
-            HuggingFaceCausalLMCheckpointAdapter,
-            open_causal_lm_tensor_source,
-        )
         from voicehub.architectures.causal_lm.configuration import CausalLMConfig
-        from voicehub.architectures.causal_lm.modeling import LlamaForCausalLM
         from voicehub.hub import read_json_file
         from voicehub.models.orpheustts.artifacts import resolve_orpheus_artifacts
         from voicehub.models.orpheustts.source.snac import SNAC
@@ -105,6 +102,7 @@ class OrpheusTTSForTextToSpeech(PreTrainedTTSModel):
             revision=self.config.revision,
             token=self._hub_token,
             local_files_only=self.config.local_files_only,
+            include_checkpoint=not self.uses_llm_token_backend,
         )
         architecture_values = read_json_file(artifacts.config)
         native_config = CausalLMConfig.from_dict(architecture_values)
@@ -126,21 +124,32 @@ class OrpheusTTSForTextToSpeech(PreTrainedTTSModel):
                 "Orpheus tokenizer/model vocabulary mismatch: tokenizer ID "
                 f"space ends at {tokenizer.token_id_space_size}, model expects "
                 f"{native_config.vocab_size}.")
-        model = LlamaForCausalLM(
-            native_config,
-            initialize=False,
-            device=self.device,
-            dtype=dtype,
-        )
-        with open_causal_lm_tensor_source(artifacts.checkpoint) as reader:
-            HuggingFaceCausalLMCheckpointAdapter().load_streaming(
-                model,
-                reader,
-                architecture_values,
-                strict=True,
+        if self.uses_llm_token_backend:
+            model = self._create_remote_causal_lm_proxy()
+        else:
+            from voicehub.architectures.causal_lm.checkpoint import (
+                HuggingFaceCausalLMCheckpointAdapter,
+                open_causal_lm_tensor_source,
             )
-        if native_config.tie_word_embeddings:
-            model.tie_weights()
+            from voicehub.architectures.causal_lm.modeling import LlamaForCausalLM
+
+            if artifacts.checkpoint is None:
+                raise RuntimeError("Native Orpheus resolution returned no checkpoint.")
+            model = LlamaForCausalLM(
+                native_config,
+                initialize=False,
+                device=self.device,
+                dtype=dtype,
+            )
+            with open_causal_lm_tensor_source(artifacts.checkpoint) as reader:
+                HuggingFaceCausalLMCheckpointAdapter().load_streaming(
+                    model,
+                    reader,
+                    architecture_values,
+                    strict=True,
+                )
+            if native_config.tie_word_embeddings:
+                model.tie_weights()
 
         local_codec = artifacts.root / "snac"
         codec_source = (str(local_codec) if local_codec.is_dir() else self.config.codec_name_or_path)
@@ -276,11 +285,14 @@ class OrpheusTTSForTextToSpeech(PreTrainedTTSModel):
         input_ids, attention_mask = self._prepare_inputs(text, voice)
         from voicehub.generation import GenerationConfig
 
-        with seeded_inference(
+        seed_context = (
+            nullcontext(validate_seed(seed) if seed is not None else secrets.randbits(63))
+            if self.uses_llm_token_backend else seeded_inference(
                 seed,
                 device=self.device,
                 model_type="orpheustts",
-        ) as effective_seed:
+            ))
+        with seed_context as effective_seed:
             with self._torch.inference_mode():
                 generation = self.model.generate(
                     input_ids=input_ids,
@@ -308,6 +320,8 @@ class OrpheusTTSForTextToSpeech(PreTrainedTTSModel):
             metadata={
                 "voice": voice,
                 "audio_tokens": len(codes),
+                "backend": self.llm_backend.value,
+                "engine_transport": ("tokens" if self.uses_llm_token_backend else "native"),
                 "seed": effective_seed,
                 "requested_seed": seed,
             },

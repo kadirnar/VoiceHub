@@ -79,6 +79,7 @@ def create_speecht5_architecture_spec() -> ArchitectureSpec:
             batched_inference=True,
             distributed_training=True,
             export_formats=("safetensors", ),
+            optimization_passes=("compile", ),
             features=(
                 "encoder-decoder-text-to-spectrogram",
                 "sentencepiece-character-tokenizer",

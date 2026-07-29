@@ -62,6 +62,8 @@ nav:
       - Data preparation: guides/data-preparation.md
       - ASR and VAD data: guides/speech-data.md
       - Training: guides/training.md
+      - TTS optimization: guides/tts-optimization.md
+      - LLM TTS serving: guides/llm-serving.md
   - Notebooks: guides/notebook.md
   - Models:
       - TTS model catalog: models/index.md

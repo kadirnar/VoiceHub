@@ -93,6 +93,18 @@ Use the [training guide](training.md) to:
 - resume complete VoiceHub checkpoints exactly; and
 - distinguish a portable inference artifact from optimizer-bearing state.
 
+After the one-step baseline is correct, use
+[TTS optimization by architecture](tts-optimization.md). It keeps VITS
+adversarial windows, codec/LLM token budgets, and diffusion frame/EMA policies
+separate, adds architecture-compatible compile/Triton/CUDA/FA4 plans, and ties
+every default to a pinned original implementation.
+
+For production LLM-based synthesis, use the
+[vLLM and SGLang serving guide](llm-serving.md). It separates flat token
+generation from complete Omni speech pipelines, lists every verified
+model/backend pairing, and keeps incompatible engine dependencies outside the
+VoiceHub environment.
+
 !!! warning "Training support is not universal"
 
     TTS support remains checkpoint-specific; read the
