@@ -6,27 +6,41 @@ from collections.abc import Mapping, Sequence
 from math import isfinite
 from numbers import Integral, Real
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from voicehub.architectures.conversationtts.checkpoint import export_conversationtts_checkpoint
-from voicehub.architectures.conversationtts.processing import (
-    ConversationTTSProtocol,
-    build_conversationtts_sequence,
-    collate_conversationtts_sequences,
-)
 from voicehub.dependencies import import_optional
 from voicehub.hub import resolve_pretrained_file
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
 from voicehub.models._shared import finish_audio_output, resolve_torch_dtype, seeded_inference, validate_local_file
 from voicehub.models.conversationtts.configuration_conversationtts import ConversationTTSConfig
-from voicehub.models.conversationtts.runtime import resume_for_inference
+
+if TYPE_CHECKING:
+    from voicehub.architectures.conversationtts.processing import ConversationTTSProtocol
 
 _AUDIO_FRAME_MILLISECONDS = 40
 _MODEL_CONTEXT_TOKENS = 2_048
 _MINIMUM_TEXT_PROMPT_TOKENS = 5
 _MAX_AUDIO_LENGTH_MILLISECONDS = (
     _MODEL_CONTEXT_TOKENS - _MINIMUM_TEXT_PROMPT_TOKENS) * _AUDIO_FRAME_MILLISECONDS
+
+
+def resume_for_inference(
+    checkpoint: str | Path,
+    experiment_directory: str | None,
+    model,
+    device: str,
+):
+    """Load checkpoints without importing the PyTorch runtime at module
+    import."""
+    from voicehub.models.conversationtts.runtime import resume_for_inference as resume
+
+    return resume(
+        checkpoint,
+        experiment_directory,
+        model,
+        device,
+    )
 
 
 class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
@@ -264,6 +278,8 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
             raise
 
     def _training_protocol(self) -> ConversationTTSProtocol:
+        from voicehub.architectures.conversationtts.processing import ConversationTTSProtocol
+
         audio_vocab_size = int(self.config.model_args["audio_vocab_size"])
         text_vocab_size = int(self.config.model_args["text_vocab_size"])
         return ConversationTTSProtocol(
@@ -669,6 +685,11 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
                 code_examples.append(codes.squeeze(0).detach().cpu())
 
         protocol = self._training_protocol()
+        from voicehub.architectures.conversationtts.processing import (
+            build_conversationtts_sequence,
+            collate_conversationtts_sequences,
+        )
+
         sequences = [
             build_conversationtts_sequence(
                 tokens,
@@ -805,6 +826,8 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
 
     def _save_pretrained(self, save_directory: Path) -> None:
         """Export trained weights without serializing serving KV caches."""
+        from voicehub.architectures.conversationtts.checkpoint import export_conversationtts_checkpoint
+
         if self.model is None:
             raise RuntimeError("Load ConversationTTS before exporting its native weights.")
         destination = Path(save_directory).expanduser()

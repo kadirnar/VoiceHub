@@ -167,8 +167,10 @@ records.to_jsonl("data/train.jsonl")
 ```
 
 `from_audio_folder()` scans recursively by default, requires every transcript
-sidecar to be non-empty, and intentionally accepts only materialized PCM WAV
-files. Change `transcript_extension=` when sidecars use another suffix.
+sidecar to be non-empty, and discovers materialized `.wav` files. Audio
+decoding remains model-owned; native preprocessors currently decode PCM WAVE,
+while a custom transform can decode other WAV encodings before training.
+Change `transcript_extension=` when sidecars use another suffix.
 
 Kaldi/ESPnet-style directories containing `wav.scp` and `text` can be loaded
 without executing shell commands:

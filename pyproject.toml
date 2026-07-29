@@ -59,9 +59,22 @@ training = [
   "wandb>=0.19",
 ]
 test = [
+  "coqpit>=0.0.16",
+  "einops",
+  "librosa>=0.10",
+  "matplotlib",
+  "mutagen",
   "nbformat>=5.10",
+  "numpy>=1.23",
+  "packaging",
+  "pandas",
   "pre-commit",
   "pytest",
+  "scipy",
+  "soundfile>=0.12",
+  "torchaudio>=2.8,<2.9",
+  "trainer",
+  "transformers>=5.14,<6",
 ]
 
 [tool.setuptools]

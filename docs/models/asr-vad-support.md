@@ -151,11 +151,11 @@ task-neutral adapters for:
 
 - CTC, preserving backend-native blank and alignment semantics;
 - speech sequence-to-sequence, using the checkpoint's teacher-forced native
-  loss;
-- RNN-T, requiring the backend transducer objective; and
-- TDT, requiring the backend token-and-duration objective.
+  loss.
 
-Do not replace a native CTC/RNN-T/TDT objective with ordinary cross entropy.
+RNN-T and TDT are deliberately outside this dispatcher. Use the dedicated
+`asr_nemotron` and `asr_parakeet_tdt` profiles so their transducer alignment
+and token-duration objectives cannot be replaced with ordinary cross entropy.
 The processor, label padding, lengths, blank ID, alignment topology, and
 duration terms are part of the model.
 

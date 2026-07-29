@@ -28,13 +28,16 @@ jobs:
 
       - name: Build distributions
         run: |
-          python -m pip install --upgrade pip build "nbformat>=5.10" numpy pytest soundfile
+          python -m pip install --upgrade pip build "nbformat>=5.10" numpy pytest soundfile uv
           python -m build
 
-      - name: Verify wheel
+      - name: Verify the dependency-free package surface
         run: |
           python -m pip install --force-reinstall --no-deps dist/*.whl
           python -c "from voicehub import AutoInferenceModel; assert AutoInferenceModel.available_models()"
+
+      - name: Install the declared wheel runtime
+        run: uv pip install --system --torch-backend cpu dist/*.whl
 
       - name: Import every integration from the installed wheel
         working-directory: ${{ runner.temp }}

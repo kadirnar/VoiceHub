@@ -703,6 +703,7 @@ speech-input task.
 | Field | Purpose |
 | --- | --- |
 | `model_type` | Canonical model key |
+| `task` | `SpeechTask` owned by this training profile |
 | `family` | A built-in `TrainingFamily` or custom non-empty family name |
 | `support` | Capability boundary |
 | `module_paths` | Ordered candidates for the primary trainable module |
@@ -730,6 +731,7 @@ Useful properties and methods:
 | `requires_custom_adapter` | Whether support is `custom` |
 | `phase_map` | Read-only phase-name mapping |
 | `get_phase(name=None)` | Resolve a phase, defaulting to `default_phase` |
+| `dataset_spec` | Architecture-aware TTS or ASR data contract |
 | `install_extra` | `"training"` for built-in trainable profiles; otherwise an optional extension-owned setup identifier |
 
 Built-in `TrainingFamily` values are:
@@ -741,6 +743,14 @@ flow-matching
 acoustic-regression
 vits
 composite
+ctc
+speech-sequence-to-sequence
+rnnt
+tdt
+audio-classification
+frame-classification
+native-asr-dispatch
+upstream-native
 ```
 
 A custom non-empty family string is also valid when an adapter factory is
@@ -1333,6 +1343,18 @@ ASRDataset(
     transform_fingerprint=None,
 )
 
+ASRDataset.coerce(
+    records_or_manifest,
+    *,
+    model_type=None,
+    architecture=None,
+    root=None,
+    aliases=None,
+    validate=True,
+    validate_files=False,
+    transform_fingerprint=None,
+) -> ASRDataset
+
 ASRDataset.from_manifest(
     path,
     *,
@@ -1380,14 +1402,61 @@ get_asr_dataset_spec(
 ) -> ASRDatasetSpec
 
 list_asr_dataset_specs() -> tuple[ASRDatasetSpec, ...]
+
+ASRRecordVariant(
+    name: str,
+    required_fields=(),
+    one_of=(),
+    at_most_one_of=(),
+    forbidden_fields=(),
+    requires=(),
+    requires_one_of=(),
+    description="",
+    preprocessed=False,
+)
+
+ASRDatasetSpec(
+    architecture: ASRDataArchitecture,
+    variants: tuple[ASRRecordVariant, ...],
+    model_type=None,
+    sample_rate=None,
+    description="",
+    readiness=None,
+    training_support=None,
+    homogeneous_batch_fields=(),
+)
+
+variant.missing(record) -> tuple[str, ...]
+variant.matches(record) -> bool
+
+spec.match_variant(record, *, index=None) -> str
+spec.raw_variants -> tuple[ASRRecordVariant, ...]
+spec.preprocessed_variants -> tuple[ASRRecordVariant, ...]
+spec.accepts_raw_records -> bool
+spec.requires_preprocessing -> bool
+spec.requires_homogeneous_batches -> bool
+
+EpochGroupedBatchSampler(
+    dataset: ASRDataset,
+    *,
+    batch_size: int,
+    seed: int,
+    shuffle: bool,
+    drop_last: bool,
+)
+
+sampler.set_epoch(epoch: int) -> None
+sampler.state_dict() -> dict
+sampler.load_state_dict(state_dict) -> None
 ```
 
 `ASRDataset` reads JSON, JSON Lines, CSV, and TSV, normalizes common audio,
 transcript, language, and sample-rate aliases, resolves relative audio paths,
 and validates model-specific source or cached-tensor variants. It can also
-pair recursively discovered PCM WAV files with same-stem transcript sidecars,
-or import a simple Kaldi/ESPnet `wav.scp` plus `text` directory. Kaldi shell
-pipelines are rejected.
+pair recursively discovered `.wav` files with same-stem transcript sidecars,
+or import a simple Kaldi/ESPnet `wav.scp` plus `text` directory. Native
+preprocessors decode PCM WAVE; custom transforms can materialize other
+encodings. Kaldi shell pipelines are rejected.
 
 The dataset exposes:
 

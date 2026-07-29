@@ -34,10 +34,10 @@ jobs:
       - name: Update pip
         run: python -m pip install --upgrade pip
 
-      - name: Install lightweight contract-test environment
+      - name: Install the complete test environment
         run: |
-          python -m pip install --no-deps -e .
-          python -m pip install "nbformat>=5.10" packaging pytest numpy soundfile uv
+          python -m pip install --upgrade uv
+          uv pip install --system --torch-backend cpu -e ".[test]"
 
       - name: Resolve the complete default runtime
         run: >

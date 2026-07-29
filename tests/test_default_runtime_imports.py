@@ -52,6 +52,28 @@ print(json.dumps({{"imported": len({modules!r})}}))
         )
         self.assertIn('"imported":', result.stdout)
 
+    def test_zonos2_source_import_does_not_require_tqdm(self):
+        code = """
+import builtins
+
+real_import = builtins.__import__
+
+def import_without_tqdm(name, *args, **kwargs):
+    if name.split(".", 1)[0] == "tqdm":
+        raise ModuleNotFoundError(name)
+    return real_import(name, *args, **kwargs)
+
+builtins.__import__ = import_without_tqdm
+import voicehub.models.zonos2.source.zonos2.tts
+"""
+        subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
 
 @unittest.skipUnless(
     FULL_RUNTIME_ENABLED,

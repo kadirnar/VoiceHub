@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import gc
-from typing import TYPE_CHECKING, Dict, List
+from collections.abc import Iterable, Iterator
+from typing import TYPE_CHECKING, Any, Dict, Generic, List, TypeVar
 
 import torch
-from tqdm import tqdm
 from voicehub.models.zonos2.source.zonos2.core import TTSBatch, TTSReq, get_global_ctx
 from voicehub.models.zonos2.source.zonos2.distributed import get_tp_info
 from voicehub.models.zonos2.source.zonos2.utils import init_logger
@@ -14,6 +14,27 @@ if TYPE_CHECKING:
     from voicehub.models.zonos2.source.zonos2.models import Zonos2ForCausalLM
 
 logger = init_logger(__name__)
+_T = TypeVar("_T")
+
+
+class _SilentProgress(Generic[_T]):
+    """Minimal tqdm-compatible iterator for the dependency-free runtime."""
+
+    def __init__(self, values: Iterable[_T], *, desc: str = "", **_: Any) -> None:
+        self._values = values
+        self.desc = desc
+
+    def __iter__(self) -> Iterator[_T]:
+        return iter(self._values)
+
+    def refresh(self) -> None:
+        """Keep the upstream progress-update call as a no-op."""
+
+
+try:
+    from tqdm import tqdm as _progress
+except ModuleNotFoundError:  # Default VoiceHub runtime intentionally omits tqdm.
+    _progress = _SilentProgress
 
 
 def _determine_cuda_graph_bs(
@@ -96,7 +117,7 @@ class GraphRunner:
         free_memory = get_free_memory(self.device)
         logger.info_rank0(f"Free GPU memory before capturing CUDA graphs: {mem_GB(free_memory)}")
 
-        pbar = tqdm(
+        pbar = _progress(
             sorted(self.graph_bs_list, reverse=True),
             desc="Preparing for capturing CUDA graphs...",
             unit="batch",

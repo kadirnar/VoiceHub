@@ -96,14 +96,20 @@ contracts are ported and verified. Unknown families fail explicitly.
 
 ## Use a reviewed architecture provider
 
-Choose a dedicated provider when you want a reviewed checkpoint, processor,
-architecture family, and training objective instead of automatic architecture
-detection. Migrated providers run on VoiceHub-owned PyTorch graphs; a row in
-this table does not imply a Transformers runtime:
+Choose a reviewed provider when you want a pinned checkpoint, processor,
+architecture family, and training objective. The `asr_transformers` entry is
+the closed automatic dispatcher for its five verified native graph families;
+the remaining entries select one exact architecture. Migrated providers run
+on VoiceHub-owned PyTorch graphs, so a row in this table does not imply a
+Transformers runtime:
 
 | Model type | Default checkpoint | Objective |
 | --- | --- | --- |
+| `asr_transformers` | `openai/whisper-small` | Native Whisper, Wav2Vec2, HuBERT, WavLM, or Moonshine dispatch |
 | `asr_whisper` | `openai/whisper-large-v3-turbo` | Speech sequence-to-sequence |
+| `asr_faster_whisper` | `openai/whisper-small` | VoiceHub-native Whisper compatibility route |
+| `asr_whisperx` | `openai/whisper-small` | Whisper training; alignment trains separately through `asr_wav2vec2` |
+| `asr_openai_whisper` | `openai/whisper-small` | VoiceHub-native OpenAI Whisper compatibility route |
 | `asr_tiron` | `Trelis/tiron` | Whisper sequence-to-sequence with speaker/time tokens |
 | `asr_qwen3` | `Qwen/Qwen3-ASR-0.6B` | Native prompted audio-language modeling |
 | `asr_vibevoice` | `microsoft/VibeVoice-ASR-HF` | Prompted multimodal sequence-to-sequence |
@@ -119,6 +125,7 @@ this table does not imply a Transformers runtime:
 | `asr_nemo` | `nvidia/nemo/stt_en_quartznet15x5` | Native character CTC |
 | `asr_speechbrain` | `speechbrain/asr-crdnn-rnnlm-librispeech` | Native CTC plus attention sequence-to-sequence |
 | `asr_funasr` | `iic/SenseVoiceSmall` | Native SANM-CTC plus rich control tokens |
+| `asr_espnet` | `espnet/shinji-watanabe-librispeech_asr_train_asr_transformer_e18_raw_bpe_sp_valid.acc.best` | Native hybrid CTC plus attention sequence-to-sequence |
 | `asr_wenet` | `wenet/gigaspeech-u2pp-conformer` | Native hybrid CTC plus bidirectional attention |
 | `asr_seamless_m4t_v2` | `facebook/seamless-m4t-v2-large` | Multilingual speech sequence-to-sequence |
 

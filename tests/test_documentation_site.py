@@ -178,6 +178,33 @@ class DocumentationSiteTests(unittest.TestCase):
 
         self.assertFalse((DOCS_ROOT / "tts_workflow.md").exists())
 
+    def test_every_asr_training_profile_is_in_model_and_training_docs(self):
+        from voicehub import SpeechTask, list_training_specs
+
+        model_types = {
+            spec.model_type
+            for spec in list_training_specs(task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION)
+        }
+        self.assertEqual(len(model_types), 23)
+        pages = (
+            DOCS_ROOT / "guides" / "speech-recognition.md",
+            DOCS_ROOT / "models" / "asr-vad-support.md",
+            DOCS_ROOT / "models" / "training-support.md",
+        )
+        for page in pages:
+            with self.subTest(page=page):
+                source = page.read_text(encoding="utf-8")
+                documented = []
+                for line in source.splitlines():
+                    if not line.startswith("|"):
+                        continue
+                    first_cell = line.split("|", 2)[1]
+                    match = re.search(r"`(asr_[a-z0-9_]+)`", first_cell)
+                    if match:
+                        documented.append(match.group(1))
+                self.assertEqual(set(documented), model_types)
+                self.assertEqual(len(documented), len(model_types))
+
     def test_multilingual_homepages_and_configuration_are_complete(self):
         config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
         theme_override = THEME_OVERRIDE_PATH.read_text(encoding="utf-8")
