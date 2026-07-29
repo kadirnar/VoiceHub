@@ -50,7 +50,13 @@ class SpecDiscriminator(nn.Module):
 
         fmap = []
         y = y.squeeze(1)
-        y = stft(y, self.fft_size, self.shift_size, self.win_length, self.window.to(y.get_device()))
+        y = stft(
+            y,
+            self.fft_size,
+            self.shift_size,
+            self.win_length,
+            self.window.to(device=y.device, dtype=y.dtype),
+        )
         y = y.unsqueeze(1)
         for i, d in enumerate(self.discriminators):
             y = d(y)

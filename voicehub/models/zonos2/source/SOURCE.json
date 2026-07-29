@@ -2,7 +2,25 @@
   "commercial_use": true,
   "license": "MIT",
   "model_type": "zonos2",
-  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "native_runtime": "voicehub.architectures.zonos2",
+  "policy": "The vendored upstream serving source is retained for provenance and parity audits only. Public inference and training execute the VoiceHub-owned PyTorch architecture. Source code is MIT; published model weights are a separate Apache-2.0 work.",
+  "reference_checkpoint": {
+    "filename": "model.pth",
+    "license": "Apache-2.0",
+    "repository": "Zyphra/ZONOS2",
+    "revision": "65f1e80f94b599d474bb6af9094a803dc52f60bd",
+    "safetensors_published": false,
+    "sha256": "5f6aa0fff9036ee44ccbc625d40aa6bdd8ea223480a5447e9f6aad70c38b6ecd",
+    "size": 15336390655
+  },
   "revision": "194c0a3ab67b90383a67646289f28d4ecb1c1f64",
+  "safe_conversion": {
+    "filename": "zonos2-bf16.safetensors",
+    "repository": "drbaph/ZONOS2-BF16",
+    "revision": "c8470cd6b2c43639780635fac10921fd74a381e0",
+    "sha256": "cd2fd4c9e867750e27ccd0544d2ff4cc86b5c403d6bff4ceb7540068d31b26b4",
+    "size": 15336294640
+  },
+  "training_boundary": "The upstream release does not publish its original training loop, optimizer, or data pipeline. VoiceHub verifies full-model gradients and implements the implied delayed-codebook next-row cross-entropy, explicitly marked as reconstructed.",
   "upstream": "https://github.com/Zyphra/ZONOS2"
 }

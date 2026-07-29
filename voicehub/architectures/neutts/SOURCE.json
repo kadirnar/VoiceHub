@@ -1,0 +1,57 @@
+{
+  "architecture": "neutts",
+  "checkpoints": {
+    "neucodec": {
+      "file": "model.safetensors",
+      "license": "Apache-2.0",
+      "repository": "neuphonic/neucodec",
+      "revision": "30c1fdd19e68aee65d542cf043750d4c0165893e",
+      "sha256": "c4ccda95a16eb6f3ab02aa574946b01870f16a4af0da6bdb5afaa962e4d9f0d9",
+      "size": 2519855456,
+      "state_values": 629937706,
+      "tensor_count": 811,
+      "tensor_inventory_fingerprint": "9ec8ada5d387b47180200d70bbf0e19d4bfd7ef6d13431b0ff34e3a5d11405a7"
+    },
+    "neutts": {
+      "metadata_module": "voicehub.architectures.neutts.metadata",
+      "repositories": [
+        "neuphonic/neutts-air",
+        "neuphonic/neutts-nano",
+        "neuphonic/neutts-nano-german",
+        "neuphonic/neutts-nano-french",
+        "neuphonic/neutts-nano-spanish",
+        "neuphonic/neutts-2e"
+      ]
+    }
+  },
+  "implementation": "VoiceHub-owned PyTorch graph; no provider runtime import",
+  "implementation_sources": [
+    {
+      "license": "NeuTTS-Open-License-1.0",
+      "repository": "neuphonic/neutts",
+      "revision": "ac69851f28fc63a487917e7c2e27f0d75c759cba"
+    },
+    {
+      "license": "Apache-2.0",
+      "repository": "neuphonic/neucodec",
+      "revision": "ed3e6cd1bdc374ce14a21355e5eee66a777149ce"
+    },
+    {
+      "license": "Apache-2.0",
+      "repository": "huggingface/transformers",
+      "revision": "91d0737eea53da41c98b45da1cd8116e518aad21",
+      "scope": "NeuCodec reference implementation"
+    }
+  ],
+  "limitations": [
+    "Only Safetensors checkpoints are accepted; GGUF, ONNX, and pickle artifacts are rejected.",
+    "Phoneme variants require precomputed phonemes or an explicitly injected phonemizer.",
+    "The pinned upstream fine-tuning recipe is verified only for NeuTTS-Air; Nano and 2E training fail closed."
+  ],
+  "training_recipe": {
+    "path": "examples/finetune.py",
+    "repository": "neuphonic/neutts",
+    "revision": "ac69851f28fc63a487917e7c2e27f0d75c759cba",
+    "verified_family": "neutts-air"
+  }
+}

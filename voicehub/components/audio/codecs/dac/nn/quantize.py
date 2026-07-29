@@ -1,10 +1,8 @@
 from typing import Union
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
 from torch.nn.utils import weight_norm
 
 from voicehub.components.audio.codecs.dac.nn.layers import WNConv1d
@@ -76,7 +74,11 @@ class VectorQuantize(nn.Module):
         return self.embed_code(embed_id).transpose(1, 2)
 
     def decode_latents(self, latents):
-        encodings = rearrange(latents, "b d t -> (b t) d")
+        batch_size, _, time_steps = latents.shape
+        encodings = latents.permute(0, 2, 1).reshape(
+            batch_size * time_steps,
+            self.codebook_dim,
+        )
         codebook = self.codebook.weight  # codebook: (N x D)
 
         # L2 normalize encodings and codebook (ViT-VQGAN)
@@ -89,7 +91,7 @@ class VectorQuantize(nn.Module):
             - 2 * encodings @ codebook.t()
             + codebook.pow(2).sum(1, keepdim=True).t()
         )
-        indices = rearrange((-dist).max(1)[1], "(b t) -> b t", b=latents.size(0))
+        indices = (-dist).max(1)[1].reshape(batch_size, time_steps)
         z_q = self.decode_code(indices)
         return z_q, indices
 
@@ -238,13 +240,20 @@ class ResidualVectorQuantize(nn.Module):
         z_q = 0
         z_p = []
         codes = []
-        dims = np.cumsum([0] + [q.codebook_dim for q in self.quantizers])
-
-        n_codebooks = np.where(dims <= latents.shape[1])[0].max(axis=0, keepdims=True)[
-            0
-        ]
+        dimensions = [0]
+        for quantizer in self.quantizers:
+            next_dimension = dimensions[-1] + quantizer.codebook_dim
+            if next_dimension > latents.shape[1]:
+                break
+            dimensions.append(next_dimension)
+        n_codebooks = len(dimensions) - 1
+        if n_codebooks == 0:
+            raise ValueError(
+                "Latent tensor does not contain one complete codebook "
+                "projection."
+            )
         for i in range(n_codebooks):
-            j, k = dims[i], dims[i + 1]
+            j, k = dimensions[i], dimensions[i + 1]
             z_p_i, codes_i = self.quantizers[i].decode_latents(latents[:, j:k, :])
             z_p.append(z_p_i)
             codes.append(codes_i)

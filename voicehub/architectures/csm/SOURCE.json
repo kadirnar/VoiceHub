@@ -1,0 +1,56 @@
+{
+  "architecture": "csm",
+  "implementation": {
+    "description": "VoiceHub-owned PyTorch graph preserving the original Sesame checkpoint namespace and generation equations",
+    "runtime_dependencies": [
+      "python-standard-library",
+      "torch",
+      "voicehub"
+    ],
+    "training_boundary": "The two-level codebook objective is source-faithful for pre-encoded Mimi codes. Raw audio is encoded by the separately pinned, frozen native Mimi graph. SilentCipher watermarking remains an explicit separately trained postprocessor boundary and is never claimed unless a supplied postprocessor declares watermarks_audio=true."
+  },
+  "sources": [
+    {
+      "license": "Apache-2.0",
+      "name": "Sesame CSM",
+      "revision": "daed31e6d42cf71873999075de204fa37d2acec3",
+      "url": "https://github.com/SesameAILabs/csm"
+    },
+    {
+      "license": "BSD-3-Clause",
+      "name": "torchtune 0.4.0 Llama-3.2 components",
+      "revision": "03a4b1e41adb62a4b1729c09e6f6b2792b8d7e7e",
+      "url": "https://github.com/pytorch/torchtune"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "Kyutai Moshi/Mimi source",
+      "revision": "e6a55d2722a65870ef52a6c9f6ecfc0e90f38362",
+      "url": "https://github.com/kyutai-labs/moshi"
+    }
+  ],
+  "artifacts": [
+    {
+      "filename": "model.safetensors",
+      "header_fingerprint_sha256": "4599e6510bc0198383c220f3da32348946868ab47e8cd6e24ef81cee1a4a17f5",
+      "license": "Apache-2.0",
+      "parameter_count": 1552791552,
+      "repository": "sesame/csm-1b",
+      "revision": "c92a71e1c419772e25be7dc14d952c2521a740ab",
+      "sha256": "2e7721144afe38b906d4f1048671da639fe142423f4a26283606ecebe894f4bf",
+      "size": 6211186784,
+      "tensor_count": 187
+    },
+    {
+      "filename": "tokenizer-e351c8d8-checkpoint125.safetensors",
+      "header_fingerprint_sha256": "7c4807abedfe259ce83b055f2ca7b7fcaf39ead6f6d9d7c1ba55885987400b72",
+      "license": "CC-BY-4.0",
+      "parameter_count": 96151393,
+      "repository": "kyutai/moshiko-pytorch-bf16",
+      "revision": "2bfc9ae6e89079a5cc7ed2a68436010d91a3d289",
+      "sha256": "09b782f0629851a271227fb9d36db65c041790365f11bbe5d3d59369cf863f50",
+      "size": 384644900,
+      "tensor_count": 318
+    }
+  ]
+}

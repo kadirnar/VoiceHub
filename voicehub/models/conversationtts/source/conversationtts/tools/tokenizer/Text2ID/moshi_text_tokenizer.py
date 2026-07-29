@@ -1,18 +1,25 @@
 import math
-import os
-import sentencepiece
-from huggingface_hub import hf_hub_download
+from pathlib import Path
+
 import torch
+from voicehub.hub import resolve_pretrained_file
+from voicehub.tokenization import SentencePieceUnigramTokenizer
 from voicehub.models.conversationtts.source.conversationtts.tools.tokenizer.abs_tokenizer import AbsTokenizer
 
 
 class Text2IDTokenizer(AbsTokenizer):
-    def __init__(self):
+    def __init__(self, model_path: str | Path | None = None):
         super(Text2IDTokenizer, self).__init__()
-        ckpt_path = "Moshi/ckpts/moshiko-pytorch-bf16/tokenizer_spm_32k_3.model"
-        if not os.path.exists(ckpt_path):
-            ckpt_path = hf_hub_download("kyutai/moshiko-pytorch-bf16", "tokenizer_spm_32k_3.model")
-        self.model = sentencepiece.SentencePieceProcessor(ckpt_path)  # type: ignore
+        checkpoint = (
+            resolve_pretrained_file(
+                "kyutai/moshiko-pytorch-bf16",
+                "tokenizer_spm_32k_3.model",
+                revision="2bfc9ae6e89079a5cc7ed2a68436010d91a3d289",
+            )
+            if model_path is None
+            else Path(model_path).expanduser().resolve()
+        )
+        self.model = SentencePieceUnigramTokenizer.from_model_file(checkpoint)
 
     def get_word_to_subword_mapping(self, tokens):
         word_to_subword = []

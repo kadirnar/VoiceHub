@@ -1,0 +1,54 @@
+{
+  "architecture": "voxcpm2",
+  "audit_date": "2026-07-29",
+  "implementation": "voicehub-native",
+  "license": "Apache-2.0",
+  "source": {
+    "repository": "https://github.com/OpenBMB/VoxCPM",
+    "revision": "616d3d3e630a9c96c2853250eef91b0f39dcd5fa"
+  },
+  "checkpoint": {
+    "repository": "openbmb/VoxCPM2",
+    "revision": "bffb3df5a29440629464e5e839f4d214c8714c3d",
+    "filename": "model.safetensors",
+    "size": 4580080592,
+    "sha256": "f7f964cfa9da23653baec6e6f7750719977ad944ed9f95fe52fe3a620506891d",
+    "dtype": "BF16",
+    "tensor_count": 577,
+    "parameter_count": 2290004544,
+    "header_fingerprint": "15bc490a125ea08b0f8412d728bfd19ad2bbce753cda5dc9e7bc2ff667dce7c7"
+  },
+  "codec": {
+    "filename": "audiovae.pth",
+    "source_format": "pytorch-pickle",
+    "size": 376951122,
+    "sha256": "94b5d51e107e0507d4acc976cfdadb64edd6fd06d1f751dadbf2fd1594274bf1",
+    "tensor_count": 312,
+    "parameter_count": 94213957,
+    "header_fingerprint": "64c34273a67acc37eac2bbda68f2f98126c780774a7075b9f67326bd2b387bb9",
+    "conversion": "Explicit opt-in, exact SHA-256 verification, torch.load(weights_only=True), complete strict state validation, then Safetensors export."
+  },
+  "tokenizer": {
+    "filename": "tokenizer.json",
+    "size": 3676772,
+    "sha256": "f8984687e4a92a3503d521396d454b7d68e9fdaab2a0288eb3536c7c1aa4bc20",
+    "implementation": "VoiceHub SentencePiece BPE plus the official multi-character CJK split"
+  },
+  "training": {
+    "published": true,
+    "full_sft": true,
+    "lora": true,
+    "objective": {
+      "loss/diff": 1.0,
+      "loss/stop": 1.0
+    },
+    "codec_policy": "AudioVAE V2 is frozen and used only for preprocessing/validation decode.",
+    "reference_layout": "[103, reference_audio, 104, text, 101, target_audio, 102]; loss applies only to target audio.",
+    "lora_artifact": "lora_weights.safetensors"
+  },
+  "limits": [
+    "The native runtime implements offline batch-size-one autoregressive synthesis; upstream streaming acceleration is not claimed.",
+    "External text normalization and denoising are intentionally outside the model boundary.",
+    "The official AudioVAE requires a one-time explicit legacy conversion until upstream publishes Safetensors."
+  ]
+}

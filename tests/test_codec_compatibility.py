@@ -7,14 +7,39 @@ import unittest
 from pathlib import Path
 
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
-TORCHAUDIO_AVAILABLE = importlib.util.find_spec("torchaudio") is not None
 
 
 @unittest.skipUnless(
-    TORCH_AVAILABLE and TORCHAUDIO_AVAILABLE,
-    "The codec compatibility layer requires PyTorch and TorchAudio",
+    TORCH_AVAILABLE,
+    "The native codec compatibility layer requires PyTorch",
 )
 class CodecCompatibilityTests(unittest.TestCase):
+
+    def test_native_dac_archive_round_trip_needs_no_numpy(self):
+        import torch
+
+        from voicehub.components.audio.codecs.dac.model.base import DACFile
+
+        source = DACFile(
+            codes=torch.arange(24).reshape(1, 3, 8),
+            chunk_length=4,
+            original_length=2_048,
+            input_db=torch.tensor([-23.5]),
+            channels=1,
+            sample_rate=44_100,
+            padding=True,
+            dac_version="1.0.0",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = source.save(Path(directory) / "sample")
+            restored = DACFile.load(path)
+
+        self.assertEqual(path.suffix, ".dac")
+        self.assertEqual(restored.chunk_length, source.chunk_length)
+        self.assertEqual(restored.original_length, source.original_length)
+        self.assertEqual(restored.sample_rate, source.sample_rate)
+        self.assertTrue(torch.equal(restored.codes, source.codes))
+        self.assertTrue(torch.equal(restored.input_db, source.input_db))
 
     def test_weights_checkpoint_round_trip_preserves_constructor_metadata(self):
         import torch
@@ -90,7 +115,7 @@ class CodecCompatibilityTests(unittest.TestCase):
         self.assertLessEqual(float(signal.audio_data.abs().max()), 1.0)
 
     def test_irodori_uses_internal_loudness_normalization(self):
-        required = ("einops", "huggingface_hub")
+        required = ("einops", )
         if any(importlib.util.find_spec(name) is None for name in required):
             self.skipTest("Irodori runtime dependencies are not installed")
 

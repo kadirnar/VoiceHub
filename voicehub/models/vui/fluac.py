@@ -1,20 +1,22 @@
+from __future__ import annotations
+
 import math
+from collections.abc import Mapping
 from contextlib import nullcontext
+from dataclasses import asdict, dataclass, field, fields
 from functools import partial, wraps
 from os import path
-from typing import List, Tuple
+from pathlib import Path
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import pack, rearrange, unpack
-from einops.layers.torch import Rearrange
-from pydantic import BaseModel
 from torch import Tensor, int32
 from torch.amp import autocast
 from torch.nn import Module
 from torch.nn.utils.parametrizations import weight_norm
 
+from voicehub.hub import resolve_pretrained_file
 from voicehub.models.vui.utils import decompile_state_dict
 
 
@@ -45,14 +47,6 @@ def maybe(fn):
     return inner
 
 
-def pack_one(t, pattern):
-    return pack([t], pattern)
-
-
-def unpack_one(t, ps, pattern):
-    return unpack(t, ps, pattern)[0]
-
-
 def round_ste(z: Tensor) -> Tensor:
     """Round with straight through gradients."""
     zhat = z.round()
@@ -65,11 +59,11 @@ class FSQ(Module):
 
     def __init__(
         self,
-        levels: List[int],
+        levels: list[int],
         dim: int | None = None,
         num_codebooks: int = 1,
         keep_num_codebooks_dim: bool | None = None,
-        allowed_dtypes: Tuple[torch.dtype, ...] = (torch.float32, torch.float64),
+        allowed_dtypes: tuple[torch.dtype, ...] = (torch.float32, torch.float64),
         channel_first: bool = True,
         projection_has_bias: bool = True,
         return_indices=True,
@@ -152,7 +146,7 @@ class FSQ(Module):
     def indices_to_level_indices(self, indices):
         """Converts indices to indices at each level, perhaps needed for a
         transformer with factorized embeddings."""
-        indices = rearrange(indices, "... -> ... 1")
+        indices = indices.unsqueeze(-1)
         codes_non_centered = (indices // self._basis) % self._levels
         return codes_non_centered
 
@@ -165,12 +159,13 @@ class FSQ(Module):
         codes = self._indices_to_codes(indices)
 
         if self.keep_num_codebooks_dim:
-            codes = rearrange(codes, "... c d -> ... (c d)")
+            codes = codes.flatten(start_dim=-2)
 
         codes = self.project_out(codes)
 
         if is_img_or_video or self.channel_first:
-            codes = rearrange(codes, "b ... d -> b d ...")
+            dimensions = tuple(range(codes.ndim))
+            codes = codes.permute(0, codes.ndim - 1, *dimensions[1:-1])
 
         return codes
 
@@ -185,9 +180,12 @@ class FSQ(Module):
         device_type = z.device.type
 
         with torch.autocast(device_type=device_type, enabled=False):
+            spatial_shape: tuple[int, ...] | None = None
             if self.channel_first:
-                z = rearrange(z, "b d ... -> b ... d")
-                z, ps = pack_one(z, "b * d")
+                spatial_shape = tuple(z.shape[2:])
+                dimensions = tuple(range(z.ndim))
+                z = z.permute(0, *dimensions[2:], 1)
+                z = z.reshape(z.shape[0], -1, z.shape[-1])
 
             assert (
                 z.shape[-1] == self.dim
@@ -195,7 +193,12 @@ class FSQ(Module):
 
             z = self.project_in(z)
 
-            z = rearrange(z, "b n (c d) -> b n c d", c=self.num_codebooks)
+            z = z.reshape(
+                z.shape[0],
+                z.shape[1],
+                self.num_codebooks,
+                self.codebook_dim,
+            )
 
             # whether to force quantization step to be full precision or not
 
@@ -218,7 +221,7 @@ class FSQ(Module):
                 if self.return_indices:
                     indices = self.codes_to_indices(codes)
 
-                codes = rearrange(codes, "b n c d -> b n (c d)")
+                codes = codes.flatten(start_dim=-2)
 
                 codes = codes.type(orig_dtype)
 
@@ -229,13 +232,20 @@ class FSQ(Module):
             # reconstitute image or video dimensions
 
             if self.channel_first:
-                out = unpack_one(out, ps, "b * d")
-                out = rearrange(out, "b ... d -> b d ...")
-
-                indices = maybe(unpack_one)(indices, ps, "b * c")
+                if spatial_shape is None:
+                    raise RuntimeError("FSQ lost its source spatial shape.")
+                out = out.reshape(out.shape[0], *spatial_shape, out.shape[-1])
+                dimensions = tuple(range(out.ndim))
+                out = out.permute(0, out.ndim - 1, *dimensions[1:-1])
+                if indices is not None:
+                    indices = indices.reshape(
+                        indices.shape[0],
+                        *spatial_shape,
+                        indices.shape[-1],
+                    )
 
             if not self.keep_num_codebooks_dim and self.return_indices:
-                indices = maybe(rearrange)(indices, "... 1 -> ...")
+                indices = None if indices is None else indices.squeeze(-1)
 
             # return quantized output and indices
 
@@ -250,6 +260,15 @@ def WNConv1d(*args, **kwargs):
 def WNConvTranspose1d(*args, **kwargs):
     """Weight-normalised ``ConvTranspose1d`` factory."""
     return weight_norm(nn.ConvTranspose1d(*args, **kwargs))
+
+
+class _SwapTimeChannels(nn.Module):
+    """Swap `[batch, channels, time]` and `[batch, time, channels]`."""
+
+    def forward(self, values: Tensor) -> Tensor:
+        if values.ndim != 3:
+            raise ValueError("Expected a rank-three sequence tensor.")
+        return values.transpose(1, 2)
 
 
 @torch.jit.script
@@ -435,11 +454,11 @@ class FiniteScalarQuantize(nn.Module):
 
         if mlp:
             self.mlp = nn.Sequential(
-                Rearrange("B C T -> B T C"),
+                _SwapTimeChannels(),
                 nn.Linear(latent_dim, 4 * latent_dim),
                 nn.GELU(),
                 nn.Linear(4 * latent_dim, latent_dim),
-                Rearrange("B T C -> B C T"),
+                _SwapTimeChannels(),
             )
         else:
             self.mlp = None
@@ -587,22 +606,68 @@ class ResidualFiniteScalarQuantize(nn.Module):
         return z_q, indices, latents
 
 
-class FluacConfig(BaseModel):
+@dataclass(slots=True)
+class FluacConfig:
     """Configuration for the Fluac neural audio codec (encoder + FSQ quantiser
     + decoder)."""
 
     sample_rate: int = 44100
-
     codebook_size: int | None = None
-
     encoder_dim: int = 64
-    encoder_rates: list[int] = [2, 4, 8, 8]
-
+    encoder_rates: list[int] = field(default_factory=lambda: [2, 4, 8, 8])
     quantizer_strides: list[int] | None = None  # SNAC style strides
     n_quantizers: int = 1
-    fsq_levels: list[int] | None = [8, 5, 5, 5]  # 1000
+    fsq_levels: list[int] | None = field(default_factory=lambda: [8, 5, 5, 5])
     decoder_dim: int = 1536
-    decoder_rates: list[int] = [8, 8, 4, 2]
+    decoder_rates: list[int] = field(default_factory=lambda: [8, 8, 4, 2])
+
+    def __post_init__(self) -> None:
+        for name in (
+                "sample_rate",
+                "encoder_dim",
+                "n_quantizers",
+                "decoder_dim",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError(f"`{name}` must be an integer.")
+            if value <= 0:
+                raise ValueError(f"`{name}` must be positive.")
+        if self.codebook_size is not None and (isinstance(self.codebook_size, bool) or
+                                               not isinstance(self.codebook_size, int) or
+                                               self.codebook_size <= 0):
+            raise ValueError("`codebook_size` must be a positive integer or None.")
+        for name in ("encoder_rates", "decoder_rates"):
+            values = getattr(self, name)
+            if (not isinstance(values, list) or not values or
+                    any(isinstance(value, bool) or not isinstance(value, int) or value <= 0
+                        for value in values)):
+                raise ValueError(f"`{name}` must be a non-empty list of positive integers.")
+            setattr(self, name, list(values))
+        if (not isinstance(self.fsq_levels, list) or len(self.fsq_levels) < 1 or
+                any(isinstance(value, bool) or not isinstance(value, int) or value < 2
+                    for value in self.fsq_levels)):
+            raise ValueError("`fsq_levels` must contain integers of at least two.")
+        self.fsq_levels = list(self.fsq_levels)
+        if self.quantizer_strides is not None:
+            if (not isinstance(self.quantizer_strides, list) or
+                    any(isinstance(value, bool) or not isinstance(value, int) or value <= 0
+                        for value in self.quantizer_strides)):
+                raise ValueError("`quantizer_strides` must contain positive integers or be None.")
+            self.quantizer_strides = list(self.quantizer_strides)
+
+    @classmethod
+    def from_dict(cls, values: Mapping[str, object]) -> FluacConfig:
+        if not isinstance(values, Mapping):
+            raise TypeError("Fluac configuration must be a mapping.")
+        known = {item.name for item in fields(cls)}
+        return cls(**{key: value for key, value in values.items() if key in known})
+
+    def model_dump(self) -> dict[str, object]:
+        return asdict(self)
+
+    def dict(self) -> dict[str, object]:
+        return self.model_dump()
 
     @property
     def hop_length(self) -> int:
@@ -646,23 +711,64 @@ class Fluac(nn.Module):
         self.apply(init_weights)
 
     @staticmethod
-    def from_pretrained(name: str = Q9_22KHZ):
+    def from_pretrained(
+        name: str = Q9_22KHZ,
+        *,
+        config: FluacConfig | Mapping[str, object] | None = None,
+        repo_id: str = "fluxions/vui",
+        revision: str = "8dc2bd9993a8118b6e2b71f3d9d92d1deb80e5f7",
+        cache_dir: str | None = None,
+        token: str | bool | None = None,
+        local_files_only: bool = False,
+    ):
+        source = Path(name).expanduser()
+        is_native_directory = (source.is_dir() and (source / "codec.safetensors").is_file())
+        is_native_checkpoint = (source.is_file() and source.suffix.lower() == ".safetensors")
+        if is_native_directory or is_native_checkpoint:
+            from voicehub.models.vui.checkpoint import load_vui_safetensors, resolve_native_vui_artifact
+
+            artifact = resolve_native_vui_artifact(source)
+            if (is_native_checkpoint and source.resolve() != artifact.codec_checkpoint):
+                raise ValueError(
+                    "Fluac.from_pretrained() requires the codec Safetensors "
+                    "file, not the Vui model component.")
+            checkpoint_path = artifact.codec_checkpoint
+            if config is None:
+                config = artifact.codec_config
+            if isinstance(config, FluacConfig):
+                model_config = config
+            elif isinstance(config, Mapping):
+                model_config = FluacConfig.from_dict(config)
+            else:  # pragma: no cover - guarded by artifact validation
+                raise TypeError("Native Fluac configuration must be a mapping.")
+            generator = Fluac(model_config).eval()
+            generator.load_state_dict(
+                load_vui_safetensors(
+                    checkpoint_path,
+                    component="codec",
+                ),
+                strict=True,
+            )
+            return generator
+
         if path.exists(name):
             checkpoint_path = name
         else:
-            from huggingface_hub import hf_hub_download
-
-            checkpoint_path = hf_hub_download(
-                "fluxions/vui",
+            checkpoint_path = resolve_pretrained_file(
+                repo_id,
                 name,
+                revision=revision,
+                cache_dir=cache_dir,
+                token=token,
+                local_files_only=local_files_only,
             )
 
         checkpoint = torch.load(checkpoint_path, weights_only=True, map_location="cpu")
-        config = checkpoint["config"]
-        if "model" in config:
-            model_config = FluacConfig(**config["model"])
+        checkpoint_config = checkpoint["config"]
+        if "model" in checkpoint_config:
+            model_config = FluacConfig.from_dict(checkpoint_config["model"])
         else:
-            model_config = FluacConfig(**config)
+            model_config = FluacConfig.from_dict(checkpoint_config)
 
         generator = Fluac(model_config).eval()
         ckpt = decompile_state_dict(checkpoint["generator"])
@@ -714,6 +820,4 @@ class Fluac(nn.Module):
 
     @property
     def hz(self):
-        import numpy as np
-
-        return self.config.sample_rate / np.prod(self.config.encoder_rates).item()
+        return self.config.sample_rate / math.prod(self.config.encoder_rates)

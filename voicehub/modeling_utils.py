@@ -216,6 +216,7 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         """
         with self._lifecycle_lock:
             requested_training = self._loading_for_training
+            self._validate_optimization_transition("training" if requested_training else "inference")
             if not requested_training:
                 self._validate_inference_strategy()
             if self.model is None:
@@ -331,6 +332,7 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         :meth:`_prepare_for_training`.
         """
         with self._lifecycle_lock:
+            self._validate_optimization_transition("training")
             self._validate_training_runtime()
             if self.model is None:
                 self._loading_for_training = True
@@ -556,6 +558,23 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         if include_native_export:
             self._save_pretrained(output_directory / NATIVE_EXPORT_DIR)
         return output_directory
+
+    def export_native_pretrained(
+        self,
+        save_directory: str | Path,
+    ) -> Path:
+        """Write a flat runtime-native artifact for trainer interop.
+
+        Unlike :meth:`save_pretrained`, this method does not write
+        VoiceHub's portable wrapper metadata or introduce another
+        ``native_export`` directory. Specialized training adapters can
+        therefore export directly into the namespace allocated by
+        :class:`voicehub.Trainer`.
+        """
+        destination = Path(save_directory).expanduser()
+        destination.mkdir(parents=True, exist_ok=True)
+        self._save_pretrained(destination)
+        return destination
 
     def get_training_adapter(self):
         """Return the unloaded model-family adapter paired with this model."""

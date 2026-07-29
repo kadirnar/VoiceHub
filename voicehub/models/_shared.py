@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import random
 import secrets
+import sys
 from contextlib import contextmanager
 from importlib import import_module
 from numbers import Integral
@@ -13,6 +14,7 @@ from threading import RLock
 from typing import Any
 
 from voicehub.dependencies import import_optional
+from voicehub.hub_transport import download_hugging_face_snapshot
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.path_utils import is_explicit_local_path
 
@@ -69,7 +71,8 @@ def preserve_inference_state(
     model_type: str,
 ):
     """Preserve process-global RNG and mutable Torch backend state."""
-    numpy = import_module("numpy")
+    numpy = sys.modules.get("numpy")
+    numpy_random = getattr(numpy, "random", None)
     try:
         torch = import_module("torch")
     except ModuleNotFoundError as exc:
@@ -80,7 +83,7 @@ def preserve_inference_state(
     if torch is None:
         with _RANDOM_STATE_LOCK:
             python_state = random.getstate()
-            numpy_state = numpy.random.get_state()
+            numpy_state = (numpy_random.get_state() if numpy_random is not None else None)
             hash_seed = os.environ.get("PYTHONHASHSEED")
             try:
                 yield None, None, (), None
@@ -90,7 +93,8 @@ def preserve_inference_state(
                 else:
                     os.environ["PYTHONHASHSEED"] = hash_seed
                 random.setstate(python_state)
-                numpy.random.set_state(numpy_state)
+                if numpy_random is not None and numpy_state is not None:
+                    numpy_random.set_state(numpy_state)
         return
 
     resolved_device = torch.device(device)
@@ -101,7 +105,7 @@ def preserve_inference_state(
 
     with _RANDOM_STATE_LOCK:
         python_state = random.getstate()
-        numpy_state = numpy.random.get_state()
+        numpy_state = (numpy_random.get_state() if numpy_random is not None else None)
         hash_seed = os.environ.get("PYTHONHASHSEED")
         backend_flags = [(owner, name, getattr(owner, name))
                          for owner, name in _mutable_torch_backend_flags(torch)]
@@ -129,7 +133,8 @@ def preserve_inference_state(
             else:
                 os.environ["PYTHONHASHSEED"] = hash_seed
             random.setstate(python_state)
-            numpy.random.set_state(numpy_state)
+            if numpy_random is not None and numpy_state is not None:
+                numpy_random.set_state(numpy_state)
 
 
 @contextmanager
@@ -158,9 +163,11 @@ def seeded_inference(
             device=device,
             model_type=model_type,
     ) as (torch, resolved_device, cuda_devices, xpu_device):
-        numpy = import_module("numpy")
+        numpy = sys.modules.get("numpy")
+        numpy_random = getattr(numpy, "random", None)
         random.seed(seed)
-        numpy.random.seed(seed % (2**32))
+        if numpy_random is not None:
+            numpy_random.seed(seed % (2**32))
         torch.random.default_generator.manual_seed(seed)
         if cuda_devices:
             with torch.cuda.device(cuda_devices[0]):
@@ -219,6 +226,7 @@ def resolve_model_directory(
     **download_kwargs: Any,
 ) -> Path:
     """Resolve a local directory or download one complete Hub snapshot."""
+    del install_extra
     if not isinstance(name_or_path, (str, Path)):
         raise TypeError("`name_or_path` must be a string or pathlib.Path.")
     if isinstance(name_or_path, str) and not name_or_path.strip():
@@ -230,19 +238,13 @@ def resolve_model_directory(
         raise NotADirectoryError(f"Expected a model directory, received file: {source}.")
     if is_explicit_local_path(name_or_path):
         raise FileNotFoundError(f"Model directory was not found: {source}.")
-    hub = import_optional(
-        "huggingface_hub",
-        model_type=model_type,
-        install_extra=install_extra,
+    snapshot = download_hugging_face_snapshot(
+        str(name_or_path),
+        **{
+            key: value
+            for key, value in download_kwargs.items() if value is not None
+        },
     )
-    snapshot = Path(
-        hub.snapshot_download(
-            repo_id=str(name_or_path),
-            **{
-                key: value
-                for key, value in download_kwargs.items() if value is not None
-            },
-        )).resolve()
     if not snapshot.is_dir():
         raise RuntimeError(f"Downloaded {model_type!r} snapshot is not a directory: {snapshot}.")
     return snapshot

@@ -46,6 +46,7 @@ class SpeechTrainingContractTests(unittest.TestCase):
         TrainingFamily.TDT: TDTTrainingAdapter,
         TrainingFamily.AUDIO_CLASSIFICATION: AudioClassificationTrainingAdapter,
         TrainingFamily.FRAME_CLASSIFICATION: FrameClassificationTrainingAdapter,
+        TrainingFamily.NATIVE_ASR_DISPATCH: UpstreamNativeTrainingAdapter,
         TrainingFamily.UPSTREAM_NATIVE: UpstreamNativeTrainingAdapter,
     }
 
@@ -71,6 +72,7 @@ class SpeechTrainingContractTests(unittest.TestCase):
             TrainingFamily.TDT: "tdt",
             TrainingFamily.AUDIO_CLASSIFICATION: "audio-classification",
             TrainingFamily.FRAME_CLASSIFICATION: "frame-classification",
+            TrainingFamily.NATIVE_ASR_DISPATCH: "native-asr-dispatch",
             TrainingFamily.UPSTREAM_NATIVE: "upstream-native",
         }
         self.assertEqual(
@@ -99,6 +101,7 @@ class SpeechTrainingContractTests(unittest.TestCase):
             TrainingFamily.CTC,
             TrainingFamily.RNNT,
             TrainingFamily.TDT,
+            TrainingFamily.NATIVE_ASR_DISPATCH,
             TrainingFamily.UPSTREAM_NATIVE,
         )
         for index, family in enumerate(native_families):
@@ -127,6 +130,16 @@ class SpeechTrainingContractTests(unittest.TestCase):
                 family=family,
             )
             self.assertEqual(spec.fallback_objective, "classification")
+
+    def test_single_optimizer_composite_profiles_are_not_multi_optimizer_recipes(self):
+        for model_type in ("vibevoice", "vad_pyannote_brouhaha"):
+            with self.subTest(model_type=model_type):
+                spec = get_training_spec(model_type)
+                self.assertFalse(spec.separate_optimizers)
+                self.assertEqual(
+                    spec.get_phase().optimizer_names,
+                    ("model", ),
+                )
 
     def test_task_registry_keeps_legacy_tts_view_stable(self):
         spec = ModelTrainingSpec(

@@ -1,0 +1,68 @@
+{
+  "architecture": "parakeet-tdt",
+  "implementation": "voicehub-native",
+  "architecture_reference": {
+    "repository": "https://github.com/huggingface/transformers",
+    "revision": "af71155683b4d34dd92d8f037392fa6bf334035e",
+    "license": "Apache-2.0",
+    "notes": "The FastConformer graph, TDT joint network, anti-diagonal loss, greedy duration decoder, feature extractor, tokenizer contract, and timestamp semantics were audited at this exact revision. VoiceHub imports none of Transformers at runtime."
+  },
+  "semantic_reference": {
+    "repository": "https://github.com/NVIDIA/NeMo",
+    "revision": "2381f42f6979449b5b99538f8f80135831009b51",
+    "license": "Apache-2.0",
+    "notes": "TDT loss and decoding semantics were compared with NVIDIA NeMo v2.4.0. The active checkpoint namespace follows the official Safetensors conversion."
+  },
+  "tokenizer_references": [
+    {
+      "repository": "https://github.com/huggingface/tokenizers",
+      "revision": "f383101a26663708484cac0727792aad74f78234",
+      "license": "Apache-2.0",
+      "notes": "BPE, byte fallback, Metaspace, added-token, and decoder behavior."
+    },
+    {
+      "repository": "https://github.com/huggingface/spm_precompiled",
+      "revision": "3795b14343d25782df654b49f5c3e9f2a7db7d6f",
+      "license": "Apache-2.0",
+      "notes": "SentencePiece precompiled normalization character-map format and Darts-trie traversal."
+    }
+  ],
+  "checkpoints": [
+    {
+      "repository": "nvidia/parakeet-tdt-0.6b-v3",
+      "revision": "7c35754d166cca382ad1e53e68b01e7c575f3a1d",
+      "license": "CC-BY-4.0",
+      "format": "Safetensors",
+      "sha256": "3a2026366188c8c68598edbbff92f8d11590a08e0ae2e6775544e7b07d6a5e11",
+      "tensors": 723,
+      "learned_parameters": 627057286,
+      "state_values": 627057310,
+      "dtype": "F32 plus 24 I64 BatchNorm counters",
+      "header_fingerprint": "f861cd8d0e811fd9bfbf3b887356fe3f6e226562ec78653dc77d90c1c2757e6b"
+    }
+  ],
+  "verified_scope": {
+    "inference": [
+      "official three-stage 8x convolutional subsampling",
+      "24-layer FastConformer encoder with relative attention",
+      "LSTM prediction network and token-duration joint head",
+      "greedy duration-aware decoding with blank cache reuse and safety bound",
+      "native log-mel processor and tokenizer",
+      "word timestamps derived from TDT durations",
+      "strict Safetensors inventory verification and portable reload"
+    ],
+    "training": [
+      "raw waveform and transcript preparation",
+      "decoder-input construction",
+      "exact differentiable TDT anti-diagonal objective",
+      "full-model backward and gradient checkpointing",
+      "inference-ready Safetensors export"
+    ],
+    "limitations": [
+      "Only TDT checkpoints are accepted; Parakeet CTC and RNNT require separate native architectures.",
+      "Only greedy decoding is implemented. Beam search, hotwords, streaming state, translation, and language forcing fail closed.",
+      "The multilingual checkpoint auto-detects language but does not expose a separately verified language classifier.",
+      "No corpus-level WER benchmark was run, so no accuracy improvement over NVIDIA's published checkpoint is claimed."
+    ]
+  }
+}

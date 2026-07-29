@@ -1,0 +1,28 @@
+OmniVoice native architecture attribution
+=========================================
+
+The architecture, training objective, masking policy, duration estimator, and
+generation algorithm in this directory were independently adapted from:
+
+  k2-fsa/OmniVoice
+  https://github.com/k2-fsa/OmniVoice
+  revision 468e927ba3716cd8dd86421148dfb3046e9f9d7b
+  Copyright 2026 Xiaomi Corp. and OmniVoice contributors
+  License: Apache License 2.0
+
+The Higgs Audio V2 tokenizer graph was independently adapted from the
+Apache-2.0 implementation published in Hugging Face Transformers and audited
+against the Boson AI Higgs Audio reference:
+
+  https://github.com/huggingface/transformers
+  revision aad13b87ed59f2afcfaebc985f403301887a35fc
+
+  https://github.com/boson-ai/higgs-audio
+  revision 05a145bb490501b534563bf51bf2f7aa2326b271
+
+The complete Apache License 2.0 text distributed with the audited OmniVoice
+source is retained at:
+
+  voicehub/models/omnivoice/source/THIRD_PARTY_LICENSE
+
+SPDX-License-Identifier: Apache-2.0

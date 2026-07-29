@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Optional
 
 from voicehub.models.xtts.source.TTS.tts.configs.shared_configs import BaseTTSConfig
 from voicehub.models.xtts.source.TTS.tts.layers.bark.model import GPTConfig
@@ -43,6 +43,15 @@ class BarkConfig(BaseTTSConfig):
         SMALL_REMOTE_MODEL_PATHS (Dict): small remote model paths. Defaults to None.
         CACHE_DIR (str): local cache directory. Defaults to get_user_data_dir().
         DEF_SPEAKER_DIR (str): default speaker directory to stoke speaker values for voice cloning. Defaults to get_user_data_dir().
+        ENCODEC_CHECKPOINT (str, optional): VoiceHub-native Safetensors or the
+            exact official Encodec checkpoint. Defaults to None.
+        ENCODEC_CACHE_DIR (str, optional): VoiceHub Encodec cache root.
+            Defaults to None.
+        ENCODEC_LOCAL_FILES_ONLY (bool): Disable Encodec network resolution.
+            Defaults to False.
+        TRUST_OFFICIAL_ENCODEC_PICKLE (bool): Explicitly allow the pinned
+            official legacy ``.th`` container after strict verification.
+            Defaults to False.
     """
 
     model: str = "bark"
@@ -74,6 +83,10 @@ class BarkConfig(BaseTTSConfig):
     SMALL_REMOTE_MODEL_PATHS: Dict = None
     CACHE_DIR: str = str(get_user_data_dir("tts/suno/bark_v0"))
     DEF_SPEAKER_DIR: str = str(get_user_data_dir("tts/bark_v0/speakers"))
+    ENCODEC_CHECKPOINT: Optional[str] = None
+    ENCODEC_CACHE_DIR: Optional[str] = None
+    ENCODEC_LOCAL_FILES_ONLY: bool = False
+    TRUST_OFFICIAL_ENCODEC_PICKLE: bool = False
 
     def __post_init__(self):
         self.REMOTE_MODEL_PATHS = {

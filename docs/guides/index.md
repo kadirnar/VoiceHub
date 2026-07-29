@@ -97,8 +97,8 @@ Use the [training guide](training.md) to:
 
     TTS support remains checkpoint-specific; read the
     [TTS training matrix](../models/training-support.md). ASR and VAD providers
-    separately declare a VoiceHub-native, upstream-custom, or inference-only
-    boundary in the
+    separately declare a native, preprocessed, custom-component, or
+    inference-only boundary in the
     [speech-input support matrix](../models/asr-vad-support.md).
 
 ## Artifact boundaries

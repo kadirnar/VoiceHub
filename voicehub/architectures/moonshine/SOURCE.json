@@ -1,0 +1,41 @@
+{
+  "architecture": "moonshine",
+  "implementation": "voicehub-native",
+  "main_library": {
+    "repository": "https://github.com/moonshine-ai/moonshine",
+    "revision": "cc1695646a560f2eec7f7c058f3c4d580f039e4b",
+    "license": "MIT",
+    "notes": "Reviewed for the current public Moonshine runtime, model catalogue, tokenizer conversion, and decoding behavior. The current deployment library is ONNX-oriented and is not executed by VoiceHub."
+  },
+  "architecture_reference": {
+    "repository": "https://github.com/huggingface/transformers",
+    "revision": "d0e91c7ff1d3ab41b49de369a396f65191e34d2b",
+    "path": "src/transformers/models/moonshine",
+    "license": "Apache-2.0",
+    "notes": "Reviewed for the published Safetensors graph, raw-waveform frontend, rotary attention, masking, tied output projection, and teacher-forced loss semantics."
+  },
+  "fine_tuning_reference": {
+    "repository": "https://github.com/pierre-cheneau/finetune-moonshine-asr",
+    "revision": "7717a92eb726e1900cc68fa8434e5552de416cde",
+    "license": "MIT",
+    "notes": "Reviewed for raw-waveform collation, EOS-terminated targets without a label-side BOS token, decoder right shifting, ignored label padding, encoder-freezing, and curriculum-training guidance. VoiceHub integrates the loss-critical data semantics into its native processor and leaves optimizer, freezing, and curriculum policy to the general trainer."
+  },
+  "checkpoints": [
+    {
+      "repository": "UsefulSensors/moonshine-tiny",
+      "revision": "390624ed33d594443aa4aa221f5b9f283b545b5a",
+      "license": "MIT",
+      "tensors": 160,
+      "dtype": "F32",
+      "header_fingerprint": "37c91ded4815d54a88d26dfe0d586f198d0ea8106a31c79cbbe1b52a7c6f9041"
+    },
+    {
+      "repository": "UsefulSensors/moonshine-base",
+      "revision": "7a73d8d55ac0ba2ef3ae761593f6784b51f96dcf",
+      "license": "MIT",
+      "tensors": 210,
+      "dtype": "F32",
+      "header_fingerprint": "b6a2fb3e03f6e8cf4227e526bc48eedc9b9d9668d195fb518e5ff19b4c26e6b1"
+    }
+  ]
+}

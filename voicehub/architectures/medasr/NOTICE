@@ -1,0 +1,8 @@
+VoiceHub's MedASR architecture is an independent PyTorch implementation
+reviewed against the Apache-2.0 licensed LASR implementation in Hugging Face
+Transformers and the Apache-2.0 licensed Google-Health/medasr recipe.
+
+Copyright 2025 The HuggingFace Inc. team and Google LLC.
+
+VoiceHub does not bundle or redistribute Google MedASR model weights.
+The model name and Google trademarks remain the property of their owners.

@@ -1,8 +1,6 @@
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from attr import attr
 
 
 class CustomSTFT(nn.Module):
@@ -49,26 +47,28 @@ class CustomSTFT(nn.Module):
 
         # Precompute forward DFT (real, imag)
         # PyTorch stft uses e^{-j 2 pi k n / N} => real=cos(...), imag=-sin(...)
-        n = np.arange(self.n_fft)
-        k = np.arange(self.freq_bins)
-        angle = 2 * np.pi * np.outer(k, n) / self.n_fft  # shape (freq_bins, n_fft)
-        dft_real = np.cos(angle)
-        dft_imag = -np.sin(angle)  # note negative sign
+        n = torch.arange(self.n_fft, dtype=torch.float64)
+        k = torch.arange(self.freq_bins, dtype=torch.float64)
+        angle = (2 * torch.pi * torch.outer(k, n) / self.n_fft)  # shape (freq_bins, n_fft)
+        dft_real = torch.cos(angle)
+        dft_imag = -torch.sin(angle)  # note negative sign
 
         # Combine window and dft => shape (freq_bins, filter_length)
         # We'll make 2 conv weight tensors of shape (freq_bins, 1, filter_length).
-        forward_window = window_tensor.numpy()  # shape (n_fft,)
+        forward_window = window_tensor.to(dtype=torch.float64)
         forward_real = dft_real * forward_window  # (freq_bins, n_fft)
         forward_imag = dft_imag * forward_window
 
-        # Convert to PyTorch
-        forward_real_torch = torch.from_numpy(forward_real).float()
-        forward_imag_torch = torch.from_numpy(forward_imag).float()
-
         # Register as Conv1d weight => (out_channels, in_channels, kernel_size)
         # out_channels = freq_bins, in_channels=1, kernel_size=n_fft
-        self.register_buffer("weight_forward_real", forward_real_torch.unsqueeze(1))
-        self.register_buffer("weight_forward_imag", forward_imag_torch.unsqueeze(1))
+        self.register_buffer(
+            "weight_forward_real",
+            forward_real.float().unsqueeze(1),
+        )
+        self.register_buffer(
+            "weight_forward_imag",
+            forward_imag.float().unsqueeze(1),
+        )
 
         # Precompute inverse DFT
         # Real iFFT formula => scale = 1/n_fft, doubling for bins 1..freq_bins-2 if n_fft even, etc.
@@ -76,20 +76,25 @@ class CustomSTFT(nn.Module):
         # If you want perfect real iSTFT, you can add that logic.
         # This version just yields good approximate reconstruction with Hann + typical overlap.
         inv_scale = 1.0 / self.n_fft
-        n = np.arange(self.n_fft)
-        angle_t = 2 * np.pi * np.outer(n, k) / self.n_fft  # shape (n_fft, freq_bins)
-        idft_cos = np.cos(angle_t).T  # => (freq_bins, n_fft)
-        idft_sin = np.sin(angle_t).T  # => (freq_bins, n_fft)
+        angle_t = (2 * torch.pi * torch.outer(n, k) / self.n_fft)  # shape (n_fft, freq_bins)
+        idft_cos = torch.cos(angle_t).T  # => (freq_bins, n_fft)
+        idft_sin = torch.sin(angle_t).T  # => (freq_bins, n_fft)
 
         # Multiply by window again for typical overlap-add
         # We also incorporate the scale factor 1/n_fft
-        inv_window = window_tensor.numpy() * inv_scale
+        inv_window = window_tensor.to(dtype=torch.float64) * inv_scale
         backward_real = idft_cos * inv_window  # (freq_bins, n_fft)
         backward_imag = idft_sin * inv_window
 
         # We'll implement iSTFT as real+imag conv_transpose with stride=hop.
-        self.register_buffer("weight_backward_real", torch.from_numpy(backward_real).float().unsqueeze(1))
-        self.register_buffer("weight_backward_imag", torch.from_numpy(backward_imag).float().unsqueeze(1))
+        self.register_buffer(
+            "weight_backward_real",
+            backward_real.float().unsqueeze(1),
+        )
+        self.register_buffer(
+            "weight_backward_imag",
+            backward_imag.float().unsqueeze(1),
+        )
 
     def transform(self, waveform: torch.Tensor):
         """Forward STFT => returns magnitude, phase Output shape => (batch,

@@ -1,4 +1,45 @@
 {
+  "architecture": {
+    "license": "MIT",
+    "repository": "https://github.com/resemble-ai/chatterbox",
+    "revision": "eb90621fa748f341a5b768aed0c0c12fc561894b",
+    "tag": "v0.1.2"
+  },
+  "checkpoint": {
+    "files": {
+      "conds.pt": {
+        "sha256": "6552d70568833628ba019c6b03459e77fe71ca197d5c560cef9411bee9d87f4e",
+        "size": 107374
+      },
+      "s3gen.safetensors": {
+        "inventory_sha256": "f235fedc693ac64663dee304804f4024da836fcefc54a21a458f0adb2874e05a",
+        "sha256": "2b78103c654207393955e4900aac14a12de8ef25f4b09424f1ef91941f161d4e",
+        "size": 1056484620,
+        "tensor_count": 2489,
+        "topology_sha256": "5129253c6e831698470e850f8d72ab37e41cb2b72b144959733172d196531196",
+        "value_count": 264041793
+      },
+      "t3_cfg.safetensors": {
+        "inventory_sha256": "702aed62bb8f117db5a5b38ce96a1da957bed12a551f5bfe982636cc574cacb5",
+        "sha256": "914cb1696f47527fe8852ca8f1fe1fa63cb34f76f9c715e84e067b744dd0da81",
+        "size": 2129653744,
+        "tensor_count": 292,
+        "topology_sha256": "28aadbedb2795d47f59c5210310fe3f3821c1f42ac564cc3dc533926148d4fbd",
+        "value_count": 532405248
+      },
+      "ve.safetensors": {
+        "inventory_sha256": "72b7f222248b33ac93885d9056bf7e463c006a1da4a95a65b46b5428fc64a54e",
+        "sha256": "f0921cab452fa278bc25cd23ffd59d36f816d7dc5181dd1bef9751a7fb61f63c",
+        "size": 5695784,
+        "tensor_count": 16,
+        "topology_sha256": "17944baf16b5ccb23afba35c93c6957e163d963a592e3aaf884e0994cae45707",
+        "value_count": 1423618
+      }
+    },
+    "license": "MIT",
+    "repository": "ResembleAI/chatterbox",
+    "revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18"
+  },
   "components": [
     {
       "license": "Apache-2.0",
@@ -11,8 +52,42 @@
       "name": "perth",
       "revision": "ce86c49d029f42272c1902eccb675556b9ed2330",
       "upstream": "https://github.com/resemble-ai/Perth"
+    },
+    {
+      "integration": [
+        "causal next-token label shifting",
+        "prompt-prefix loss masking",
+        "mean-initialized text vocabulary expansion",
+        "T3 LoRA target policy",
+        "precomputed training batch schema",
+        "native raw-audio preprocessing"
+      ],
+      "license": "Apache-2.0",
+      "name": "community-fine-tuning-audit",
+      "revision": "fac31c46ec96b37283a363a1a96c2a0e56640e03",
+      "upstream": "https://github.com/gokhaneraslan/chatterbox-finetuning"
     }
   ],
   "model_type": "chatterbox",
-  "policy": "Runtime component source is vendored; pretrained weights remain external."
+  "policy": "Runtime architecture and audio frontends are VoiceHub-owned; weights remain immutable external artifacts.",
+  "training_audit": {
+    "author_end_to_end_recipe_published": false,
+    "published_objectives": [
+      "T3 text and speech token cross entropy",
+      "S3Gen causal conditional flow matching"
+    ],
+    "integrated_fine_tuning_implementation": {
+      "license": "Apache-2.0",
+      "repository": "https://github.com/gokhaneraslan/chatterbox-finetuning",
+      "revision": "fac31c46ec96b37283a363a1a96c2a0e56640e03"
+    },
+    "voicehub_corrections": [
+      "shift token logits and labels for causal supervision",
+      "prepend the released start-speech token so the first acoustic token is supervised",
+      "mask padded attention keys in variable-length T3 batches",
+      "keep frozen audio frontends in evaluation mode"
+    ],
+    "repository": "https://github.com/resemble-ai/chatterbox",
+    "revision": "5de7a54aa4e5e2baadb0182dde554908b48b85c2"
+  }
 }

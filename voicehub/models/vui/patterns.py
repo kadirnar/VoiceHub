@@ -152,22 +152,22 @@ class Pattern:
         # use the proper layout based on whether we limit ourselves to valid steps only or not,
         # note that using the valid_layout will result in a truncated sequence up to the valid steps
         ref_layout = self.valid_layout if keep_only_valid_steps else self.layout
-        # single item indexing being super slow with pytorch vs. numpy, so we use numpy here
-        indexes = torch.zeros(n_q, len(ref_layout), dtype=torch.long).numpy()
-        mask = torch.zeros(n_q, len(ref_layout), dtype=torch.bool).numpy()
+        indexes = torch.full(
+            (n_q, len(ref_layout)),
+            n_q * timesteps,
+            dtype=torch.long,
+        )
+        mask = torch.zeros(n_q, len(ref_layout), dtype=torch.bool)
         # fill indexes with last sequence step value that will correspond to our special token
         # the last value is n_q * timesteps as we have flattened z and append special token as the last token
         # which will correspond to the index: n_q * timesteps
-        indexes[:] = n_q * timesteps
         # iterate over the pattern and fill scattered indexes and mask
         for s, sequence_coords in enumerate(ref_layout):
             for coords in sequence_coords:
                 if coords.t < timesteps:
                     indexes[coords.q, s] = coords.t + coords.q * timesteps
-                    mask[coords.q, s] = 1
-        indexes = torch.from_numpy(indexes).to(device)
-        mask = torch.from_numpy(mask).to(device)
-        return indexes, mask
+                    mask[coords.q, s] = True
+        return indexes.to(device), mask.to(device)
 
     def build_pattern_sequence(
             self, z: torch.Tensor, special_token: int, keep_only_valid_steps: bool = False):
@@ -231,20 +231,20 @@ class Pattern:
         if is_model_output and self.starts_with_special_token():
             ref_layout = ref_layout[1:]
 
-        # single item indexing being super slow with pytorch vs. numpy, so we use numpy here
-        indexes = torch.zeros(n_q, timesteps, dtype=torch.long).numpy()
-        mask = torch.zeros(n_q, timesteps, dtype=torch.bool).numpy()
+        indexes = torch.full(
+            (n_q, timesteps),
+            n_q * sequence_steps,
+            dtype=torch.long,
+        )
+        mask = torch.zeros(n_q, timesteps, dtype=torch.bool)
         # fill indexes with last sequence step value that will correspond to our special token
-        indexes[:] = n_q * sequence_steps
         for s, sequence_codes in enumerate(ref_layout):
             if s < sequence_steps:
                 for code in sequence_codes:
                     if code.t < timesteps:
                         indexes[code.q, code.t] = s + code.q * sequence_steps
-                        mask[code.q, code.t] = 1
-        indexes = torch.from_numpy(indexes).to(device)
-        mask = torch.from_numpy(mask).to(device)
-        return indexes, mask
+                        mask[code.q, code.t] = True
+        return indexes.to(device), mask.to(device)
 
     def revert_pattern_sequence(
             self, s: torch.Tensor, special_token: int, keep_only_valid_steps: bool = False):

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSTrainingOutput
 from voicehub.training.adapters import CausalLMTrainingAdapter
@@ -18,7 +16,7 @@ class VuiTrainingAdapter(CausalLMTrainingAdapter):
     """
 
     supports_custom_recipe = True
-    native_export_semantics = "source-compatible-checkpoint-weight-warm-start"
+    native_export_semantics = "inference-reloadable-vui-fluac-safetensors"
 
     def setup(self):
         super().setup()
@@ -184,33 +182,15 @@ class VuiTrainingAdapter(CausalLMTrainingAdapter):
         )
 
     def save_pretrained(self, save_directory) -> None:
-        """Export an upstream-loadable Vui ``.pt`` checkpoint."""
+        """Export a standalone native Vui + Fluac Safetensors directory."""
         self.setup()
-        torch = import_optional(
-            "torch",
-            model_type="vui",
-            install_extra="training",
+        from voicehub.models.vui.checkpoint import export_vui_pretrained
+
+        export_vui_pretrained(
+            self.primary_model,
+            save_directory,
+            wrapper_config=getattr(self.model, "config", None),
         )
-        destination = Path(save_directory)
-        destination.mkdir(parents=True, exist_ok=True)
-        config = self.primary_model.config
-        to_dict = getattr(config, "model_dump", None)
-        if not callable(to_dict):
-            to_dict = getattr(config, "dict")
-        state = {
-            name: value.detach().cpu()
-            for name, value in self.primary_model.state_dict().items() if not name.startswith("codec.")
-        }
-        torch.save(
-            {
-                "config": to_dict(),
-                "model": state,
-            },
-            destination / "vui-finetuned.pt",
-        )
-        wrapper_config = getattr(self.model, "config", None)
-        if wrapper_config is not None and hasattr(wrapper_config, "save_pretrained"):
-            wrapper_config.save_pretrained(destination)
 
 
 __all__ = ["VuiTrainingAdapter"]

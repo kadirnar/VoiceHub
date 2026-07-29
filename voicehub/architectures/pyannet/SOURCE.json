@@ -1,0 +1,94 @@
+{
+  "architecture": "pyannet",
+  "implementation": "voicehub-native",
+  "main_library": {
+    "repository": "https://github.com/pyannote/pyannote-audio",
+    "revision": "795b92ab265888c58d160f90ae4d91b7bcc6aa2c",
+    "release": "3.0.0",
+    "license": "MIT",
+    "notes": "Reviewed PyanNet, SincNet, powerset conversion, frame inference, Hamming overlap-add, segmentation activation, and loss semantics. VoiceHub does not import or execute pyannote.audio."
+  },
+  "filterbank_reference": {
+    "repository": "https://github.com/asteroid-team/asteroid-filterbanks",
+    "revision": "8a3d13fb0e495772bc9d1deac3327affe2833e10",
+    "release": "0.4.0",
+    "license": "MIT",
+    "notes": "Reviewed ParamSincFB initialization and filter equations. VoiceHub implements the equations directly in PyTorch and does not import asteroid-filterbanks."
+  },
+  "brouhaha_reference": {
+    "repository": "https://github.com/marianne-m/brouhaha-vad",
+    "revision": "9132cbe62ac78f90abdbc21bcf6ec6cfe9bb4891",
+    "license": "MIT",
+    "notes": "Reviewed the three-head PyanNet graph, bounded VAD/SNR/C50 activations, six-second repeated-final-chunk inference, speech-masked SNR objective, and training recipe."
+  },
+  "checkpoints": [
+    {
+      "repository": "pyannote/segmentation",
+      "revision": "059e96f964841d40f1a5e755bb7223f76666bba4",
+      "license": "MIT",
+      "format": "Lightning pickle",
+      "sha256": "c7d2e72ce20167e5eb05ce163b7af9762e92ef5fec7313435b676b74b8498afe",
+      "tensors": 54,
+      "parameters": 1473128,
+      "native_inventory_fingerprint": "98094c4cae41d26bfa1d6ac01d3d544f1f622a0fad48aa4149988482302b751f"
+    },
+    {
+      "repository": "pyannote/segmentation-3.0",
+      "revision": "e66f3d3b9eb0873085418a7b813d3b369bf160bb",
+      "license": "MIT",
+      "format": "Lightning pickle",
+      "sha256": "da85c29829d4002daedd676e012936488234d9255e65e86dfab9bec6b1729298",
+      "tensors": 54,
+      "parameters": 1473515,
+      "native_inventory_fingerprint": "5e2760276cce81682b8e0e381602bc13835e489a35d42eb19a3416dc2f1cdb34"
+    },
+    {
+      "repository": "pyannote/brouhaha",
+      "revision": "c93c9b537732dd50c28c0366c73f560c3a7aeb02",
+      "license": "OpenRAIL",
+      "format": "Lightning pickle",
+      "sha256": null,
+      "tensors": 50,
+      "parameters": 3930599,
+      "native_inventory_fingerprint": "3f76412ee98b57772f72ac145c45eae8beb5480d149a325696ea421ce076987f",
+      "notes": "This gated Hugging Face file was not available to the verifier account. Its digest is intentionally not guessed; conversion still requires an explicit trust acknowledgement and a complete name-and-shape match."
+    },
+    {
+      "repository": "https://github.com/marianne-m/brouhaha-vad",
+      "revision": "9132cbe62ac78f90abdbc21bcf6ec6cfe9bb4891",
+      "path": "models/best/checkpoints/best.ckpt",
+      "license": "MIT",
+      "format": "Lightning pickle",
+      "sha256": "9c237e4a7b1de8b456dbee25db853342bf374b19d8732b72b61356519e390ae1",
+      "tensors": 50,
+      "parameters": 3930599,
+      "native_inventory_fingerprint": "3f76412ee98b57772f72ac145c45eae8beb5480d149a325696ea421ce076987f"
+    }
+  ],
+  "security_boundary": {
+    "runtime_format": "Safetensors",
+    "conversion": "Official checkpoints are converted once with torch.load(weights_only=True), an inert compatibility allowlist, an explicit trust_pickle_checkpoint=True acknowledgement, optional SHA-256 verification, and strict complete tensor inventory validation.",
+    "runtime_guarantee": "Inference and fine-tuning never deserialize the source Lightning pickle and never import pyannote.audio, Asteroid, Brouhaha, NumPy, einops, or Lightning."
+  },
+  "verified_scope": {
+    "inference": [
+      "exact ParamSincFB equations against asteroid-filterbanks 0.4.0",
+      "full synthetic PyanNet powerset graph against the pinned pyannote reference with converted segmentation-3.0 weights",
+      "deterministic chunking, powerset conversion, repeated-final-chunk handling, and Hamming overlap-add",
+      "VAD hysteresis and Brouhaha SNR/C50 frame metadata",
+      "Safetensors export and fresh-runtime reload"
+    ],
+    "training": [
+      "multi-label segmentation binary cross-entropy",
+      "powerset categorical cross-entropy",
+      "Brouhaha VAD binary cross-entropy, speech-masked SNR MSE, and C50 MSE",
+      "all-silence Brouhaha batches with differentiable zero SNR loss",
+      "full backward through every native graph variant"
+    ],
+    "limitations": [
+      "No corpus-level VAD, diarization, SNR, or C50 benchmark was run, so no accuracy improvement over the published models is claimed.",
+      "The gated Hugging Face Brouhaha checkpoint could not be downloaded by the verifier account. Real-checkpoint verification used the pinned MIT-licensed GitHub checkpoint with the recorded SHA-256 instead.",
+      "CI runs numerical graph, checkpoint conversion, inference, training, export, and reload tests on shape-reduced configurations; published tensor inventories are validated separately."
+    ]
+  }
+}

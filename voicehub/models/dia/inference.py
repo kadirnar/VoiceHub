@@ -1,4 +1,10 @@
-"""Dia inference with legacy Nari and official Transformers backends."""
+"""VoiceHub-native Dia inference and lifecycle integration.
+
+The public wrapper intentionally contains no provider runtime imports.
+Dia's text encoder, autoregressive decoder, delay protocol, strict
+Safetensors adapter, and DAC processor all live under
+:mod:`voicehub.architectures`.
+"""
 
 from __future__ import annotations
 
@@ -9,20 +15,30 @@ from os import PathLike
 from pathlib import Path
 from typing import Any
 
+from voicehub.architectures.dia.metadata import NARI_DIA_CHECKPOINT_REVISION
 from voicehub.configuration_utils import VoiceHubConfig
-from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
 from voicehub.models._shared import finish_audio_output, seeded_inference, validate_local_file
+from voicehub.trainer_utils import NATIVE_EXPORT_DIR
+
+_NATIVE_CHECKPOINT = "nari-labs/Dia-1.6B-0626"
+_LEGACY_CHECKPOINT = "nari-labs/Dia-1.6B"
+_GENERATION_ALIASES = (
+    ("max_tokens", "max_new_tokens"),
+    ("cfg_scale", "guidance_scale"),
+    ("cfg_filter_top_k", "top_k"),
+)
 
 
 class DiaConfig(VoiceHubConfig):
-    """VoiceHub loading and generation configuration for Dia.
+    """Serializable configuration for the VoiceHub-owned Dia runtime.
 
-    ``backend="auto"`` preserves the original Nari runtime for the
-    legacy ``Dia-1.6B`` artifact and selects Transformers for the
-    converted ``Dia-1.6B-0626`` checkpoint. Fine-tuning always requires
-    the latter.
+    ``backend="auto"`` is retained as a compatibility spelling, but both
+    accepted values select the native implementation. The original
+    ``Dia-1.6B`` pickle/JAX layout and framework-owned Dia backends are
+    deliberately rejected because they do not share the strict,
+    trainable 0626 Safetensors namespace.
     """
 
     model_type = "dia"
@@ -30,60 +46,119 @@ class DiaConfig(VoiceHubConfig):
     def __init__(
         self,
         *,
-        backend: str = "auto",
+        backend: str = "native",
         compute_dtype: str = "bfloat16",
         use_torch_compile: bool = False,
-        sample_rate: int = 44100,
-        **kwargs,
-    ):
-        super().__init__(sample_rate=sample_rate, **kwargs)
-        normalized_backend = str(backend).strip().lower()
-        if normalized_backend not in {"auto", "legacy", "transformers"}:
-            raise ValueError("Dia backend must be 'auto', 'legacy', or 'transformers'.")
-        self.backend = normalized_backend
+        revision: str | None = None,
+        cache_dir: str | None = None,
+        local_files_only: bool = False,
+        sample_rate: int = 44_100,
+        generation_config: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        defaults = {
+            "do_sample": True,
+            "guidance_scale": 3.0,
+            "max_new_tokens": 256,
+            "temperature": 1.8,
+            "top_k": 50,
+            "top_p": 0.9,
+        }
+        defaults.update(dict(generation_config or {}))
+        super().__init__(
+            sample_rate=sample_rate,
+            generation_config=defaults,
+            **kwargs,
+        )
+        self.backend = str(backend).strip().lower()
         self.compute_dtype = compute_dtype
         self.use_torch_compile = use_torch_compile
+        self.revision = revision
+        self.cache_dir = cache_dir
+        self.local_files_only = local_files_only
         self.validate()
 
     def validate(self) -> None:
-        if self.backend not in {"auto", "legacy", "transformers"}:
-            raise ValueError("Dia backend must be 'auto', 'legacy', or 'transformers'.")
+        if self.backend not in {"auto", "native"}:
+            raise ValueError(
+                "Dia backend must be 'native' or 'auto'. Provider-owned "
+                "legacy/Transformers runtimes are no longer used.")
         if not isinstance(self.compute_dtype, str) or not self.compute_dtype.strip():
             raise ValueError("`compute_dtype` must be a non-empty string.")
         if not isinstance(self.use_torch_compile, bool):
             raise TypeError("`use_torch_compile` must be a boolean.")
+        if self.use_torch_compile:
+            raise ValueError(
+                "`use_torch_compile=True` is no longer a Dia-specific "
+                "runtime switch. Register a reversible VoiceHub "
+                "InferenceStrategy and pass it through "
+                "`from_pretrained(..., inference_strategy=...)` instead.")
+        if self.revision is not None and (not isinstance(self.revision, str) or not self.revision.strip()):
+            raise ValueError("`revision` must be a non-empty string or None.")
+        if self.cache_dir is not None and (not isinstance(self.cache_dir,
+                                                          (str, Path)) or not str(self.cache_dir).strip()):
+            raise ValueError("`cache_dir` must be a non-empty path or None.")
+        if not isinstance(self.local_files_only, bool):
+            raise TypeError("`local_files_only` must be a boolean.")
+        if (isinstance(self.sample_rate, bool) or not isinstance(self.sample_rate, int) or
+                self.sample_rate < 1):
+            raise ValueError("`sample_rate` must be a positive integer.")
 
 
 class DiaForTextToSpeech(PreTrainedTTSModel):
-    """Dialogue synthesis and fine-tuning across both released Dia formats."""
+    """Dialogue synthesis and full fine-tuning through native PyTorch Dia."""
 
     config_class = DiaConfig
-    default_model_name_or_path = "nari-labs/Dia-1.6B-0626"
-    default_transformers_model_name_or_path = "nari-labs/Dia-1.6B-0626"
+    default_model_name_or_path = _NATIVE_CHECKPOINT
+    training_default_model_name_or_path = _NATIVE_CHECKPOINT
+    passthrough_generation_options = frozenset({
+        "audio",
+        "audio_prompt",
+        "audio_prompt_path",
+        "cfg_filter_top_k",
+        "cfg_scale",
+        "do_sample",
+        "guidance_scale",
+        "max_new_tokens",
+        "max_tokens",
+        "output_file",
+        "seed",
+        "temperature",
+        "top_k",
+        "top_p",
+        "use_cfg_filter",
+        "verbose",
+    })
 
     def __init__(
         self,
-        config: DiaConfig | str | None = None,
+        config: DiaConfig | str | Path | None = None,
         *,
-        model_path: str | None = None,
+        model_path: str | Path | None = None,
         device: str = "auto",
         lazy_load: bool = True,
-        **config_overrides,
-    ):
+        token: str | bool | None = None,
+        **config_overrides: Any,
+    ) -> None:
+        if token is not None and not isinstance(token, (str, bool)):
+            raise TypeError("`token` must be a string, boolean, or None.")
+        if isinstance(token, str) and not token.strip():
+            raise ValueError("String `token` values must be non-empty.")
         config = self._coerce_config(
             config,
             model_path=model_path,
             **config_overrides,
         )
         config.validate()
-        self._dia_backend = None
+        self._hub_token = token
+        self._dia_runtime = None
         self._loaded_backend: str | None = None
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     @staticmethod
-    def _is_legacy_checkpoint(name_or_path: str) -> bool:
+    def _is_legacy_checkpoint(name_or_path: str | Path) -> bool:
         normalized = str(name_or_path).rstrip("/").lower()
-        if normalized == "nari-labs/dia-1.6b":
+        if normalized == _LEGACY_CHECKPOINT.lower():
             return True
         source = Path(name_or_path).expanduser()
         config_path = (
@@ -99,112 +174,71 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
             values.get("model_type") != "dia")
 
     def _select_backend(self, *, for_training: bool) -> str:
-        requested = self.config.backend
-        if requested != "auto":
-            return requested
-        if for_training:
-            return "transformers"
+        del for_training
+        self._validate_supported_checkpoint()
+        return "native"
+
+    def _validate_supported_checkpoint(self) -> None:
         if self._is_legacy_checkpoint(self.config.name_or_path):
-            return "legacy"
-        return "transformers"
+            raise ValueError(
+                "The original `nari-labs/Dia-1.6B` checkpoint uses a "
+                "different pickle/JAX layout. Use "
+                "`nari-labs/Dia-1.6B-0626` for strict native inference and "
+                "fine-tuning.")
 
     def _validate_training_runtime(self) -> None:
-        if self.config.backend == "legacy":
-            raise ValueError(
-                "Dia's legacy Nari runtime is inference-only. Fine-tuning "
-                "requires backend='transformers' (or 'auto') and the "
-                f"{self.default_transformers_model_name_or_path!r} checkpoint.")
-        if self._is_legacy_checkpoint(self.config.name_or_path):
-            raise ValueError(
-                f"{self.config.name_or_path!r} uses Dia's original "
-                "inference-only checkpoint format. Fine-tune "
-                f"{self.default_transformers_model_name_or_path!r} instead.")
+        self._validate_supported_checkpoint()
+
+    def _runtime_source(self) -> str | Path:
+        source = Path(self.config.name_or_path).expanduser()
+        native_export = source / NATIVE_EXPORT_DIR
+        if source.is_dir() and (native_export / "config.json").is_file():
+            return native_export
+        return self.config.name_or_path
 
     def _load_pretrained_model(self) -> None:
-        selected_backend = self._select_backend(for_training=self.is_training_load, )
-        if selected_backend == "transformers":
-            from voicehub.models.dia.training import load_dia_transformers_backend
+        self._select_backend(for_training=self.is_training_load)
+        from voicehub.architectures.dia.runtime import load_dia_runtime
 
-            backend = load_dia_transformers_backend(
-                self.config.name_or_path,
-                device=self.device,
-                compute_dtype=self.config.compute_dtype,
-                for_training=self.is_training_load,
-            )
-            if backend.model is None or backend.processor is None:
-                raise RuntimeError("The Transformers Dia loader returned an incomplete backend.")
-            sample_rate = int(backend.sample_rate)
-            if sample_rate <= 0:
-                raise ValueError("The Transformers Dia backend reported an invalid sample rate.")
-            self.model = backend.model
-            self._dia_backend = backend
-            self._loaded_backend = "transformers"
-            self.config.sample_rate = sample_rate
-            return
-
-        from voicehub.models.dia.model import Dia
-
-        model = Dia.from_pretrained(
-            self.config.name_or_path,
-            compute_dtype=self.config.compute_dtype,
+        source = self._runtime_source()
+        source_path = Path(source).expanduser()
+        is_local = source_path.exists()
+        revision = self.config.revision
+        if revision is None and not is_local and str(source) == _NATIVE_CHECKPOINT:
+            revision = NARI_DIA_CHECKPOINT_REVISION
+        runtime = load_dia_runtime(
+            source,
             device=self.device,
+            compute_dtype=self.config.compute_dtype,
+            revision=revision,
+            cache_dir=self.config.cache_dir,
+            token=self._hub_token,
+            local_files_only=self.config.local_files_only,
+            for_training=self.is_training_load,
         )
-        if not callable(getattr(model, "generate", None)):
-            raise TypeError("The legacy Dia runtime does not implement generate().")
-        self.model = model
-        self._dia_backend = None
-        self._loaded_backend = "legacy"
-        self.config.sample_rate = 44_100
+        self.model = runtime.model
+        self._dia_runtime = runtime
+        self._loaded_backend = "native"
+        self.config.sample_rate = runtime.sample_rate
 
     @property
     def training_backend(self):
-        """Return the official backend after a training load."""
-        model_config = getattr(self.model, "config", None)
-        if (self._loaded_backend == "transformers" and self._dia_backend is not None and
-                not getattr(model_config, "use_cache", True)):
-            return self._dia_backend
+        runtime = self._dia_runtime
+        if runtime is not None and runtime.model is self.model:
+            return runtime
         return None
 
     def _prepare_for_training(self) -> None:
-        if (self._loaded_backend == "transformers" and self._dia_backend is not None and
-                self.model is self._dia_backend.model):
-            self._dia_backend.prepare_for_training()
-            return
-
-        previous_state = (
-            self.model,
-            self._dia_backend,
-            self._loaded_backend,
-        )
-        self.model = None
-        self._dia_backend = None
-        self._loaded_backend = None
-        previous_loading_mode = self._loading_for_training
-        self._loading_for_training = True
-        try:
-            self.load()
-        except BaseException:
-            self.model, self._dia_backend, self._loaded_backend = previous_state
-            raise
-        finally:
-            self._loading_for_training = previous_loading_mode
+        runtime = self.training_backend
+        if runtime is None:
+            raise RuntimeError("Dia's native training runtime is not loaded.")
+        runtime.prepare_for_training()
 
     def _prepare_for_inference(self) -> None:
-        """Restore eval and cache state for either Dia backend."""
-        if self._loaded_backend == "transformers":
-            if self.model is not None and hasattr(self.model, "eval"):
-                self.model.eval()
-            model_config = getattr(self.model, "config", None)
-            if model_config is not None and hasattr(model_config, "use_cache"):
-                model_config.use_cache = True
-            return
-
-        source_model = getattr(self.model, "model", None)
-        if source_model is not None and hasattr(source_model, "eval"):
-            source_model.eval()
-        codec = getattr(self.model, "dac_model", None)
-        if codec is not None and hasattr(codec, "eval"):
-            codec.eval()
+        runtime = self.training_backend
+        if runtime is None:
+            raise RuntimeError("Dia's native inference runtime is not loaded.")
+        runtime.prepare_for_inference()
 
     def prepare_training_inputs(
         self,
@@ -212,46 +246,36 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
         *,
         phase: str,
     ) -> dict[str, Any]:
-        """Prepare official delayed codec inputs and labels from raw
-        records."""
         del phase
-        backend = self.training_backend
-        if backend is None:
-            raise RuntimeError("Dia training inputs require load_for_training() before "
-                               "preparation.")
-        return backend.prepare_inputs(inputs)
+        runtime = self.training_backend
+        if runtime is None:
+            raise RuntimeError("Dia training inputs require load_for_training() first.")
+        return runtime.prepare_inputs(inputs)
 
     def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
-        super()._validate_generation_inputs(model_inputs)
-        for aliases in (
-            ("max_tokens", "max_new_tokens"),
-            ("cfg_scale", "guidance_scale"),
-            ("cfg_filter_top_k", "top_k"),
-        ):
-            if all(model_inputs.get(name) is not None for name in aliases):
-                raise ValueError(f"Pass either {aliases[0]!r} or {aliases[1]!r}, not both.")
+        for source, target in _GENERATION_ALIASES:
+            if model_inputs.get(source) is not None and model_inputs.get(target) is not None:
+                raise ValueError(f"Pass either {source!r} or {target!r}, not both.")
 
         prompt_names = ("audio", "audio_prompt", "audio_prompt_path")
-        supplied_prompts = [name for name in prompt_names if model_inputs.get(name) is not None]
-        if len(supplied_prompts) > 1:
+        supplied = [name for name in prompt_names if model_inputs.get(name) is not None]
+        if len(supplied) > 1:
             raise ValueError("Pass only one of 'audio', 'audio_prompt', or "
                              "'audio_prompt_path'.")
-        if supplied_prompts:
-            prompt = model_inputs[supplied_prompts[0]]
+        if supplied:
+            name = supplied[0]
+            prompt = model_inputs[name]
             if isinstance(prompt, Mapping) and "path" in prompt:
                 prompt = prompt["path"]
             if isinstance(prompt, (str, PathLike)):
-                prompt_path = validate_local_file(
-                    prompt,
-                    option_name=supplied_prompts[0],
-                )
-                prompt_value = model_inputs[supplied_prompts[0]]
-                if isinstance(prompt_value, Mapping):
-                    prompt_value = dict(prompt_value)
-                    prompt_value["path"] = str(prompt_path)
-                    model_inputs[supplied_prompts[0]] = prompt_value
+                normalized = validate_local_file(prompt, option_name=name)
+                original = model_inputs[name]
+                if isinstance(original, Mapping):
+                    original = dict(original)
+                    original["path"] = str(normalized)
+                    model_inputs[name] = original
                 else:
-                    model_inputs[supplied_prompts[0]] = str(prompt_path)
+                    model_inputs[name] = str(normalized)
 
         for name in ("max_tokens", "max_new_tokens", "cfg_filter_top_k", "top_k"):
             value = model_inputs.get(name)
@@ -267,50 +291,16 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
                 raise TypeError(f"`{name}` must be a finite number.")
             if not math.isfinite(float(value)) or value < 0:
                 raise ValueError(f"`{name}` must be finite and non-negative.")
-        seed = model_inputs.get("seed")
-        if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int)):
-            raise TypeError("`seed` must be an integer or None.")
+        do_sample = model_inputs.get("do_sample")
+        if do_sample is not None and not isinstance(do_sample, bool):
+            raise TypeError("`do_sample` must be a boolean.")
+        top_p = model_inputs.get("top_p")
+        if top_p is not None and float(top_p) <= 0:
+            raise ValueError("Dia `top_p` must be greater than zero.")
 
     @staticmethod
-    def _audio_prompt(audio: Any, sample_rate: int) -> Any:
-        source_rate = None
-        if isinstance(audio, Mapping):
-            source_rate = audio.get("sampling_rate")
-            if "array" in audio:
-                audio = audio["array"]
-            elif "path" in audio:
-                audio = audio["path"]
-            else:
-                raise ValueError("Dia audio prompts require an 'array' or 'path' field.")
-        if isinstance(audio, (str, PathLike)):
-            soundfile = import_optional(
-                "soundfile",
-                model_type="dia",
-                install_extra=None,
-            )
-            numpy = import_optional(
-                "numpy",
-                model_type="dia",
-                install_extra=None,
-            )
-            audio, source_rate = soundfile.read(
-                str(audio),
-                dtype="float32",
-                always_2d=False,
-            )
-            if audio.ndim > 1:
-                audio = numpy.mean(audio, axis=-1)
-        if source_rate is not None and int(source_rate) != sample_rate:
-            raise ValueError("Dia audio prompts must be "
-                             f"{sample_rate} Hz; received {source_rate} Hz.")
-        return audio
-
-    @staticmethod
-    def _rename_generation_options(
-        options: dict[str, Any],
-        aliases: tuple[tuple[str, str], ...],
-    ) -> None:
-        for source, target in aliases:
+    def _rename_generation_options(options: dict[str, Any]) -> None:
+        for source, target in _GENERATION_ALIASES:
             if source not in options:
                 continue
             if target in options:
@@ -321,9 +311,7 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
     def _pop_audio_prompt(options: dict[str, Any]) -> Any:
         prompt = None
         for name in ("audio", "audio_prompt", "audio_prompt_path"):
-            if name not in options:
-                continue
-            value = options.pop(name)
+            value = options.pop(name, None)
             if value is None:
                 continue
             if prompt is not None:
@@ -332,73 +320,39 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
             prompt = value
         return prompt
 
-    def _generate_legacy(
+    def _generate_native(
         self,
         text: str,
         generation_options: dict[str, Any],
     ) -> Any:
-        self._rename_generation_options(
-            generation_options,
-            (
-                ("max_new_tokens", "max_tokens"),
-                ("guidance_scale", "cfg_scale"),
-                ("top_k", "cfg_filter_top_k"),
-            ),
-        )
-        audio_prompt = self._pop_audio_prompt(generation_options)
-        if audio_prompt is not None:
-            generation_options["audio_prompt"] = audio_prompt
-        return self.model.generate(
-            text,
-            use_torch_compile=self.config.use_torch_compile,
-            **generation_options,
-        )
-
-    def _generate_transformers(
-        self,
-        text: str,
-        generation_options: dict[str, Any],
-    ) -> Any:
-        backend = self._dia_backend
-        if backend is None or backend.processor is None:
-            raise RuntimeError("Dia Transformers generation requires a loaded processor.")
-        processor = backend.processor
-        self._rename_generation_options(
-            generation_options,
-            (
-                ("max_tokens", "max_new_tokens"),
-                ("cfg_scale", "guidance_scale"),
-                ("cfg_filter_top_k", "top_k"),
-            ),
-        )
-        generation_options.pop("use_cfg_filter", None)
-        generation_options.pop("verbose", None)
-
-        audio = self._pop_audio_prompt(generation_options)
-        if audio is not None:
-            audio = self._audio_prompt(audio, self.sample_rate)
-
-        inputs = processor(
+        runtime = self.training_backend
+        if runtime is None:
+            raise RuntimeError("Dia's native runtime is not loaded.")
+        options = dict(generation_options)
+        self._rename_generation_options(options)
+        options.pop("use_cfg_filter", None)
+        options.pop("verbose", None)
+        audio = self._pop_audio_prompt(options)
+        inputs = runtime.processor(
             text=[text],
             audio=audio,
+            generation=True,
             padding=True,
             return_tensors="pt",
         )
-        prompt_length = None
-        if audio is not None:
-            prompt_length = processor.get_audio_prompt_len(inputs["decoder_attention_mask"], )
-        inputs = inputs.to(self.device)
+        prompt_length = (
+            runtime.processor.get_audio_prompt_len(inputs["decoder_attention_mask"])
+            if audio is not None else None)
         generated = self.model.generate(
-            **inputs,
-            **generation_options,
+            **inputs.to(self.device),
+            **options,
         )
-        sequences = getattr(generated, "sequences", generated)
-        decoded = processor.batch_decode(
-            sequences,
+        decoded = runtime.processor.batch_decode(
+            generated,
             audio_prompt_len=prompt_length,
         )
         if not decoded:
-            raise RuntimeError("Dia Transformers decoding returned no audio.")
+            raise RuntimeError("Native Dia decoding returned no audio.")
         return decoded[0]
 
     def _generate(
@@ -406,7 +360,7 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
         text: str,
         *,
         output_file: str | None = None,
-        **generation_options,
+        **generation_options: Any,
     ) -> TTSOutput:
         options = dict(generation_options)
         requested_seed = options.pop("seed", None)
@@ -415,27 +369,34 @@ class DiaForTextToSpeech(PreTrainedTTSModel):
                 device=self.device,
                 model_type="dia",
         ) as effective_seed:
-            if self._loaded_backend == "legacy":
-                audio = self._generate_legacy(text, options)
-            elif self._loaded_backend == "transformers":
-                audio = self._generate_transformers(text, options)
-            else:
-                raise RuntimeError("Dia must select and load a backend before generation.")
+            audio = self._generate_native(text, options)
+        revision = (self._dia_runtime.artifacts.revision if self._dia_runtime is not None else None)
         return finish_audio_output(
             audio,
             self.sample_rate,
             output_file=output_file,
             metadata={
-                "backend": self._loaded_backend,
-                "seed": effective_seed,
+                "backend": "voicehub-native",
+                "checkpoint_revision": revision,
                 "requested_seed": requested_seed,
+                "seed": effective_seed,
             },
         )
 
     def _save_pretrained(self, save_directory: Path) -> None:
-        if self._loaded_backend == "transformers" and self._dia_backend:
-            self._dia_backend.save_pretrained(save_directory)
+        if self._dia_runtime is None:
+            self.load()
+        if self._dia_runtime is None:
+            raise RuntimeError("Dia's native runtime is not available for export.")
+        self._dia_runtime.save_pretrained(save_directory)
 
 
 DiaVoiceHubConfig = DiaConfig
 DiaTTS = DiaForTextToSpeech
+
+__all__ = [
+    "DiaConfig",
+    "DiaForTextToSpeech",
+    "DiaTTS",
+    "DiaVoiceHubConfig",
+]

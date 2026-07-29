@@ -1,0 +1,32 @@
+{
+  "architecture": "VITS / MMS-TTS",
+  "implementation": {
+    "runtime_dependencies": [
+      "python-standard-library",
+      "torch",
+      "voicehub"
+    ],
+    "training": "Native posterior encoder, monotonic alignment search, stochastic or deterministic duration objective, flow, HiFi-GAN decoder, scale-plus-five-period discriminator, Slaney mel frontend, and separate discriminator/generator optimizer phases.",
+    "training_boundary": "MMS-TTS config.json publishes the 513-bin posterior input and 256x decoder upsample factor, but not the FFT, window, mel, or segment settings used for training. VoiceHub therefore requires training_acoustic_config explicitly and never infers those values from the inference checkpoint."
+  },
+  "sources": [
+    {
+      "license": "MIT",
+      "name": "VITS",
+      "revision": "2e561ba58618d021b5b8323d3765880f7e0ecfdb",
+      "url": "https://github.com/jaywalnut310/vits"
+    },
+    {
+      "license": "Apache-2.0",
+      "name": "Transformers VITS checkpoint namespace",
+      "revision": "ebea912f0bb6f9e28ad2df04acd9b4df035933a9",
+      "url": "https://github.com/huggingface/transformers/tree/ebea912f0bb6f9e28ad2df04acd9b4df035933a9/src/transformers/models/vits"
+    }
+  ],
+  "reference_checkpoint": {
+    "license": "CC-BY-NC-4.0",
+    "repository": "facebook/mms-tts-eng",
+    "revision": "c71de0fe7204c83f1c10820a7d696d0b450048ba",
+    "safetensors_header_fingerprint_sha256": "3a4b98a214895e2e4dd27ee96f85c7b646d8e3d26942c3157840778e6d0ef424"
+  }
+}

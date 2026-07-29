@@ -2,13 +2,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Tuple
 
-import safetensors.torch as st
 import torch
-import torchaudio
-from huggingface_hub import hf_hub_download
 
+from voicehub.checkpointing import SafeTensorReader
+from voicehub.hub import resolve_pretrained_file
 from voicehub.models.echo.autoencoder import DAC, build_ae
 from voicehub.models.echo.model import EchoDiT
+from voicehub.processing.waveform import load_native_audio, save_pcm_wave
 
 
 def _resolve_checkpoint_file(
@@ -16,19 +16,90 @@ def _resolve_checkpoint_file(
     filename: str,
     *,
     token: str | None = None,
-) -> str:
-    raw_source = str(name_or_path)
-    source = Path(name_or_path).expanduser()
-    if source.is_file():
-        return str(source.resolve())
-    if source.is_dir():
-        checkpoint = source / filename
-        if not checkpoint.is_file():
-            raise FileNotFoundError(f"Echo checkpoint file was not found: {checkpoint}.")
-        return str(checkpoint.resolve())
-    if (isinstance(name_or_path, Path) or source.is_absolute() or raw_source.startswith(("./", "../", "~"))):
-        raise FileNotFoundError(f"Echo checkpoint path was not found: {source}.")
-    return hf_hub_download(raw_source, filename, token=token)
+) -> Path:
+    """Resolve one Echo artifact through VoiceHub's native Hub transport."""
+    return resolve_pretrained_file(
+        name_or_path,
+        filename,
+        token=token,
+    )
+
+
+def _load_safetensors(
+        path: str | Path,
+        *,
+        device: str | torch.device = "cpu",
+        dtype: torch.dtype | None = None,
+        excluded_prefixes: tuple[str, ...] = (),
+        excluded_fragments: tuple[str, ...] = (),
+) -> dict[str, torch.Tensor]:
+    """Materialize a validated Echo state dictionary without third-party
+    I/O."""
+    with SafeTensorReader(path) as reader:
+        names = tuple(
+            name for name in reader.keys() if not name.startswith(excluded_prefixes) and not any(
+                fragment in name for fragment in excluded_fragments))
+        return {
+            name: reader.get_tensor(
+                name,
+                device=device,
+                dtype=dtype,
+            )
+            for name in names
+        }
+
+
+def _assign_validated_state(
+        model: torch.nn.Module,
+        state: dict[str, torch.Tensor],
+        *,
+        allowed_missing_prefixes: tuple[str, ...] = (),
+        allowed_missing_fragments: tuple[str, ...] = (),
+) -> None:
+    """Assign a safe state only when its complete tensor inventory is known."""
+    expected = set(model.state_dict())
+    supplied = set(state)
+    allowed_missing = {
+        name
+        for name in expected if name.startswith(allowed_missing_prefixes) or any(
+            fragment in name for fragment in allowed_missing_fragments)
+    }
+    missing = expected - supplied
+    unexpected = supplied - expected
+    if missing != allowed_missing or unexpected:
+        details = []
+        unapproved_missing = sorted(missing - allowed_missing)
+        unexpectedly_present = sorted(unexpected)
+        expected_but_present = sorted(allowed_missing - missing)
+        if unapproved_missing:
+            details.append("missing: " + ", ".join(unapproved_missing[:8]))
+        if unexpectedly_present:
+            details.append("unexpected: " + ", ".join(unexpectedly_present[:8]))
+        if expected_but_present:
+            details.append(
+                "excluded tensors were unexpectedly supplied: " + ", ".join(expected_but_present[:8]))
+        raise RuntimeError(
+            "Echo checkpoint tensor inventory does not match the pinned "
+            f"architecture ({'; '.join(details)}).")
+    incompatible = model.load_state_dict(
+        state,
+        strict=False,
+        assign=True,
+    )
+    if (set(incompatible.missing_keys) != allowed_missing or incompatible.unexpected_keys):
+        raise RuntimeError(
+            "PyTorch reported a different Echo checkpoint inventory after "
+            "validated assignment.")
+
+
+def _discard_blockwise_only_modules(model: EchoDiT) -> None:
+    """Remove weights that the non-blockwise sampler intentionally omits."""
+    del model.latent_encoder
+    del model.latent_norm
+    for block in model.blocks:
+        del block.attention.wk_latent
+        del block.attention.wv_latent
+    model.blockwise_generation_available = False
 
 
 def load_model_from_hf(
@@ -64,22 +135,24 @@ def load_model_from_hf(
         "pytorch_model.safetensors",
         token=token,
     )
-    state = st.load_file(w_path, device="cpu")
+    state = _load_safetensors(
+        w_path,
+        device=device,
+        dtype=dtype,
+        excluded_prefixes=(("latent_encoder.", "latent_norm") if delete_blockwise_modules else ()),
+        excluded_fragments=((".wk_latent", ".wv_latent") if delete_blockwise_modules else ()),
+    )
 
+    missing_prefixes = (("latent_encoder.", "latent_norm") if delete_blockwise_modules else ())
+    missing_fragments = ((".wk_latent", ".wv_latent") if delete_blockwise_modules else ())
+    _assign_validated_state(
+        model,
+        state,
+        allowed_missing_prefixes=missing_prefixes,
+        allowed_missing_fragments=missing_fragments,
+    )
     if delete_blockwise_modules:
-        state = {
-            k: v
-            for k, v in state.items() if not (
-                k.startswith("latent_encoder.") or k.startswith("latent_norm") or ".wk_latent" in k or
-                ".wv_latent" in k)
-        }
-
-    if dtype is not None:
-        state = {k: v.to(dtype=dtype) for k, v in state.items()}
-
-    state = {k: v.to(device=device) for k, v in state.items()}
-
-    model.load_state_dict(state, strict=False, assign=True)
+        _discard_blockwise_only_modules(model)
     model = model.eval()
 
     if compile:
@@ -92,7 +165,8 @@ def compile_model(model: EchoDiT) -> EchoDiT:
     model = torch.compile(model)
     model.get_kv_cache_text = torch.compile(model.get_kv_cache_text)
     model.get_kv_cache_speaker = torch.compile(model.get_kv_cache_speaker)
-    model.get_kv_cache_latent = torch.compile(model.get_kv_cache_latent)
+    if getattr(model, "blockwise_generation_available", True):
+        model.get_kv_cache_latent = torch.compile(model.get_kv_cache_latent)
     return model
 
 
@@ -111,14 +185,12 @@ def load_fish_ae_from_hf(
         "pytorch_model.safetensors",
         token=token,
     )
-    if dtype is not None and dtype != torch.float32:
-        state = st.load_file(w_path, device="cpu")
-        state = {k: v.to(dtype=dtype) for k, v in state.items()}
-        state = {k: v.to(device=device) for k, v in state.items()}
-        fish_ae.load_state_dict(state, strict=False, assign=True)
-    else:
-        state = st.load_file(w_path, device=device)
-        fish_ae.load_state_dict(state, strict=False, assign=True)
+    state = _load_safetensors(
+        w_path,
+        device=device,
+        dtype=dtype,
+    )
+    _assign_validated_state(fish_ae, state)
 
     fish_ae = fish_ae.eval().to(device)
 
@@ -153,7 +225,7 @@ def load_pca_state_from_hf(
         filename,
         token=token,
     )
-    t = st.load_file(p_path, device=device)
+    t = _load_safetensors(p_path, device=device)
     return PCAState(
         pca_components=t["pca_components"],
         pca_mean=t["pca_mean"],
@@ -165,14 +237,17 @@ def load_pca_state_from_hf(
 
 
 def load_audio(path: str, max_duration: int = 300) -> torch.Tensor:
-
-    audio, sr = torchaudio.load(path)
-    max_samples = max_duration * sr
-    audio = audio[:, :max_samples]
-    audio = audio.mean(dim=0).unsqueeze(0)
-    audio = torchaudio.functional.resample(audio, sr, 44_100)
-    audio = audio / torch.maximum(audio.abs().max(), torch.tensor(1.))
-    return audio
+    if isinstance(max_duration, bool) or not isinstance(max_duration, int):
+        raise TypeError("`max_duration` must be an integer number of seconds.")
+    if max_duration <= 0:
+        raise ValueError("`max_duration` must be positive.")
+    materialized = load_native_audio(
+        path,
+        target_sampling_rate=44_100,
+    )
+    audio = materialized.waveform[:max_duration * 44_100].unsqueeze(0)
+    denominator = audio.abs().max().clamp_min(1.0)
+    return audio / denominator
 
 
 def tokenizer_encode(
@@ -562,4 +637,4 @@ if __name__ == "__main__":
     )
     audio_out = ae_decode(fish_ae, pca_state, latent_out)
     audio_out = crop_audio_to_flattening_point(audio_out, latent_out[0])
-    torchaudio.save("output.wav", audio_out[0].cpu(), 44100)
+    save_pcm_wave("output.wav", audio_out[0].cpu(), 44_100)

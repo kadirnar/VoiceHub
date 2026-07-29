@@ -1,13 +1,14 @@
-"""Lazy WebRTC VAD wrapper with explicit PCM framing."""
+"""VoiceHub-native WebRTC VAD wrapper with explicit PCM framing."""
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
+from voicehub.architectures.webrtc_vad.detector import NativeWebRTCVAD
 from voicehub.audio import load_audio
 from voicehub.audio_modeling_utils import PreTrainedVADModel
-from voicehub.dependencies import import_optional
 from voicehub.inference_configuration import VADInferenceConfig
 from voicehub.modeling_outputs import SpeechSegment, VADOutput
 from voicehub.models.vad_webrtc.configuration_vad_webrtc import WebRTCVADConfig
@@ -39,17 +40,7 @@ class WebRTCVADForVoiceActivityDetection(PreTrainedVADModel):
         return "cpu"
 
     def _load_pretrained_model(self) -> None:
-        webrtcvad = import_optional(
-            "webrtcvad",
-            model_type=self.config.model_type,
-            install_extra=None,
-        )
-        self._vad_class = getattr(webrtcvad, "Vad", None)
-        if not callable(self._vad_class):
-            raise RuntimeError("The installed webrtcvad package does not expose Vad().")
-        self.model = self._vad_class(self.config.aggressiveness)
-        if not callable(getattr(self.model, "is_speech", None)):
-            raise RuntimeError("The WebRTC VAD runtime does not expose is_speech().")
+        self.model = NativeWebRTCVAD(self.config.aggressiveness)
 
     def _detect(
         self,
@@ -86,26 +77,28 @@ class WebRTCVADForVoiceActivityDetection(PreTrainedVADModel):
             sampling_rate=sampling_rate,
             target_sampling_rate=self.sample_rate,
         )
-        np = import_optional(
-            "numpy",
-            model_type=self.config.model_type,
-            install_extra=None,
-        )
         frame_samples = round(materialized.sampling_rate * self.config.frame_duration_ms / 1000)
         if window_size_samples is not None and window_size_samples != frame_samples:
             raise ValueError(
                 "WebRTC requires the configured 10/20/30 ms frame size; "
                 f"expected {frame_samples} samples.")
-        pcm = np.clip(materialized.waveform, -1.0, 1.0)
-        pcm = (pcm * 32767.0).round().astype("<i2", copy=False)
-        vad = self._vad_class(self.config.aggressiveness)
+        waveform = materialized.waveform
+        values = waveform.tolist() if hasattr(waveform, "tolist") else list(waveform)
+        pcm = []
+        for value in values:
+            normalized = float(value)
+            if not math.isfinite(normalized):
+                normalized = 0.0
+            normalized = max(-1.0, min(1.0, normalized))
+            pcm.append(round(normalized * 32767.0))
+        vad = NativeWebRTCVAD(self.config.aggressiveness)
         flags = []
         for start in range(0, len(pcm), frame_samples):
             frame = pcm[start:start + frame_samples]
             if len(frame) < frame_samples:
-                frame = np.pad(frame, (0, frame_samples - len(frame)))
+                frame.extend([0] * (frame_samples - len(frame)))
             flags.append(1.0 if vad.is_speech(
-                frame.tobytes(),
+                frame,
                 materialized.sampling_rate,
             ) else 0.0)
         postprocessing = VADInferenceConfig(
@@ -138,7 +131,7 @@ class WebRTCVADForVoiceActivityDetection(PreTrainedVADModel):
             sample_rate=materialized.sampling_rate,
             probabilities=None,
             metadata={
-                "backend": "webrtc",
+                "backend": "voicehub-native-webrtc",
                 "aggressiveness": self.config.aggressiveness,
                 "frame_duration_ms": self.config.frame_duration_ms,
                 "frame_scores_available": False,

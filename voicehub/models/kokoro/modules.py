@@ -1,9 +1,9 @@
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.parametrizations import weight_norm
-from transformers import AlbertModel
+
+from voicehub.architectures.kokoro.albert import KokoroAlbertModel
 
 from .istftnet import AdainResBlk1d
 
@@ -193,10 +193,5 @@ class DurationEncoder(nn.Module):
         return x.transpose(-1, -2)
 
 
-class CustomAlbert(AlbertModel):
-    """ALBERT wrapper that returns ``last_hidden_state`` directly instead of
-    the full output object."""
-
-    def forward(self, *args, **kwargs):
-        outputs = super().forward(*args, **kwargs)
-        return outputs.last_hidden_state
+class CustomAlbert(KokoroAlbertModel):
+    """Source name retained for checkpoint and downstream compatibility."""

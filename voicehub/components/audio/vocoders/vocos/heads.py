@@ -1,11 +1,20 @@
-from typing import Optional
+from __future__ import annotations
+
+import math
 
 import torch
 from torch import nn
-from torchaudio.functional.functional import _hz_to_mel, _mel_to_hz
 
 from voicehub.components.audio.vocoders.vocos.spectral_ops import IMDCT, ISTFT
 from voicehub.components.audio.vocoders.vocos.modules import symexp
+
+
+def _hz_to_htk_mel(frequency: float) -> float:
+    return 2_595.0 * math.log10(1.0 + frequency / 700.0)
+
+
+def _htk_mel_to_hz(mels: torch.Tensor) -> torch.Tensor:
+    return 700.0 * (torch.pow(10.0, mels / 2_595.0) - 1.0)
 
 
 class FourierHead(nn.Module):
@@ -87,7 +96,7 @@ class IMDCTSymExpHead(FourierHead):
         dim: int,
         mdct_frame_len: int,
         padding: str = "same",
-        sample_rate: Optional[int] = None,
+        sample_rate: int | None = None,
         clip_audio: bool = False,
     ):
         super().__init__()
@@ -97,10 +106,16 @@ class IMDCTSymExpHead(FourierHead):
         self.clip_audio = clip_audio
 
         if sample_rate is not None:
+            if (
+                isinstance(sample_rate, bool)
+                or not isinstance(sample_rate, int)
+                or sample_rate <= 0
+            ):
+                raise ValueError("`sample_rate` must be a positive integer.")
             # optionally init the last layer following mel-scale
-            m_max = _hz_to_mel(sample_rate // 2)
+            m_max = _hz_to_htk_mel(sample_rate / 2)
             m_pts = torch.linspace(0, m_max, out_dim)
-            f_pts = _mel_to_hz(m_pts)
+            f_pts = _htk_mel_to_hz(m_pts)
             scale = 1 - (f_pts / f_pts.max())
 
             with torch.no_grad():
@@ -122,7 +137,7 @@ class IMDCTSymExpHead(FourierHead):
         x = torch.clip(x, min=-1e2, max=1e2)  # safeguard to prevent excessively large magnitudes
         audio = self.imdct(x)
         if self.clip_audio:
-            audio = torch.clip(x, min=-1.0, max=1.0)
+            audio = torch.clip(audio, min=-1.0, max=1.0)
 
         return audio
 
@@ -160,5 +175,5 @@ class IMDCTCosHead(FourierHead):
         m = torch.exp(m).clip(max=1e2)  # safeguard to prevent excessively large magnitudes
         audio = self.imdct(m * torch.cos(p))
         if self.clip_audio:
-            audio = torch.clip(x, min=-1.0, max=1.0)
+            audio = torch.clip(audio, min=-1.0, max=1.0)
         return audio

@@ -1,10 +1,14 @@
 import json
 import math
-import sys
 from pathlib import Path
 from typing import Union
 
 import torch
+from voicehub.tokenization import (
+    ByteBPETokenizer,
+    SentencePieceUnigramTokenizer,
+)
+from voicehub.tokenization.llama3 import llama3_pretokenize
 from voicehub.models.conversationtts.source.conversationtts.tools.tokenizer.common import fix_and_load_json
 from voicehub.models.conversationtts.source.conversationtts.tools.tokenizer.abs_tokenizer import AbsTokenizer
 
@@ -17,10 +21,15 @@ class TextTokenizer(AbsTokenizer):
             raise NotADirectoryError(f"The checkpoint directory does not exist: {str(checkpoint_dir)}")
         # some checkpoints have both files, `.json` takes precedence
         if (vocabulary_path := checkpoint_dir / "tokenizer.json").is_file():
-            from tokenizers import Tokenizer as HFTokenizer
-            self.model = HFTokenizer.from_file(str(vocabulary_path))
-            self.backend = "huggingface"
+            self.model = ByteBPETokenizer.from_tokenizer_json(
+                vocabulary_path,
+                use_regex=False,
+                pretokenizer=llama3_pretokenize,
+            )
+            self.backend = "voicehub-byte-bpe"
             # get BOS and EOS ids
+            self.bos_id = None
+            self.eos_id = None
             if (special_tokens_path := checkpoint_dir / "tokenizer_config.json").is_file():
                 with open(special_tokens_path, encoding="utf-8") as fp:
                     config = json.load(fp)
@@ -46,18 +55,23 @@ class TextTokenizer(AbsTokenizer):
                     self.eos_id = config.get("eos_token_id")
         else:
             vocabulary_path = next(checkpoint_dir.glob("tokenizer*.model"), None)
-            assert vocabulary_path is not None, f"No vocabulary file found in {str(checkpoint_dir)}"
-            from sentencepiece import SentencePieceProcessor
-            self.model = SentencePieceProcessor(model_file=str(vocabulary_path))
-            self.backend = "sentencepiece"
-            self.bos_id = self.model.bos_id()
-            self.eos_id = self.model.eos_id()
+            if vocabulary_path is None:
+                raise FileNotFoundError(
+                    f"No tokenizer.json or tokenizer*.model found in {checkpoint_dir}."
+                )
+            self.model = SentencePieceUnigramTokenizer.from_model_file(
+                vocabulary_path,
+            )
+            self.backend = "voicehub-sentencepiece"
+            self.bos_id = self.model.bos_token_id
+            self.eos_id = self.model.eos_token_id
         # Set special token ids. we use the reversed token from llama 3 tokenizer
         self.pad_id = 128004    # 0: <unk> / <epad>
         self.epad_id = 128005    # 3: <pad>
         self.use_bos = True
         self.use_eos = True
         self.max_length = max_length
+        self.apply_decoding_fix = False
 
     @property
     def codebook_length(self):
@@ -79,17 +93,21 @@ class TextTokenizer(AbsTokenizer):
 
     def decode(self, tensor: torch.Tensor) -> str:
         tokens = [tensor.item()] if tensor.ndim == 0 else tensor.tolist()
-        if len(tokens) == 1 and self.apply_decoding_fix:
-            dummy_token_id = 33  # \x1e
-            dummy_token = self.model.decode([dummy_token_id])
-            return self.model.decode([dummy_token_id] + tokens)[len(dummy_token) :]
+        if self.backend == "voicehub-byte-bpe":
+            return self.model.decode(tokens)
         return self.model.decode(tokens)
 
 
     def token_to_id(self, token: str) -> int:
-        if self.backend == "huggingface":
-            id_ = self.model.token_to_id(token)
-        elif self.backend == "sentencepiece":
+        if self.backend == "voicehub-byte-bpe":
+            id_ = self.model.special_tokens.get(token)
+            if id_ is None:
+                id_ = self.model.added_tokens.get(token)
+            if id_ is None:
+                id_ = self.model.vocabulary.get(
+                    token.encode("utf-8"),
+                )
+        elif self.backend == "voicehub-sentencepiece":
             id_ = self.model.piece_to_id(token)
         else:
             raise RuntimeError
@@ -104,7 +122,11 @@ class TextTokenizer(AbsTokenizer):
         for i, token in enumerate(tokens):
             # SentencePiece 使用 "▁" 作为词的开始标记
             # tiktorch 使用 "Ġ" 作为词的开始标记
-            if token.startswith("▁") or token.startswith("Ġ"):
+            if (
+                token.startswith("▁")
+                or token.startswith("Ġ")
+                or token.startswith(" ")
+            ):
                 if current_word:
                     word_to_subword.append({
                         "word": current_word,
@@ -153,20 +175,22 @@ class TextTokenizer(AbsTokenizer):
     def tokenize(self, text):
         ''' input the text setence. output the ID sequence.
         '''
-        if self.backend == "huggingface":
-            encodings = self.model.encode(text) # this returns a `Encoding` object
-            tokens = encodings.tokens
-            ids = encodings.ids
-        elif self.backend == "sentencepiece":
-            tokens = self.model.encode_as_pieces(text)   # this returns a list of tokens
-            ids = [self.model.piece_to_id(token) for token in tokens]
+        if self.backend == "voicehub-byte-bpe":
+            ids = list(
+                self.model.encode(
+                    text,
+                    disallowed_special="none",
+                ).input_ids
+            )
+        elif self.backend == "voicehub-sentencepiece":
+            ids = self.model.encode_as_ids(text)
         else:
             raise RuntimeError(f"`{self.backend}` is not supported.")
         if self.use_bos:
-            if ids[0] != self.bos_id:
+            if self.bos_id is not None and (not ids or ids[0] != self.bos_id):
                 ids = [self.bos_id] + ids
         if self.use_eos:
-            if ids[-1] != self.eos_id:
+            if self.eos_id is not None and (not ids or ids[-1] != self.eos_id):
                 ids = ids + [self.eos_id]
         if self.max_length > 0:
             ids = ids[:self.max_length]
@@ -176,17 +200,24 @@ class TextTokenizer(AbsTokenizer):
     def tokenize_segment(self, segments):
         word_list = []
         for segment in segments:
-            if self.backend == "huggingface":
-                encodings = self.model.encode(segment["text"]) # this returns a `Encoding` object
-                tokens = encodings.tokens
-                ids = encodings.ids
-            elif self.backend == "sentencepiece":
+            if self.backend == "voicehub-byte-bpe":
+                ids = list(
+                    self.model.encode(
+                        segment["text"],
+                        disallowed_special="none",
+                    ).input_ids
+                )
+                tokens = [
+                    self.model.decode((token_id,))
+                    for token_id in ids
+                ]
+            elif self.backend == "voicehub-sentencepiece":
                 tokens = self.model.encode_as_pieces(segment["text"])   # this returns a list of tokens
                 ids = [self.model.piece_to_id(token) for token in tokens]
             else:
                 raise RuntimeError(f"`{self.backend}` is not supported.")
             # remove BOS token if it exists
-            if ids[0] == self.bos_id:
+            if ids and ids[0] == self.bos_id:
                 tokens = tokens[1:]
                 ids = ids[1:]
             # print('tokens ', tokens, ids)

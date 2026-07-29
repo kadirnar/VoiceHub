@@ -1,73 +1,164 @@
+"""PyTorch-native datasets for Vocos fine-tuning."""
+
+from __future__ import annotations
+
+import math
 from dataclasses import dataclass
+from pathlib import Path
 
-import numpy as np
 import torch
-import torchaudio
-from pytorch_lightning import LightningDataModule
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset
 
-torch.set_num_threads(1)
+from voicehub.processing.waveform import load_native_audio
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class DataConfig:
-    filelist_path: str
+    """One deterministic Vocos data-loader configuration."""
+
+    filelist_path: str | Path
     sampling_rate: int
     num_samples: int
     batch_size: int
-    num_workers: int
+    num_workers: int = 0
+
+    def __post_init__(self) -> None:
+        for name in ("sampling_rate", "num_samples", "batch_size"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"`{name}` must be a positive integer.")
+        if (
+            isinstance(self.num_workers, bool)
+            or not isinstance(self.num_workers, int)
+            or self.num_workers < 0
+        ):
+            raise ValueError("`num_workers` must be a non-negative integer.")
+        path = Path(self.filelist_path).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Vocos file list was not found: {path}.")
+        object.__setattr__(self, "filelist_path", path.resolve())
 
 
-class VocosDataModule(LightningDataModule):
-    def __init__(self, train_params: DataConfig, val_params: DataConfig):
-        super().__init__()
-        self.train_config = train_params
-        self.val_config = val_params
+class VocosDataset(Dataset[torch.Tensor]):
+    """Load mono PCM WAVE records without torchaudio or NumPy."""
 
-    def _get_dataloder(self, cfg: DataConfig, train: bool):
-        dataset = VocosDataset(cfg, train=train)
-        dataloader = DataLoader(
-            dataset, batch_size=cfg.batch_size, num_workers=cfg.num_workers, shuffle=train, pin_memory=True,
+    def __init__(
+        self,
+        config: DataConfig,
+        *,
+        train: bool,
+        generator: torch.Generator | None = None,
+    ) -> None:
+        lines = Path(config.filelist_path).read_text(encoding="utf-8").splitlines()
+        root = Path(config.filelist_path).parent
+        paths = (
+            Path(line.strip()).expanduser()
+            for line in lines
+            if line.strip() and not line.lstrip().startswith("#")
         )
-        return dataloader
-
-    def train_dataloader(self) -> DataLoader:
-        return self._get_dataloder(self.train_config, train=True)
-
-    def val_dataloader(self) -> DataLoader:
-        return self._get_dataloder(self.val_config, train=False)
-
-
-class VocosDataset(Dataset):
-    def __init__(self, cfg: DataConfig, train: bool):
-        with open(cfg.filelist_path) as f:
-            self.filelist = f.read().splitlines()
-        self.sampling_rate = cfg.sampling_rate
-        self.num_samples = cfg.num_samples
-        self.train = train
+        self.filelist = tuple(
+            path if path.is_absolute() else root / path
+            for path in paths
+        )
+        if not self.filelist:
+            raise ValueError("Vocos file list does not contain any audio paths.")
+        missing = tuple(path for path in self.filelist if not path.is_file())
+        if missing:
+            raise FileNotFoundError(
+                f"Vocos audio file was not found: {missing[0]}."
+            )
+        self.sampling_rate = config.sampling_rate
+        self.num_samples = config.num_samples
+        self.train = bool(train)
+        self.generator = generator
 
     def __len__(self) -> int:
         return len(self.filelist)
 
-    def __getitem__(self, index: int) -> torch.Tensor:
-        audio_path = self.filelist[index]
-        y, sr = torchaudio.load(audio_path)
-        if y.size(0) > 1:
-            # mix to mono
-            y = y.mean(dim=0, keepdim=True)
-        gain = np.random.uniform(-1, -6) if self.train else -3
-        y, _ = torchaudio.sox_effects.apply_effects_tensor(y, sr, [["norm", f"{gain:.2f}"]])
-        if sr != self.sampling_rate:
-            y = torchaudio.functional.resample(y, orig_freq=sr, new_freq=self.sampling_rate)
-        if y.size(-1) < self.num_samples:
-            pad_length = self.num_samples - y.size(-1)
-            padding_tensor = y.repeat(1, 1 + pad_length // y.size(-1))
-            y = torch.cat((y, padding_tensor[:, :pad_length]), dim=1)
-        elif self.train:
-            start = np.random.randint(low=0, high=y.size(-1) - self.num_samples + 1)
-            y = y[:, start : start + self.num_samples]
-        else:
-            # During validation, take always the first segment for determinism
-            y = y[:, : self.num_samples]
+    def _random_integer(self, high: int) -> int:
+        return int(
+            torch.randint(
+                high,
+                (1,),
+                generator=self.generator,
+            ).item()
+        )
 
-        return y[0]
+    def _normalize_peak(self, waveform: torch.Tensor) -> torch.Tensor:
+        gain_db = (
+            -6.0 + 5.0 * float(torch.rand((), generator=self.generator).item())
+            if self.train
+            else -3.0
+        )
+        peak = waveform.abs().amax()
+        if float(peak.item()) <= 0:
+            return waveform
+        target_peak = math.pow(10.0, gain_db / 20.0)
+        return waveform * (target_peak / peak)
+
+    def __getitem__(self, index: int) -> torch.Tensor:
+        native = load_native_audio(
+            self.filelist[index],
+            target_sampling_rate=self.sampling_rate,
+        )
+        waveform = native.waveform.float()
+        if waveform.ndim != 1:
+            raise RuntimeError("Native audio loader did not return mono audio.")
+        if waveform.numel() == 0:
+            raise ValueError(f"Vocos audio is empty: {self.filelist[index]}.")
+        waveform = self._normalize_peak(waveform)
+
+        if waveform.numel() < self.num_samples:
+            repetitions = math.ceil(self.num_samples / waveform.numel())
+            waveform = waveform.repeat(repetitions)[:self.num_samples]
+        elif waveform.numel() > self.num_samples:
+            start = (
+                self._random_integer(waveform.numel() - self.num_samples + 1)
+                if self.train
+                else 0
+            )
+            waveform = waveform[start:start + self.num_samples]
+        return waveform.contiguous()
+
+
+class VocosDataModule:
+    """Small framework-independent DataLoader factory."""
+
+    def __init__(
+        self,
+        train_params: DataConfig,
+        val_params: DataConfig,
+        *,
+        generator: torch.Generator | None = None,
+    ) -> None:
+        self.train_config = train_params
+        self.val_config = val_params
+        self.generator = generator
+
+    def _get_dataloader(self, config: DataConfig, *, train: bool) -> DataLoader:
+        dataset = VocosDataset(
+            config,
+            train=train,
+            generator=self.generator,
+        )
+        return DataLoader(
+            dataset,
+            batch_size=config.batch_size,
+            num_workers=config.num_workers,
+            shuffle=train,
+            pin_memory=torch.cuda.is_available(),
+            generator=self.generator,
+        )
+
+    def train_dataloader(self) -> DataLoader:
+        return self._get_dataloader(self.train_config, train=True)
+
+    def val_dataloader(self) -> DataLoader:
+        return self._get_dataloader(self.val_config, train=False)
+
+
+__all__ = [
+    "DataConfig",
+    "VocosDataModule",
+    "VocosDataset",
+]

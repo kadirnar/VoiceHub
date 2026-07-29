@@ -15,8 +15,6 @@
 
 from typing import List, Tuple
 
-import numpy as np
-
 import torch
 
 
@@ -95,12 +93,16 @@ def gen_timestamps_from_peak(
 
 def insert_blank(label, blank_id=0):
     """Insert blank token between every two label token."""
-    label = np.expand_dims(label, 1)
-    blanks = np.zeros((label.shape[0], 1), dtype=np.int64) + blank_id
-    label = np.concatenate([blanks, label], axis=1)
-    label = label.reshape(-1)
-    label = np.append(label, label[0])
-    return label
+    if isinstance(label, torch.Tensor):
+        if label.ndim != 1:
+            raise ValueError("CTC alignment labels must be rank one.")
+        values = [int(value) for value in label.tolist()]
+    else:
+        values = [int(value) for value in label]
+    result = [int(blank_id)]
+    for value in values:
+        result.extend((value, int(blank_id)))
+    return result
 
 
 def force_align(ctc_probs: torch.Tensor, y: torch.Tensor, blank_id=0) -> list:

@@ -1,8 +1,41 @@
 {
-  "commercial_use": true,
+  "architecture_source": {
+    "license": "MIT",
+    "repository": "https://github.com/supertone-inc/supertonic",
+    "revision": "7e2804f96016a7028cb1ed627353c61c1e9dd281"
+  },
+  "checkpoint": {
+    "format": "onnx",
+    "license": "OpenRAIL-M",
+    "repository": "Supertone/supertonic-3",
+    "revision": "3cadd1ee6394adea1bd021217a0e650ede09a323"
+  },
   "license": "MIT",
   "model_type": "supertonic",
-  "policy": "Upstream implementation source is vendored. Pretrained weights are resolved separately and retain their upstream license.",
+  "policy": "Architecture execution, Unicode processing, training objectives, and Safetensors export are VoiceHub-owned. External weights are accepted only after pinned byte-integrity and graph-semantic review.",
   "revision": "7e2804f96016a7028cb1ed627353c61c1e9dd281",
-  "upstream": "https://github.com/supertone-inc/supertonic"
+  "upstream": "https://github.com/supertone-inc/supertonic",
+  "voicehub_port": {
+    "author_training_recipe_published": false,
+    "limitations": [
+      "The released repository contains inference graphs but no audio encoder, trainable style encoder path, optimizer configuration, dataset pipeline, or complete author training recipe.",
+      "Fine-tuning therefore requires precomputed style tensors and duration and/or latent targets.",
+      "No quality improvement is claimed without a task-specific benchmark."
+    ],
+    "parity_reference": {
+      "backend": "onnxruntime-cpu",
+      "maximum_absolute_error": {
+        "duration_predictor": 5.9604645e-08,
+        "text_encoder": 2.682209e-05,
+        "vector_estimator": 3.8594e-06,
+        "vocoder": 2.413988e-06
+      }
+    },
+    "runtime_dependencies": [
+      "python-standard-library",
+      "torch",
+      "voicehub"
+    ],
+    "training": "Differentiable duration, text encoding, one-step flow matching, and vocoder reconstruction over the exact published graph."
+  }
 }

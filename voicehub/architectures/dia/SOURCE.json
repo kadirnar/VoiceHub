@@ -1,0 +1,65 @@
+{
+  "architecture": "dia",
+  "implementation": "voicehub-native",
+  "main_library": {
+    "repository": "https://github.com/nari-labs/dia",
+    "revision": "876125e461a03b157ec905b0fe8b57a0f8b9e7a0",
+    "license": "Apache-2.0",
+    "notes": "Reviewed for the official architecture, dialogue protocol, classifier-free guidance, audio prompting, delay pattern, DAC integration, and generation defaults. VoiceHub does not execute this provider package."
+  },
+  "architecture_reference": {
+    "repository": "https://github.com/huggingface/transformers",
+    "revision": "d0e91c7ff1d3ab41b49de369a396f65191e34d2b",
+    "path": "src/transformers/models/dia",
+    "license": "Apache-2.0",
+    "notes": "Reviewed configuration_dia.py, modeling_dia.py, generation_dia.py, processing_dia.py, tokenization_dia.py, feature_extraction_dia.py, and the Dia-specific logits processors. VoiceHub ports the graph and loss semantics using only PyTorch and VoiceHub."
+  },
+  "checkpoint": {
+    "repository": "nari-labs/Dia-1.6B-0626",
+    "revision": "ef2795fcc29c5abe6ffc91fd33808588b49bbc66",
+    "license": "Apache-2.0",
+    "tensors": 335,
+    "parameters": 1611160576,
+    "dtype": "F32",
+    "header_fingerprint": "7e10584bab2432e74f824fd54c64e169e73fb02affc692f6b34650b6392df9f3",
+    "shards": {
+      "model-00001-of-00002.safetensors": "9cf8f82d9f87d408f5da9cc0d73a3e9c4d9ca3633a4df3be4d283277b7ff1b1a",
+      "model-00002-of-00002.safetensors": "54bf3a47ac13e28ba6193659d57bc63a46875685b211b071f782c32efc834343"
+    },
+    "notes": "The complete public index namespace exactly equals the native state dictionary: 335 names, zero missing names, zero extra names, and 1,611,160,576 parameters."
+  },
+  "audio_codec": {
+    "repository": "descript/dac_44khz",
+    "revision": "c1bc521685adf9cfe247bc39a5ca58917eda1ac4",
+    "license": "MIT",
+    "notes": "Loaded through VoiceHub's native DAC architecture. Codec parameters are frozen while constructing Dia targets and are included in portable exports."
+  },
+  "legacy_checkpoint": {
+    "repository": "nari-labs/Dia-1.6B",
+    "supported": false,
+    "reason": "The original pickle/Nari layout is not the strict converted Safetensors namespace used for native end-to-end training. VoiceHub rejects it with a migration message instead of executing pickle or an upstream runtime."
+  },
+  "verified_scope": {
+    "inference": [
+      "UTF-8 byte and speaker-token preparation",
+      "nine-channel delay and reverse-delay transforms",
+      "text-only and audio-prompt preparation",
+      "greedy and multinomial generation",
+      "classifier-free guidance and Dia EOS rules",
+      "native DAC decode"
+    ],
+    "training": [
+      "native DAC target encoding",
+      "teacher-forced shifted decoder inputs",
+      "BOS/PAD label masking",
+      "nine-channel cross-entropy",
+      "full backward through every Dia parameter",
+      "frozen target codec"
+    ],
+    "limitations": [
+      "The reference 1.6B weights are too large for routine CPU CI, so CI verifies the exact public namespace/header inventory and runs numerical graph, checkpoint, generation, export, reload, and backward tests on shape-reduced configurations.",
+      "The baseline native generator recomputes decoder prefixes. KV-cache and compiled execution are optional optimization strategies and do not alter the architecture graph.",
+      "No accuracy improvement is claimed; no corpus-level audio quality benchmark has been run."
+    ]
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "architecture": "inflect-v2",
+  "implementation": "VoiceHub-owned PyTorch port",
+  "license": "Apache-2.0",
+  "source": {
+    "repository": "https://github.com/owenawsong/Inflect",
+    "revision": "6dad5382e473a90be8446e42405874937d4f8959"
+  },
+  "released_runtime": {
+    "repository": "owensong/Inflect-Micro-v2",
+    "revision": "132edf8700da8e0d3fa81cdc0fd8844926fc6582"
+  },
+  "checkpoints": {
+    "micro": {
+      "repository": "owensong/Inflect-Micro-v2",
+      "revision": "132edf8700da8e0d3fa81cdc0fd8844926fc6582",
+      "sha256": "3eede065c9ccfa88ade0a5a9a5c23de34afcbbb32213e59aad44d5cf100fdee8",
+      "config_sha256": "91ba9652f743f65e6be48eaa1aacea1db3d2941f5138ce309f359d4ce14f34e4",
+      "payload_format": "inflect_vits_inference_checkpoint_v1",
+      "tensor_count": 410,
+      "parameter_count": 9356513,
+      "inventory_fingerprint": "16490fe45b1e702613e5e352d2f6b88b9136023697f2c704a120c62021ab9fbf"
+    },
+    "nano": {
+      "repository": "owensong/Inflect-Nano-v2",
+      "revision": "8541719142da23db34a2728b08a8b379a6e10558",
+      "sha256": "bfca468489c9069361d6b87b295a17eef611af8ff09854ce0b80305d9122f5b3",
+      "config_sha256": "8669007c29a215dfc6c4cbb4962c01440f4d806022584699404aee58e5249f03",
+      "payload_format": "inflect_vits_inference_checkpoint_v1",
+      "tensor_count": 410,
+      "parameter_count": 3966721,
+      "inventory_fingerprint": "f4b65b449d95167a19f5ebebdd5f0c64ae93ec4ec17d8039c3f1625609edf516"
+    }
+  },
+  "training_boundary": {
+    "published_checkpoint": "complete deployable generator only",
+    "fresh_components": [
+      "posterior encoder",
+      "multi-period discriminator"
+    ],
+    "fresh_discriminator_parameter_count": 46747132,
+    "author_recipe_recovered": false,
+    "requires_preprocessed_inputs": true
+  },
+  "third_party": [
+    {
+      "project": "jaywalnut310/vits",
+      "license": "MIT"
+    },
+    {
+      "project": "NVIDIA/BigVGAN",
+      "license": "MIT"
+    },
+    {
+      "project": "junjun3518/alias-free-torch",
+      "license": "Apache-2.0"
+    }
+  ]
+}

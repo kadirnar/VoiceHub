@@ -1,7 +1,6 @@
 import math
 from typing import Tuple, Union
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -128,10 +127,9 @@ class WhisperPositionalEncoding(PositionalEncoding):
     def __init__(self, d_model: int, dropout_rate: float, max_len: int = 1500):
         super().__init__(d_model, dropout_rate, max_len)
         self.xscale = 1.0
-        log_timescale_increment = np.log(10000) / (d_model // 2 - 1)
+        log_timescale_increment = math.log(10000) / (d_model // 2 - 1)
         inv_timescales = torch.exp(-log_timescale_increment * torch.arange(d_model // 2))
-        scaled_time = torch.arange(max_len)[:, np.newaxis] *\
-            inv_timescales[np.newaxis, :]
+        scaled_time = torch.arange(max_len)[:, None] * inv_timescales[None, :]
         pe = torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], dim=1)
         delattr(self, "pe")
         self.register_buffer("pe", pe.unsqueeze(0))

@@ -1,7 +1,6 @@
 import json
 import math
 from typing import List, Tuple
-import numpy as np
 import torch
 from torch import nn
 from voicehub.models.conversationtts.source.conversationtts.tools.tokenizer.MimiCodec.model.modules.seanet import SEANetEncoder, SEANetDecoder

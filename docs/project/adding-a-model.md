@@ -58,7 +58,7 @@ The integration path is:
   <li>
     <span class="vh-process__number" aria-hidden="true">03</span>
     <strong>Register the integration</strong>
-    <span class="vh-process__detail">Declare aliases, default runtime dependencies, components, and public classes.</span>
+    <span class="vh-process__detail">Declare aliases, native architecture components, and public classes without adding a provider runtime.</span>
   </li>
   <li>
     <span class="vh-process__number" aria-hidden="true">04</span>
@@ -108,7 +108,8 @@ validates a trainable graph.
 Use a base or pretraining checkpoint for training when the inference default is
 an instruction-tuned, voice-specific, EMA-only, or inference-pruned variant.
 Record that distinction with
-`training_default_model_name_or_path` in the training profile.
+`training_default_model_name_or_path` in the training profile and add the
+`default-checkpoint-inference-only` capability to the model specification.
 
 ## 2. Choose an honest training boundary
 
@@ -449,56 +450,65 @@ If an inference transformation is destructive, branch inside
 `_load_pretrained_model()` while `self.is_training_load` is true. Do not assume
 it can be reversed later.
 
-## 6. Keep runtime imports lazy
+## 6. Keep the native runtime boundary small and lazy
 
-Add the integration's general-purpose runtime libraries to the existing
-default dependency list in `pyproject.toml`:
+Built-in model integrations do not add framework, tokenizer, audio, checkpoint,
+or numerical packages to the default dependency list. PyTorch is VoiceHub's
+only external tensor/autograd substrate:
 
 ```toml
 [project]
 dependencies = [
-  # Existing VoiceHub inference requirements...
-  "torch>=2.1",
-  "torchaudio>=2.1",
-  "transformers>=4.53",
-  "safetensors>=0.4",
+  "torch>=2.8,<2.9",
 ]
 ```
 
-Users receive the new inference runtime through the same stable command:
+The executable model graph, processor, tokenizer/parser, codec or vocoder,
+checkpoint reader, objective, and export path must live under `voicehub`.
+Checkpoint repositories provide data, not executable code. Implement the
+required tensor mapping or file-format reader in VoiceHub instead of importing
+Transformers, Safetensors, Tokenizers, Torchaudio, ONNX Runtime, a provider SDK,
+or a convenience DSP package.
+
+Users receive every built-in inference runtime through the same stable command:
 
 ```bash
 python -m pip install voicehub
 ```
 
-Add the only runtime feature extra when fine-tuning is required:
+The separate training extra installs dataset, evaluation, reporting, and
+training-workflow tools. It must not be needed to construct a built-in
+inference graph:
 
 ```bash
 python -m pip install "voicehub[training]"
 ```
 
-Being installed does not make a dependency eager. The core import must not
-pull in `torch`, `transformers`, `soundfile`, or even `numpy`. Use
-`import_optional()` at the operation that needs a dependency:
+PyTorch is installed by default but remains lazy. Importing `voicehub`,
+inspecting registries, reading configuration, and resolving metadata must not
+load it. Import PyTorch only in the model operation that needs tensor execution:
 
 ```python
+from voicehub.dependencies import import_optional
+
+
 torch = import_optional(
     "torch",
     model_type="auroratts",
 )
 ```
 
-With no `install_extra`, an incomplete environment produces an actionable
-hint to reinstall the complete default runtime. Built-in inference models use
-`ModelSpec.install_extra=None`; the optional field is reserved for
-separately distributed extensions or future setup surfaces.
+With no `install_extra`, an incomplete environment produces an actionable hint
+to reinstall the complete default runtime. Built-in inference models use
+`ModelSpec.install_extra=None`; the optional field is reserved for separately
+distributed extensions or future setup surfaces.
 
-Do not add the installable upstream TTS project to the dependency list and do
-not import its top-level package. VoiceHub's source-integration policy requires
-the executable model implementation to live in its isolated
-`voicehub.models.auroratts.source` namespace. General-purpose libraries such
-as PyTorch, Transformers, safetensors, audio I/O, and numerical packages may
-remain external.
+Do not add the installable upstream TTS project to the dependency list or
+import its top-level package. Port the reviewed implementation into a
+VoiceHub-owned architecture namespace, retain its provenance and license, and
+include every active file in the native dependency policy. Dormant reference
+source may be retained for auditability, but no public inference or training
+path may execute it.
 
 ## 7. Record source provenance and licensing
 
@@ -1120,8 +1130,8 @@ still pass or skip cleanly in dependency-light contributor environments.
 - [ ] Generation validation happens before allocation.
 - [ ] Generation returns a valid `TTSOutput` and restores random state.
 - [ ] Inference and training lifecycle transformations are reversible or separated.
-- [ ] Default package metadata contains every required general-purpose inference dependency.
-- [ ] No external installable TTS runtime is imported.
+- [ ] The built-in runtime adds no default dependency beyond the supported PyTorch substrate.
+- [ ] No external model framework, provider SDK, tokenizer, checkpoint, audio, DSP, or numerical runtime is imported.
 - [ ] Source revision and all applicable licenses are recorded.
 - [ ] Shared components are registered once.
 - [ ] Exactly one honest `ModelTrainingSpec` exists.

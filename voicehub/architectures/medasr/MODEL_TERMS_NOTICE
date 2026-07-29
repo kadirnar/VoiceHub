@@ -1,0 +1,6 @@
+HAI-DEF is provided under and subject to the Health AI Developer Foundations Terms of Use found at https://developers.google.com/health-ai-developer-foundations/terms
+
+VoiceHub does not distribute MedASR weights. Access to google/medasr is gated,
+and users must review and accept the current terms before downloading,
+fine-tuning, using, or distributing the model or model derivatives. This
+notice is not a substitute for the agreement or prohibited-use policy.

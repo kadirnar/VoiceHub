@@ -1,0 +1,36 @@
+{
+  "checkpoints": {
+    "s2-pro": {
+      "codec": {
+        "filename": "codec.pth",
+        "format": "pytorch-pickle",
+        "safetensors_published": false,
+        "sha256": "74fc41c5a7151c6f350af8bd7e5d6e3accfcc7f3dfbfac23afd35af07052bb2f",
+        "size": 1871099728,
+        "trust_boundary": "Explicit opt-in, integrity-verified, weights_only one-time conversion"
+      },
+      "license": "Fish Audio Research License",
+      "model_id": "fishaudio/s2-pro",
+      "parameter_count": 4561852416,
+      "revision": "1de9996b6be38b745688de084d87a5633f714e4e",
+      "semantic_format": "sharded-safetensors",
+      "tensor_count": 358
+    }
+  },
+  "commercial_use": false,
+  "implementation_sources": [
+    {
+      "license": "Fish Audio Research License",
+      "revision": "e5e292632cb11e7a27b2b7487f58f612bc101e13",
+      "url": "https://github.com/fishaudio/fish-speech"
+    }
+  ],
+  "license_obligations": {
+    "attribution": "Built with Fish Audio",
+    "commercial_license_required": true,
+    "notice": "This model is licensed under the Fish Audio Research License, Copyright © 39 AI, INC. All Rights Reserved.",
+    "restriction": "Materials, derivatives, and outputs may not create or improve a foundational generative AI model other than Fish models or derivatives."
+  },
+  "model_type": "fish-s2",
+  "policy": "VoiceHub owns the executable PyTorch graph. Pretrained weights remain separately licensed Fish Audio Materials."
+}

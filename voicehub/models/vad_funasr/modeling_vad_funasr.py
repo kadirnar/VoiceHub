@@ -1,109 +1,17 @@
-"""Lazy FunASR FSMN voice activity detection wrapper."""
+"""VoiceHub-native FunASR FSMN voice activity detection provider."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from math import isclose, isfinite
-from numbers import Real
+import math
 from pathlib import Path
 from typing import Any
 
-from voicehub.audio import load_audio
 from voicehub.audio_modeling_utils import PreTrainedVADModel
-from voicehub.dependencies import import_optional
+from voicehub.hub import read_json_file, write_json_file
 from voicehub.modeling_outputs import SpeechSegment, VADOutput
 from voicehub.models.native_utils import resolve_native_device
 from voicehub.models.vad_funasr.configuration_vad_funasr import FunASRVADConfig
 from voicehub.vad_utils import merge_speech_segments
-
-_MILLISECONDS_TO_SECONDS = 0.001
-
-
-def _clean_time(value: float) -> float:
-    """Remove insignificant floating-point noise from millisecond
-    arithmetic."""
-    return round(value, 12)
-
-
-def _is_boundary(value: Any) -> bool:
-    if isinstance(value, Mapping):
-        return ("start" in value and ("end" in value or "stop" in value))
-    if isinstance(value, (str, bytes)):
-        return False
-    try:
-        return len(value) >= 2
-    except TypeError:
-        return False
-
-
-def _result_boundaries(result: Any) -> tuple[Any, tuple[str, ...]]:
-    """Extract the single-utterance boundary list from FunASR output."""
-    if (isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], Mapping)):
-        result = result[0]
-
-    if isinstance(result, Mapping):
-        raw_keys = tuple(sorted(str(key) for key in result))
-        if "value" in result:
-            values = result["value"]
-            return (() if values is None else values), raw_keys
-        if "segments" in result:
-            values = result["segments"]
-            return (() if values is None else values), raw_keys
-        raise ValueError("FunASR VAD output must contain a `value` or `segments` field.")
-
-    if isinstance(result, (tuple, list)):
-        if not result:
-            return (), ()
-        if all(_is_boundary(value) for value in result):
-            return result, ()
-        if len(result) != 1:
-            raise ValueError("FunASR VAD returned multiple utterances for one audio input.")
-        return _result_boundaries(result[0])
-
-    raise TypeError("FunASR VAD output must be a result mapping or boundary sequence.")
-
-
-def _boundary_values(value: Any) -> tuple[float, float]:
-    if isinstance(value, Mapping):
-        start = value.get("start")
-        end = value.get("end", value.get("stop"))
-    else:
-        try:
-            start, end = value[0], value[1]
-        except (IndexError, KeyError, TypeError) as exc:
-            raise TypeError("FunASR VAD boundaries must contain start/end pairs.") from exc
-    for name, timestamp in (("start", start), ("end", end)):
-        if hasattr(timestamp, "item"):
-            timestamp = timestamp.item()
-        if (isinstance(timestamp, bool) or not isinstance(timestamp, Real) or not isfinite(float(timestamp))):
-            raise TypeError(f"FunASR VAD boundary `{name}` must be a finite number.")
-        if name == "start":
-            start = float(timestamp)
-        else:
-            end = float(timestamp)
-    return start, end
-
-
-def _normalize_boundaries(
-    values,
-    *,
-    duration: float,
-) -> tuple[SpeechSegment, ...]:
-    segments = []
-    for value in values:
-        start_ms, end_ms = _boundary_values(value)
-        if start_ms < 0 or end_ms < 0:
-            raise RuntimeError(
-                "FunASR returned an incomplete streaming boundary during "
-                "offline inference.")
-        if end_ms < start_ms:
-            raise ValueError("FunASR returned a VAD boundary whose end precedes its start.")
-        start = _clean_time(min(duration, start_ms * _MILLISECONDS_TO_SECONDS))
-        end = _clean_time(min(duration, end_ms * _MILLISECONDS_TO_SECONDS))
-        if end <= start:
-            continue
-        segments.append(SpeechSegment(start=start, end=end))
-    return merge_speech_segments(segments)
 
 
 def _postprocess_segments(
@@ -115,62 +23,50 @@ def _postprocess_segments(
     speech_pad_ms: int,
     max_speech_duration_s: float | None,
 ) -> tuple[SpeechSegment, ...]:
-    minimum_speech = min_speech_duration_ms / 1000
+    minimum_speech = min_speech_duration_ms / 1_000.0
     retained = tuple(segment for segment in segments if segment.end - segment.start >= minimum_speech)
     joined = merge_speech_segments(
         retained,
-        max_gap=min_silence_duration_ms / 1000,
+        max_gap=min_silence_duration_ms / 1_000.0,
     )
-    padding = speech_pad_ms / 1000
+    padding = speech_pad_ms / 1_000.0
     padded = tuple(
         SpeechSegment(
-            start=_clean_time(max(0.0, segment.start - padding)),
-            end=_clean_time(min(duration, segment.end + padding)),
+            start=max(0.0, segment.start - padding),
+            end=min(duration, segment.end + padding),
             score=segment.score,
-            label=segment.label,
-            channel=segment.channel,
-            metadata=dict(segment.metadata),
         ) for segment in joined if min(duration, segment.end + padding) > max(0.0, segment.start - padding))
-    padded = merge_speech_segments(padded)
+    merged = merge_speech_segments(padded)
     if max_speech_duration_s is None:
-        return padded
-
+        return merged
     split = []
-    for segment in padded:
+    for segment in merged:
         cursor = segment.start
-        tolerance = 1e-12
-        while segment.end - cursor > max_speech_duration_s + tolerance:
-            split_end = _clean_time(cursor + max_speech_duration_s)
-            split.append(
-                SpeechSegment(
-                    start=cursor,
-                    end=split_end,
-                    score=segment.score,
-                    label=segment.label,
-                    channel=segment.channel,
-                    metadata=dict(segment.metadata),
-                ))
-            cursor = split_end
-        if segment.end - cursor > tolerance:
-            split.append(
-                SpeechSegment(
-                    start=cursor,
-                    end=segment.end,
-                    score=segment.score,
-                    label=segment.label,
-                    channel=segment.channel,
-                    metadata=dict(segment.metadata),
-                ))
+        while segment.end - cursor > max_speech_duration_s + 1e-12:
+            end = round(cursor + max_speech_duration_s, 12)
+            split.append(SpeechSegment(
+                start=cursor,
+                end=end,
+                score=segment.score,
+            ), )
+            cursor = end
+        if segment.end - cursor > 1e-12:
+            split.append(SpeechSegment(
+                start=cursor,
+                end=segment.end,
+                score=segment.score,
+            ), )
     return tuple(split)
 
 
 class FunASRVADForVoiceActivityDetection(PreTrainedVADModel):
-    """Run FunASR FSMN VAD and expose normalized second-based boundaries."""
+    """Run and fine-tune FSMN VAD without importing FunASR or torchaudio."""
 
     config_class = FunASRVADConfig
-    default_model_name_or_path = "fsmn-vad"
-    training_support = "upstream-custom"
-    supports_generic_finetuning = False
+    default_model_name_or_path = "funasr/fsmn-vad"
+    architecture_family = "frame-classification"
+    training_support = "native"
+    supports_generic_finetuning = True
 
     def __init__(
         self,
@@ -180,52 +76,125 @@ class FunASRVADForVoiceActivityDetection(PreTrainedVADModel):
         device: str = "auto",
         lazy_load: bool = True,
         token: str | bool | None = None,
-        **kwargs,
-    ):
-        if token is not None and (not isinstance(token, (str, bool)) or
-                                  isinstance(token, str) and not token.strip()):
-            raise ValueError("`token` must be a non-empty string, boolean, or None.")
-        config = self._coerce_config(config, model_path=model_path, **kwargs)
-        super().__init__(config, device=device, lazy_load=lazy_load)
-        self._token = token
+        trust_pickle_checkpoint: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        if token is not None and not isinstance(token, (str, bool)):
+            raise TypeError("`token` must be a string, boolean, or None.")
+        if isinstance(token, str) and not token.strip():
+            raise ValueError("String `token` values must be non-empty.")
+        if not isinstance(trust_pickle_checkpoint, bool):
+            raise TypeError("`trust_pickle_checkpoint` must be a boolean.")
+        self._hub_token = token
+        self._trust_pickle_checkpoint = trust_pickle_checkpoint
+        self.artifacts: Any | None = None
+        self.native_config: Any | None = None
+        self.checkpoint_adapter: str | None = None
+        config = self._coerce_config(
+            config,
+            model_path=model_path,
+            **kwargs,
+        )
+        super().__init__(
+            config,
+            device=device,
+            lazy_load=lazy_load,
+        )
 
     @staticmethod
     def _resolve_device(device: str) -> str:
         return resolve_native_device(
             device,
-            provider="FunASR VAD",
-            supported_types=("cpu", "cuda", "xpu", "npu"),
+            provider="native FunASR FSMN VAD",
+            supported_types=("cpu", "cuda", "mps"),
         )
 
     def _load_pretrained_model(self) -> None:
-        funasr = import_optional(
-            "funasr",
-            model_type=self.config.model_type,
-            install_extra=None,
-        )
-        auto_model = getattr(funasr, "AutoModel", None)
-        if not callable(auto_model):
-            raise RuntimeError("The installed FunASR package does not expose AutoModel.")
+        import torch
+
+        from voicehub.architectures.fsmn_vad.checkpoint import FSMNVADSafeTensorsCheckpointAdapter
+        from voicehub.architectures.fsmn_vad.configuration import FSMNVADConfig
+        from voicehub.architectures.fsmn_vad.modeling import FSMNVADModel
+        from voicehub.checkpointing import SafeTensorReader
+        from voicehub.models.vad_funasr.artifacts import resolve_fsmn_vad_artifacts
+
         source = self.config.name_or_path or self.default_model_name_or_path
-        options = dict(self.config.model_kwargs)
-        options.update({
-            "model": source,
-            "device": self.device,
-            "hub": self.config.hub,
-            "trust_remote_code": self.config.trust_remote_code,
-            "disable_update": self.config.disable_update,
-            "disable_pbar": self.config.disable_pbar,
-        })
-        if self.config.revision is not None:
-            options["model_revision"] = self.config.revision
-        if self.config.ncpu is not None:
-            options["ncpu"] = self.config.ncpu
-        if self._token is not None:
-            options["token"] = self._token
-        model = auto_model(**options)
-        if model is None or not callable(getattr(model, "generate", None)):
-            raise RuntimeError(f"FunASR could not load a VAD runtime from {source!r}.")
+        artifacts = resolve_fsmn_vad_artifacts(
+            source,
+            revision=self.config.revision,
+            cache_dir=self.config.cache_dir,
+            token=self._hub_token,
+            local_files_only=self.config.local_files_only,
+            trust_pickle_checkpoint=self._trust_pickle_checkpoint,
+        )
+        values = read_json_file(artifacts.config)
+        native_config = FSMNVADConfig.from_dict(values)
+        model = FSMNVADModel(native_config)
+        adapter = FSMNVADSafeTensorsCheckpointAdapter()
+        with SafeTensorReader(artifacts.checkpoint) as reader:
+            declared_format = reader.metadata.get("format")
+            if (declared_format is not None and declared_format != "voicehub-fsmn-vad-v1"):
+                raise ValueError("FSMN VAD Safetensors declares unsupported format "
+                                 f"{declared_format!r}.")
+            adapter.load_streaming(
+                model,
+                reader,
+                values,
+                strict=True,
+            )
+        model.to(device=self.device, dtype=torch.float32)
+        self.config.sample_rate = native_config.sampling_rate
+        self.artifacts = artifacts
+        self.native_config = native_config
+        self.checkpoint_adapter = adapter.qualified_id
         self.model = model
+
+    def _native_inference(
+        self,
+        waveform: Any,
+        *,
+        threshold: float,
+        min_silence_duration_ms: int,
+        max_speech_duration_s: float | None,
+    ) -> tuple[Any, tuple[Any, ...]]:
+        import torch
+
+        from voicehub.architectures.fsmn_vad.inference import FSMNVADDecoder, frame_decibels
+
+        if self.model is None or self.native_config is None:
+            raise RuntimeError("Native FSMN VAD runtime is not loaded.")
+        parameter = next(self.model.parameters())
+        values = waveform.unsqueeze(0).to(
+            device=parameter.device,
+            dtype=parameter.dtype,
+        )
+        with torch.inference_mode():
+            output = self.model(values)
+        speech = output.speech_probabilities[0].detach().float().cpu()
+        probabilities = output.probabilities[0].detach().float().cpu()
+        silence = probabilities[
+            :,
+            list(self.native_config.silence_pdf_ids),
+        ].sum(dim=-1)
+        decibels = frame_decibels(
+            waveform,
+            config=self.native_config,
+            frame_count=speech.numel(),
+        )
+        decoder = FSMNVADDecoder(
+            self.native_config,
+            speech_noise_threshold=threshold,
+            max_end_silence_ms=min_silence_duration_ms,
+            max_single_segment_ms=(
+                None if max_speech_duration_s is None else round(max_speech_duration_s * 1_000)),
+        )
+        boundaries = decoder.process(
+            speech,
+            silence_probabilities=silence,
+            decibels=decibels,
+            final=True,
+        )
+        return speech, boundaries
 
     def _detect(
         self,
@@ -242,51 +211,50 @@ class FunASRVADForVoiceActivityDetection(PreTrainedVADModel):
         window_size_samples: int | None = None,
         return_frames: bool = False,
     ) -> VADOutput:
-        if return_frames:
-            raise ValueError(
-                "FunASR's public FSMN result does not expose frame scores; "
-                "use `return_frames=False`.")
+        from voicehub.processing.waveform import load_native_audio
+
         if window_size_samples is not None:
-            raise ValueError(
-                "FunASR controls analysis geometry in the model artifact; "
-                "`window_size_samples` is not supported.")
+            expected = (None if self.native_config is None else self.native_config.frame_length_samples)
+            if expected is None or window_size_samples != expected:
+                raise ValueError(
+                    "Native FSMN VAD uses a fixed 25 ms analysis window; "
+                    f"received `window_size_samples={window_size_samples}`.")
         effective_threshold = threshold if onset is None else onset
-        if offset is not None and not isclose(
+        if offset is not None and not math.isclose(
                 offset,
                 effective_threshold,
                 rel_tol=0.0,
                 abs_tol=1e-12,
         ):
             raise ValueError(
-                "FunASR FSMN exposes one speech/noise threshold and cannot "
+                "FSMN VAD exposes one speech/noise threshold and cannot "
                 "apply independent `onset` and `offset` values.")
-
-        materialized = load_audio(
+        materialized = load_native_audio(
             audio,
             sampling_rate=sampling_rate,
             target_sampling_rate=self.sample_rate,
         )
-        options = dict(self.config.generate_kwargs)
-        options.update({
-            "cache": {},
-            "fs": materialized.sampling_rate,
-            "is_final": True,
-            "max_end_silence_time": min_silence_duration_ms,
-            "speech_noise_thres": effective_threshold,
-        })
-        if max_speech_duration_s is not None:
-            options["max_single_segment_time"] = round(max_speech_duration_s * 1000)
-        result = self.model.generate(
-            input=materialized.waveform,
-            **options,
+        if materialized.waveform.numel() < 400:
+            raise ValueError("Native FSMN VAD requires at least 25 ms (400 samples) of audio.")
+        speech, boundaries = self._native_inference(
+            materialized.waveform,
+            threshold=effective_threshold,
+            min_silence_duration_ms=min_silence_duration_ms,
+            max_speech_duration_s=max_speech_duration_s,
         )
-        boundaries, raw_keys = _result_boundaries(result)
-        segments = _normalize_boundaries(
-            boundaries,
-            duration=materialized.duration,
-        )
+        raw_segments = tuple(
+            SpeechSegment(
+                start=min(
+                    materialized.duration,
+                    boundary.start_ms / 1_000.0,
+                ),
+                end=min(
+                    materialized.duration,
+                    boundary.end_ms / 1_000.0,
+                ),
+            ) for boundary in boundaries if boundary.end_ms > boundary.start_ms)
         segments = _postprocess_segments(
-            segments,
+            raw_segments,
             duration=materialized.duration,
             min_speech_duration_ms=min_speech_duration_ms,
             min_silence_duration_ms=min_silence_duration_ms,
@@ -296,21 +264,102 @@ class FunASRVADForVoiceActivityDetection(PreTrainedVADModel):
         return VADOutput(
             segments=segments,
             duration=materialized.duration,
-            sample_rate=materialized.sampling_rate,
+            sample_rate=self.sample_rate,
+            probabilities=(tuple(float(item) for item in speech.tolist()) if return_frames else None),
             metadata={
-                "backend": "funasr",
-                "architecture_family": "fsmn",
-                "source": (self.config.name_or_path or self.default_model_name_or_path),
-                "hub": self.config.hub,
-                "native_timestamp_unit": "milliseconds",
-                "frame_scores_available": False,
-                "raw_keys": raw_keys,
+                "backend":
+                "voicehub-native",
+                "architecture":
+                "fsmn-vad",
+                "source":
+                self.config.name_or_path,
+                "checkpoint_format":
+                "voicehub-fsmn-vad-v1",
+                "checkpoint_adapter":
+                self.checkpoint_adapter,
+                "checkpoint_revision":
+                None if self.artifacts is None else self.artifacts.revision,
+                "converted_from_pickle":
+                (False if self.artifacts is None else self.artifacts.converted_from_pickle),
+                "frame_scores_available":
+                True,
+                "frame_hop_samples":
+                160,
+                "frame_length_samples":
+                400,
+                "native_timestamp_unit":
+                "milliseconds",
             },
         )
 
+    def stream(
+        self,
+        *,
+        sampling_rate: int,
+        **inference_kwargs: Any,
+    ) -> Any:
+        """Create an incremental session with isolated frontend/FSMN state."""
+        from voicehub.models.vad_funasr.streaming import FSMNVADStreamingSession
+
+        if sampling_rate != self.sample_rate:
+            raise ValueError("Native FSMN streaming requires 16 kHz input chunks.")
+        defaults = self.inference_config.to_dict()
+        defaults.update(inference_kwargs)
+        self.load()
+        return FSMNVADStreamingSession(
+            self,
+            sampling_rate=sampling_rate,
+            inference_kwargs=defaults,
+        )
+
+    def prepare_training_inputs(
+        self,
+        inputs: dict[str, Any],
+        *,
+        phase: str,
+    ) -> dict[str, Any]:
+        from voicehub.models.vad_funasr.training_vad_funasr import prepare_fsmn_vad_training_batch
+
+        del phase
+        if self.model is None:
+            self.load_for_training()
+        return prepare_fsmn_vad_training_batch(self, inputs)
+
     def _validate_training_runtime(self) -> None:
-        raise ValueError(
-            "FunASR FSMN VAD training is upstream-custom and requires its "
-            "configuration-driven training runner and data manifests. "
-            "VoiceHub's generic fine-tuning adapter is intentionally "
-            "unavailable.")
+        return None
+
+    def _save_pretrained(self, save_directory: Path) -> None:
+        from voicehub.architectures.fsmn_vad.checkpoint import NATIVE_FSMN_VAD_FILENAME, NATIVE_FSMN_VAD_FORMAT
+        from voicehub.checkpointing import save_safetensors
+
+        if self.model is None or self.native_config is None:
+            self.load()
+        save_directory.mkdir(parents=True, exist_ok=True)
+        save_safetensors(
+            self.model.state_dict(),
+            save_directory / NATIVE_FSMN_VAD_FILENAME,
+            metadata={
+                "format": NATIVE_FSMN_VAD_FORMAT,
+                "architecture": "fsmn-vad",
+                "sample_rate": str(self.sample_rate),
+            },
+        )
+        values = self.native_config.to_dict()
+        values.update({
+            "model_type": self.config.model_type,
+            "architectures": [self.__class__.__name__],
+            "name_or_path": str(save_directory),
+            "checkpoint_format": NATIVE_FSMN_VAD_FORMAT,
+        })
+        write_json_file(save_directory / "config.json", values)
+
+    def export_native_pretrained(
+        self,
+        save_directory: str | Path,
+    ) -> Path:
+        destination = Path(save_directory).expanduser()
+        self._save_pretrained(destination)
+        return destination
+
+
+__all__ = ["FunASRVADForVoiceActivityDetection"]

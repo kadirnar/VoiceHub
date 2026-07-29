@@ -1,10 +1,7 @@
 import logging
-from functools import lru_cache
 from typing import Optional
 
-import numpy as np
 import torch
-import torchaudio as ta
 
 from voicehub.models.chatterbox.models.s3gen.configs import CFM_PARAMS
 from voicehub.models.chatterbox.models.s3gen.const import S3GEN_SR
@@ -17,6 +14,7 @@ from voicehub.models.chatterbox.models.s3gen.transformer.upsample_encoder import
 from voicehub.models.chatterbox.models.s3gen.utils.mel import mel_spectrogram
 from voicehub.models.chatterbox.models.s3gen.xvector import CAMPPlus
 from voicehub.models.chatterbox.models.s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE, S3Tokenizer
+from voicehub.processing.waveform import resample_waveform
 
 
 def drop_invalid_tokens(x):
@@ -25,12 +23,12 @@ def drop_invalid_tokens(x):
     return x[x < SPEECH_VOCAB_SIZE]
 
 
-# TODO: global resampler cache
-@lru_cache(100)
-def get_resampler(src_sr, dst_sr, device):
-    """Get or create a cached audio resampler for the given sample rate
-    conversion."""
-    return ta.transforms.Resample(src_sr, dst_sr).to(device)
+def _resample_batch(waveforms: torch.Tensor, source_rate: int, target_rate: int) -> torch.Tensor:
+    """Resample a ``[batch, samples]`` tensor with VoiceHub's native
+    frontend."""
+    if source_rate == target_rate:
+        return waveforms
+    return torch.stack([resample_waveform(waveform, source_rate, target_rate) for waveform in waveforms])
 
 
 class S3Token2Mel(torch.nn.Module):
@@ -98,8 +96,9 @@ class S3Token2Mel(torch.nn.Module):
         ref_fade_out=True,
     ):
         device = self.device if device == "auto" else device
-        if isinstance(ref_wav, np.ndarray):
-            ref_wav = torch.from_numpy(ref_wav).float()
+        ref_wav = torch.as_tensor(ref_wav)
+        if not ref_wav.is_floating_point():
+            ref_wav = ref_wav.float()
 
         if ref_wav.device != device:
             ref_wav = ref_wav.to(device)
@@ -112,13 +111,13 @@ class S3Token2Mel(torch.nn.Module):
 
         ref_wav_24 = ref_wav
         if ref_sr != S3GEN_SR:
-            ref_wav_24 = get_resampler(ref_sr, S3GEN_SR, device)(ref_wav)
+            ref_wav_24 = _resample_batch(ref_wav, ref_sr, S3GEN_SR)
 
         ref_mels_24 = self.mel_extractor(ref_wav_24).transpose(1, 2).to(device)
         ref_mels_24_len = None
 
         # Resample to 16kHz
-        ref_wav_16 = get_resampler(ref_sr, S3_SR, device)(ref_wav).to(device)
+        ref_wav_16 = _resample_batch(ref_wav, ref_sr, S3_SR).to(device)
 
         # Speaker embedding
         ref_x_vector = self.speaker_encoder.inference(ref_wav_16)
@@ -173,10 +172,10 @@ class S3Token2Mel(torch.nn.Module):
         if ref_dict is None:
             ref_dict = self.embed_ref(ref_wav, ref_sr)
         else:
-            # type/device casting (all values will be numpy if it's from a prod API call)
+            # Normalize portable array-like values without importing NumPy.
             for rk in list(ref_dict):
-                if isinstance(ref_dict[rk], np.ndarray):
-                    ref_dict[rk] = torch.from_numpy(ref_dict[rk])
+                if ref_dict[rk] is not None and not torch.is_tensor(ref_dict[rk]):
+                    ref_dict[rk] = torch.as_tensor(ref_dict[rk])
                 if torch.is_tensor(ref_dict[rk]):
                     ref_dict[rk] = ref_dict[rk].to(self.device)
 
@@ -193,6 +192,11 @@ class S3Token2Mel(torch.nn.Module):
             **ref_dict,
         )
         return output_mels
+
+    def compute_loss(self, batch: dict, device: torch.device | str | None = None) -> dict:
+        """Train the published causal token-to-mel flow objective."""
+        resolved_device = self.device if device is None else torch.device(device)
+        return self.flow.compute_loss(batch, resolved_device)
 
 
 class S3Token2Wav(S3Token2Mel):

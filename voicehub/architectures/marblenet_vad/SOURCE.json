@@ -1,0 +1,20 @@
+{
+  "architecture": "marblenet-vad",
+  "artifact": {
+    "filename": "frame_vad_multilingual_marblenet_v2.0.nemo",
+    "repository": "nvidia/Frame_VAD_Multilingual_MarbleNet_v2.0",
+    "revision": "1f6df5f07c68baacbb91b155ddd54503b4ef2d80",
+    "sha256": "84bda37e925ac6fd740c2ced55642cb79f94f81348e1fa0db992ca50d4b09706"
+  },
+  "license": "Apache-2.0",
+  "source": {
+    "repository": "https://github.com/NVIDIA/NeMo",
+    "revision": "ceeafa4f2b8cece8a0fd47b29051ad659e55b76c",
+    "version": "2.1.0rc0"
+  },
+  "notes": [
+    "The graph preserves all 84 released tensor names and shapes.",
+    "The official pickle-based .nemo file is accepted only through explicit restricted one-time conversion.",
+    "Steady-state inference, fine-tuning, and export use VoiceHub-native PyTorch and Safetensors."
+  ]
+}

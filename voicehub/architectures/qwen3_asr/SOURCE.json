@@ -1,0 +1,68 @@
+{
+  "architecture": "qwen3-asr",
+  "implementation": "voicehub-native",
+  "main_library": {
+    "repository": "https://github.com/QwenLM/Qwen3-ASR",
+    "revision": "7c6daf77a2421100f5fb066495372c00129d39ff",
+    "license": "Apache-2.0",
+    "notes": "Reviewed the complete Transformers backend graph, processor, inference API, vLLM strategy, streaming convenience API, output parser, forced-aligner boundary, examples, and official supervised fine-tuning recipe. VoiceHub does not import or execute qwen_asr or Transformers."
+  },
+  "architecture_reference": {
+    "repository": "https://github.com/huggingface/transformers",
+    "revision": "ebea912f0bb6f9e28ad2df04acd9b4df035933a9",
+    "license": "Apache-2.0",
+    "notes": "VoiceHub reuses its independently implemented dense Qwen3 decoder after verifying the ASR model's identical-position multimodal RoPE reduces to ordinary temporal RoPE."
+  },
+  "checkpoints": [
+    {
+      "repository": "Qwen/Qwen3-ASR-0.6B",
+      "revision": "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+      "license": "Apache-2.0",
+      "format": "Safetensors",
+      "tensors": 612,
+      "parameters": 938008576,
+      "dtype": "BF16",
+      "header_fingerprint": "67bba95c9922ef5ca599b2b0ebd80420ca497e06ad43f9a49f58659a933cfbdb",
+      "shards": {
+        "model.safetensors": "79d6cbd4c98c7bbffe9db2edac07f56cd6637d0d5944b27f6c2b8353840323ea"
+      }
+    },
+    {
+      "repository": "Qwen/Qwen3-ASR-1.7B",
+      "revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
+      "license": "Apache-2.0",
+      "format": "sharded Safetensors",
+      "tensors": 708,
+      "parameters": 2349217408,
+      "dtype": "BF16",
+      "header_fingerprint": "ecf3f6c30544447679cf6a25390e2a62ddfa2490a1fc01655acfeebe3c803e0e",
+      "shards": {
+        "model-00001-of-00002.safetensors": "a4cd1f1a04d90b757dc7f7dd26254e69a013b19e80efe590a83c6a3bde8608d6",
+        "model-00002-of-00002.safetensors": "6e0b9d9e09e2e0238e7ef3cc8a484ab387e91b90f1900bedf88bc92d7929ccfc"
+      }
+    }
+  ],
+  "verified_scope": {
+    "inference": [
+      "three-stage convolutional audio frontend and chunk-length equation",
+      "bounded-window bidirectional audio Transformer and projector",
+      "dense Qwen3 decoder with grouped-query attention, Q/K normalization, RoPE, SwiGLU, and KV cache",
+      "Qwen2 byte-BPE tokenizer, official chat prompt, language protocol, hotword context, long-audio chunking, and repetition cleanup",
+      "strict single-file and sharded Safetensors inventory validation",
+      "portable native export and reload"
+    ],
+    "training": [
+      "raw PCM/tensor audio and text preparation",
+      "completion-only causal labels",
+      "full differentiable backward through the audio tower, projector, and decoder",
+      "VoiceHub-native LoRA injection",
+      "inference-ready merged export"
+    ],
+    "limitations": [
+      "No corpus-level WER benchmark was run, so no accuracy improvement over the published checkpoints is claimed.",
+      "The official streaming helper buffers and reprocesses all accumulated audio with vLLM; the published graph has no incremental audio state and VoiceHub does not claim otherwise.",
+      "Timestamps require the separately published forced-aligner model and are not claimed by this ASR architecture.",
+      "CI executes graph, processor, checkpoint, generation, loss, backward, export, and reload tests on shape-reduced configurations; the exact public tensor inventories are validated separately."
+    ]
+  }
+}

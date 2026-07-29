@@ -1,10 +1,10 @@
 # Copyright (c) Kyutai, all rights reserved.
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
+# Modified by VoiceHub: replace external reshape helpers with native PyTorch.
 
 import typing as tp
 
-from einops import rearrange
 import torch
 from torch import nn
 
@@ -58,10 +58,11 @@ class ConvDownsample1d(nn.Module):
     def forward(self, x: torch.Tensor):
         batch_size = len(x)
         if not self.learnt:
-            x = rearrange(x, "b c t -> (b c) () t")
+            _, channels, time = x.shape
+            x = x.reshape(batch_size * channels, 1, time)
         y = self.conv(x)
         if not self.learnt:
-            y = rearrange(y, "(b c) () t -> b c t", b=batch_size)
+            y = y.reshape(batch_size, channels, y.shape[-1])
         return y
 
 
@@ -109,11 +110,12 @@ class ConvTrUpsample1d(nn.Module):
     def forward(self, x: torch.Tensor):
         batch_size = len(x)
         if not self.learnt:
-            x = rearrange(x, "b c t -> (b c) () t")
+            _, channels, time = x.shape
+            x = x.reshape(batch_size * channels, 1, time)
         y = self.convtr(x)
         if not self.learnt:
             x_for_normalization = torch.ones_like(x[:1])
             normalization = self.convtr(x_for_normalization)
             y = y / normalization
-            y = rearrange(y, "(b c) () t -> b c t", b=batch_size)
+            y = y.reshape(batch_size, channels, y.shape[-1])
         return y

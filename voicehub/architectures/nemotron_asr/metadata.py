@@ -1,0 +1,116 @@
+"""Pinned provenance and checkpoint facts for native Nemotron 3.5 ASR."""
+
+from __future__ import annotations
+
+from types import MappingProxyType
+
+NEMOTRON_ASR_REPOSITORY = ("nvidia/nemotron-3.5-asr-streaming-0.6b")
+NEMOTRON_ASR_REVISION = ("f3d333391852ba876df169dcc9ba902d25b6ab0b")
+NEMOTRON_ASR_CHECKPOINT_FILENAME = "model.safetensors"
+NEMOTRON_ASR_CHECKPOINT_SIZE = 2_552_062_944
+NEMOTRON_ASR_CHECKPOINT_SHA256 = ("9eebdd6590289cb3030f310858f3df932"
+                                  "56600a800a3e8200c5993d5f967e174")
+NEMOTRON_ASR_HEADER_SIZE = 74_584
+NEMOTRON_ASR_TENSOR_COUNT = 655
+NEMOTRON_ASR_PARAMETER_COUNT = 637_997_088
+NEMOTRON_ASR_TENSOR_BYTES = 2_551_988_352
+NEMOTRON_ASR_TENSOR_DTYPE = "F32"
+NEMOTRON_ASR_HEADER_FINGERPRINT = ("c50ff5014b5bb7da8b6a96f27cc568ad"
+                                   "ec886a6e80b53ea3910ee06e77d6b517")
+NEMOTRON_ASR_LICENSE = "OpenMDW-1.1"
+NEMOTRON_ASR_LICENSE_URL = "https://openmdw.ai/license/1-1/"
+
+TRANSFORMERS_SOURCE_REPOSITORY = ("https://github.com/huggingface/transformers")
+TRANSFORMERS_SOURCE_VERSION = "5.14.1"
+TRANSFORMERS_SOURCE_REVISION = ("a08ace4bbd97e721c98751deec37d87b026acadc")
+TRANSFORMERS_NEMOTRON_INITIAL_REVISION = ("4fd7f1a05f52a11d7709747be554ca50294bf03f")
+TRANSFORMERS_NEMOTRON_PROCESSING_FIX_REVISION = ("2df80c4f5863192f1d4cc698bd4f1e1d254e14ba")
+
+TRANSCRIPTION_READY_LOCALES = (
+    "en-US",
+    "en-GB",
+    "es-US",
+    "es-ES",
+    "fr-FR",
+    "fr-CA",
+    "it-IT",
+    "pt-BR",
+    "pt-PT",
+    "nl-NL",
+    "de-DE",
+    "tr-TR",
+    "ru-RU",
+    "ar-AR",
+    "hi-IN",
+    "ja-JP",
+    "ko-KR",
+    "vi-VN",
+    "uk-UA",
+)
+BROAD_COVERAGE_LOCALES = (
+    "pl-PL",
+    "sv-SE",
+    "cs-CZ",
+    "nb-NO",
+    "da-DK",
+    "bg-BG",
+    "fi-FI",
+    "hr-HR",
+    "sk-SK",
+    "zh-CN",
+    "hu-HU",
+    "ro-RO",
+    "et-EE",
+)
+ADAPTATION_READY_LOCALES = (
+    "el-GR",
+    "lt-LT",
+    "lv-LV",
+    "mt-MT",
+    "sl-SI",
+    "he-IL",
+    "th-TH",
+    "nn-NO",
+)
+
+NEMOTRON_ASR_CHECKPOINTS = MappingProxyType({
+    NEMOTRON_ASR_REPOSITORY:
+    MappingProxyType({
+        "revision": NEMOTRON_ASR_REVISION,
+        "filename": NEMOTRON_ASR_CHECKPOINT_FILENAME,
+        "size": NEMOTRON_ASR_CHECKPOINT_SIZE,
+        "sha256": NEMOTRON_ASR_CHECKPOINT_SHA256,
+        "header_size": NEMOTRON_ASR_HEADER_SIZE,
+        "tensors": NEMOTRON_ASR_TENSOR_COUNT,
+        "parameters": NEMOTRON_ASR_PARAMETER_COUNT,
+        "tensor_bytes": NEMOTRON_ASR_TENSOR_BYTES,
+        "dtype": NEMOTRON_ASR_TENSOR_DTYPE,
+        "header_fingerprint": NEMOTRON_ASR_HEADER_FINGERPRINT,
+        "license": NEMOTRON_ASR_LICENSE,
+    }),
+})
+
+__all__ = [
+    "ADAPTATION_READY_LOCALES",
+    "BROAD_COVERAGE_LOCALES",
+    "NEMOTRON_ASR_CHECKPOINTS",
+    "NEMOTRON_ASR_CHECKPOINT_FILENAME",
+    "NEMOTRON_ASR_CHECKPOINT_SHA256",
+    "NEMOTRON_ASR_CHECKPOINT_SIZE",
+    "NEMOTRON_ASR_HEADER_FINGERPRINT",
+    "NEMOTRON_ASR_HEADER_SIZE",
+    "NEMOTRON_ASR_LICENSE",
+    "NEMOTRON_ASR_LICENSE_URL",
+    "NEMOTRON_ASR_PARAMETER_COUNT",
+    "NEMOTRON_ASR_REPOSITORY",
+    "NEMOTRON_ASR_REVISION",
+    "NEMOTRON_ASR_TENSOR_BYTES",
+    "NEMOTRON_ASR_TENSOR_COUNT",
+    "NEMOTRON_ASR_TENSOR_DTYPE",
+    "TRANSCRIPTION_READY_LOCALES",
+    "TRANSFORMERS_NEMOTRON_INITIAL_REVISION",
+    "TRANSFORMERS_NEMOTRON_PROCESSING_FIX_REVISION",
+    "TRANSFORMERS_SOURCE_REPOSITORY",
+    "TRANSFORMERS_SOURCE_REVISION",
+    "TRANSFORMERS_SOURCE_VERSION",
+]

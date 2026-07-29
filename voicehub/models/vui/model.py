@@ -1,17 +1,19 @@
+from __future__ import annotations
+
 import math
-import os
+from collections.abc import Mapping
+from pathlib import Path
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
 from torch import Tensor
-from transformers import AutoTokenizer
 
 from voicehub.models.vui.config import Config
-from voicehub.models.vui.fluac import Fluac
+from voicehub.models.vui.fluac import Fluac, FluacConfig
 from voicehub.models.vui.patterns import DelayedPatternProvider
 from voicehub.models.vui.rope import apply_rotary_emb, precompute_freqs_cis
+from voicehub.models.vui.tok import CustomByT5Tokenizer
 from voicehub.models.vui.utils import load_what_you_can
 
 
@@ -52,7 +54,7 @@ def repeat_kv(x: torch.Tensor, n_reps: int) -> torch.Tensor:
     bs, n_kv_heads, T, head_dim = x.shape
 
     return (
-        x[:, :, :, None, :].expand(bs, n_kv_heads, n_reps, T,
+        x[:, :, None, :, :].expand(bs, n_kv_heads, n_reps, T,
                                    head_dim).reshape(bs, n_kv_heads * n_reps, T, head_dim))
 
 
@@ -84,7 +86,9 @@ class MHA(nn.Module):
         self.head_dim = head_dim
         self.dropout = dropout
         self.causal = causal
-        self.n_reps = n_kv_heads // n_heads
+        if n_heads % n_kv_heads:
+            raise ValueError("`n_heads` must be divisible by `n_kv_heads`.")
+        self.n_reps = n_heads // n_kv_heads
         qkv_dim = (n_heads + 2 * n_kv_heads) * head_dim
         self.Wqkv = nn.Linear(dim, qkv_dim, bias=bias)
         self.out_proj = nn.Linear(dim, dim, bias=bias)
@@ -104,7 +108,7 @@ class MHA(nn.Module):
 
         qkv = self.Wqkv(x)
         if self.n_heads == self.n_kv_heads:
-            qkv = rearrange(qkv, "B T (three h d) -> B three h T d", three=3, h=self.n_heads)
+            qkv = (qkv.reshape(B, T, 3, self.n_heads, self.head_dim).permute(0, 2, 3, 1, 4))
             q, k, v = qkv.unbind(dim=1)  # (B, h, T, d)
         else:
             q, k, v = torch.split(
@@ -114,9 +118,11 @@ class MHA(nn.Module):
                     self.head_dim * self.n_kv_heads,
                     self.head_dim * self.n_kv_heads,
                 ],
-                dim=1,
+                dim=-1,
             )
-            q, k, v = map(lambda t: rearrange(t, "B T (h d) -> B h T d"), (q, k, v))
+            q = q.reshape(B, T, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
+            k = k.reshape(B, T, self.n_kv_heads, self.head_dim).permute(0, 2, 1, 3)
+            v = v.reshape(B, T, self.n_kv_heads, self.head_dim).permute(0, 2, 1, 3)
 
         if self.use_rotary_emb:
             q = apply_rotary_emb(freqs_cis, q)
@@ -142,7 +148,7 @@ class MHA(nn.Module):
             attn_mask=attn_mask,
         )
 
-        out = self.out_proj(rearrange(out, "B h T d -> B T (h d)"))
+        out = self.out_proj(out.permute(0, 2, 1, 3).reshape(B, T, self.dim))
 
         return out
 
@@ -352,12 +358,20 @@ class Vui(nn.Module):
     COHOST = "vui-cohost-100m.pt"
     ABRAHAM = "vui-abraham-100m.pt"
 
-    def __init__(self, config: Config = Config()):
+    def __init__(
+        self,
+        config: Config | None = None,
+        *,
+        codec: Fluac | None = None,
+    ):
         super().__init__()
-        self.codec = Fluac.from_pretrained()
+        config = Config() if config is None else config
+        if not isinstance(config, Config):
+            raise TypeError("`config` must be a Vui Config or None.")
+        self.codec = Fluac.from_pretrained() if codec is None else codec
         self.config = config
         cfg = config.model
-        self.tokenizer = AutoTokenizer.from_pretrained("google/byt5-small")
+        self.tokenizer = CustomByT5Tokenizer()
         self.use_rotary_emb = cfg.use_rotary_emb
         self.token_emb = nn.Embedding(self.tokenizer.vocab_size, cfg.d_model)
 
@@ -402,29 +416,146 @@ class Vui(nn.Module):
     @staticmethod
     def from_pretrained(
         checkpoint_path: str | dict = ABRAHAM,
+        *,
+        codec_path: str | Path | None = None,
+        codec: Fluac | None = None,
+        model_config: Config | Mapping[str, object] | None = None,
+        codec_config: FluacConfig | Mapping[str, object] | None = None,
+        revision: str | None = None,
+        cache_dir: str | None = None,
+        token: str | bool | None = None,
+        local_files_only: bool = False,
+        verify_official_integrity: bool = True,
         **config_kwargs,
     ):
+        native_artifact = None
         if isinstance(checkpoint_path, dict):
+            if model_config is not None or codec_config is not None:
+                raise TypeError(
+                    "Do not pass native graph configurations with a legacy "
+                    "in-memory Vui checkpoint.")
             checkpoint = checkpoint_path
         else:
-            if not os.path.exists(checkpoint_path):
-                from huggingface_hub import hf_hub_download
+            direct_checkpoint = Path(checkpoint_path).expanduser()
+            is_native_directory = (
+                direct_checkpoint.is_dir() and (direct_checkpoint / "model.safetensors").is_file())
+            is_native_checkpoint = (
+                direct_checkpoint.is_file() and direct_checkpoint.suffix.lower() == ".safetensors")
+            if is_native_directory or is_native_checkpoint:
+                from voicehub.models.vui.checkpoint import load_vui_safetensors, resolve_native_vui_artifact
 
-                checkpoint_path = hf_hub_download(
-                    repo_id="fluxions/vui",
-                    filename=checkpoint_path,
+                native_artifact = resolve_native_vui_artifact(direct_checkpoint, )
+                if (is_native_checkpoint and direct_checkpoint.resolve() != native_artifact.model_checkpoint):
+                    raise ValueError(
+                        "Vui.from_pretrained() requires the model Safetensors "
+                        "file, not the codec component.")
+                checkpoint_path = native_artifact.model_checkpoint
+                if codec_path is None:
+                    codec_path = native_artifact.codec_checkpoint
+                if model_config is None:
+                    model_config = native_artifact.model_config
+                if codec_config is None:
+                    codec_config = native_artifact.codec_config
+                state_dict = load_vui_safetensors(
+                    checkpoint_path,
+                    component="model",
                 )
-            checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+                checkpoint = None
+            elif codec_path is not None and direct_checkpoint.is_file():
+                checkpoint_path = direct_checkpoint.resolve()
+            else:
+                from voicehub.models.vui.artifacts import resolve_vui_artifacts
 
-        config = {**checkpoint["config"], **config_kwargs}
-        config = Config(**config)
-        state_dict = checkpoint["model"]
+                artifacts = resolve_vui_artifacts(
+                    checkpoint_path,
+                    revision=revision,
+                    cache_dir=cache_dir,
+                    token=token,
+                    local_files_only=local_files_only,
+                    verify_official_integrity=verify_official_integrity,
+                )
+                checkpoint_path = artifacts.model_checkpoint
+                if codec_path is None:
+                    codec_path = artifacts.codec_checkpoint
+            if native_artifact is None:
+                checkpoint = torch.load(
+                    checkpoint_path,
+                    map_location="cpu",
+                    weights_only=True,
+                )
+        if codec is not None and codec_path is not None:
+            raise TypeError("Pass either `codec` or `codec_path`, not both.")
+        if codec is None:
+            if codec_path is None:
+                from voicehub.models.vui.artifacts import VUI_CODEC_FILENAME, VUI_REPO_ID, VUI_REVISION
+
+                codec = Fluac.from_pretrained(
+                    VUI_CODEC_FILENAME,
+                    repo_id=VUI_REPO_ID,
+                    revision=revision or VUI_REVISION,
+                    cache_dir=cache_dir,
+                    token=token,
+                    local_files_only=local_files_only,
+                )
+            else:
+                codec = Fluac.from_pretrained(
+                    str(codec_path),
+                    config=codec_config,
+                )
+
+        if native_artifact is None:
+            config_values = checkpoint["config"]
+            state_dict = checkpoint["model"]
+        elif isinstance(model_config, Config):
+            config_values = model_config.model_dump()
+        elif isinstance(model_config, Mapping):
+            config_values = dict(model_config)
+        else:  # pragma: no cover - guarded by native artifact validation
+            raise TypeError("Native Vui model configuration must be a mapping.")
+        config = Config.from_dict({
+            **config_values,
+            **config_kwargs,
+        })
 
         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
         state_dict = {k.replace("text_embedding.", "token_emb."): v for k, v in state_dict.items()}
-        model = Vui(config)
-        load_what_you_can(state_dict, model)
+        model = Vui(config, codec=codec)
+        if native_artifact is None:
+            load_what_you_can(state_dict, model)
+        else:
+            model_state = {
+                name: value
+                for name, value in model.state_dict().items() if not name.startswith("codec.")
+            }
+            missing = sorted(set(model_state) - set(state_dict))
+            unexpected = sorted(set(state_dict) - set(model_state))
+            if missing or unexpected:
+                raise ValueError(
+                    "Native Vui model Safetensors do not match the declared "
+                    f"graph (missing={missing!r}, unexpected={unexpected!r}).")
+            model.load_state_dict(
+                {
+                    **model.state_dict(),
+                    **state_dict,
+                },
+                strict=True,
+            )
         return model
+
+    def save_pretrained(
+        self,
+        save_directory: str | Path,
+        *,
+        wrapper_config=None,
+    ):
+        """Export a standalone native Vui + Fluac Safetensors directory."""
+        from voicehub.models.vui.checkpoint import export_vui_pretrained
+
+        return export_vui_pretrained(
+            self,
+            save_directory,
+            wrapper_config=wrapper_config,
+        )
 
     @staticmethod
     def from_pretrained_inf(

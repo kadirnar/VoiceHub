@@ -5,9 +5,10 @@ description: Transcribe file, array, and tensor audio through VoiceHub's normali
 # Speech recognition
 
 VoiceHub exposes automatic speech recognition through one task-specific
-factory while preserving each provider's decoding behavior. Transformers CTC,
-speech encoder-decoder, RNN-T, and TDT checkpoints share one integration;
-optimized and source-native runtimes remain separate providers.
+factory while preserving each architecture's decoding behavior. CTC, speech
+encoder-decoder, RNN-T, and TDT checkpoints use VoiceHub-owned graphs behind
+task-specific provider keys. Names retained for compatibility do not load
+Transformers or another provider framework.
 
 Use the [ASR and VAD support matrix](../models/asr-vad-support.md) to select a
 provider by architecture, timestamps, runtime, and fine-tuning boundary.
@@ -50,11 +51,13 @@ Use the canonical `model_type` with
 `cohere-transcribe`, `parakeet-tdt`, `wav2vec2`, `faster-whisper`,
 `nemo-asr`, and `funasr` are also accepted.
 
-## Transcribe with Transformers
+## Transcribe with the native generic dispatcher
 
-The universal Transformers provider examines the checkpoint configuration and
-dispatches to a compatible CTC, speech sequence-to-sequence, RNN-T, or TDT
-auto-model class:
+The historical `asr_transformers` model key now examines a checkpoint's
+declarative `config.json` and dispatches only to verified VoiceHub-native
+Whisper, Wav2Vec2 CTC, HuBERT CTC, WavLM CTC, or Moonshine graphs. It accepts
+strict Safetensors artifacts and never imports Transformers or executes remote
+repository code:
 
 ```python
 from voicehub import AutoModelForSpeechRecognition
@@ -84,25 +87,25 @@ Set `architecture_family` only when automatic detection is ambiguous:
 | Value | Intended model graph |
 | --- | --- |
 | `auto` | Detect the family from the checkpoint configuration |
-| `ctc` | CTC acoustic encoders such as Wav2Vec2-family checkpoints |
-| `speech-seq2seq` | Encoder-decoder speech models such as Whisper |
-| `rnnt` | Recurrent neural network transducers |
-| `tdt` | Token-and-duration transducers |
+| `ctc` | Verified Wav2Vec2, HuBERT, or WavLM CTC checkpoints |
+| `speech-seq2seq` | Verified Whisper or Moonshine checkpoints |
 
-The native Transformers module remains the model's trainable object. The
-high-level transcription pipeline is an inference view and is discarded
-before `load_for_training()`.
+RNN-T, TDT, remote-code, multimodal prompt, quantized, and serving-only
+artifacts require a dedicated provider until their graphs and preprocessing
+contracts are ported and verified. Unknown families fail explicitly.
 
-## Use a locked Transformers preset
+## Use a reviewed architecture provider
 
-Choose a preset when you want a reviewed checkpoint, processor, architecture
-family, and training objective instead of automatic architecture detection:
+Choose a dedicated provider when you want a reviewed checkpoint, processor,
+architecture family, and training objective instead of automatic architecture
+detection. Migrated providers run on VoiceHub-owned PyTorch graphs; a row in
+this table does not imply a Transformers runtime:
 
 | Model type | Default checkpoint | Objective |
 | --- | --- | --- |
 | `asr_whisper` | `openai/whisper-large-v3-turbo` | Speech sequence-to-sequence |
 | `asr_tiron` | `Trelis/tiron` | Whisper sequence-to-sequence with speaker/time tokens |
-| `asr_qwen3` | `Qwen/Qwen3-ASR-0.6B-hf` | Prompted multimodal sequence-to-sequence |
+| `asr_qwen3` | `Qwen/Qwen3-ASR-0.6B` | Native prompted audio-language modeling |
 | `asr_vibevoice` | `microsoft/VibeVoice-ASR-HF` | Prompted multimodal sequence-to-sequence |
 | `asr_granite_speech` | `ibm-granite/granite-speech-4.1-2b` | Prompted multimodal causal language modeling |
 | `asr_parakeet_tdt` | `nvidia/parakeet-tdt-0.6b-v3` | Token-and-duration transducer |
@@ -113,7 +116,27 @@ family, and training objective instead of automatic architecture detection:
 | `asr_hubert` | `facebook/hubert-large-ls960-ft` | CTC |
 | `asr_wavlm` | `patrickvonplaten/wavlm-libri-clean-100h-base-plus` | CTC |
 | `asr_moonshine` | `UsefulSensors/moonshine-tiny` | Speech sequence-to-sequence |
+| `asr_nemo` | `nvidia/nemo/stt_en_quartznet15x5` | Native character CTC |
+| `asr_speechbrain` | `speechbrain/asr-crdnn-rnnlm-librispeech` | Native CTC plus attention sequence-to-sequence |
+| `asr_funasr` | `iic/SenseVoiceSmall` | Native SANM-CTC plus rich control tokens |
+| `asr_wenet` | `wenet/gigaspeech-u2pp-conformer` | Native hybrid CTC plus bidirectional attention |
 | `asr_seamless_m4t_v2` | `facebook/seamless-m4t-v2-large` | Multilingual speech sequence-to-sequence |
+
+WavLM runs on a VoiceHub-owned PyTorch graph. The default checkpoint is pinned
+to an immutable Safetensors conversion whose parent is the original published
+CTC checkpoint; pickle checkpoints, remote repository code, language adapters,
+and non-CTC WavLM heads are rejected explicitly. The native implementation
+preserves WavLM's learned SpecAugment vector and gated bucketed
+relative-position attention during both inference and fine-tuning.
+
+Moonshine likewise has no Transformers, Tokenizers, Safetensors-package,
+NumPy, or audio-framework runtime dependency. VoiceHub implements the
+published raw-waveform convolutional frontend, partial rotary encoder-decoder,
+head-dimension padding, tied text projection, SentencePiece-style BPE with
+UTF-8 byte fallback, and teacher-forced cross-entropy. Tiny and base
+Safetensors are accepted; pickle, ONNX, GGUF, remote-code, sampled, beam,
+timestamp, and hotword decoding paths are rejected explicitly by this
+training-capable provider.
 
 ```python
 model = AutoModelForSpeechRecognition.from_pretrained(
@@ -124,22 +147,83 @@ model = AutoModelForSpeechRecognition.from_pretrained(
 result = model.transcribe("meeting.wav")
 ```
 
-The preset validates the checkpoint's native `model_type` and architecture
-before loading. This catches an accidental CTC/sequence-to-sequence mismatch
-early while preserving the same `ASROutput` and shared trainer lifecycle.
+SeamlessM4T-v2 follows the same native boundary at a larger multilingual
+scale. VoiceHub projects the audited unified checkpoint onto its exact
+speech-to-text subset—1,429 persisted tensors and 1,501,842,240 values—then
+reties the shared embedding and language-model head. The processor implements
+the released 16 kHz stacked Kaldi-style frontend and SentencePiece ID offset.
+Pass one of the 98 supported output-language codes:
+
+```python
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "facebook/seamless-m4t-v2-large",
+    model_type="asr_seamless_m4t_v2",
+    target_language="tur",
+    device="cuda",
+)
+result = model.transcribe(
+    "meeting.wav",
+    language="tur",
+    num_beams=1,
+)
+```
+
+Only complete-waveform greedy recognition is verified. Translation task mode,
+beam or sampled decoding, timestamps, hotwords, and streaming state are
+rejected rather than delegated to Transformers. The checkpoint is
+CC-BY-NC-4.0; fine-tuned derivatives remain non-commercial.
+
+The provider validates the checkpoint's native `model_type`, architecture,
+processor, tokenizer ID space, generation IDs, and complete tensor inventory
+before loading. This catches an accidental or mixed artifact root early while
+preserving the same `ASROutput` and shared trainer lifecycle.
+
+### Run native HuBERT CTC
+
+`asr_hubert` loads the official `facebook/hubert-large-ls960-ft` graph without
+Transformers, tokenizers, torchaudio, NumPy, or the Safetensors Python package.
+The official main revision only contains a legacy pickle, so VoiceHub pins Hugging
+Face's tensor-equivalent Safetensors conversion commit automatically. Custom
+repositories and local directories must provide `config.json`, `vocab.json`,
+and a single or sharded Safetensors checkpoint from one coherent revision.
+
+```python
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "facebook/hubert-large-ls960-ft",
+    model_type="asr_hubert",
+    device="cuda",
+)
+result = model.transcribe(
+    "meeting.wav",
+    return_timestamps="word",
+)
+```
+
+The native graph preserves HuBERT's learned SpecAugment mask embedding,
+feature projection, stable pre-layer-normalized encoder, and CTC objective.
+Fine-tuning accepts raw 16 kHz audio plus transcripts through the shared
+VoiceHub trainer. Current inference is whole-waveform, greedy CTC decoding;
+chunked decoding, beam-search language models, hotwords, speech translation,
+and HuBERT language adapters are rejected instead of approximated.
 
 ## Use current prompt-aware ASR
 
-Qwen3-ASR, VibeVoice-ASR, and Granite Speech are audio-language models, not ordinary
-`automatic-speech-recognition` pipelines. Their dedicated providers build the
-checkpoint's transcription request, retain the complete multimodal processor
-batch, remove prompt tokens from generated output, and normalize the result:
+Qwen3-ASR, VibeVoice-ASR, and Granite Speech are audio-language models, not
+ordinary `automatic-speech-recognition` pipelines. All three have dedicated
+VoiceHub-native graphs rather than a generic pipeline. Qwen3-ASR owns
+VoiceHub owns the three-stage convolutional audio tower, bounded-window audio
+Transformer, dense Qwen3 decoder, Qwen2 byte-BPE tokenizer, Whisper-compatible
+log-mel processor, cached generation, completion-only loss, and Safetensors
+loader. It does not import Transformers, `qwen_asr`, Tokenizers, NumPy,
+torchaudio, librosa, or the Safetensors package. Dedicated providers build the
+model-specific transcription request, remove prompt tokens from generated
+output, and normalize the result:
 
 ```python
 from voicehub import AutoModelForSpeechRecognition
 
 model = AutoModelForSpeechRecognition.from_pretrained(
-    "Qwen/Qwen3-ASR-0.6B-hf",
+    "Qwen/Qwen3-ASR-0.6B",
     model_type="asr_qwen3",
     device="cuda",
 )
@@ -151,10 +235,16 @@ result = model.transcribe(
 print(result.text, result.language)
 ```
 
-Use `Qwen/Qwen3-ASR-1.7B-hf` with the same model type when the larger
-checkpoint is appropriate. Language names and ISO codes are validated against
-the checkpoint's supported set before the prompt is rendered. VibeVoice uses
-the same public lifecycle and normalizes its parsed `Start`, `End`, `Speaker`,
+Use `Qwen/Qwen3-ASR-1.7B` with the same model type when the larger checkpoint
+is appropriate. Both public revisions are pinned and their complete
+name/dtype/shape inventories are verified before tensor assignment. Language
+names and ISO codes are validated against the checkpoint's supported set
+before the prompt is rendered. Timestamps remain a separate Qwen forced
+alignment architecture; VoiceHub does not misrepresent buffered full-prefix
+decoding as graph-incremental streaming. VibeVoice owns its continuous
+acoustic and semantic encoders, multimodal projector, Qwen2 decoder, byte-BPE
+tokenizer, native prompt renderer, causal objective, and strict
+sharded-Safetensors lifecycle. It normalizes parsed `Start`, `End`, `Speaker`,
 and `Content` records into speaker-aware `ASRSegment` values:
 
 ```python
@@ -173,14 +263,19 @@ for segment in result.segments:
     print(segment.start, segment.end, segment.speaker, segment.text)
 ```
 
-VibeVoice identifies language from the recording and does not expose a
-language-forcing argument. VoiceHub rejects `language` rather than silently
-ignoring it.
+VibeVoice identifies language from the recording. Supplying `language` adds
+an explicit expected-language instruction to the prompt; it does not force a
+decoder language token. The provider also rejects beam search, manual
+chunk/stride controls, word timestamps, and translation instead of silently
+approximating those modes.
 
-Granite Speech uses IBM's tokenizer-rendered instruction and separate audio
-processor contract. Its prompt must contain `<|audio|>`; VoiceHub inserts the
-placeholder for one-off inference prompts and retains the configured prompt in
-portable exports:
+Granite Speech is also fully native. VoiceHub owns its block-local Conformer,
+windowed Q-Former, Granite decoder, Llama-3-style byte-BPE tokenizer, HTK
+log-mel frontend, cache-aware generation, and strict sharded-Safetensors
+loader. The pinned public checkpoint is validated against all 954 tensor
+names, dtypes, and shapes before assignment. Its prompt must contain
+`<|audio|>`; VoiceHub inserts the placeholder for one-off inference prompts
+and retains the configured prompt in portable exports:
 
 ```python
 model = AutoModelForSpeechRecognition.from_pretrained(
@@ -196,32 +291,96 @@ result = model.transcribe(
 print(result.text)
 ```
 
-Granite is prompt-conditioned and has no language-ID forcing parameter.
-Express language guidance in the instruction instead of passing `language`.
-Its fine-tuning path implements IBM's published collator: prompt/audio tokens
-are followed by transcript plus EOS tokens, then prompt and target-padding
-labels are masked with `-100`. The model's native causal objective owns the
-one-token shift.
+Granite has no transcription language-ID forcing parameter. Express source
+language guidance in the instruction instead of passing `language`. Speech
+translation uses `language` as the target, following the same public contract
+as other translation-capable providers:
 
-The dedicated providers matter during training too. VibeVoice preserves its
-processor-generated target mask. Qwen renders the native chat template, then
+```python
+translated = model.transcribe(
+    "support-call-fr.wav",
+    task="translate",
+    language="English",
+)
+print(translated.text)
+```
+
+VoiceHub validates the documented English, French, German, Spanish,
+Portuguese, Japanese, Italian, and Mandarin target set and renders IBM's
+recommended translation prompt. Granite fine-tuning implements the published
+collator: prompt/audio tokens are followed by transcript plus EOS tokens, then
+prompt and target-padding labels are masked with `-100`. The native causal
+objective owns the one-token shift. The default recipe mirrors IBM's
+lightweight adaptation boundary by training the complete Q-Former projector
+and VoiceHub-native LoRA layers in the language model while keeping the
+Conformer and dense language-model weights frozen. A merged Safetensors export
+reloads in a clean VoiceHub inference runtime.
+
+The dedicated providers matter during training too. VibeVoice renders
+speaker/timestamp segments into assistant-completion-only labels, masks audio
+placeholders and prompt tokens, freezes both continuous speech encoders, and
+trains the multimodal projector, language model, and LM head. Qwen renders the
+native chat template, then
 constructs completion-only causal labels from the assistant vocabulary tokens
 while masking the audio, prompt, and padding positions. This also guards
 against Transformers releases that return multimodal token-type IDs instead
 of vocabulary labels from `output_labels`.
 
-## Use current transducer and domain presets
+## Use current transducer and domain providers
 
-Parakeet TDT and Nemotron 3.5 must process audio and transcript together
-during fine-tuning. Their processors create decoder inputs and, for Nemotron,
-language prompt and lookahead fields required by the native transducer loss.
-Nemotron's `language="auto"` output is normalized from its emitted locale tag,
-and `return_timestamps="word"` retains its native token timing.
-VoiceHub also installs Nemotron's RNN-T objective explicitly and reconciles
-the released processor/model blank-token IDs. Cohere conditions both
-inference and labels on a language code; its trainer combines the decoder
-prompt and shifted transcript while masking non-target prompt positions.
-MedASR uses the gated LASR CTC processor for medical dictation:
+Parakeet TDT runs without Transformers, NeMo, Tokenizers, torchaudio, librosa,
+NumPy, or the Safetensors package. VoiceHub owns the 24-layer FastConformer,
+three-stage 8× subsampler, LSTM prediction network, token-duration joint head,
+log-mel frontend, bounded tokenizer, duration-aware greedy decoder, exact TDT
+objective, strict checkpoint adapter, and portable export. The pinned release
+contains 723 tensors, 627,057,286 learned parameters, and 24 integer
+BatchNorm counters. Fine-tuning processes raw audio and transcript together,
+constructs `[blank] + labels` decoder inputs, and backpropagates through the
+complete graph.
+
+The verified public decoder is intentionally narrow: it processes one complete
+waveform, auto-detects language, and optionally returns duration-derived word
+timestamps. Beam search, hotwords, streaming state, forced language,
+translation, and caller-controlled chunk/stride settings fail explicitly.
+No corpus-level parity or accuracy improvement over NVIDIA's published model
+is claimed.
+
+Nemotron 3.5 also runs without Transformers, NeMo, Tokenizers, torchaudio,
+librosa, NumPy, or the Safetensors package. VoiceHub owns the pinned
+FastConformer, language-prompt projector, two-layer LSTM predictor, RNN-T
+joint, log-mel frontend, bounded tokenizer, exact transducer objective, and
+strict checkpoint lifecycle. The official header contains 655 tensors and
+637,997,088 parameters; its complete identity is checked before assignment.
+Joint audio/transcript processing creates the prompt, labels, target lengths,
+and blank-prefixed decoder inputs required for full-model fine-tuning.
+
+The native graph exposes cache-aware chunk generation for the published
+lookaheads 0, 3, 6, and 13. The common VoiceHub `transcribe` lifecycle remains
+buffered, so it is not advertised as a live incremental session. Public
+decoding is greedy only: beam search and hotword bias fail explicitly.
+`language="auto"` is normalized from the emitted locale tag, and
+`return_timestamps="word"` retains native token timing. No corpus-level
+accuracy change over NVIDIA's checkpoint is claimed.
+
+Cohere Transcribe is also independent of Transformers, NeMo, Tokenizers,
+torchaudio, librosa, NumPy, and the Safetensors package. VoiceHub implements
+the exact 48-layer FastConformer, eight-layer cross-attention decoder,
+128-bin log-mel frontend, byte-fallback BPE tokenizer, 14 language prompts,
+quiet-boundary long-form splitter, and strict checkpoint/export lifecycle.
+The pinned gated checkpoint contains 2,152 tensors, 2,065,804,096 persistent
+values, and 2,047,822,080 learned parameters. Inference and training both
+condition on an explicit language and punctuation choice; the trainer builds
+the prompt plus teacher-forced transcript and masks padding and any configured
+prompt-only positions.
+
+MedASR is fully native and restricted to the released LASR CTC contract.
+VoiceHub implements the 17-layer, 512-dimensional Conformer, two-stage
+subsampler, 128-bin log-mel frontend, 512-piece Unigram tokenizer, greedy CTC
+decoder, and strict single-file Safetensors adapter. The gated checkpoint has
+368 tensors and 105,282,833 persistent elements; the exact header is verified
+before any tensor is assigned. Raw 16 kHz audio plus transcripts supports
+full-model CTC fine-tuning, gradient checkpointing, and portable export. The
+source recipe records AdamW at `3e-5` with 300 warmup steps.
 
 ```python
 model = AutoModelForSpeechRecognition.from_pretrained(
@@ -242,11 +401,11 @@ model = AutoModelForSpeechRecognition.from_pretrained(
 result = model.transcribe("long-form.wav", language="en")
 ```
 
-Use `CohereLabs/cohere-transcribe-arabic-07-2026` with the same
-`asr_cohere` model type for the current Arabic-specialized variant; it shares
-the verified processor, language conditioning, native loss, and export
-contract. Likewise, `Qwen/Qwen3-ASR-1.7B-hf` uses `asr_qwen3`; checkpoint-size
-variants do not need duplicate registry keys.
+The native Cohere loader currently accepts only the audited
+`CohereLabs/cohere-transcribe-03-2026` graph. Other Cohere repositories must
+be audited independently even when their public APIs look similar. Likewise,
+`Qwen/Qwen3-ASR-1.7B` uses `asr_qwen3` because that checkpoint-size variant
+has an independently verified compatible graph.
 
 For Cohere fine-tuning, pre-segment long recordings and pair every segment
 with its own transcript. Its processor can reassemble long audio during
@@ -257,11 +416,33 @@ The Cohere and `google/medasr` repositories require accepting their
 checkpoint terms and authenticating at runtime. Credentials are passed to the
 factory and are never serialized in a VoiceHub configuration.
 
-Tiron uses Whisper weights but has a distinct output vocabulary. Its provider
-walks the generated token IDs so speaker markers and 20 ms timestamp tokens
-remain visible in normalized segments. The native checkpoint handles one
-30-second window; whole-meeting cross-window speaker linking remains a
-separate orchestration concern.
+Cohere decoding is deliberately greedy. Beam search, sampling, KV caching,
+timestamps, hotwords, diarization, translation, and automatic language
+detection fail closed. Long-form inference performs offline quiet-boundary
+segmentation rather than streaming. No full-checkpoint WER benchmark or
+accuracy improvement over Cohere's release is claimed.
+
+The released MedASR checkpoint is English-only and intended for medical
+dictation. Current inference is complete-waveform greedy CTC. Timestamp
+alignment, beam search, hotwords, translation, forced non-English language,
+and manual chunk/stride settings fail explicitly. VoiceHub does not claim
+clinical suitability or an accuracy improvement over the published
+checkpoint.
+
+Tiron uses VoiceHub's native Whisper graph but has a distinct padded output
+vocabulary. The default model revision is immutable, all eight speaker-token
+IDs are checked against the published layout, and undeclared embedding rows
+are masked during generation. VoiceHub ports the reference harness's
+`speaker_blocks` constraint grammar, including its silence path, contiguous
+speaker introduction, timestamp-mass tie-breaker, and repetition guard. This
+avoids the quality loss caused by unconstrained greedy decoding while keeping
+speaker markers and 20 ms timestamps visible in normalized segments.
+
+The native provider and fine-tuning path handle one window of at most 30
+seconds. Training targets must use the model's inline speaker/timestamp
+grammar. Cross-window voice embeddings, clustering, and meeting-global
+speaker identities remain a separate architecture rather than being hidden
+inside the checkpoint wrapper.
 
 ## Use an optimized or native provider
 
@@ -281,17 +462,19 @@ result = model("interview.wav", return_timestamps=True)
 ```
 
 The same factory also covers OpenAI Whisper, WhisperX, NeMo, SpeechBrain,
-FunASR, ESPnet, and WeNet integrations. Each provider normalizes its result
+SenseVoiceSmall through the historical `asr_funasr` compatibility key,
+ESPnet, and WeNet integrations. Each provider normalizes its result
 into `ASROutput`; only capabilities implemented by the selected VoiceHub
 wrapper are exposed. An upstream runtime being streaming-capable does not by
 itself make the wrapper incremental.
 
-!!! note "An optimized runtime is not a fine-tuning graph"
+!!! note "Compatibility providers use the native graph"
 
-    faster-whisper, OpenAI Whisper, and WhisperX are inference providers in
-    VoiceHub. Fine-tune the corresponding unquantized Transformers checkpoint
-    with `asr_transformers`, then perform any provider-specific conversion or
-    export as a separate step.
+    faster-whisper and OpenAI Whisper names resolve to VoiceHub's trainable
+    Whisper graph. WhisperX composes that same graph with native Wav2Vec2 CTC
+    forced alignment. Fine-tuning updates Whisper; the language-specific
+    alignment checkpoint is an independent CTC model that can be fine-tuned
+    through `asr_wav2vec2`.
 
 ## Accepted audio inputs
 
@@ -414,10 +597,146 @@ sequence-to-sequence, RNN-T, and TDT. CTC, RNN-T, and TDT keep their
 backend-native blank, alignment, and duration semantics; the generic trainer
 does not reconstruct those objectives from arbitrary logits.
 
-NeMo, SpeechBrain, FunASR, ESPnet, and WeNet currently retain their upstream
-task/configuration runners for fine-tuning. Their inference wrappers do not
-pretend that the common single-model loop reproduces Lightning/Hydra, recipe,
-or distributed orchestration.
+NeMo QuartzNet, SpeechBrain CRDNN, and WeNet GigaSpeech U2++ now use complete
+VoiceHub-owned training graphs. SpeechBrain accepts raw 16 kHz audio plus
+transcripts, owns its protobuf-free unigram tokenizer, and preserves the
+released staged objective:
+
+```python
+from voicehub import AutoModelForSpeechRecognition, Trainer, TrainingArguments
+
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "speechbrain/asr-crdnn-rnnlm-librispeech",
+    model_type="asr_speechbrain",
+    trust_pickle_checkpoint=True,  # first upstream-checkpoint conversion only
+)
+training_dataset = model.create_training_dataset([
+    {"audio_path": "clips/example.wav", "text": "THE TRANSCRIPT"},
+])
+validation_dataset = model.create_training_dataset([
+    {"audio_path": "clips/validation.wav", "text": "THE VALIDATION TRANSCRIPT"},
+])
+trainer = Trainer(
+    model=model,
+    args=TrainingArguments(
+        output_dir="runs/speechbrain-crdnn",
+        num_train_epochs=15,
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
+        eval_strategy="epoch",
+    ),
+    train_dataset=training_dataset,
+    eval_dataset=validation_dataset,
+)
+trainer.train()
+```
+
+The first five epochs combine CTC and label-smoothed attention losses at
+equal weight. Later epochs use the attention objective alone. The published
+RNNLM remains frozen, the optimizer is Adadelta, and the specialized scheduler
+updates from corpus validation WER rather than from every optimizer step.
+VoiceHub decodes validation batches with the published attention beam without
+RNNLM fusion, matching the author recipe; final inference enables the frozen
+RNNLM. Audio longer than `training_max_duration_s` is rejected instead of being
+truncated away from its transcript. Add OpenRIR noise and 0.95/1.0/1.05 speed
+perturbation as explicit dataset transforms when reproducing the full author
+recipe.
+
+The source repository distributes three pickle checkpoints. VoiceHub verifies
+their immutable revisions, SHA-256 digests, tensor namespaces, shapes, and
+inventory fingerprints, then reads them with PyTorch's restricted
+`weights_only=True` path. The converted artifact contains one Safetensors file,
+the bounded original tokenizer model, and declarative JSON. Later loads and
+trainer exports do not import SpeechBrain, SentencePiece, protobuf,
+HyperPyYAML, TorchAudio, or Transformers.
+
+SenseVoiceSmall also accepts raw 16 kHz audio. VoiceHub owns its SANM encoder,
+CTC projection, frontend, tokenizer, rich control-token objective, decoding,
+forced CTC word alignment, and strict checkpoint adapter:
+
+```python
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "iic/SenseVoiceSmall",
+    model_type="asr_funasr",
+    trust_pickle_checkpoint=True,  # first published-checkpoint conversion only
+)
+dataset = model.create_training_dataset([
+    {
+        "audio_path": "clips/example.wav",
+        "text": "The transcript",
+        "language": "en",
+        "emotion": "neutral",
+        "event": "speech",
+        "use_itn": True,
+    },
+])
+trainer = Trainer(
+    model=model,
+    args=TrainingArguments(
+        output_dir="runs/sensevoice-small",
+        learning_rate=2e-5,
+        warmup_steps=25_000,
+        max_grad_norm=5.0,
+    ),
+    train_dataset=dataset,
+)
+trainer.train()
+```
+
+The adapter combines sequence CTC with the four initial language, emotion,
+event, and text-normalization query targets. It uses AdamW and the published
+inverse-square-root WarmupLR schedule, validates the complete 917-tensor
+release inventory, and exports a portable Safetensors runtime. The
+compatibility key is intentionally narrow: Paraformer, Fun-ASR-Nano, hotword
+decoding, and embedded VAD/punctuation/speaker submodels require separately
+verified architectures and fail before execution.
+
+WeNet accepts raw 16 kHz audio plus transcripts and preserves the released
+0.3 CTC/0.3 reverse-decoder/0.1 label-smoothing objective:
+
+```python
+from voicehub import AutoModelForSpeechRecognition, Trainer, TrainingArguments
+from voicehub.models.asr_wenet import WeNetASRConfig
+
+model = AutoModelForSpeechRecognition.from_pretrained(
+    WeNetASRConfig(
+        name_or_path="wenet/gigaspeech-u2pp-conformer",
+        decoding_strategy="attention_rescoring",
+        beam_size=5,
+    ),
+    trust_pickle_checkpoint=True,  # first legacy-checkpoint conversion only
+)
+dataset = model.create_training_dataset([
+    {
+        "audio": "clips/example.wav",
+        "sampling_rate": 16_000,
+        "text": "THE TRANSCRIPT",
+    },
+])
+trainer = Trainer(
+    model=model,
+    args=TrainingArguments(
+        output_dir="runs/wenet-u2pp",
+        num_train_epochs=50,
+        per_device_train_batch_size=28,
+        learning_rate=1e-3,
+        warmup_steps=80_000,
+        max_grad_norm=5.0,
+    ),
+    train_dataset=dataset,
+)
+trainer.train()
+```
+
+The adapter selects Adam and WeNet's inverse-square-root `WarmupLR`; the
+explicit training arguments above reproduce the released learning rate,
+warmup, batch size, epoch count, and gradient clipping. Change those values
+deliberately when adapting the recipe to a smaller dataset.
+
+ESPnet retains its upstream-owned training boundary. Other SenseVoice,
+SpeechBrain, or WeNet checkpoints are rejected unless their vocabulary,
+frontend, encoder, decoder, objective, and tensor contracts match a separately
+verified native graph.
 
 See [speech data contracts](speech-data.md) and the exact
 [provider fine-tuning matrix](../models/asr-vad-support.md#fine-tuning-boundaries).

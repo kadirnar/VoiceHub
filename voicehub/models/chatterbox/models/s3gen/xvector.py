@@ -3,7 +3,10 @@ from collections import OrderedDict
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint as cp
-import torchaudio.compliance.kaldi as Kaldi
+
+from voicehub.processing.kaldi import KaldiFbankConfig, kaldi_fbank
+
+_CAMPPLUS_FBANK = KaldiFbankConfig(num_mel_bins=80)
 
 
 def pad_list(xs, pad_value):
@@ -43,7 +46,7 @@ def extract_feature(audio):
     feature_times = []
     feature_lengths = []
     for au in audio:
-        feature = Kaldi.fbank(au.unsqueeze(0), num_mel_bins=80)
+        feature = kaldi_fbank(au, _CAMPPLUS_FBANK)
         feature = feature - feature.mean(dim=0, keepdim=True)
         features.append(feature)
         feature_times.append(au.shape[0])

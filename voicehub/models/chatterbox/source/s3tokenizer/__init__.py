@@ -14,28 +14,49 @@
 # limitations under the License.
 """Modified from
     https://github.com/openai/whisper/blob/main/whisper/__init__.py
+
+This namespace is retained for source compatibility and provenance. VoiceHub's
+active Chatterbox graph lives in ``chatterbox.models.s3tokenizer``. Imports in
+this compatibility namespace stay lazy so importing a native submodule cannot
+pull in the legacy ONNX/audio conversion stack.
 """
 
+from __future__ import annotations
+
 import hashlib
+import importlib
 import os
-import urllib
 import warnings
-from typing import List, Union
-
-from tqdm import tqdm
-
-from voicehub.models.chatterbox.source.s3tokenizer.model_v2 import S3TokenizerV2
-from voicehub.models.chatterbox.source.s3tokenizer.model_v3 import S3TokenizerV3
-
-from .model import S3Tokenizer
-from .utils import (load_audio, log_mel_spectrogram, make_non_pad_mask,
-                    mask_to_bias, merge_tokenized_segments, onnx2torch,
-                    onnx2torch_v3, padding)
+from urllib.request import urlopen
 
 __all__ = [
-    'load_audio', 'log_mel_spectrogram', 'make_non_pad_mask', 'mask_to_bias',
-    'onnx2torch', 'onnx2torch_v3', 'padding', 'merge_tokenized_segments'
+    "S3Tokenizer",
+    "S3TokenizerV2",
+    "S3TokenizerV3",
+    "available_models",
+    "load_audio",
+    "load_model",
+    "log_mel_spectrogram",
+    "make_non_pad_mask",
+    "mask_to_bias",
+    "merge_tokenized_segments",
+    "onnx2torch",
+    "onnx2torch_v3",
+    "padding",
 ]
+_LAZY_ATTRIBUTES = {
+    "S3Tokenizer": (".model", "S3Tokenizer"),
+    "S3TokenizerV2": (".model_v2", "S3TokenizerV2"),
+    "S3TokenizerV3": (".model_v3", "S3TokenizerV3"),
+    "load_audio": (".utils", "load_audio"),
+    "log_mel_spectrogram": (".utils", "log_mel_spectrogram"),
+    "make_non_pad_mask": (".utils", "make_non_pad_mask"),
+    "mask_to_bias": (".utils", "mask_to_bias"),
+    "merge_tokenized_segments": (".utils", "merge_tokenized_segments"),
+    "onnx2torch": (".utils", "onnx2torch"),
+    "onnx2torch_v3": (".utils", "onnx2torch_v3"),
+    "padding": (".utils", "padding"),
+}
 _MODELS = {
     "speech_tokenizer_v1":
     "https://www.modelscope.cn/models/iic/cosyvoice-300m/"
@@ -63,7 +84,20 @@ _SHA256S = {
 }
 
 
-def _download(name: str, root: str) -> Union[bytes, str]:
+def __getattr__(name: str):
+    """Resolve legacy public objects only when callers request them."""
+
+    target = _LAZY_ATTRIBUTES.get(name)
+    if target is None:
+        raise AttributeError(name)
+    module_name, attribute_name = target
+    module = importlib.import_module(module_name, __name__)
+    value = getattr(module, attribute_name)
+    globals()[name] = value
+    return value
+
+
+def _download(name: str, root: str) -> str:
     os.makedirs(root, exist_ok=True)
 
     expected_sha256 = _SHA256S[name]
@@ -82,27 +116,16 @@ def _download(name: str, root: str) -> Union[bytes, str]:
         else:
             warnings.warn(
                 f"{download_target} exists, but the SHA256 checksum does not"
-                " match; re-downloading the file")
+                " match; re-downloading the file",
+                stacklevel=2,
+            )
 
-    with urllib.request.urlopen(url) as source, open(download_target,
-                                                     "wb") as output:
-        with tqdm(
-                total=int(source.info().get("Content-Length")),
-                ncols=80,
-                unit="iB",
-                unit_scale=True,
-                unit_divisor=1024,
-                desc="Downloading onnx checkpoint",
-        ) as loop:
-            while True:
-                buffer = source.read(8192)
-                if not buffer:
-                    break
+    with urlopen(url) as source, open(download_target, "wb") as output:
+        while buffer := source.read(8192):
+            output.write(buffer)
 
-                output.write(buffer)
-                loop.update(len(buffer))
-
-    model_bytes = open(download_target, "rb").read()
+    with open(download_target, "rb") as checkpoint:
+        model_bytes = checkpoint.read()
     if hashlib.sha256(model_bytes).hexdigest() != expected_sha256:
         raise RuntimeError(
             "Model has been downloaded but the SHA256 checksum does not not"
@@ -111,15 +134,15 @@ def _download(name: str, root: str) -> Union[bytes, str]:
     return download_target
 
 
-def available_models() -> List[str]:
+def available_models() -> list[str]:
     """Returns the names of available models"""
     return list(_MODELS.keys())
 
 
 def load_model(
     name: str,
-    download_root: str = None,
-) -> S3Tokenizer:
+    download_root: str | None = None,
+):
     """
     Load a S3Tokenizer ASR model
 
@@ -152,10 +175,16 @@ def load_model(
         raise RuntimeError(
             f"Model {name} not found; available models = {available_models()}")
     if 'v3' in name:
+        from .model_v3 import S3TokenizerV3
+
         model = S3TokenizerV3(name)
     elif 'v2' in name:
+        from .model_v2 import S3TokenizerV2
+
         model = S3TokenizerV2(name)
     else:
+        from .model import S3Tokenizer
+
         model = S3Tokenizer(name)
     model.init_from_onnx(checkpoint_file)
 

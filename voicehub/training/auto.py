@@ -58,6 +58,7 @@ _FAMILY_ADAPTERS: dict[str, AdapterFactory] = {
     TrainingFamily.TDT.value: TDTTrainingAdapter,
     TrainingFamily.AUDIO_CLASSIFICATION.value: AudioClassificationTrainingAdapter,
     TrainingFamily.FRAME_CLASSIFICATION.value: FrameClassificationTrainingAdapter,
+    TrainingFamily.NATIVE_ASR_DISPATCH.value: UpstreamNativeTrainingAdapter,
     TrainingFamily.UPSTREAM_NATIVE.value: UpstreamNativeTrainingAdapter,
 }
 

@@ -1,7 +1,7 @@
 import sys
 import tempfile
 import unittest
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -101,10 +101,9 @@ class FlowInferencePreflightTests(unittest.TestCase):
             (
                 CosyVoiceForTextToSpeech(CosyVoiceConfig(), device="cpu"),
                 {
-                    "mode": "zero-shot",
                     "speaker_audio_path": "reference.wav",
                 },
-                "prompt_text",
+                "speaker_embedding",
             ),
             (
                 F5TTSForTextToSpeech(F5TTSConfig(), device="cpu"),
@@ -179,14 +178,6 @@ class FlowInferencePreflightTests(unittest.TestCase):
                     {
                         "speaker_audio_path": missing,
                         "reference_text": "Reference transcript.",
-                    },
-                ),
-                (
-                    CosyVoiceForTextToSpeech(device="cpu"),
-                    {
-                        "mode": "zero-shot",
-                        "speaker_audio_path": missing,
-                        "prompt_text": "Reference transcript.",
                     },
                 ),
                 (
@@ -416,23 +407,19 @@ class FlowInferenceLoaderTests(unittest.TestCase):
         self.assertTrue(source_model.training)
         self.assertEqual(source_model.train_calls, 1)
 
-    def test_cosyvoice_inference_spec_forwards_selected_device(self):
-        runtime = SimpleNamespace(
-            CosyVoice=object(),
-            CosyVoice2=object(),
-            CosyVoice3=object(),
-        )
+    def test_cosyvoice_native_loader_forwards_selected_device(self):
+        runtime = SimpleNamespace(model=object(), sample_rate=24_000)
         model = CosyVoiceForTextToSpeech(device="cpu")
-        with tempfile.TemporaryDirectory() as directory:
-            model_directory = Path(directory)
-            (model_directory / "cosyvoice3.yaml").touch()
+        with patch(
+                "voicehub.architectures.cosyvoice_native.runtime."
+                "load_cosyvoice_runtime",
+                return_value=runtime,
+        ) as loader:
+            model._load_pretrained_model()
 
-            _, options = model._inference_runtime_spec(
-                runtime,
-                model_directory,
-            )
-
-        self.assertEqual(options["device"], "cpu")
+        self.assertIs(model.model, runtime.model)
+        self.assertEqual(model.config.sample_rate, 24_000)
+        self.assertEqual(loader.call_args.kwargs["device"], "cpu")
 
     def test_irodori_ignores_speaker_inversion_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -453,7 +440,7 @@ class FlowInferenceLoaderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             model_directory = Path(directory)
             (model_directory / "first.safetensors").touch()
-            (model_directory / "second.pt").touch()
+            (model_directory / "second.safetensors").touch()
             model = IrodoriTTSForTextToSpeech(
                 IrodoriTTSConfig(name_or_path=directory),
                 device="cpu",
@@ -510,54 +497,42 @@ class FlowInferenceLoaderTests(unittest.TestCase):
                 str(checkpoint.resolve()),
             )
 
-    def test_dia_legacy_maps_public_aliases(self):
-        runtime = SimpleNamespace(generate=Mock(return_value=[0.1, -0.1]), )
-        model = DiaForTextToSpeech(
-            DiaConfig(backend="legacy"),
-            device="cpu",
-        )
-        model.model = runtime
-        model._loaded_backend = "legacy"
+    def test_dia_legacy_backend_is_rejected_with_native_migration(self):
+        with self.assertRaisesRegex(ValueError, "native"):
+            DiaConfig(backend="legacy")
 
-        model._generate_legacy(
-            "Test request.",
-            {
-                "max_new_tokens": 16,
-                "guidance_scale": 2.5,
-                "top_k": 20,
-                "audio_prompt_path": "prompt.wav",
-            },
-        )
-
-        runtime.generate.assert_called_once_with(
-            "Test request.",
-            use_torch_compile=False,
-            max_tokens=16,
-            cfg_scale=2.5,
-            cfg_filter_top_k=20,
-            audio_prompt="prompt.wav",
-        )
-
-    def test_dia_transformers_transition_restores_generation_cache(self):
+    def test_dia_native_transition_prepares_the_shared_runtime(self):
         source_model = _ModeModule()
-        source_model.config = SimpleNamespace(use_cache=False)
+        runtime = SimpleNamespace(
+            model=source_model,
+            prepare_for_inference=Mock(),
+        )
         model = DiaForTextToSpeech(device="cpu")
         model.model = source_model
-        model._loaded_backend = "transformers"
+        model._dia_runtime = runtime
+        model._loaded_backend = "native"
 
         model._prepare_for_inference()
 
-        self.assertFalse(source_model.training)
-        self.assertTrue(source_model.config.use_cache)
+        runtime.prepare_for_inference.assert_called_once_with()
 
     def test_voxcpm_reports_the_seed_that_succeeded(self):
-        source_model = SimpleNamespace(last_successful_seed=29)
-        runtime = SimpleNamespace(
-            tts_model=source_model,
-            generate=Mock(return_value=[0.1, -0.1]),
-        )
-        model = VoxCPMForTextToSpeech(device="cpu")
-        model.model = runtime
+
+        class Audio(list):
+            ndim = 1
+
+            def detach(self):
+                return self
+
+            def float(self):
+                return self
+
+            def cpu(self):
+                return self
+
+        runtime = SimpleNamespace(generate=Mock(return_value=Audio([0.1, -0.1])), )
+        model = VoxCPMForTextToSpeech(device="cpu", )
+        model._runtime = runtime
 
         output = model._generate(
             "Test request.",
@@ -565,64 +540,41 @@ class FlowInferenceLoaderTests(unittest.TestCase):
         )
 
         self.assertEqual(output.metadata["requested_seed"], 17)
-        self.assertEqual(output.metadata["seed"], 29)
+        self.assertEqual(output.metadata["seed"], 17)
+        self.assertEqual(
+            runtime.generate.call_args.kwargs["seed"],
+            17,
+        )
 
-    def test_voxcpm_training_runtime_uses_parameter_dtype_for_generation(self):
-
-        class Parameter:
-            dtype = "torch.float32"
-
-        base_lm = SimpleNamespace(setup_cache=Mock())
-        residual_lm = SimpleNamespace(setup_cache=Mock())
+    def test_voxcpm_native_runtime_prepares_for_generation(self):
         source_model = _ModeModule()
-        source_model.parameters = lambda: iter([Parameter()])
-        source_model.config = SimpleNamespace(
-            dtype="bfloat16",
-            max_length=128,
-        )
-        source_model.device = "cpu"
-        source_model._dtype = lambda: "runtime-float32"
-        source_model.optimize = Mock()
-        source_model.base_lm = base_lm
-        source_model.residual_lm = residual_lm
         runtime = SimpleNamespace(
-            tts_model=source_model,
-            denoiser=None,
+            model=source_model,
+            prepare_for_inference=Mock(),
         )
-        model = VoxCPMForTextToSpeech(device="cpu")
-        model.model = runtime
-        model._loaded_for_training = True
+        model = VoxCPMForTextToSpeech(device="cpu", )
+        model._runtime = runtime
+        model.model = source_model
 
         model._prepare_for_inference()
 
-        self.assertEqual(source_model.config.dtype, "float32")
-        base_lm.setup_cache.assert_called_once_with(
-            1,
-            128,
-            "cpu",
-            "runtime-float32",
-        )
-        residual_lm.setup_cache.assert_called_once_with(
-            1,
-            128,
-            "cpu",
-            "runtime-float32",
-        )
-        self.assertFalse(source_model.training)
-        source_model.optimize.assert_called_once_with()
+        runtime.prepare_for_inference.assert_called_once_with()
+        self.assertIs(model.model, source_model)
 
-    def test_voxcpm_restores_uncompiled_modules_before_training(self):
+    def test_voxcpm_native_runtime_prepares_for_training(self):
         source_model = _ModeModule()
-        source_model.deoptimize = Mock()
-        runtime = SimpleNamespace(tts_model=source_model)
-        model = VoxCPMForTextToSpeech(device="cpu")
-        model.model = runtime
-        model._loaded_for_training = True
+        runtime = SimpleNamespace(
+            model=source_model,
+            prepare_for_training=Mock(),
+        )
+        model = VoxCPMForTextToSpeech(device="cpu", )
+        model._runtime = runtime
+        model.model = source_model
 
         model._prepare_for_training()
 
-        source_model.deoptimize.assert_called_once_with()
-        self.assertTrue(source_model.training)
+        runtime.prepare_for_training.assert_called_once_with()
+        self.assertIs(model.model, source_model)
 
 
 class OmniVoiceInferenceContractTests(unittest.TestCase):
@@ -631,7 +583,7 @@ class OmniVoiceInferenceContractTests(unittest.TestCase):
         for options, message in (
             ({"top_p": 0.9}, "does not support `top_p`"),
             ({"max_new_tokens": 10}, "does not support `max_new_tokens`"),
-            ({"misspelled_option": 1}, "Unsupported OmniVoice"),
+            ({"misspelled_option": 1}, "Unsupported generation option"),
         ):
             with self.subTest(options=options):
                 model = OmniVoiceForTextToSpeech(device="cpu")
@@ -647,31 +599,35 @@ class OmniVoiceInferenceContractTests(unittest.TestCase):
                 loader.assert_not_called()
 
     def test_temperature_maps_to_class_temperature(self):
-        runtime = SimpleNamespace(generate=Mock(return_value=([0.1, -0.1], )), )
-        model = OmniVoiceForTextToSpeech(device="cpu")
-        model.model = runtime
+        import torch
 
-        with patch(
-                "voicehub.models.omnivoice.inference.seeded_inference",
-                return_value=nullcontext(17),
-        ) as seeded:
-            output = model.generate(
-                "Test request.",
-                temperature=0.4,
-                num_step=8,
-            )
-
-        seeded.assert_called_once_with(
-            None,
-            device="cpu",
-            model_type="omnivoice",
+        source_model = _ModeModule()
+        runtime = SimpleNamespace(
+            generator=SimpleNamespace(model=source_model),
+            generate=Mock(return_value=torch.tensor([0.1, -0.1])),
+            model=source_model,
+            prepare_for_inference=Mock(),
         )
-        self.assertEqual(output.audio, [0.1, -0.1])
+        model = OmniVoiceForTextToSpeech(device="cpu")
+        model._runtime = runtime
+        model.model = source_model
+
+        output = model.generate(
+            "Test request.",
+            temperature=0.4,
+            num_step=8,
+            seed=17,
+        )
+        torch.testing.assert_close(output.audio, torch.tensor([0.1, -0.1]))
+        runtime.prepare_for_inference.assert_called_once_with()
+        self.assertEqual(output.metadata["seed"], 17)
+        generation = runtime.generate.call_args.kwargs["generation_config"]
         self.assertEqual(
-            runtime.generate.call_args.kwargs["class_temperature"],
+            generation.class_temperature,
             0.4,
         )
-        self.assertEqual(runtime.generate.call_args.kwargs["num_step"], 8)
+        self.assertEqual(generation.num_steps, 8)
+        self.assertEqual(runtime.generate.call_args.kwargs["seed"], 17)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,13 @@ from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
 from voicehub.models._shared import finish_audio_output, seeded_inference
+from voicehub.models.vui.artifacts import (
+    VUI_CODEC_FILENAME,
+    VUI_MODEL_FILENAME,
+    VUI_REVISION,
+    VuiArtifacts,
+    resolve_vui_artifacts,
+)
 
 
 class VuiConfig(VoiceHubConfig):
@@ -17,15 +24,43 @@ class VuiConfig(VoiceHubConfig):
 
     model_type = "vui"
 
-    def __init__(self, *, sample_rate: int = 22050, **kwargs):
-        super().__init__(sample_rate=sample_rate, **kwargs)
+    def __init__(
+        self,
+        *,
+        sample_rate: int = 22_050,
+        checkpoint_filename: str | None = None,
+        codec_filename: str = VUI_CODEC_FILENAME,
+        native_artifact_format: str | None = None,
+        native_artifact_format_version: int | None = None,
+        native_model_config: dict[str, Any] | None = None,
+        native_codec_config: dict[str, Any] | None = None,
+        revision: str = VUI_REVISION,
+        cache_dir: str | None = None,
+        local_files_only: bool = False,
+        verify_official_integrity: bool = True,
+        **kwargs,
+    ):
+        super().__init__(
+            sample_rate=sample_rate,
+            checkpoint_filename=checkpoint_filename,
+            codec_filename=codec_filename,
+            native_artifact_format=native_artifact_format,
+            native_artifact_format_version=native_artifact_format_version,
+            native_model_config=native_model_config,
+            native_codec_config=native_codec_config,
+            revision=revision,
+            cache_dir=cache_dir,
+            local_files_only=local_files_only,
+            verify_official_integrity=verify_official_integrity,
+            **kwargs,
+        )
 
 
 class VuiForTextToSpeech(PreTrainedTTSModel):
     """Vui synthesis with locally maintained source."""
 
     config_class = VuiConfig
-    default_model_name_or_path = "vui-abraham-100m.pt"
+    default_model_name_or_path = VUI_MODEL_FILENAME
     passthrough_generation_options = frozenset({
         "max_chunk_retries",
         "max_secs",
@@ -42,6 +77,7 @@ class VuiForTextToSpeech(PreTrainedTTSModel):
         model_path: str | None = None,
         device: str = "auto",
         lazy_load: bool = True,
+        token: str | bool | None = None,
         **config_overrides,
     ):
         config = self._coerce_config(
@@ -49,12 +85,29 @@ class VuiForTextToSpeech(PreTrainedTTSModel):
             model_path=model_path,
             **config_overrides,
         )
+        self._hub_token = token
+        self.artifacts: VuiArtifacts | None = None
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     def _load_pretrained_model(self) -> None:
         from voicehub.models.vui.model import Vui
 
-        self.model = Vui.from_pretrained(checkpoint_path=self.config.name_or_path).to(self.device)
+        self.artifacts = resolve_vui_artifacts(
+            self.config.name_or_path,
+            model_filename=self.config.checkpoint_filename,
+            codec_filename=self.config.codec_filename,
+            revision=self.config.revision,
+            cache_dir=self.config.cache_dir,
+            token=self._hub_token,
+            local_files_only=self.config.local_files_only,
+            verify_official_integrity=self.config.verify_official_integrity,
+        )
+        self.model = Vui.from_pretrained(
+            checkpoint_path=self.artifacts.model_checkpoint,
+            codec_path=self.artifacts.codec_checkpoint,
+            model_config=self.config.native_model_config,
+            codec_config=self.config.native_codec_config,
+        ).to(self.device)
         self.model.eval()
         self.config.sample_rate = int(self.model.codec.config.sample_rate)
 

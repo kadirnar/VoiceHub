@@ -1,0 +1,62 @@
+{
+  "architecture": "nemotron-3.5-rnnt",
+  "implementation": "voicehub-native",
+  "architecture_reference": {
+    "repository": "https://github.com/huggingface/transformers",
+    "reviewed_version": "5.14.1",
+    "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+    "initial_nemotron_revision": "4fd7f1a05f52a11d7709747be554ca50294bf03f",
+    "processing_fix_revision": "2df80c4f5863192f1d4cc698bd4f1e1d254e14ba",
+    "license": "Apache-2.0",
+    "files": [
+      "src/transformers/models/nemotron3_5_asr",
+      "src/transformers/models/nemotron_asr_streaming"
+    ]
+  },
+  "checkpoint": {
+    "repository": "nvidia/nemotron-3.5-asr-streaming-0.6b",
+    "revision": "f3d333391852ba876df169dcc9ba902d25b6ab0b",
+    "filename": "model.safetensors",
+    "format": "single-safetensors",
+    "size": 2552062944,
+    "sha256": "9eebdd6590289cb3030f310858f3df93256600a800a3e8200c5993d5f967e174",
+    "header_size": 74584,
+    "tensor_count": 655,
+    "parameter_count": 637997088,
+    "tensor_bytes": 2551988352,
+    "dtype": "F32",
+    "header_fingerprint": "c50ff5014b5bb7da8b6a96f27cc568adec886a6e80b53ea3910ee06e77d6b517",
+    "license": "OpenMDW-1.1",
+    "license_url": "https://openmdw.ai/license/1-1/"
+  },
+  "verified_scope": {
+    "inference": [
+      "16 kHz centered Hann log-mel frontend",
+      "cache-aware FastConformer encoder",
+      "language prompt projection",
+      "RNN-T greedy decoding",
+      "automatic locale-tag decoding",
+      "token timestamps",
+      "cache-aware streaming graph"
+    ],
+    "training": [
+      "joint raw-waveform and transcript processing",
+      "model-vocabulary blank-prefix normalization",
+      "native differentiable RNN-T dynamic-programming objective",
+      "full-model autograd",
+      "gradient checkpointing",
+      "portable single-file Safetensors export and reload"
+    ],
+    "limitations": [
+      "Only the published Nemotron3_5AsrForRNNT graph is accepted",
+      "Tokenizer normalization is implemented from the declarative published graph and does not execute opaque tokenizer code",
+      "Greedy RNN-T decoding is implemented; beam search and hotword biasing are not claimed",
+      "No corpus-level accuracy improvement or benchmark result is claimed"
+    ]
+  },
+  "runtime_dependencies": [
+    "Python standard library",
+    "PyTorch",
+    "VoiceHub"
+  ]
+}

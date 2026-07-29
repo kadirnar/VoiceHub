@@ -1,0 +1,71 @@
+{
+  "architecture": "Kokoro-82M",
+  "checkpoint": {
+    "license": "Apache-2.0",
+    "repository": "hexgrad/Kokoro-82M",
+    "revision": "cbc78411372edb46f7e42030b241834a55fe0cb6",
+    "sha256": "496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4",
+    "tensor_count": 548,
+    "parameter_count": 81763410
+  },
+  "implementation": {
+    "dependencies": [
+      "python-standard-library",
+      "torch",
+      "voicehub"
+    ],
+    "steady_state_checkpoint_format": "safetensors",
+    "legacy_import": "torch.load(weights_only=True) followed by strict one-time conversion"
+  },
+  "parity": {
+    "albert": {
+      "reference": "transformers==4.48.3",
+      "input_shape": [
+        2,
+        8
+      ],
+      "max_absolute_difference": 0.0,
+      "mean_absolute_difference": 0.0,
+      "exact": true
+    },
+    "full_decoder": {
+      "source_revision": "dfb907a02bba8152ca444717ca5d78747ccb4bec",
+      "phonemes": "həlˈoʊ",
+      "seed": 123,
+      "samples": 31800,
+      "duration_exact": true,
+      "waveform_max_absolute_difference": 0.0,
+      "waveform_mean_absolute_difference": 0.0,
+      "waveform_exact": true
+    },
+    "native_export_reload": {
+      "checkpoint": "official converted Safetensors",
+      "phonemes": "həlˈoʊ",
+      "seed": 123,
+      "samples": 31800,
+      "waveform_max_absolute_difference": 0.0,
+      "waveform_exact": true
+    }
+  },
+  "source": {
+    "license": "Apache-2.0",
+    "repository": "https://github.com/hexgrad/kokoro",
+    "revision": "dfb907a02bba8152ca444717ca5d78747ccb4bec",
+    "transformers_reference_version": "4.48.3"
+  },
+  "training": {
+    "status": "reconstructed-not-author-verified",
+    "supported": "preprocessed released decoder graph",
+    "measured_backward": {
+      "checkpoint": "official converted Safetensors",
+      "duration_objective": "finite loss and nonzero PL-BERT, projection, and duration-predictor gradients",
+      "acoustic_objective": "finite loss and nonzero projection, duration, prosody, text-encoder, early-decoder, and vocoder-output gradients"
+    },
+    "unsupported": [
+      "raw-audio StyleTTS2 alignment recipe",
+      "unreleased style encoder and diffusion checkpoints",
+      "unreleased discriminator initialization and optimizer schedule",
+      "source-equivalent multilingual G2P data"
+    ]
+  }
+}

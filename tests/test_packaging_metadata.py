@@ -31,27 +31,45 @@ FORBIDDEN_INFERENCE_EXTRAS = {
     "vad-webrtc",
     "whisperx",
 }
-EXPECTED_INFERENCE_ABI_REQUIREMENTS = (
-    "torch>=2.8,<2.9",
-    "torchaudio>=2.8,<2.9",
-    "torchvision>=0.23,<0.24",
-    "transformers>=5.14,<6",
-    "faster-whisper>=1.1",
-    "funasr>=1.3.26",
-    "whisperx>=3.8.7rc1,<3.9",
-    "openai-whisper",
-    "nemo-toolkit[asr-only,common-only]==2.5.0",
-    "espnet==202511",
-    "pyannote.audio>=4,<5",
-    "protobuf>=5.29.5,<5.30",
-    "numba>=0.61",
-    "misaki[en,ja,zh]",
+EXPECTED_INFERENCE_ABI_REQUIREMENTS = ("torch>=2.8,<2.9", )
+FORBIDDEN_EXTERNAL_RUNTIME_DISTRIBUTIONS = {
+    "accelerate",
+    "apache-tvm-ffi",
+    "argbind",
+    "cached-path",
+    "cloudpickle",
+    "diffusers",
     "encodec",
+    "fiddle",
+    "huggingface-hub",
+    "hyperpyyaml",
+    "librosa",
     "local-attention",
-    "split-lang>=2,<3",
-    "auditok>=0.5,<0.6",
-    "sherpa-onnx>=1.13,<1.14",
-)
+    "msgpack",
+    "modelscope",
+    "ninja",
+    "numba",
+    "numpy",
+    "onnxruntime",
+    "peft",
+    "protobuf",
+    "pynini",
+    "pyzmq",
+    "rjieba",
+    "sacremoses",
+    "safetensors",
+    "scikit-learn",
+    "sentencepiece",
+    "split-lang",
+    "tiktoken",
+    "tokenizers",
+    "torchaudio",
+    "torchdiffeq",
+    "torchtune",
+    "torchvision",
+    "transformers",
+    "x-transformers",
+}
 EXPECTED_TRAINING_REQUIREMENTS = (
     "ema-pytorch",
     "datasets",
@@ -164,7 +182,10 @@ class PackagingMetadataTests(unittest.TestCase):
 
     def test_default_install_has_the_supported_inference_abi(self):
         normalized = _normalized_requirements(self.dependencies)
-        self.assertTrue(_normalized_requirements(EXPECTED_INFERENCE_ABI_REQUIREMENTS) <= normalized, )
+        self.assertEqual(
+            normalized,
+            _normalized_requirements(EXPECTED_INFERENCE_ABI_REQUIREMENTS),
+        )
         aggregate_requirements = _requirements_by_distribution(self.dependencies)
         self.assertNotIn(
             "wenet",
@@ -172,27 +193,34 @@ class PackagingMetadataTests(unittest.TestCase):
             "WeNet's inference runtime is vendored because no matching PyPI "
             "distribution exists.",
         )
-        nemo_core_distributions = {
-            "cloudpickle",
-            "fiddle",
-            "hydra-core",
-            "lightning",
-            "omegaconf",
-            "peft",
-            "torchmetrics",
-            "webdataset",
-        }
+        self.assertNotIn(
+            "espnet",
+            aggregate_requirements,
+            "The audited ESPnet Transformer runtime is implemented natively.",
+        )
+        self.assertNotIn(
+            "espnet-model-zoo",
+            aggregate_requirements,
+            "Native artifact resolution replaces ESPnet's model-zoo client.",
+        )
         self.assertEqual(
-            nemo_core_distributions - aggregate_requirements.keys(),
+            FORBIDDEN_EXTERNAL_RUNTIME_DISTRIBUTIONS
+            & aggregate_requirements.keys(),
             set(),
-            "The W&B-free NeMo split must retain its import-time core dependencies.",
+            "VoiceHub-native graphs must not reintroduce external model, "
+            "tokenizer, checkpoint, DSP, or provider runtimes.",
         )
         self.assertNotIn("descript-audiotools", aggregate_requirements)
         self.assertNotIn(
+            "pyannote-audio",
+            aggregate_requirements,
+            "PyanNet is implemented by VoiceHub and must not reinstall "
+            "pyannote.audio.",
+        )
+        self.assertNotIn(
             "torchcodec",
             aggregate_requirements,
-            "TorchCodec must be resolved transitively at the WhisperX/pyannote "
-            "ABI-compatible version.",
+            "VoiceHub-native audio loading must not require TorchCodec.",
         )
 
     def test_training_extra_has_exact_shared_trainer_contract(self):

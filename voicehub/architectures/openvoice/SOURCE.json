@@ -1,0 +1,41 @@
+{
+  "architecture": "openvoice-v2-converter",
+  "implementation": "voicehub-native",
+  "source": {
+    "repository": "https://github.com/myshell-ai/OpenVoice",
+    "revision": "74a1d147b17a8c3092dd5430504bd83ef6c7eb23",
+    "license": "MIT"
+  },
+  "checkpoint": {
+    "repository": "myshell-ai/OpenVoiceV2",
+    "revision": "f36e7edfe1684461a8343844af60babc2efbb727",
+    "filename": "converter/checkpoint.pth",
+    "license": "MIT",
+    "sha256": "9652c27e92b6b2a91632590ac9962ef7ae2b712e5c5b7f4c34ec55ee2b37ab9e",
+    "file_bytes": 131320490,
+    "tensor_data_bytes": 131168904,
+    "tensors": 486,
+    "parameters": 32792226,
+    "header_fingerprint": "fd350d54eb92706417c1c37215a318f80ee914e151d087e9d4bcfbdbd9751216"
+  },
+  "verified_scope": {
+    "inference": [
+      "exact released reference encoder, posterior encoder, flow, and generator topology",
+      "released 22.05 kHz magnitude-spectrogram frontend",
+      "restricted weights-only conversion of the hash-pinned release pickle",
+      "strict steady-state Safetensors reload and portable export"
+    ],
+    "training": [
+      "full-graph differentiable paired tone-conversion reconstruction",
+      "raw source, target, and optional reference waveform preparation",
+      "portable inference-ready Safetensors export"
+    ],
+    "limitations": [
+      "The upstream repository publishes no converter training loop, discriminator, dataset, or loss; VoiceHub's paired reconstruction objective is explicitly reconstructed.",
+      "The converter clones tone color only; accent, emotion, rhythm, and linguistic content come from the base speech.",
+      "The upstream Silero/Whisper reference segmenters are not used. Provide trimmed speech or run a VoiceHub-native VAD explicitly.",
+      "Native text-to-speech composition requires a VoiceHub-native base model or caller-supplied base waveform and is separate from the converter graph.",
+      "No corpus-level similarity or audio-quality improvement is claimed."
+    ]
+  }
+}

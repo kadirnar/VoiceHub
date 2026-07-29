@@ -194,6 +194,22 @@ spec = get_model_spec("zonos2")
 print(spec.components)  # ("dac",)
 ```
 
+Zonos v0.1 uses the same component declaration while keeping its model graph
+separate from ZONOS2. Its registered native architecture covers the audited
+dense Transformer checkpoint, conditioning, delayed codebooks, strict
+Safetensors load/export, and full-model gradients. The different Mamba-2
+hybrid graph is rejected explicitly rather than being loaded as though it were
+Transformer-compatible.
+
+ConversationTTS follows the same boundary with a different codec-language-model
+protocol. VoiceHub owns its pinned Llama 3.2 backbone and depth decoder, byte
+BPE tokenizer, Mimi codec, 33-stream processor, two-level masked objective, and
+strict checkpoint adapter. Raw audio is encoded under `no_grad` by the frozen
+Mimi graph; only the conversational language model enters the optimizer.
+Serving KV caches are lifecycle state rather than checkpoint state and are
+removed before fine-tuning or Safetensors export. The upstream PyTorch archive
+is never loaded through an unrestricted pickle fallback.
+
 `save_pretrained()` writes the portable VoiceHub API metadata at the artifact
 root:
 
@@ -229,6 +245,7 @@ be paired with a factory registered through
 | `tdt` | Requires the backend-native token-and-duration objective. |
 | `audio-classification` | Supports declared clip-level CE/BCE fallbacks and explicit loss masks. |
 | `frame-classification` | Applies classification semantics to time-aligned outputs and requires a padding mask for variable frames. |
+| `native-asr-dispatch` | Selects one closed, verified VoiceHub ASR graph and preserves that graph's native CTC or sequence-to-sequence objective. |
 | `upstream-native` | Requires a native scalar objective or complete specialized adapter; it never guesses a provider recipe. |
 
 Native losses are always inspected before a fallback is considered. A phase
@@ -326,6 +343,52 @@ model = AutoModelForTextToSpeech.from_pretrained(
 )
 ```
 
+For composable graph transformations, callers can apply an explicit sequence
+of `OptimizationPass` objects or lazily registered pass names. Plans are never
+selected automatically:
+
+```python
+from voicehub.optimization import OptimizationContext
+
+result = model.apply_optimization_plan(
+    ("my-fusion-pass", configured_pass),
+    mode="inference",
+    context=OptimizationContext(
+        mode="inference",
+        device="cuda",
+        dtype="float16",
+    ),
+)
+print(result.manifest())
+```
+
+The complete plan validates before its first transformation. A later failure
+rolls back earlier reversible passes, and `result.restore()` reverses a
+successful all-reversible plan. An active inference plan must be restored
+explicitly before entering training, and vice versa; VoiceHub never guesses
+whether an optimized graph remains differentiable.
+
+Each concrete pass has a versioned `pass_id` and an architecture-level
+compatibility kind such as `compile`, `sdpa`, or `lora`. The wrapper binds its
+registered architecture into the optimization context, and the manager
+rejects an unsupported device, dtype, training mode, streaming mode,
+distributed-training request, or pass kind before any mutation occurs.
+Distributed inference is rejected for architecture-bound plans because the
+current architecture schema verifies distributed training only. A registered
+model whose specification has no architecture remains architecture-agnostic.
+Architecture `optimization_passes` values are compatibility metadata, not
+factory registrations: a compatible kind is executable only after a concrete
+pass implementation has been explicitly registered or supplied.
+
+Every pass implements `manifest_configuration()` and returns all defaults and
+caller options that affect its transformation. Before applying the first
+pass, VoiceHub snapshots each pass's ID, kind, version, capabilities, and
+configuration as a strict JSON string-key tree. Result metadata is
+canonicalized into the same immutable snapshot after application. This makes
+manifests JSON-round-trip stable and ensures that two instances with the same
+ID/version but different configuration are different exact-resume plans.
+Declaring `reversible=True` also requires a real `restore()` override.
+
 The adapter owns model semantics: source resolution, input preparation, phase
 selection, freezing/detaching, native loss extraction, and explicitly enabled
 fallback objectives. `Trainer` owns orchestration: dataloader progress,
@@ -337,6 +400,7 @@ multi-component recipes.
 can independently provide:
 
 ```text
+prepare_device(model, *, device)
 prepare_model(...) / prepare_training_adapter(...)
 prepare_optimization(model, optimizer, scheduler)
 prepare_dataloader(...) / prepare_input(...)
@@ -356,6 +420,28 @@ Such a strategy either returns a callable accepting `training_context` or
 overrides `execute_training_phase()`. Optimizer and scheduler objects are
 created after source resolution and then passed with the prepared model
 through `prepare_optimization()`.
+
+`Trainer(optimization_plan=...)` applies the same pass contract in
+`mode="training"`. The strategy's explicit `prepare_device()` hook first
+places the unwrapped graph, Trainer applies graph/adapter passes next, and only
+then may `prepare_model()` or `prepare_training_adapter()` create a strategy
+proxy. Optimizers are created from that transformed graph. Training contexts
+always set `persist_result=True`; nonpersistent passes fail before training or
+checkpoint creation. A separate-optimizer recipe rejects any
+topology/name-changing pass unless the pass implements complete post-transform
+parameter routing for every recipe optimizer.
+
+Its resolved context and immutable pass snapshots are written to model and
+checkpoint manifests. Exact resume requires the caller to provide the same
+explicit plan and configuration; no pass is reconstructed or applied from
+artifact metadata.
+
+Exact checkpoints may store explicitly persistent optimized topology because
+resume reapplies and verifies the same plan before loading it. Public and
+final model saves have a stronger contract: a topology/name-changing pass must
+declare `portable_export=True` and implement `export_portable_state()` to
+produce state loadable by a fresh canonical runtime. Otherwise portable save
+fails instead of labeling optimized wrapper state as reloadable.
 
 During accumulation, Trainer records how many micro-batches contributed to
 each optimizer and normalizes that optimizer's gradients by its own count.
@@ -425,12 +511,40 @@ iterable dataloader or worker-prefetched dataloader because their cursor,
 prefetch queue, and worker RNG cannot be recovered generically. A custom
 strategy must provide a stateful dataloader contract for those runtimes.
 
-General compute and utility dependencies remain external: PyTorch,
-Transformers, NumPy, audio I/O, phonemizers, and platform runtimes such as
-ONNX Runtime. Neural architecture packages needed by the models—SNAC,
-S3Tokenizer, Perth, DAC, Vocos, Conformer, WavMark, and monotonic alignment—are
-vendored with their licenses. Newer families apply the same rule to MOSS
-Audio Tokenizer, DACVAE, NeuCodec, Moshi/Mimi, and SilentCipher.
+The native architecture boundary permits only Python's standard library,
+VoiceHub, and PyTorch as its tensor/autograd substrate. Migrated components
+such as WavMark perform PCM loading, resampling, embedding, extraction, voting,
+and restricted checkpoint loading without NumPy, librosa, SoundFile, resampy,
+Torchaudio, or tqdm. The dependency policy checks every migrated file
+statically, including literal dynamic imports. Provider families that have not
+yet crossed this boundary remain explicitly documented as legacy runtimes
+rather than being described as native.
+
+Neural architecture source needed by models—SNAC, S3Tokenizer, Perth, DAC,
+Encodec, Vocos, Conformer, WavMark, and monotonic alignment—is retained with
+its license and immutable provenance. The same rule covers complete native
+LLaSA/XCodec2, SpeechT5/HiFi-GAN, and ESPnet Transformer-e18 execution graphs:
+source, checkpoint, tokenizer, and training-recipe revisions are recorded
+separately instead of being collapsed into one ambiguous “upstream” version.
+Newer families apply the same source rule to MOSS Audio Tokenizer, DACVAE,
+NeuCodec, Moshi/Mimi, and SilentCipher.
+
+MOSS-TTS is registered as one lazy `moss-tts` architecture spanning four
+checkpoint-exact semantic graphs and two separately versioned codecs. Its
+model builder, Qwen byte-BPE processor, strict checkpoint adapter, codec
+loader, runtime, objective, and exporter all resolve inside the native
+boundary. Raw waveform fine-tuning encodes RVQ targets through the matching
+frozen MOSS Audio Tokenizer; pre-encoded records enter at the same processor
+boundary. The architecture advertises `streaming=False`: the published
+Realtime graph has a verified buffered prefill/depth schedule, but an
+incremental session, queue, or transport contract has not been implemented.
+
+Vui follows the complete-artifact form of this rule. Its versioned standalone
+export contains the 100M model and frozen Fluac codec in separate native
+Safetensors files plus a validated graph configuration. Fresh inference
+strict-loads both components and rejects unmarked or mismatched tensor
+containers rather than treating a `.safetensors` suffix as proof of
+compatibility.
 
 Commercial-use restrictions do not remove otherwise licensed source from the
 registry. `voicehub.policies.licensing` records special terms separately from
@@ -440,11 +554,92 @@ latter is included with its usage restriction exposed as metadata.
 
 ## Source boundary
 
-An architecture is registered only when its executable model and codec path
-can run without importing an installable TTS project. General compute
-libraries such as PyTorch, Transformers, ONNX Runtime, tokenizers, and audio
-I/O remain regular dependencies. Upstream TTS packages are static-test
-failures even when they happen to be installed in the environment.
+An architecture is registered as VoiceHub-native only when its executable
+model, processor, codec, objective, checkpoint adapter, and export path use
+Python's standard library, VoiceHub, and PyTorch. Transformers, ONNX Runtime,
+provider SDKs, third-party tokenizer runtimes, and convenience DSP libraries
+are not part of that boundary. They may exist only behind an explicitly
+selected optional execution strategy outside the owned architecture.
+
+The static boundary includes every package `__init__.py` executed while
+importing a covered module, and every registry facade marked
+`voicehub-native` must resolve to a covered file. Literal dynamic imports are
+checked like normal imports; unresolved dynamic targets are rejected outside
+the small lazy-namespace and architecture-plugin infrastructure boundary.
+
+Checkpoint repositories provide data, not executable code. Safetensors is the
+steady-state format. A pinned legacy archive may cross a narrow
+`weights_only=True` conversion boundary only when its exact revision, digest,
+tensor inventory, and license are known; unpinned pickle loading fails closed.
+Native Encodec follows this rule, and Vocos never runs raw-audio encoding with
+an uninitialized codec. Code-to-waveform Vocos decoding remains available
+without loading the separately published Encodec encoder weights.
+Encodec is also a first-class lazy architecture declaration: its 24 kHz mono
+and 48 kHz stereo graphs, residual quantizer, strict checkpoint adapter,
+Safetensors exporter, and differentiable straight-through path are
+discoverable without importing PyTorch. The XTTS compatibility Bark path,
+Vocos, codec evaluation, and the public Bark provider use that shared
+implementation, so the external `encodec` distribution is not part of
+VoiceHub's installation ABI. Bark's semantic, coarse, and fine Transformers,
+WordPiece processor, generation protocol, stage objectives, and checkpoint
+adapter are registered as one native architecture. Its official pickle
+archive crosses only the explicit digest-pinned restricted conversion
+boundary; steady-state training and inference use Safetensors.
+
+Fish Speech S2 follows the same fail-closed lifecycle while retaining its own
+architecture. VoiceHub owns the checkpoint-exact 36-layer Qwen3-style slow
+transformer, 4-layer residual-codebook decoder, Qwen2 byte-BPE conversation
+protocol, repetition-aware sampler, and 44.1 kHz ten-codebook ModifiedDAC.
+The semantic graph trains with the source-aligned base-token and residual
+codebook losses; the codec remains a frozen offline tokenizer. The official
+semantic shards load directly from Safetensors. The separately published
+`codec.pth` may cross only an explicit, immutable-revision, size-and-digest
+verified `weights_only=True` conversion boundary. Fresh inference and
+fine-tuning reloads use Safetensors exclusively.
+
+Inflect Micro/Nano v2 is a native VITS warm-start architecture. The published
+generator is checkpoint-exact, while the posterior encoder and multi-period
+discriminator are freshly initialized because the release does not contain
+them. The training profile therefore records separate generator and
+discriminator phases and calls the result a reconstructed warm start, not an
+author-resumable training checkpoint.
+
+StyleTTS 2 follows the same explicit-boundary rule. VoiceHub owns the released
+PL-BERT, style diffusion, duration/prosody, HiFi-GAN and iSTFTNet execution
+graphs and exports the eight deployable components as one strict Safetensors
+artifact. Preprocessed fine-tuning routes generator and fresh MPD/MSD updates
+through separate optimizers. The registry does not imply raw-text training:
+checkpoint-compatible phonemes, monotonic alignments, acoustic targets, and
+waveform lengths remain required, while the unpublished discriminator state,
+author optimizer-resume state, and omitted WavLM objective are not invented.
+
+GPT-SoVITS is registered for the audited V1, V2, V2Pro, and V2ProPlus
+classic-S2 topologies. Their variant-exact S1 semantic model and S2 VITS
+generator/discriminator are independent native components with independent
+optimizer routes and a coherent staged export manifest. Pro variants add the
+released 20,480-D ERes2NetV2 speaker-verification conditioning path and
+seven-period discriminator. Checkpoint-compatible phoneme, BERT, CN-HuBERT,
+spectrogram, speaker-embedding, and waveform tensors remain an explicit data
+boundary. V3/V4 flow-matching and LoRA/PEFT layouts are rejected instead of
+being forced through the classic graph.
+
+MeloTTS is likewise registered at its real acoustic boundary. VoiceHub owns
+the checkpoint-exact seven-component VITS2 generator, maximum monotonic
+alignment, HiFi-GAN decoder, waveform discriminator, duration discriminator,
+and published losses. The released multilingual frontends are separate
+language-specific G2P and BERT models, so the native API requires their exact
+phone, tone, language, 1,024-channel BERT, and 768-channel Japanese-BERT
+outputs rather than substituting a convenient tokenizer. Official release
+archives cross a digest-pinned `weights_only=True` conversion gate once;
+normal inference, fine-tuning, and export use strict Safetensors. Fresh
+training discriminators and optimizer state are intentionally excluded from
+the deployable artifact.
+
+NeuTTS similarly owns its Qwen/Llama backbone, byte-BPE tokenizer, contiguous
+speech-token protocol, and full NeuCodec graph. The pinned completion-only
+fine-tuning recipe is verified for NeuTTS-Air and freezes NeuCodec. Nano and
+2E remain native inference graphs, but their training routes fail closed until
+an author-equivalent recipe is established.
 
 The vendoring manifest is declarative: every current project defines copied
 source roots, namespace rewrites, license files, and separately licensed

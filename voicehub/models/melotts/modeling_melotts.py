@@ -1,4 +1,4 @@
-"""Stable model imports for melotts."""
+"""Stable model imports for VoiceHub's native MeloTTS runtime."""
 
 from voicehub.models.melotts.inference import MeloTTSForTextToSpeech
 

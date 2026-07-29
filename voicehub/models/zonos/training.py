@@ -1,92 +1,127 @@
-"""Delayed-codebook causal fine-tuning for the released Zonos graph."""
+"""Differentiable fine-tuning for the native Zonos v0.1 Transformer."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from collections.abc import Mapping
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
+from typing import Any
 
-from voicehub.dependencies import import_optional
+import torch
+from torch import Tensor
+from torch.nn import functional as F
+
+from voicehub.architectures.zonos.checkpoint import save_zonos_pretrained
+from voicehub.architectures.zonos.metadata import NATIVE_ZONOS_FORMAT
+from voicehub.architectures.zonos.modeling import ZonosForCausalLM
+from voicehub.checkpointing import save_safetensors
 from voicehub.modeling_outputs import TTSTrainingOutput
 from voicehub.training.adapters import CausalLMTrainingAdapter
 from voicehub.training.contracts import TrainingContext
 
 
 class ZonosTrainingAdapter(CausalLMTrainingAdapter):
-    """Train Zonos from source-shaped conditioning and DAC code tensors."""
+    """Full-model delayed-codebook causal fine-tuning.
+
+    Zyphra publishes the inference graph and checkpoints, but not the
+    original optimizer, data pipeline, or training loop.  This adapter
+    reconstructs only the objective implied by generation: each codebook
+    predicts its next delayed token, including the diagonal EOS cascade.
+    The distinction is recorded in every artifact manifest.
+    """
 
     supports_custom_recipe = True
-    native_export_semantics = "source-compatible-checkpoint-weight-warm-start"
+    native_export_semantics = "inference-reloadable-safetensors"
+    RECIPE_VERSION = 1
+
+    def _native_model(self) -> ZonosForCausalLM | None:
+        candidate = self.primary_model
+        return (candidate if isinstance(candidate, ZonosForCausalLM) else None)
 
     def setup(self):
         super().setup()
-        autoencoder = getattr(self.primary_model, "autoencoder", None)
-        if autoencoder is not None:
-            codec = getattr(autoencoder, "dac", autoencoder)
-            if hasattr(codec, "eval"):
-                codec.eval()
-            if hasattr(codec, "parameters"):
-                for parameter in codec.parameters():
+        # Compatibility runtimes may expose the frozen codec on the model.
+        # The native runtime keeps it outside the trainable graph entirely.
+        for name in ("autoencoder", "codec"):
+            component = getattr(self.primary_model, name, None)
+            if component is None:
+                continue
+            component = getattr(component, "dac", component)
+            if hasattr(component, "eval"):
+                component.eval()
+            if hasattr(component, "parameters"):
+                for parameter in component.parameters():
                     parameter.requires_grad_(False)
         self.primary_model.train()
         return self
+
+    @staticmethod
+    def _validate_batch(
+        prefix: Any,
+        audio_codes: Any,
+        lengths: Any,
+        *,
+        model: Any,
+    ) -> tuple[Tensor, Tensor, Tensor | None]:
+        if not isinstance(prefix, Tensor) or prefix.ndim != 3:
+            raise ValueError(
+                "Zonos `prefix_conditioning` must have shape "
+                "[batch, prefix_time, hidden_size].")
+        if not isinstance(audio_codes, Tensor) or audio_codes.ndim != 3:
+            raise ValueError("Zonos `audio_codes` must have shape "
+                             "[batch, codebook, audio_time].")
+        if prefix.shape[0] != audio_codes.shape[0]:
+            raise ValueError("Zonos prefix and audio-code batch sizes must match.")
+        expected_codebooks = len(getattr(model, "embeddings", ()))
+        if audio_codes.shape[1] != expected_codebooks:
+            raise ValueError(
+                f"Zonos expects {expected_codebooks} codebooks, received "
+                f"{audio_codes.shape[1]}.")
+        if audio_codes.dtype == torch.bool or audio_codes.is_floating_point():
+            raise TypeError("Zonos audio codes must use an integer dtype.")
+        if lengths is not None:
+            if not isinstance(lengths, Tensor) or lengths.shape != (audio_codes.shape[0], ):
+                raise ValueError("Zonos `audio_code_lengths` must have shape [batch].")
+            lengths = lengths.to(dtype=torch.long)
+        return prefix, audio_codes.long(), lengths
 
     def execute_training_phase(
         self,
         context: TrainingContext,
     ) -> TTSTrainingOutput:
         self.setup()
-        torch = import_optional(
-            "torch",
-            model_type="zonos",
-            install_extra="training",
+        prepared = self.prepare_batch(context.inputs, context)
+        if not isinstance(prepared, Mapping):
+            raise TypeError("Zonos training input preparation must return a mapping.")
+        batch = self.prepare_runtime_inputs(prepared)
+        prefix, audio_codes, code_lengths = self._validate_batch(
+            batch.get("prefix_conditioning"),
+            batch.get("audio_codes"),
+            batch.get("audio_code_lengths"),
+            model=self.primary_model,
         )
-        functional = import_optional(
-            "torch.nn.functional",
-            model_type="zonos",
-            install_extra="training",
-        )
-        batch = dict(context.inputs)
-        prefix = batch.get("prefix_conditioning")
-        audio_codes = batch.get("audio_codes")
-        if not torch.is_tensor(prefix) or prefix.ndim != 3:
-            raise ValueError(
-                "Zonos `prefix_conditioning` must have shape "
-                "[batch, prefix_time, hidden_size].")
-        if not torch.is_tensor(audio_codes) or audio_codes.ndim != 3:
-            raise ValueError("Zonos `audio_codes` must have shape "
-                             "[batch, codebook, audio_time].")
-
-        prefix = prefix.to(
-            device=self.primary_model.device,
-            dtype=next(self.primary_model.parameters()).dtype,
-        )
-        audio_codes = audio_codes.to(
-            device=self.primary_model.device,
-            dtype=torch.long,
-        )
-        code_lengths = batch.get("audio_code_lengths")
+        device = getattr(self.primary_model, "device", None)
+        if device is None:
+            device = next(self.primary_model.parameters()).device
+        dtype = next(self.primary_model.parameters()).dtype
+        prefix = prefix.to(device=device, dtype=dtype)
+        audio_codes = audio_codes.to(device=device)
         if code_lengths is not None:
-            if (not torch.is_tensor(code_lengths) or code_lengths.shape != (audio_codes.shape[0], )):
-                raise ValueError("Zonos `audio_code_lengths` must have shape [batch].")
-            code_lengths = code_lengths.to(
-                device=audio_codes.device,
-                dtype=torch.long,
-            )
+            code_lengths = code_lengths.to(device=device)
 
-        logits, targets = self.primary_model.teacher_forced_logits(
+        logits, labels = self.primary_model.teacher_forced_logits(
             prefix,
             audio_codes,
             audio_code_lengths=code_lengths,
         )
-        valid_targets = targets.ne(int(self.primary_model.masked_token_id))
-
-        if not bool(valid_targets.any()):
+        supervised = labels.ne(int(self.primary_model.masked_token_id))
+        if not bool(supervised.any()):
             raise ValueError("Zonos training batch contains no supervised codec token.")
-        labels = targets.masked_fill(~valid_targets, -100)
-        codec_loss = functional.cross_entropy(
+        targets = labels.masked_fill(~supervised, -100)
+        codec_loss = F.cross_entropy(
             logits.reshape(-1, logits.shape[-1]),
-            labels.reshape(-1),
+            targets.reshape(-1),
             ignore_index=-100,
         )
         return TTSTrainingOutput(
@@ -98,37 +133,71 @@ class ZonosTrainingAdapter(CausalLMTrainingAdapter):
             },
             metadata={
                 "model_type": "zonos",
-                "objective": "delayed-codebook-causal-ce",
-                "supervised_tokens": int(valid_targets.sum().item()),
+                "objective": ("reconstructed-delayed-codebook-causal-cross-entropy"),
+                "objective_author_verified": False,
+                "supervised_tokens": int(supervised.sum().item()),
+                "full_model_gradient_ready": True,
+                "codec": "frozen-native-descript-dac-44khz",
             },
             training_phase=context.phase.name,
             optimizer_names=context.phase.optimizer_names,
         )
 
-    def save_pretrained(self, save_directory) -> None:
-        """Write the ``config.json`` and safetensors used by ``from_local``."""
+    def save_pretrained(self, save_directory: str | Path) -> None:
+        """Write a strict artifact loadable by fresh native inference."""
         self.setup()
-        destination = Path(save_directory)
+        destination = Path(save_directory).expanduser()
+        native = self._native_model()
+        if native is not None:
+            save_zonos_pretrained(native, destination)
+            return
+
+        # Keep the compatibility path used by legacy in-memory test graphs.
+        # Production native models always take the strict branch above.
         destination.mkdir(parents=True, exist_ok=True)
-        safetensors = import_optional(
-            "safetensors.torch",
-            model_type="zonos",
-            install_extra="training",
+        save_safetensors(
+            {
+                name: value.detach().cpu().contiguous()
+                for name, value in self.primary_model.state_dict().items()
+            },
+            destination / "model.safetensors",
         )
-        state = {
-            name: value.detach().cpu().contiguous()
-            for name, value in self.primary_model.state_dict().items()
-        }
-        safetensors.save_file(state, destination / "model.safetensors")
+        config = getattr(self.primary_model, "config", None)
+        if config is None:
+            raise TypeError("Zonos compatibility graph has no configuration.")
+        if hasattr(config, "to_dict"):
+            values = config.to_dict()
+        elif is_dataclass(config):
+            values = asdict(config)
+        elif isinstance(config, Mapping):
+            values = dict(config)
+        else:
+            raise TypeError("Zonos compatibility configuration is not serializable.")
         (destination / "config.json").write_text(
             json.dumps(
-                asdict(self.primary_model.config),
+                values,
                 ensure_ascii=False,
                 indent=2,
                 sort_keys=True,
             ) + "\n",
             encoding="utf-8",
         )
+
+    def artifact_manifest(self) -> dict[str, Any]:
+        manifest = super().artifact_manifest()
+        manifest.update({
+            "checkpoint_format": NATIVE_ZONOS_FORMAT,
+            "native_architecture_family": "zonos-v0.1-transformer",
+            "objective": ("reconstructed-delayed-codebook-causal-cross-entropy"),
+            "objective_author_verified": False,
+            "training_scope": "full-acoustic-language-model",
+            "frozen_components": ["descript-dac-44khz"],
+            "raw_audio_preprocessing": "optional-frozen-native-codec",
+            "phoneme_frontend": ("precomputed-or-injected-checkpoint-compatible-frontend"),
+            "inference_reloadable": True,
+            "hybrid_mamba_support": False,
+        })
+        return manifest
 
 
 __all__ = ["ZonosTrainingAdapter"]

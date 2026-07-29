@@ -1,16 +1,24 @@
-from numpy import zeros, int32, float32
-from torch import from_numpy
+"""Torch-only maximum monotonic alignment for the MeloTTS graph."""
 
-from .core import maximum_path_jit
+from __future__ import annotations
+
+import torch
+
+from voicehub.architectures.vits.alignment import maximum_path as _maximum_path
 
 
-def maximum_path(neg_cent, mask):
-    device = neg_cent.device
-    dtype = neg_cent.dtype
-    neg_cent = neg_cent.data.cpu().numpy().astype(float32)
-    path = zeros(neg_cent.shape, dtype=int32)
+def maximum_path(neg_cent: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Return the maximum-score path in MeloTTS's ``[B, frames, text]`` layout."""
+    if not isinstance(neg_cent, torch.Tensor) or neg_cent.ndim != 3:
+        raise ValueError("MeloTTS alignment scores must have shape [batch, frames, text].")
+    if not isinstance(mask, torch.Tensor) or mask.shape != neg_cent.shape:
+        raise ValueError("MeloTTS alignment mask must match the score tensor.")
+    if not neg_cent.is_floating_point() or not mask.is_floating_point():
+        raise TypeError("MeloTTS alignment scores and masks must be floating-point tensors.")
+    return _maximum_path(
+        neg_cent.detach(),
+        mask,
+    ).to(dtype=neg_cent.dtype)
 
-    t_t_max = mask.sum(1)[:, 0].data.cpu().numpy().astype(int32)
-    t_s_max = mask.sum(2)[:, 0].data.cpu().numpy().astype(int32)
-    maximum_path_jit(path, neg_cent, t_t_max, t_s_max)
-    return from_numpy(path).to(device=device, dtype=dtype)
+
+__all__ = ["maximum_path"]

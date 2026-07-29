@@ -1,15 +1,16 @@
 import torch
-from einops import rearrange, repeat
 from torch import Tensor
 from torch.amp import autocast
 
 
 def rotate_half(x):
     """Also known as "interleaved" style or GPT-J style."""
-    x = rearrange(x, "... (d r) -> ... d r", r=2)
+    if x.shape[-1] % 2:
+        raise ValueError("Rotary feature dimensions must be even.")
+    x = x.reshape(*x.shape[:-1], x.shape[-1] // 2, 2)
     x1, x2 = x.unbind(dim=-1)
     x = torch.stack((-x2, x1), dim=-1)
-    return rearrange(x, "... d r -> ... (d r)")
+    return x.flatten(start_dim=-2)
 
 
 @autocast("cuda", enabled=False)
@@ -52,5 +53,5 @@ def precompute_freqs_cis(
     pos = torch.arange(max_seqlen, dtype=dtype)
     inv_freqs = 1.0 / (theta**(torch.arange(0, dim, 2, dtype=dtype) / dim))
     freqs = torch.einsum("..., f -> ... f", pos.to(inv_freqs.dtype), inv_freqs)
-    freqs = repeat(freqs, "... n -> ... (n r)", r=2)
+    freqs = freqs.repeat_interleave(2, dim=-1)
     return freqs

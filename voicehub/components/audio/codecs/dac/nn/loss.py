@@ -1,368 +1,543 @@
-import typing
-from typing import List
+"""Native reconstruction and adversarial objectives for DAC training."""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 import torch
-import torch.nn.functional as F
-from audiotools import AudioSignal
-from audiotools import STFTParams
-from torch import nn
+from torch import Tensor, nn
+from torch.nn import functional
+
+from voicehub.components.audio.codecs._compat import AudioSignal
+from voicehub.processing.audio import mel_filter_bank
+
+
+def _audio_tensor(value: Tensor | AudioSignal, *, name: str) -> Tensor:
+    tensor = value.audio_data if isinstance(value, AudioSignal) else value
+    if not isinstance(tensor, Tensor):
+        raise TypeError(f"`{name}` must be a PyTorch tensor or AudioSignal.")
+    if tensor.ndim != 3:
+        raise ValueError(f"`{name}` must have shape [batch, channels, time].")
+    if not tensor.is_floating_point():
+        raise TypeError(f"`{name}` must use a floating-point dtype.")
+    if tensor.shape[-1] == 0:
+        raise ValueError(f"`{name}` cannot be empty.")
+    return tensor
+
+
+def _sample_rate(
+    first: Tensor | AudioSignal,
+    second: Tensor | AudioSignal,
+    fallback: int | None,
+) -> int:
+    rates = {
+        value.sample_rate
+        for value in (first, second)
+        if isinstance(value, AudioSignal)
+    }
+    if len(rates) > 1:
+        raise ValueError("Compared AudioSignal values must use one sample rate.")
+    resolved = next(iter(rates), fallback)
+    if isinstance(resolved, bool) or not isinstance(resolved, int) or resolved <= 0:
+        raise ValueError(
+            "A positive `sample_rate` is required for tensor mel losses."
+        )
+    return resolved
+
+
+def _window(
+    kind: str | None,
+    length: int,
+    *,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> Tensor:
+    normalized = "hann" if kind is None else kind.strip().lower().replace("-", "_")
+    if normalized == "hann":
+        return torch.hann_window(length, dtype=dtype, device=device)
+    if normalized == "sqrt_hann":
+        return torch.hann_window(
+            length,
+            dtype=dtype,
+            device=device,
+        ).clamp_min(0.0).sqrt()
+    if normalized == "hamming":
+        return torch.hamming_window(length, dtype=dtype, device=device)
+    if normalized == "blackman":
+        return torch.blackman_window(length, dtype=dtype, device=device)
+    if normalized == "average":
+        return torch.full(
+            (length,),
+            1.0 / length,
+            dtype=dtype,
+            device=device,
+        )
+    raise ValueError(f"Unsupported native STFT window {kind!r}.")
+
+
+@dataclass(frozen=True, slots=True)
+class STFTParameters:
+    """One validated spectral-loss resolution."""
+
+    window_length: int
+    hop_length: int
+    match_stride: bool = False
+    window_type: str | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("window_length", "hop_length"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"`{name}` must be a positive integer.")
+        if self.hop_length > self.window_length:
+            raise ValueError("`hop_length` cannot exceed `window_length`.")
+        if not isinstance(self.match_stride, bool):
+            raise TypeError("`match_stride` must be a boolean.")
+        if self.match_stride and self.hop_length != self.window_length // 4:
+            raise ValueError(
+                "Match-stride STFT requires `hop_length=window_length//4`."
+            )
+
+
+def _stft_magnitude(audio: Tensor, parameters: STFTParameters) -> Tensor:
+    batch, channels, sample_count = audio.shape
+    materialized = audio
+    if parameters.match_stride:
+        right_padding = (
+            math.ceil(sample_count / parameters.hop_length)
+            * parameters.hop_length
+            - sample_count
+        )
+        side_padding = (
+            parameters.window_length - parameters.hop_length
+        ) // 2
+        if side_padding >= sample_count:
+            raise ValueError(
+                "Audio is too short for reflective match-stride STFT padding."
+            )
+        materialized = functional.pad(
+            materialized,
+            (side_padding, side_padding + right_padding),
+            mode="reflect",
+        )
+    flattened = materialized.reshape(-1, materialized.shape[-1])
+    spectrum = torch.stft(
+        flattened,
+        n_fft=parameters.window_length,
+        hop_length=parameters.hop_length,
+        window=_window(
+            parameters.window_type,
+            parameters.window_length,
+            dtype=audio.dtype,
+            device=audio.device,
+        ),
+        center=True,
+        return_complex=True,
+    )
+    if parameters.match_stride:
+        spectrum = spectrum[..., 2:-2]
+    return spectrum.abs().reshape(
+        batch,
+        channels,
+        spectrum.shape[-2],
+        spectrum.shape[-1],
+    )
 
 
 class L1Loss(nn.L1Loss):
-    """L1 Loss between AudioSignals. Defaults
-    to comparing ``audio_data``, but any
-    attribute of an AudioSignal can be used.
-
-    Parameters
-    ----------
-    attribute : str, optional
-        Attribute of signal to compare, defaults to ``audio_data``.
-    weight : float, optional
-        Weight of this loss, defaults to 1.0.
-
-    Implementation copied from: https://github.com/descriptinc/lyrebird-audiotools/blob/961786aa1a9d628cca0c0486e5885a457fe70c1a/audiotools/metrics/distance.py
-    """
-
-    def __init__(self, attribute: str = "audio_data", weight: float = 1.0, **kwargs):
-        self.attribute = attribute
-        self.weight = weight
-        super().__init__(**kwargs)
-
-    def forward(self, x: AudioSignal, y: AudioSignal):
-        """
-        Parameters
-        ----------
-        x : AudioSignal
-            Estimate AudioSignal
-        y : AudioSignal
-            Reference AudioSignal
-
-        Returns
-        -------
-        torch.Tensor
-            L1 loss between AudioSignal attributes.
-        """
-        if isinstance(x, AudioSignal):
-            x = getattr(x, self.attribute)
-            y = getattr(y, self.attribute)
-        return super().forward(x, y)
-
-
-class SISDRLoss(nn.Module):
-    """
-    Computes the Scale-Invariant Source-to-Distortion Ratio between a batch
-    of estimated and reference audio signals or aligned features.
-
-    Parameters
-    ----------
-    scaling : int, optional
-        Whether to use scale-invariant (True) or
-        signal-to-noise ratio (False), by default True
-    reduction : str, optional
-        How to reduce across the batch (either 'mean',
-        'sum', or none).], by default ' mean'
-    zero_mean : int, optional
-        Zero mean the references and estimates before
-        computing the loss, by default True
-    clip_min : int, optional
-        The minimum possible loss value. Helps network
-        to not focus on making already good examples better, by default None
-    weight : float, optional
-        Weight of this loss, defaults to 1.0.
-
-    Implementation copied from: https://github.com/descriptinc/lyrebird-audiotools/blob/961786aa1a9d628cca0c0486e5885a457fe70c1a/audiotools/metrics/distance.py
-    """
+    """L1 distance between tensors or a selected AudioSignal attribute."""
 
     def __init__(
         self,
-        scaling: int = True,
-        reduction: str = "mean",
-        zero_mean: int = True,
-        clip_min: int = None,
+        attribute: str = "audio_data",
         weight: float = 1.0,
-    ):
+        **kwargs,
+    ) -> None:
+        if not isinstance(attribute, str) or not attribute:
+            raise ValueError("`attribute` must be a non-empty string.")
+        if not math.isfinite(weight):
+            raise ValueError("`weight` must be finite.")
+        self.attribute = attribute
+        self.weight = float(weight)
+        super().__init__(**kwargs)
+
+    def forward(
+        self,
+        first: Tensor | AudioSignal,
+        second: Tensor | AudioSignal,
+    ) -> Tensor:
+        if isinstance(first, AudioSignal):
+            first = getattr(first, self.attribute)
+        if isinstance(second, AudioSignal):
+            second = getattr(second, self.attribute)
+        return super().forward(first, second)
+
+
+class SISDRLoss(nn.Module):
+    """Scale-invariant source-to-distortion objective."""
+
+    def __init__(
+        self,
+        scaling: bool = True,
+        reduction: str = "mean",
+        zero_mean: bool = True,
+        clip_min: float | None = None,
+        weight: float = 1.0,
+    ) -> None:
+        super().__init__()
+        if reduction not in {"mean", "sum", "none"}:
+            raise ValueError("`reduction` must be 'mean', 'sum', or 'none'.")
+        for name, value in (("scaling", scaling), ("zero_mean", zero_mean)):
+            if not isinstance(value, bool):
+                raise TypeError(f"`{name}` must be a boolean.")
+        if clip_min is not None and not math.isfinite(clip_min):
+            raise ValueError("`clip_min` must be finite or None.")
+        if not math.isfinite(weight):
+            raise ValueError("`weight` must be finite.")
         self.scaling = scaling
         self.reduction = reduction
         self.zero_mean = zero_mean
         self.clip_min = clip_min
-        self.weight = weight
-        super().__init__()
+        self.weight = float(weight)
 
-    def forward(self, x: AudioSignal, y: AudioSignal):
-        eps = 1e-8
-        # nb, nc, nt
-        if isinstance(x, AudioSignal):
-            references = x.audio_data
-            estimates = y.audio_data
-        else:
-            references = x
-            estimates = y
-
-        nb = references.shape[0]
-        references = references.reshape(nb, 1, -1).permute(0, 2, 1)
-        estimates = estimates.reshape(nb, 1, -1).permute(0, 2, 1)
-
-        # samples now on axis 1
+    def forward(
+        self,
+        references: Tensor | AudioSignal,
+        estimates: Tensor | AudioSignal,
+    ) -> Tensor:
+        reference_tensor = _audio_tensor(references, name="references")
+        estimate_tensor = _audio_tensor(estimates, name="estimates")
+        if reference_tensor.shape != estimate_tensor.shape:
+            raise ValueError("SI-SDR inputs must have identical shapes.")
+        batch = reference_tensor.shape[0]
+        reference_tensor = reference_tensor.reshape(batch, -1, 1)
+        estimate_tensor = estimate_tensor.reshape(batch, -1, 1)
         if self.zero_mean:
-            mean_reference = references.mean(dim=1, keepdim=True)
-            mean_estimate = estimates.mean(dim=1, keepdim=True)
-        else:
-            mean_reference = 0
-            mean_estimate = 0
-
-        _references = references - mean_reference
-        _estimates = estimates - mean_estimate
-
-        references_projection = (_references**2).sum(dim=-2) + eps
-        references_on_estimates = (_estimates * _references).sum(dim=-2) + eps
-
-        scale = (
-            (references_on_estimates / references_projection).unsqueeze(1)
+            reference_tensor = (
+                reference_tensor
+                - reference_tensor.mean(dim=1, keepdim=True)
+            )
+            estimate_tensor = (
+                estimate_tensor
+                - estimate_tensor.mean(dim=1, keepdim=True)
+            )
+        epsilon = 1e-8
+        projection_power = reference_tensor.square().sum(dim=1) + epsilon
+        correlation = (
+            estimate_tensor * reference_tensor
+        ).sum(dim=1) + epsilon
+        scale: Tensor | float = (
+            (correlation / projection_power).unsqueeze(1)
             if self.scaling
-            else 1
+            else 1.0
         )
-
-        e_true = scale * _references
-        e_res = _estimates - e_true
-
-        signal = (e_true**2).sum(dim=1)
-        noise = (e_res**2).sum(dim=1)
-        sdr = -10 * torch.log10(signal / noise + eps)
-
+        target = scale * reference_tensor
+        residual = estimate_tensor - target
+        signal = target.square().sum(dim=1)
+        noise = residual.square().sum(dim=1)
+        loss = -10.0 * torch.log10(signal / noise.clamp_min(epsilon) + epsilon)
         if self.clip_min is not None:
-            sdr = torch.clamp(sdr, min=self.clip_min)
-
+            loss = torch.clamp(loss, min=self.clip_min)
         if self.reduction == "mean":
-            sdr = sdr.mean()
-        elif self.reduction == "sum":
-            sdr = sdr.sum()
-        return sdr
+            return loss.mean()
+        if self.reduction == "sum":
+            return loss.sum()
+        return loss
 
 
 class MultiScaleSTFTLoss(nn.Module):
-    """Computes the multi-scale STFT loss from [1].
-
-    Parameters
-    ----------
-    window_lengths : List[int], optional
-        Length of each window of each STFT, by default [2048, 512]
-    loss_fn : typing.Callable, optional
-        How to compare each loss, by default nn.L1Loss()
-    clamp_eps : float, optional
-        Clamp on the log magnitude, below, by default 1e-5
-    mag_weight : float, optional
-        Weight of raw magnitude portion of loss, by default 1.0
-    log_weight : float, optional
-        Weight of log magnitude portion of loss, by default 1.0
-    pow : float, optional
-        Power to raise magnitude to before taking log, by default 2.0
-    weight : float, optional
-        Weight of this loss, by default 1.0
-    match_stride : bool, optional
-        Whether to match the stride of convolutional layers, by default False
-
-    References
-    ----------
-
-    1.  Engel, Jesse, Chenjie Gu, and Adam Roberts.
-        "DDSP: Differentiable Digital Signal Processing."
-        International Conference on Learning Representations. 2019.
-
-    Implementation copied from: https://github.com/descriptinc/lyrebird-audiotools/blob/961786aa1a9d628cca0c0486e5885a457fe70c1a/audiotools/metrics/spectral.py
-    """
+    """Multi-resolution magnitude and log-magnitude STFT objective."""
 
     def __init__(
         self,
-        window_lengths: List[int] = [2048, 512],
-        loss_fn: typing.Callable = nn.L1Loss(),
+        window_lengths: Sequence[int] = (2_048, 512),
+        loss_fn: Callable[[Tensor, Tensor], Tensor] | None = None,
         clamp_eps: float = 1e-5,
         mag_weight: float = 1.0,
         log_weight: float = 1.0,
         pow: float = 2.0,
         weight: float = 1.0,
         match_stride: bool = False,
-        window_type: str = None,
-    ):
+        window_type: str | None = None,
+    ) -> None:
         super().__init__()
-        self.stft_params = [
-            STFTParams(
-                window_length=w,
-                hop_length=w // 4,
+        lengths = tuple(window_lengths)
+        if not lengths:
+            raise ValueError("`window_lengths` cannot be empty.")
+        self.stft_params = tuple(
+            STFTParameters(
+                window_length=length,
+                hop_length=length // 4,
                 match_stride=match_stride,
                 window_type=window_type,
             )
-            for w in window_lengths
-        ]
-        self.loss_fn = loss_fn
-        self.log_weight = log_weight
-        self.mag_weight = mag_weight
-        self.clamp_eps = clamp_eps
-        self.weight = weight
-        self.pow = pow
+            for length in lengths
+        )
+        self.loss_fn = nn.L1Loss() if loss_fn is None else loss_fn
+        if not callable(self.loss_fn):
+            raise TypeError("`loss_fn` must be callable.")
+        for name, value in (
+            ("clamp_eps", clamp_eps),
+            ("mag_weight", mag_weight),
+            ("log_weight", log_weight),
+            ("pow", pow),
+            ("weight", weight),
+        ):
+            if not math.isfinite(value):
+                raise ValueError(f"`{name}` must be finite.")
+        if clamp_eps <= 0.0 or pow <= 0.0:
+            raise ValueError("`clamp_eps` and `pow` must be positive.")
+        self.log_weight = float(log_weight)
+        self.mag_weight = float(mag_weight)
+        self.clamp_eps = float(clamp_eps)
+        self.weight = float(weight)
+        self.pow = float(pow)
 
-    def forward(self, x: AudioSignal, y: AudioSignal):
-        """Computes multi-scale STFT between an estimate and a reference
-        signal.
-
-        Parameters
-        ----------
-        x : AudioSignal
-            Estimate signal
-        y : AudioSignal
-            Reference signal
-
-        Returns
-        -------
-        torch.Tensor
-            Multi-scale STFT loss.
-        """
-        loss = 0.0
-        for s in self.stft_params:
-            x.stft(s.window_length, s.hop_length, s.window_type)
-            y.stft(s.window_length, s.hop_length, s.window_type)
-            loss += self.log_weight * self.loss_fn(
-                x.magnitude.clamp(self.clamp_eps).pow(self.pow).log10(),
-                y.magnitude.clamp(self.clamp_eps).pow(self.pow).log10(),
+    def forward(
+        self,
+        estimate: Tensor | AudioSignal,
+        reference: Tensor | AudioSignal,
+    ) -> Tensor:
+        estimate_tensor = _audio_tensor(estimate, name="estimate")
+        reference_tensor = _audio_tensor(reference, name="reference")
+        if estimate_tensor.shape != reference_tensor.shape:
+            raise ValueError("STFT-loss inputs must have identical shapes.")
+        loss = estimate_tensor.new_zeros(())
+        for parameters in self.stft_params:
+            estimate_magnitude = _stft_magnitude(
+                estimate_tensor,
+                parameters,
             )
-            loss += self.mag_weight * self.loss_fn(x.magnitude, y.magnitude)
+            reference_magnitude = _stft_magnitude(
+                reference_tensor,
+                parameters,
+            )
+            loss = loss + self.log_weight * self.loss_fn(
+                estimate_magnitude
+                .clamp_min(self.clamp_eps)
+                .pow(self.pow)
+                .log10(),
+                reference_magnitude
+                .clamp_min(self.clamp_eps)
+                .pow(self.pow)
+                .log10(),
+            )
+            loss = loss + self.mag_weight * self.loss_fn(
+                estimate_magnitude,
+                reference_magnitude,
+            )
         return loss
 
 
 class MelSpectrogramLoss(nn.Module):
-    """Compute distance between mel spectrograms. Can be used
-    in a multi-scale way.
-
-    Parameters
-    ----------
-    n_mels : List[int]
-        Number of mels per STFT, by default [150, 80],
-    window_lengths : List[int], optional
-        Length of each window of each STFT, by default [2048, 512]
-    loss_fn : typing.Callable, optional
-        How to compare each loss, by default nn.L1Loss()
-    clamp_eps : float, optional
-        Clamp on the log magnitude, below, by default 1e-5
-    mag_weight : float, optional
-        Weight of raw magnitude portion of loss, by default 1.0
-    log_weight : float, optional
-        Weight of log magnitude portion of loss, by default 1.0
-    pow : float, optional
-        Power to raise magnitude to before taking log, by default 2.0
-    weight : float, optional
-        Weight of this loss, by default 1.0
-    match_stride : bool, optional
-        Whether to match the stride of convolutional layers, by default False
-
-    Implementation copied from: https://github.com/descriptinc/lyrebird-audiotools/blob/961786aa1a9d628cca0c0486e5885a457fe70c1a/audiotools/metrics/spectral.py
-    """
+    """Multi-resolution Slaney mel and log-mel objective."""
 
     def __init__(
         self,
-        n_mels: List[int] = [150, 80],
-        window_lengths: List[int] = [2048, 512],
-        loss_fn: typing.Callable = nn.L1Loss(),
+        n_mels: Sequence[int] = (150, 80),
+        window_lengths: Sequence[int] = (2_048, 512),
+        loss_fn: Callable[[Tensor, Tensor], Tensor] | None = None,
         clamp_eps: float = 1e-5,
         mag_weight: float = 1.0,
         log_weight: float = 1.0,
         pow: float = 2.0,
         weight: float = 1.0,
         match_stride: bool = False,
-        mel_fmin: List[float] = [0.0, 0.0],
-        mel_fmax: List[float] = [None, None],
-        window_type: str = None,
-    ):
+        mel_fmin: Sequence[float] = (0.0, 0.0),
+        mel_fmax: Sequence[float | None] = (None, None),
+        window_type: str | None = None,
+        sample_rate: int | None = 44_100,
+    ) -> None:
         super().__init__()
-        self.stft_params = [
-            STFTParams(
-                window_length=w,
-                hop_length=w // 4,
+        values = (
+            tuple(n_mels),
+            tuple(window_lengths),
+            tuple(mel_fmin),
+            tuple(mel_fmax),
+        )
+        if not values[0] or len({len(value) for value in values}) != 1:
+            raise ValueError(
+                "Mel resolutions, FFT windows, and frequency bounds must "
+                "have one shared non-zero length."
+            )
+        self.stft_params = tuple(
+            STFTParameters(
+                window_length=length,
+                hop_length=length // 4,
                 match_stride=match_stride,
                 window_type=window_type,
             )
-            for w in window_lengths
-        ]
-        self.n_mels = n_mels
-        self.loss_fn = loss_fn
-        self.clamp_eps = clamp_eps
-        self.log_weight = log_weight
-        self.mag_weight = mag_weight
-        self.weight = weight
-        self.mel_fmin = mel_fmin
-        self.mel_fmax = mel_fmax
-        self.pow = pow
-
-    def forward(self, x: AudioSignal, y: AudioSignal):
-        """Computes mel loss between an estimate and a reference
-        signal.
-
-        Parameters
-        ----------
-        x : AudioSignal
-            Estimate signal
-        y : AudioSignal
-            Reference signal
-
-        Returns
-        -------
-        torch.Tensor
-            Mel loss.
-        """
-        loss = 0.0
-        for n_mels, fmin, fmax, s in zip(
-            self.n_mels, self.mel_fmin, self.mel_fmax, self.stft_params
+            for length in values[1]
+        )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 1
+            for value in values[0]
         ):
-            kwargs = {
-                "window_length": s.window_length,
-                "hop_length": s.hop_length,
-                "window_type": s.window_type,
-            }
-            x_mels = x.mel_spectrogram(n_mels, mel_fmin=fmin, mel_fmax=fmax, **kwargs)
-            y_mels = y.mel_spectrogram(n_mels, mel_fmin=fmin, mel_fmax=fmax, **kwargs)
+            raise ValueError("Every mel-bin count must be a positive integer.")
+        self.n_mels = values[0]
+        self.mel_fmin = values[2]
+        self.mel_fmax = values[3]
+        self.loss_fn = nn.L1Loss() if loss_fn is None else loss_fn
+        if not callable(self.loss_fn):
+            raise TypeError("`loss_fn` must be callable.")
+        if sample_rate is not None and (
+            isinstance(sample_rate, bool)
+            or not isinstance(sample_rate, int)
+            or sample_rate <= 0
+        ):
+            raise ValueError("`sample_rate` must be positive or None.")
+        self.sample_rate = sample_rate
+        for name, value in (
+            ("clamp_eps", clamp_eps),
+            ("mag_weight", mag_weight),
+            ("log_weight", log_weight),
+            ("pow", pow),
+            ("weight", weight),
+        ):
+            if not math.isfinite(value):
+                raise ValueError(f"`{name}` must be finite.")
+        if clamp_eps <= 0.0 or pow <= 0.0:
+            raise ValueError("`clamp_eps` and `pow` must be positive.")
+        self.clamp_eps = float(clamp_eps)
+        self.log_weight = float(log_weight)
+        self.mag_weight = float(mag_weight)
+        self.weight = float(weight)
+        self.pow = float(pow)
 
-            loss += self.log_weight * self.loss_fn(
-                x_mels.clamp(self.clamp_eps).pow(self.pow).log10(),
-                y_mels.clamp(self.clamp_eps).pow(self.pow).log10(),
+    def forward(
+        self,
+        estimate: Tensor | AudioSignal,
+        reference: Tensor | AudioSignal,
+    ) -> Tensor:
+        estimate_tensor = _audio_tensor(estimate, name="estimate")
+        reference_tensor = _audio_tensor(reference, name="reference")
+        if estimate_tensor.shape != reference_tensor.shape:
+            raise ValueError("Mel-loss inputs must have identical shapes.")
+        sample_rate = _sample_rate(
+            estimate,
+            reference,
+            self.sample_rate,
+        )
+        loss = estimate_tensor.new_zeros(())
+        for bins, minimum, maximum, parameters in zip(
+            self.n_mels,
+            self.mel_fmin,
+            self.mel_fmax,
+            self.stft_params,
+        ):
+            estimate_magnitude = _stft_magnitude(
+                estimate_tensor,
+                parameters,
             )
-            loss += self.mag_weight * self.loss_fn(x_mels, y_mels)
+            reference_magnitude = _stft_magnitude(
+                reference_tensor,
+                parameters,
+            )
+            filters = mel_filter_bank(
+                sample_rate=sample_rate,
+                n_fft=parameters.window_length,
+                n_mels=bins,
+                minimum_frequency=minimum,
+                maximum_frequency=maximum,
+                dtype=estimate_magnitude.dtype,
+                device=estimate_magnitude.device,
+            )
+            estimate_mel = torch.einsum(
+                "mf,bcft->bcmt",
+                filters,
+                estimate_magnitude,
+            )
+            reference_mel = torch.einsum(
+                "mf,bcft->bcmt",
+                filters,
+                reference_magnitude,
+            )
+            loss = loss + self.log_weight * self.loss_fn(
+                estimate_mel
+                .clamp_min(self.clamp_eps)
+                .pow(self.pow)
+                .log10(),
+                reference_mel
+                .clamp_min(self.clamp_eps)
+                .pow(self.pow)
+                .log10(),
+            )
+            loss = loss + self.mag_weight * self.loss_fn(
+                estimate_mel,
+                reference_mel,
+            )
         return loss
 
 
 class GANLoss(nn.Module):
-    """
-    Computes a discriminator loss, given a discriminator on
-    generated waveforms/spectrograms compared to ground truth
-    waveforms/spectrograms. Computes the loss for both the
-    discriminator and the generator in separate functions.
-    """
+    """Least-squares GAN and feature-matching objectives for DAC."""
 
-    def __init__(self, discriminator):
+    def __init__(self, discriminator: nn.Module) -> None:
         super().__init__()
+        if not isinstance(discriminator, nn.Module):
+            raise TypeError("`discriminator` must be a PyTorch module.")
         self.discriminator = discriminator
 
-    def forward(self, fake, real):
-        d_fake = self.discriminator(fake.audio_data)
-        d_real = self.discriminator(real.audio_data)
-        return d_fake, d_real
+    def forward(
+        self,
+        fake: Tensor | AudioSignal,
+        real: Tensor | AudioSignal,
+    ):
+        fake_tensor = _audio_tensor(fake, name="fake")
+        real_tensor = _audio_tensor(real, name="real")
+        if fake_tensor.shape != real_tensor.shape:
+            raise ValueError("GAN inputs must have identical shapes.")
+        return (
+            self.discriminator(fake_tensor),
+            self.discriminator(real_tensor),
+        )
 
-    def discriminator_loss(self, fake, real):
-        d_fake, d_real = self.forward(fake.clone().detach(), real)
+    def discriminator_loss(
+        self,
+        fake: Tensor | AudioSignal,
+        real: Tensor | AudioSignal,
+    ) -> Tensor:
+        fake_tensor = _audio_tensor(fake, name="fake").detach()
+        real_tensor = _audio_tensor(real, name="real")
+        fake_outputs = self.discriminator(fake_tensor)
+        real_outputs = self.discriminator(real_tensor)
+        loss = real_tensor.new_zeros(())
+        for fake_features, real_features in zip(fake_outputs, real_outputs):
+            loss = loss + fake_features[-1].square().mean()
+            loss = loss + (1.0 - real_features[-1]).square().mean()
+        return loss
 
-        loss_d = 0
-        for x_fake, x_real in zip(d_fake, d_real):
-            loss_d += torch.mean(x_fake[-1] ** 2)
-            loss_d += torch.mean((1 - x_real[-1]) ** 2)
-        return loss_d
+    def generator_loss(
+        self,
+        fake: Tensor | AudioSignal,
+        real: Tensor | AudioSignal,
+    ) -> tuple[Tensor, Tensor]:
+        fake_outputs, real_outputs = self.forward(fake, real)
+        fake_tensor = _audio_tensor(fake, name="fake")
+        adversarial = fake_tensor.new_zeros(())
+        feature_matching = fake_tensor.new_zeros(())
+        for fake_features, real_features in zip(fake_outputs, real_outputs):
+            adversarial = (
+                adversarial + (1.0 - fake_features[-1]).square().mean()
+            )
+            for fake_feature, real_feature in zip(
+                fake_features[:-1],
+                real_features[:-1],
+            ):
+                feature_matching = feature_matching + functional.l1_loss(
+                    fake_feature,
+                    real_feature.detach(),
+                )
+        return adversarial, feature_matching
 
-    def generator_loss(self, fake, real):
-        d_fake, d_real = self.forward(fake, real)
 
-        loss_g = 0
-        for x_fake in d_fake:
-            loss_g += torch.mean((1 - x_fake[-1]) ** 2)
-
-        loss_feature = 0
-
-        for i in range(len(d_fake)):
-            for j in range(len(d_fake[i]) - 1):
-                loss_feature += F.l1_loss(d_fake[i][j], d_real[i][j].detach())
-        return loss_g, loss_feature
+__all__ = [
+    "GANLoss",
+    "L1Loss",
+    "MelSpectrogramLoss",
+    "MultiScaleSTFTLoss",
+    "SISDRLoss",
+    "STFTParameters",
+]

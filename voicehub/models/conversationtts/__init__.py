@@ -1,10 +1,28 @@
 """ConversationTTS configuration and model exports."""
 
-from voicehub.models.conversationtts.configuration_conversationtts import ConversationTTSConfig
-from voicehub.models.conversationtts.modeling_conversationtts import ConversationTTS, ConversationTTSForTextToSpeech
+from __future__ import annotations
 
-__all__ = [
-    "ConversationTTS",
-    "ConversationTTSConfig",
-    "ConversationTTSForTextToSpeech",
-]
+from importlib import import_module
+from typing import Any
+
+_EXPORTS = {
+    "ConversationTTS": ("voicehub.models.conversationtts.modeling_conversationtts"),
+    "ConversationTTSConfig": ("voicehub.models.conversationtts.configuration_conversationtts"),
+    "ConversationTTSForTextToSpeech": ("voicehub.models.conversationtts.modeling_conversationtts"),
+}
+
+__all__ = sorted(_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_name = _EXPORTS[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted((*globals(), *_EXPORTS))

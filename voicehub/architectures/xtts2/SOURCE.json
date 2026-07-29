@@ -1,0 +1,21 @@
+{
+  "architecture": "xtts2",
+  "checkpoint": "https://huggingface.co/coqui/XTTS-v2",
+  "checkpoint_config_sha256": "ef262b1454dd2a77e1461b0b2cd53e19b8a7624cc131b837d36df67356bc75e8",
+  "checkpoint_revision": "6c2b0d75eae4b7047358e3b6bd9325f857d43f77",
+  "checkpoint_vocab_sha256": "928260878a59da8a72a2a5b7687fea29d5106137669d90945430fe17e415304a",
+  "implementation_license": "MPL-2.0",
+  "model_license": "Coqui Public Model License",
+  "model_license_url": "https://coqui.ai/cpml",
+  "policy": "VoiceHub-owned PyTorch port. The published model.pth is accepted only at an explicit, one-time restricted legacy conversion boundary; steady-state loading is strict Safetensors.",
+  "source_files": [
+    "TTS/tts/models/xtts.py",
+    "TTS/tts/layers/xtts/gpt.py",
+    "TTS/tts/layers/xtts/gpt_inference.py",
+    "TTS/tts/layers/xtts/hifigan_decoder.py",
+    "TTS/tts/layers/xtts/latent_encoder.py",
+    "TTS/tts/layers/xtts/perceiver_encoder.py"
+  ],
+  "upstream": "https://github.com/coqui-ai/TTS",
+  "upstream_revision": "dbf1a08a0d4e47fdad6172e433eeb34bc6b13b4e"
+}

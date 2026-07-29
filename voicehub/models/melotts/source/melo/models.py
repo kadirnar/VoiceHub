@@ -1,4 +1,6 @@
 import math
+from numbers import Integral
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -322,10 +324,15 @@ class TextEncoder(nn.Module):
         num_tones=None,
     ):
         super().__init__()
-        if num_languages is None:
-            from voicehub.models.melotts.source.melo.text import num_languages
-        if num_tones is None:
-            from voicehub.models.melotts.source.melo.text import num_tones
+        for name, value in (
+            ("num_languages", num_languages),
+            ("num_tones", num_tones),
+        ):
+            if isinstance(value, bool) or not isinstance(value, Integral) or value <= 0:
+                raise ValueError(
+                    f"`{name}` must be an explicit positive integer for the "
+                    "native MeloTTS graph."
+                )
         self.n_vocab = n_vocab
         self.out_channels = out_channels
         self.hidden_channels = hidden_channels

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from importlib import import_module
 from typing import Any
 
 from voicehub.dependencies import import_optional
@@ -55,9 +54,8 @@ def default_data_collator(
             batch[key] = torch.stack(values)
         elif hasattr(value, "dtype") and hasattr(value, "shape"):
             try:
-                numpy = import_module("numpy")
-                batch[key] = torch.as_tensor(numpy.stack(values))
-            except (ModuleNotFoundError, TypeError, ValueError):
+                batch[key] = torch.stack(tuple(torch.as_tensor(item) for item in values))
+            except (TypeError, ValueError, RuntimeError):
                 batch[key] = values
         elif isinstance(value, (int, float, bool, list, tuple)):
             try:

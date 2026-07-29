@@ -15,8 +15,8 @@ Intergrating vLLM inference to further improve the inference efficiency
 from dataclasses import dataclass
 from typing import List, Tuple
 import torch
-import torchaudio
-from huggingface_hub import hf_hub_download
+from voicehub.audio import load_audio
+from voicehub.processing.waveform import save_pcm_wave
 from voicehub.models.conversationtts.source.conversationtts.models.model_new import Model, ModelArgs
 from voicehub.models.conversationtts.source.conversationtts.tools.tokenizer.Text2ID.text_tokenizer import TextTokenizer
 from voicehub.models.conversationtts.source.conversationtts.tools.tokenizer.MimiCodec.mimi_tokenizer import MimiTokenizer
@@ -171,11 +171,10 @@ class Generator:
         return audio
 
 def load_prompt_audio(audio_path):
-    audio_tensor, sample_rate = torchaudio.load(audio_path)
-    audio_tensor = audio_tensor.squeeze(0)
-    if sample_rate != 24000:
-        audio_tensor = torchaudio.functional.resample(audio_tensor, orig_freq=sample_rate, new_freq=24000)
-    return audio_tensor # T
+    return load_audio(
+        audio_path,
+        target_sampling_rate=24_000,
+    ).waveform
 
 def prepare_prompt(text, speaker, audio_path):
     audio_tensor = load_prompt_audio(audio_path)
@@ -261,5 +260,5 @@ if __name__ == '__main__':
     audio_tensor = torch.cat(audio_tensors, dim=0)
     # Save the full conversation
     output_file = "podcast_output_cn_ep3.wav"
-    torchaudio.save(output_file, audio_tensor.unsqueeze(0).cpu(), generator.sample_rate)
+    save_pcm_wave(output_file, audio_tensor.cpu(), generator.sample_rate)
     print(f"Saved conversation audio to {output_file}")

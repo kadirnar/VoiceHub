@@ -6,12 +6,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from voicehub.models.fishtts.training import FishSemanticDataset, FishSpeechTrainingAdapter, FishTextDataCollator
+from voicehub.training.auto import AutoTrainingAdapter
 from voicehub.training.contracts import TrainingPhaseSpec, TrainingSupport
-from voicehub.training.specs import ModelTrainingSpec, TrainingFamily
+from voicehub.training.specs import ModelTrainingSpec, TrainingFamily, get_training_spec
 from voicehub.training_args import TrainingArguments
 
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
-SAFETENSORS_AVAILABLE = importlib.util.find_spec("safetensors") is not None
 
 
 @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")
@@ -205,6 +205,25 @@ class FishSpeechTrainingTests(unittest.TestCase):
             expected_semantic,
         ))
 
+    def test_builtin_profile_and_recipe_are_voicehub_native(self):
+        wrapper = self._wrapper()
+        spec = get_training_spec("fishtts")
+
+        self.assertEqual(
+            spec.training_default_model_name_or_path,
+            "fishaudio/s2-pro",
+        )
+        self.assertIs(spec.support, TrainingSupport.PREPROCESSED)
+        self.assertTrue(all(entrypoint.startswith("voicehub.") for entrypoint in spec.source_entrypoints))
+        self.assertEqual(
+            spec.get_phase().required_inputs,
+            ("inputs", "labels"),
+        )
+        self.assertIsInstance(
+            AutoTrainingAdapter.from_model(wrapper),
+            FishSpeechTrainingAdapter,
+        )
+
     def test_adapter_runs_dual_ar_recipe_and_freezes_codec(self):
         import torch
 
@@ -350,10 +369,6 @@ class FishSpeechTrainingTests(unittest.TestCase):
         self.assertEqual(schedule(1), 0.5)
         self.assertEqual(schedule(2), 1.0)
 
-    @unittest.skipUnless(
-        SAFETENSORS_AVAILABLE,
-        "safetensors is an optional Fish Speech dependency",
-    )
     def test_save_pretrained_exports_source_safetensors(self):
         wrapper = self._wrapper()
         adapter = FishSpeechTrainingAdapter(wrapper, self._spec())
@@ -363,7 +378,10 @@ class FishSpeechTrainingTests(unittest.TestCase):
             self.assertTrue((destination / "model.safetensors").is_file())
             self.assertTrue((destination / "config.json").is_file())
             self.assertTrue((destination / "tokenizer.marker").is_file())
-            self.assertTrue((destination / "codec.pth").is_file())
+            self.assertTrue((destination / "codec" / "model.safetensors").is_file())
+            self.assertTrue((destination / "NOTICE").is_file())
+            self.assertTrue((destination / "THIRD_PARTY_LICENSE").is_file())
+            self.assertFalse((destination / "codec.pth").exists())
 
 
 if __name__ == "__main__":

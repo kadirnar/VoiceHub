@@ -7,9 +7,7 @@ from typing import Dict, List
 import librosa
 import numpy as np
 import torch
-import torchaudio
 import tqdm
-from encodec.utils import convert_audio
 from scipy.special import softmax
 from torch.nn import functional as F
 
@@ -17,6 +15,10 @@ from voicehub.models.xtts.source.TTS.tts.layers.bark.hubert.hubert_manager impor
 from voicehub.models.xtts.source.TTS.tts.layers.bark.hubert.kmeans_hubert import CustomHubert
 from voicehub.models.xtts.source.TTS.tts.layers.bark.hubert.tokenizer import HubertTokenizer
 from voicehub.models.xtts.source.TTS.tts.layers.bark.load_model import clear_cuda_cache, inference_mode
+from voicehub.processing.waveform import (
+    load_pcm_wave,
+    resample_waveform_kaiser,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +104,81 @@ def compute_average_bass_energy(audio_data, sample_rate, max_bass_freq=250):
     return bass_energy
 
 
+def _codec_parameter_dtype(codec) -> torch.dtype:
+    parameter = next(codec.parameters(), None)
+    return parameter.dtype if parameter is not None else torch.float32
+
+
+def prepare_codec_audio(audio, model) -> torch.Tensor:
+    """Return finite ``[batch, channels, samples]`` audio for Bark's codec.
+
+    File input intentionally uses VoiceHub's portable PCM WAVE decoder. Other
+    containers should be decoded by the caller and passed as a tensor or
+    numeric array, keeping Bark independent from torchaudio and provider DSP
+    utilities.
+    """
+    codec = model.encodec
+    if isinstance(audio, (str, os.PathLike)):
+        waveform, source_rate = load_pcm_wave(
+            audio,
+            preserve_channels=True,
+        )
+        if codec.channels == 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+        elif waveform.shape[0] == 1:
+            waveform = waveform.expand(codec.channels, -1)
+        elif waveform.shape[0] != codec.channels:
+            raise ValueError(
+                f"Encodec expects {codec.channels} channels, but the input "
+                f"contains {waveform.shape[0]}."
+            )
+        waveform = resample_waveform_kaiser(
+            waveform,
+            source_rate,
+            codec.sample_rate,
+        )
+        prepared = waveform.unsqueeze(0)
+    else:
+        try:
+            prepared = torch.as_tensor(audio)
+        except (TypeError, ValueError, RuntimeError) as error:
+            raise TypeError(
+                "Bark reference audio must be a PCM WAVE path or a real "
+                "numeric tensor-like value."
+            ) from error
+        if prepared.ndim == 1:
+            prepared = prepared[None, None, :]
+        elif prepared.ndim == 2:
+            prepared = prepared[None, :, :]
+        elif prepared.ndim != 3:
+            raise ValueError(
+                "Bark reference audio must have shape [samples], "
+                "[channels, samples], or [batch, channels, samples]."
+            )
+        if prepared.shape[1] != codec.channels:
+            if codec.channels == 1:
+                prepared = prepared.mean(dim=1, keepdim=True)
+            elif prepared.shape[1] == 1:
+                prepared = prepared.expand(-1, codec.channels, -1)
+            else:
+                raise ValueError(
+                    f"Encodec expects {codec.channels} channels, but the "
+                    f"input contains {prepared.shape[1]}."
+                )
+
+    if prepared.shape[0] == 0 or prepared.shape[-1] == 0:
+        raise ValueError("Bark reference audio cannot be empty.")
+    if prepared.dtype == torch.bool or prepared.is_complex():
+        raise TypeError("Bark reference audio must contain real samples.")
+    prepared = prepared.to(
+        device=model.device,
+        dtype=_codec_parameter_dtype(codec),
+    )
+    if not torch.isfinite(prepared).all():
+        raise ValueError("Bark reference audio contains NaN or infinite samples.")
+    return prepared.contiguous()
+
+
 def generate_voice(
     audio,
     model,
@@ -115,10 +192,7 @@ def generate_voice(
         model (BarkModel): The BarkModel to use for generating the new voice.
         output_path (str): The path to save the generated voice to.
     """
-    if isinstance(audio, str):
-        audio, sr = torchaudio.load(audio)
-        audio = convert_audio(audio, sr, model.config.sample_rate, model.encodec.channels)
-        audio = audio.unsqueeze(0).to(model.device)
+    audio = prepare_codec_audio(audio, model)
 
     with torch.no_grad():
         encoded_frames = model.encodec.encode(audio)
@@ -597,10 +671,15 @@ def generate_fine(
 
 def codec_decode(fine_tokens, model):
     """Turn quantized audio codes into audio array using encodec."""
-    arr = torch.from_numpy(fine_tokens)[None]
-    arr = arr.to(model.device)
-    arr = arr.transpose(0, 1)
-    emb = model.encodec.quantizer.decode(arr)
-    out = model.encodec.decoder(emb)
+    codes = torch.as_tensor(
+        fine_tokens,
+        dtype=torch.long,
+        device=model.device,
+    )
+    if codes.ndim != 2:
+        raise ValueError(
+            "Bark fine tokens must have shape [codebooks, frames]."
+        )
+    out = model.encodec.decode([(codes.unsqueeze(0), None)])
     audio_arr = out.detach().cpu().numpy().squeeze()
     return audio_arr

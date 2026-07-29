@@ -1,73 +1,44 @@
-import numpy as np
-import torch
-from librosa.filters import mel as librosa_mel_fn
+"""Native HiFT mel frontend."""
 
-mel_basis = {}
-hann_window = {}
+from __future__ import annotations
 
+from torch import Tensor
 
-def dynamic_range_compression_torch(x, C=1, clip_val=1e-5):
-    """Apply log-based dynamic range compression to a spectrogram tensor."""
-    return torch.log(torch.clamp(x, min=clip_val) * C)
+from voicehub.models.chatterbox.native_audio import hift_mel_spectrogram
 
 
-def spectral_normalize_torch(magnitudes):
-    """Normalize spectrogram magnitudes via dynamic range compression."""
-    output = dynamic_range_compression_torch(magnitudes)
-    return output
+def dynamic_range_compression_torch(values: Tensor, C: float = 1.0, clip_val: float = 1e-5) -> Tensor:
+    """Apply the log compression used by the released HiFT frontend."""
+    return (values.clamp_min(clip_val) * C).log()
+
+
+def spectral_normalize_torch(magnitudes: Tensor) -> Tensor:
+    return dynamic_range_compression_torch(magnitudes)
 
 
 def mel_spectrogram(
+    y: Tensor,
+    n_fft: int = 1_920,
+    num_mels: int = 80,
+    sampling_rate: int = 24_000,
+    hop_size: int = 480,
+    win_size: int = 1_920,
+    fmin: float = 0.0,
+    fmax: float = 8_000.0,
+    center: bool = False,
+) -> Tensor:
+    """Compute the checkpoint-compatible Slaney magnitude-mel features."""
+    return hift_mel_spectrogram(
         y,
-        n_fft=1920,
-        num_mels=80,
-        sampling_rate=24000,
-        hop_size=480,
-        win_size=1920,
-        fmin=0,
-        fmax=8000,
-        center=False):
-    """Compute mel-spectrogram from a waveform using STFT and mel filterbank
-    projection."""
-    if isinstance(y, np.ndarray):
-        y = torch.tensor(y).float()
+        n_fft=n_fft,
+        n_mels=num_mels,
+        sample_rate=sampling_rate,
+        hop_length=hop_size,
+        win_length=win_size,
+        fmin=fmin,
+        fmax=fmax,
+        center=center,
+    )
 
-    if len(y.shape) == 1:
-        y = y[
-            None,
-        ]
 
-    if torch.min(y) < -1.0:
-        print("min value is ", torch.min(y))
-    if torch.max(y) > 1.0:
-        print("max value is ", torch.max(y))
-
-    if f"{str(fmax)}_{str(y.device)}" not in mel_basis:
-        mel = librosa_mel_fn(sr=sampling_rate, n_fft=n_fft, n_mels=num_mels, fmin=fmin, fmax=fmax)
-        mel_basis[str(fmax) + "_" + str(y.device)] = torch.from_numpy(mel).float().to(y.device)
-        hann_window[str(y.device)] = torch.hann_window(win_size).to(y.device)
-
-    y = torch.nn.functional.pad(
-        y.unsqueeze(1), (int((n_fft - hop_size) / 2), int((n_fft - hop_size) / 2)), mode="reflect")
-    y = y.squeeze(1)
-
-    spec = torch.view_as_real(
-        torch.stft(
-            y,
-            n_fft,
-            hop_length=hop_size,
-            win_length=win_size,
-            window=hann_window[str(y.device)],
-            center=center,
-            pad_mode="reflect",
-            normalized=False,
-            onesided=True,
-            return_complex=True,
-        ))
-
-    spec = torch.sqrt(spec.pow(2).sum(-1) + (1e-9))
-
-    spec = torch.matmul(mel_basis[str(fmax) + "_" + str(y.device)], spec)
-    spec = spectral_normalize_torch(spec)
-
-    return spec
+__all__ = ["dynamic_range_compression_torch", "mel_spectrogram", "spectral_normalize_torch"]

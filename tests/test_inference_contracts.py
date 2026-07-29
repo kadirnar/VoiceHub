@@ -3,11 +3,14 @@ import os
 import random
 import tempfile
 import unittest
+import wave
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import torch
 
 from voicehub import AutoConfig, PreTrainedTTSModel, TTSGenerationConfig, TTSOutput
 from voicehub.configuration_utils import VoiceHubConfig
@@ -676,11 +679,50 @@ class SharedInferenceHelperTests(unittest.TestCase):
     def test_tts_output_validates_python_audio_without_numpy(self):
         with patch(
                 "voicehub.base_model.import_module",
-                side_effect=AssertionError("NumPy should remain lazy"),
+                side_effect=AssertionError("Plain Python audio should use the standard-library path"),
         ):
             output = TTSOutput(audio=[0.0, 0.25], sample_rate=24_000)
 
         self.assertEqual(output.audio, [0.0, 0.25])
+
+    def test_tts_output_validates_array_protocol_without_tensor_conversion(self):
+
+        class FloatDType:
+            kind = "f"
+
+        class ArrayLike:
+            size = 2
+            flat = (0.0, 0.25)
+            dtype = FloatDType()
+
+        with patch(
+                "voicehub.base_model.import_module",
+                side_effect=AssertionError("Array-protocol audio should not require tensor conversion"),
+        ):
+            output = TTSOutput(audio=ArrayLike(), sample_rate=24_000)
+
+        self.assertEqual(tuple(output.audio.flat), (0.0, 0.25))
+
+    def test_tts_output_uses_the_native_pcm_wave_writer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = TTSOutput(
+                audio=torch.tensor([-1.0, 0.0, 1.0]),
+                sample_rate=24_000,
+            )
+            path = Path(output.save(Path(directory) / "speech.wav"))
+            with wave.open(str(path), "rb") as stream:
+                self.assertEqual(stream.getnchannels(), 1)
+                self.assertEqual(stream.getsampwidth(), 2)
+                self.assertEqual(stream.getframerate(), 24_000)
+                self.assertEqual(stream.getnframes(), 3)
+
+        self.assertEqual(output.file_path, str(path))
+
+    def test_tts_output_rejects_an_unsupported_native_container(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = TTSOutput(audio=[0.0], sample_rate=24_000)
+            with self.assertRaisesRegex(ValueError, "PCM WAVE"):
+                output.save(Path(directory) / "speech.flac")
 
     def test_resolve_model_directory_rejects_a_local_file(self):
         with tempfile.TemporaryDirectory() as directory:

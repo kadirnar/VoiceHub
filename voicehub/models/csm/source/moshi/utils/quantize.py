@@ -1,43 +1,50 @@
 # Copyright (c) Kyutai, all rights reserved.
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
+# Modified by VoiceHub: use a dependency-free native int8 implementation.
 
-"""Quantization based on bitsandbytes, supporting only 8 bits for now.
-We are taking from freedom from the intended use of bnb:
+"""Dependency-free weight-only int8 linear layers.
+
+The retained Moshi graph only needs this module when an optimization strategy
+explicitly replaces its floating-point linears.  VoiceHub keeps the operation
+native so merely enabling that strategy does not introduce a bitsandbytes
+runtime dependency.
 """
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 
 class QLinear(nn.Module):
     def __init__(self, linear: nn.Linear):
         super().__init__()
-        from bitsandbytes import functional as bnbF  # type: ignore
         weight = linear.weight
-        assert weight.data.dtype.is_floating_point
-        assert linear.bias is None
-        CB, SCB, _ = bnbF.int8_vectorwise_quant(weight.data.to(torch.float16))  # type: ignore
-        self.weight = nn.Parameter(CB, requires_grad=False)
-        self.weight_scb = nn.Parameter(SCB, requires_grad=False)
+        if not weight.dtype.is_floating_point:
+            raise TypeError("QLinear requires floating-point source weights.")
+        if linear.bias is not None:
+            raise ValueError("QLinear does not support biased source linears.")
+        maximum = weight.detach().float().abs().amax(dim=1)
+        safe_maximum = maximum.clamp_min(torch.finfo(torch.float32).tiny)
+        quantized = torch.round(
+            weight.detach().float() * (127.0 / safe_maximum[:, None]),
+        ).clamp_(-127, 127).to(torch.int8)
+        self.weight = nn.Parameter(quantized, requires_grad=False)
+        # Preserve Moshi's established checkpoint spelling and scale
+        # convention: one absolute row maximum, applied as SCB / 127.
+        self.weight_scb = nn.Parameter(maximum, requires_grad=False)
 
     def forward(self, x):
-        import bitsandbytes as bnb  # type: ignore
-        state = bnb.MatmulLtState()  # pyright: ignore
-        state.CB = self.weight  # type: ignore
-        assert isinstance(state.CB, torch.Tensor)
-        state.SCB = self.weight_scb  # type: ignore
-        assert isinstance(state.SCB, torch.Tensor)
-        if state.SCB.dtype != torch.float:
+        if self.weight_scb.dtype != torch.float:
             raise RuntimeError(
                 "Expected `weight_scb` to have type float, but got bfloat16. "
                 "When using quantized models, care should be taken not to change the dtype of "
                 "the model once initialized.")
-        assert state.SCB.dtype == torch.float, state.SCB.dtype
-        state.has_fp16_weights = False
-        y = bnb.matmul(x.half(), state.CB, state=state)  # pyright: ignore
-        assert isinstance(y, torch.Tensor)
-        return y
+        weight = (
+            self.weight.to(device=x.device, dtype=x.dtype) *
+            (self.weight_scb.to(device=x.device, dtype=x.dtype)[:, None] /
+             127.0))
+        return F.linear(x, weight)
 
 
 def replace_linear_with_qlinear(module):

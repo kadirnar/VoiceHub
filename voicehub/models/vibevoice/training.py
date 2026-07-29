@@ -39,8 +39,7 @@ class VibeVoicePreprocessedCollator:
     def _tensor(torch, record, name: str, *, ndim: int):
         value = record.get(name)
         if not torch.is_tensor(value) or value.ndim != ndim:
-            raise ValueError(f"Each VibeVoice record must provide `{name}` with "
-                             f"{ndim} dimensions.")
+            raise ValueError(f"Each VibeVoice record must provide `{name}` with {ndim} dimensions.")
         return value
 
     def __call__(self, features) -> dict[str, object]:
@@ -249,7 +248,7 @@ class VibeVoiceTrainingAdapter(CompositeTrainingAdapter):
     """
 
     supports_custom_recipe = True
-    native_export_semantics = "huggingface-full-model-weight-warm-start"
+    native_export_semantics = ("voicehub-native-vibevoice-full-model-safetensors-and-processor")
 
     _REQUIRED_INPUTS = (
         "input_ids",
@@ -296,12 +295,19 @@ class VibeVoiceTrainingAdapter(CompositeTrainingAdapter):
             self.data_collator.pad_token_id = checkpoint_pad_id
         return self
 
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if mode:
+            runtime = self.primary_model.model
+            runtime.acoustic_tokenizer.eval()
+            runtime.semantic_tokenizer.eval()
+        return self
+
     def create_dataset(self, records, **kwargs):
         """Validate records carrying source-native, preprocessed tensors."""
         if kwargs:
             unknown = ", ".join(sorted(kwargs))
-            raise TypeError("VibeVoice's preprocessed dataset does not accept options: "
-                            f"{unknown}.")
+            raise TypeError(f"VibeVoice's preprocessed dataset does not accept options: {unknown}.")
         dataset = SpeechDataset(
             records,
             required_fields=self._REQUIRED_INPUTS,
@@ -345,8 +351,7 @@ class VibeVoiceTrainingAdapter(CompositeTrainingAdapter):
         if not torch.is_tensor(speech_tensors) or speech_tensors.ndim != 2:
             raise ValueError("VibeVoice `speech_tensors` must have shape [segments, samples].")
         if not torch.is_tensor(speech_masks) or speech_masks.ndim != 2:
-            raise ValueError("VibeVoice `speech_masks` must have shape "
-                             "[segments, latent_time].")
+            raise ValueError("VibeVoice `speech_masks` must have shape [segments, latent_time].")
         if (not torch.is_tensor(loss_selection) or loss_selection.shape != speech_masks.shape):
             raise ValueError("VibeVoice `speeches_loss_input` must match `speech_masks`.")
         if (not torch.is_tensor(semantics) or semantics.ndim != 3 or
@@ -408,7 +413,6 @@ class VibeVoiceTrainingAdapter(CompositeTrainingAdapter):
             **model_inputs,
             ddpm_batch_mul=ddpm_batch_mul,
             use_cache=False,
-            return_dict=True,
         )
         logits = outputs.logits
         labels = mask_text_labels(
@@ -428,8 +432,8 @@ class VibeVoiceTrainingAdapter(CompositeTrainingAdapter):
         if diffusion_loss is None:
             raise RuntimeError("VibeVoice 1.5B forward did not return its diffusion loss.")
 
-        ce_weight = float(getattr(config, "training_ce_loss_weight", 1.0), )
-        diffusion_weight = float(getattr(config, "training_diffusion_loss_weight", 1.0), )
+        ce_weight = float(getattr(config, "training_ce_loss_weight", 1.0))
+        diffusion_weight = float(getattr(config, "training_diffusion_loss_weight", 1.0))
         if (not math.isfinite(ce_weight) or ce_weight < 0 or not math.isfinite(diffusion_weight) or
                 diffusion_weight < 0):
             raise ValueError("VibeVoice training loss weights must be finite and non-negative.")
@@ -455,9 +459,19 @@ class VibeVoiceTrainingAdapter(CompositeTrainingAdapter):
         )
 
     def save_pretrained(self, save_directory) -> None:
-        """Export a full Hugging Face safetensors checkpoint and processor."""
+        """Export a complete native Safetensors checkpoint and processor."""
         self.setup()
         destination = Path(save_directory)
+        native_export = getattr(
+            self.model,
+            "export_native_pretrained",
+            None,
+        )
+        if callable(native_export):
+            native_export(destination)
+            return
+
+        # Compatibility for controlled adapter tests and legacy wrappers.
         self.primary_model.save_pretrained(
             destination,
             safe_serialization=True,

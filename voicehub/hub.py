@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from voicehub.errors import OptionalDependencyError
+from voicehub.hub_transport import download_hugging_face_file
 from voicehub.path_utils import is_explicit_local_path
 
 
@@ -36,23 +36,15 @@ def resolve_pretrained_file(
     if is_explicit_local_path(pretrained_model_name_or_path):
         raise FileNotFoundError(f"Local pretrained path was not found: {source}.")
 
-    try:
-        from huggingface_hub import hf_hub_download
-    except ModuleNotFoundError as exc:
-        raise OptionalDependencyError(
-            "Loading remote checkpoints requires `huggingface-hub`. "
-            "Install it with `pip install huggingface-hub`.") from exc
-
-    resolved = hf_hub_download(
-        repo_id=pretrained_model_name_or_path,
+    return download_hugging_face_file(
+        repo_id=str(pretrained_model_name_or_path),
         filename=filename,
-        subfolder=subfolder or None,
+        subfolder=subfolder,
         cache_dir=cache_dir,
         revision=revision,
         token=token,
         local_files_only=local_files_only,
     )
-    return Path(resolved)
 
 
 def read_json_file(path: str | Path) -> dict[str, Any]:

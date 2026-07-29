@@ -1,4 +1,4 @@
-from typing import Optional
+from __future__ import annotations
 
 import torch
 from torch import nn
@@ -43,18 +43,23 @@ class VocosBackbone(Backbone):
         dim: int,
         intermediate_dim: int,
         num_layers: int,
-        layer_scale_init_value: Optional[float] = None,
-        adanorm_num_embeddings: Optional[int] = None,
+        layer_scale_init_value: float | None = None,
+        adanorm_num_embeddings: int | None = None,
     ):
         super().__init__()
+        if num_layers <= 0:
+            raise ValueError("`num_layers` must be greater than zero.")
+        if adanorm_num_embeddings is not None and adanorm_num_embeddings <= 0:
+            raise ValueError("`adanorm_num_embeddings` must be positive or None.")
         self.input_channels = input_channels
         self.embed = nn.Conv1d(input_channels, dim, kernel_size=7, padding=3)
         self.adanorm = adanorm_num_embeddings is not None
-        if adanorm_num_embeddings:
+        if adanorm_num_embeddings is not None:
             self.norm = AdaLayerNorm(adanorm_num_embeddings, dim, eps=1e-6)
         else:
             self.norm = nn.LayerNorm(dim, eps=1e-6)
-        layer_scale_init_value = layer_scale_init_value or 1 / num_layers
+        if layer_scale_init_value is None:
+            layer_scale_init_value = 1 / num_layers
         self.convnext = nn.ModuleList(
             [
                 ConvNeXtBlock(
@@ -72,7 +77,8 @@ class VocosBackbone(Backbone):
     def _init_weights(self, m):
         if isinstance(m, (nn.Conv1d, nn.Linear)):
             nn.init.trunc_normal_(m.weight, std=0.02)
-            nn.init.constant_(m.bias, 0)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
 
     def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
         bandwidth_id = kwargs.get('bandwidth_id', None)
@@ -106,7 +112,10 @@ class VocosResNetBackbone(Backbone):
         super().__init__()
         self.input_channels = input_channels
         self.embed = weight_norm(nn.Conv1d(input_channels, dim, kernel_size=3, padding=1))
-        layer_scale_init_value = layer_scale_init_value or 1 / num_blocks / 3
+        if num_blocks <= 0:
+            raise ValueError("`num_blocks` must be greater than zero.")
+        if layer_scale_init_value is None:
+            layer_scale_init_value = 1 / num_blocks / 3
         self.resnet = nn.Sequential(
             *[ResBlock1(dim=dim, layer_scale_init_value=layer_scale_init_value) for _ in range(num_blocks)]
         )

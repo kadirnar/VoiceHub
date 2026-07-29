@@ -4,6 +4,10 @@ from enum import Enum
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import torch
+
+from voicehub.architectures.mosstts.codec import MossCodecDecodeOutput
+from voicehub.architectures.mosstts.runtime import MossTTSRuntime
 from voicehub.models.csm.inference import CSMForTextToSpeech
 from voicehub.models.fishtts.inference import FishTTSForTextToSpeech
 from voicehub.models.higgstts.inference import HiggsTTSForTextToSpeech
@@ -390,259 +394,142 @@ class WrapperHelperTests(unittest.TestCase):
             "custom/codec",
         )
 
-    def test_moss_standard_loader_uses_codec_rate_not_tts_config_rate(self):
-
-        class Module:
-
-            def __init__(self):
-                self.training = True
-
-            @classmethod
-            def from_pretrained(cls, *args, **kwargs):
-                del args, kwargs
-                return cls()
-
-            def eval(self):
-                self.training = False
-                return self
-
-            def to(self, *args, **kwargs):
-                del args, kwargs
-                return self
-
-        codec = Module()
-        codec.config = SimpleNamespace(sampling_rate=48_000)
-
-        class ProcessorFactory:
-            codec_path = None
-
-            @classmethod
-            def from_pretrained(cls, model_path, *, codec_path):
-                del model_path
-                cls.codec_path = codec_path
-                return SimpleNamespace(
-                    audio_tokenizer=codec,
-                    model_config=SimpleNamespace(sampling_rate=24_000),
-                )
-
-        configuration = SimpleNamespace(MossTTSDelayConfig=type("Config", (), {}))
-        modeling = SimpleNamespace(MossTTSDelayModel=Module)
-        processing = SimpleNamespace(MossTTSDelayProcessor=ProcessorFactory)
-        module_path = "voicehub.models.mosstts.source.moss_tts_delay"
-        modules = {
-            f"{module_path}.configuration_moss_tts": configuration,
-            f"{module_path}.modeling_moss_tts": modeling,
-            f"{module_path}.processing_moss_tts": processing,
-        }
-        transformers = SimpleNamespace(AutoConfig=SimpleNamespace(register=Mock()), )
-        model = MossTTSForTextToSpeech(device="cpu")
-        model._variant = "delay"
-        model._codec_name_or_path = model._resolve_codec_name_or_path("delay")
+    def test_moss_loader_uses_native_runtime_and_codec_source(self):
+        semantic_model = torch.nn.Linear(1, 1)
+        runtime = SimpleNamespace(
+            model=semantic_model,
+            config=SimpleNamespace(variant="delay"),
+            sample_rate=24_000,
+        )
+        model = MossTTSForTextToSpeech(
+            MossTTSConfig(codec_name_or_path="custom/native-codec"),
+            device="cpu",
+        )
 
         with patch(
-                "voicehub.models.mosstts.inference.import_optional",
-                side_effect=lambda name, **kwargs: modules[name],
-        ):
-            model._load_standard_variant(
-                transformers,
-                dtype=object(),
-            )
+                "voicehub.architectures.mosstts.runtime.load_mosstts_runtime",
+                return_value=runtime,
+        ) as load_runtime:
+            model._load_pretrained_model()
 
+        self.assertIs(model.model, semantic_model)
+        self.assertIs(model._mosstts_runtime, runtime)
+        self.assertEqual(model.sample_rate, 24_000)
         self.assertEqual(
-            ProcessorFactory.codec_path,
-            "OpenMOSS-Team/MOSS-Audio-Tokenizer",
+            load_runtime.call_args.kwargs["codec_source"],
+            "custom/native-codec",
         )
-        self.assertEqual(model.sample_rate, 48_000)
-        self.assertFalse(model.model.training)
-        self.assertFalse(codec.training)
 
     def test_moss_inference_transition_preserves_runtime_identities(self):
-
-        class Module:
-
-            def __init__(self):
-                self.training = True
-
-            def eval(self):
-                self.training = False
-                return self
-
-        standard_model = Module()
-        standard_codec = Module()
-        standard = MossTTSForTextToSpeech(device="cpu")
-        standard.model = standard_model
-        standard._processor = SimpleNamespace(audio_tokenizer=standard_codec)
-
-        standard._prepare_for_inference()
-
-        self.assertIs(standard.model, standard_model)
-        self.assertIs(standard._processor.audio_tokenizer, standard_codec)
-        self.assertFalse(standard_model.training)
-        self.assertFalse(standard_codec.training)
-
-        realtime_model = Module()
-        realtime_codec = Module()
-        realtime_runtime = SimpleNamespace(
-            model=realtime_model,
-            codec=realtime_codec,
+        semantic_model = torch.nn.Linear(1, 1)
+        codec = object()
+        prepare = Mock()
+        runtime = SimpleNamespace(
+            model=semantic_model,
+            codec=codec,
+            prepare_for_inference=prepare,
         )
-        realtime = MossTTSForTextToSpeech(device="cpu")
-        realtime.model = realtime_runtime
-        realtime._processor = realtime_codec
+        model = MossTTSForTextToSpeech(device="cpu")
+        model.model = semantic_model
+        model._mosstts_runtime = runtime
 
-        realtime._prepare_for_inference()
+        model._prepare_for_inference()
 
-        self.assertIs(realtime.model, realtime_runtime)
-        self.assertIs(realtime.model.model, realtime_model)
-        self.assertIs(realtime.model.codec, realtime_codec)
-        self.assertFalse(realtime_model.training)
-        self.assertFalse(realtime_codec.training)
+        self.assertIs(model.model, semantic_model)
+        self.assertIs(model._mosstts_runtime, runtime)
+        self.assertIs(model._mosstts_runtime.codec, codec)
+        prepare.assert_called_once_with()
 
     def test_moss_decodes_inside_inference_mode(self):
-        torch = _FakeTorch()
-
-        class Realtime:
-
-            def generate(self, *args, **kwargs):
-                del args, kwargs
-                if not torch.inference_active:
-                    raise AssertionError("generation must use inference mode")
-                return [[[1, 2], [3, 4]]]
-
-        class Codec:
-
-            def decode(self, codes):
-                del codes
-                if not torch.inference_active:
-                    raise AssertionError("codec decode must use inference mode")
-                return SimpleNamespace(audio=["realtime-audio"])
-
-        realtime = MossTTSForTextToSpeech(device="cpu")
-        realtime._torch = torch
-        realtime.model = Realtime()
-        realtime._processor = Codec()
-        self.assertEqual(
-            realtime._generate_realtime(
-                "hello",
-                speaker_audio_path=None,
-                max_new_tokens=4,
-                generation_options={},
-            ),
-            "realtime-audio",
-        )
-
-        class BatchTensor:
-
-            def to(self, device):
-                del device
-                return self
-
-        class StandardProcessor:
-
-            def build_user_message(self, **kwargs):
-                del kwargs
-                return "message"
-
-            def __call__(self, messages, *, mode):
-                del messages, mode
-                return {
-                    "input_ids": BatchTensor(),
-                    "attention_mask": BatchTensor(),
-                }
-
-            def decode(self, generated):
-                del generated
-                if not torch.inference_active:
-                    raise AssertionError("processor decode must use inference mode")
-                return [SimpleNamespace(audio_codes_list=["standard-audio"])]
-
-        class StandardModel:
-
-            def generate(self, **kwargs):
-                del kwargs
-                if not torch.inference_active:
-                    raise AssertionError("generation must use inference mode")
-                return "tokens"
-
-        standard = MossTTSForTextToSpeech(device="cpu")
-        standard._torch = torch
-        standard.model = StandardModel()
-        standard._processor = StandardProcessor()
-        self.assertEqual(
-            standard._generate_standard(
-                "hello",
-                speaker_audio_path=None,
-                language=None,
-                instruction=None,
-                duration_tokens=None,
-                max_new_tokens=4,
-                generation_options={},
-            ),
-            "standard-audio",
-        )
-
-    def test_moss_standard_decode_concatenates_every_audio_segment(self):
-        torch = _FakeTorch()
-
-        class BatchTensor:
-
-            def to(self, device):
-                del device
-                return self
 
         class Processor:
 
-            def build_user_message(self, **kwargs):
-                del kwargs
-                return "message"
+            @staticmethod
+            def _codes(value, *, name):
+                del name
+                return value
 
-            def __call__(self, messages, *, mode):
-                del messages, mode
-                return {
-                    "input_ids": BatchTensor(),
-                    "attention_mask": BatchTensor(),
-                }
+        class Codec:
 
-            def decode(self, generated):
-                del generated
-                return [
-                    SimpleNamespace(audio_codes_list=["first", "second"]),
-                    SimpleNamespace(audio_codes_list=["third"]),
-                ]
+            @staticmethod
+            def decode(codes, lengths):
+                del codes, lengths
+                if not torch.is_inference_mode_enabled():
+                    raise AssertionError("codec decode must use inference mode")
+                return MossCodecDecodeOutput(
+                    waveform=torch.tensor([[[0.1, -0.1]]]),
+                    waveform_lengths=torch.tensor([2]),
+                    sample_rate=24_000,
+                )
 
+        runtime = SimpleNamespace(
+            processor=Processor(),
+            codec=Codec(),
+            device=torch.device("cpu"),
+            sample_rate=24_000,
+        )
+        output = MossTTSRuntime.decode_codes(
+            runtime,
+            torch.zeros(2, 4, dtype=torch.long),
+        )
+
+        self.assertEqual(output.sample_rate, 24_000)
+        self.assertTrue(torch.equal(output.waveform_lengths, torch.tensor([2])))
+
+    def test_moss_native_decode_concatenates_every_audio_segment(self):
         model = MossTTSForTextToSpeech(device="cpu")
-        model._torch = torch
-        model.model = SimpleNamespace(generate=lambda **kwargs: "tokens")
-        model._processor = Processor()
-
-        audio = model._generate_standard(
-            "hello",
-            speaker_audio_path=None,
-            language=None,
-            instruction=None,
-            duration_tokens=None,
-            max_new_tokens=4,
-            generation_options={},
+        runtime = SimpleNamespace(
+            artifacts=None,
+            config=SimpleNamespace(variant="delay"),
+            decode_codes=Mock(
+                side_effect=[
+                    MossCodecDecodeOutput(
+                        waveform=torch.tensor([[[0.1, 0.2]]]),
+                        waveform_lengths=torch.tensor([2]),
+                        sample_rate=24_000,
+                    ),
+                    MossCodecDecodeOutput(
+                        waveform=torch.tensor([[[0.3]]]),
+                        waveform_lengths=torch.tensor([1]),
+                        sample_rate=24_000,
+                    ),
+                ]),
         )
+        model._mosstts_runtime = runtime
+        model._generate_code_segments = Mock(
+            return_value=(
+                SimpleNamespace(audio_codes=torch.zeros(1, 4, dtype=torch.long)),
+                SimpleNamespace(audio_codes=torch.ones(1, 4, dtype=torch.long)),
+            ))
 
-        self.assertEqual(
-            audio,
-            ("concatenated", ("first", "second", "third"), -1),
-        )
+        with patch(
+                "voicehub.models.mosstts.inference.seeded_inference",
+                return_value=nullcontext(11),
+        ):
+            output = model._generate("hello")
+
+        self.assertTrue(torch.allclose(
+            output.audio,
+            torch.tensor([0.1, 0.2, 0.3]),
+        ))
+        self.assertEqual(output.sample_rate, 24_000)
+        self.assertEqual(runtime.decode_codes.call_count, 2)
 
     def test_moss_stereo_is_downmixed_to_mono(self):
-        model = MossTTSForTextToSpeech(device="cpu")
-        model._torch = _FakeTorch()
-        stereo = _AudioTensor([
-            [1.0, 3.0, 5.0],
-            [3.0, 5.0, 7.0],
-        ])
+        output = MossCodecDecodeOutput(
+            waveform=torch.tensor([[
+                [1.0, 3.0, 5.0],
+                [3.0, 5.0, 7.0],
+            ]]),
+            waveform_lengths=torch.tensor([3]),
+            sample_rate=48_000,
+        )
 
-        waveform, source_channels = model._normalize_mono_audio(stereo)
+        waveform, source_channels = MossTTSForTextToSpeech._normalize_waveform(output, )
 
         self.assertEqual(source_channels, 2)
         self.assertEqual(waveform.ndim, 1)
-        self.assertEqual(waveform.values, [2.0, 4.0, 6.0])
+        self.assertTrue(torch.equal(waveform, torch.tensor([2.0, 4.0, 6.0])))
 
     def test_qwen_auto_mode_uses_loaded_checkpoint_role(self):
         backend = SimpleNamespace(
@@ -668,38 +555,24 @@ class WrapperHelperTests(unittest.TestCase):
         backend.generate_voice_clone.assert_not_called()
         self.assertEqual(output.metadata["mode"], "voice_design")
 
-    def test_higgs_scopes_generation_seed_and_reports_effective_value(self):
+    def test_higgs_routes_seed_through_request_local_native_generator(self):
         response = SimpleNamespace(
-            audio=[0.1, -0.1],
-            sampling_rate=24_000,
-            generated_text="hello",
-            usage={
-                "completion_tokens": 2,
-            },
+            waveform=torch.tensor([[[0.1, -0.1]]]),
+            generated_steps=2,
+            sample_rate=24_000,
         )
         model = HiggsTTSForTextToSpeech(device="cpu")
-        model.device = "cpu"
-        model.model = SimpleNamespace(generate=Mock(return_value=response))
-        model._ensure_serving_runtime = Mock()
-        model._build_chat_sample = Mock(return_value=object())
+        model._runtime = SimpleNamespace(generate=Mock(return_value=response))
 
-        with patch(
-                "voicehub.models.higgstts.inference.seeded_inference",
-                return_value=nullcontext(43),
-        ) as seeded:
-            output = model._generate("hello", seed=None)
+        output = model._generate("hello", seed=43)
 
-        seeded.assert_called_once_with(
-            None,
-            device="cpu",
-            model_type="higgstts",
-        )
         self.assertEqual(
-            model.model.generate.call_args.kwargs["seed"],
+            model._runtime.generate.call_args.kwargs["seed"],
             43,
         )
         self.assertEqual(output.metadata["seed"], 43)
-        self.assertIsNone(output.metadata["requested_seed"])
+        self.assertEqual(output.metadata["requested_seed"], 43)
+        self.assertEqual(output.metadata["backend"], "voicehub-native")
 
     def test_qwen_voice_design_allows_an_empty_instruction(self):
         backend = SimpleNamespace(
@@ -730,38 +603,12 @@ class WrapperHelperTests(unittest.TestCase):
         self.assertEqual(output.metadata["seed"], 7)
 
     def test_higgs_defaults_to_forced_audio_generation(self):
-
-        class Message:
-
-            def __init__(self, **kwargs):
-                self.values = kwargs
-
-        class ChatMLSample:
-
-            def __init__(self, **kwargs):
-                self.values = kwargs
-
-        backend = Mock()
-        backend.generate.return_value = SimpleNamespace(
-            audio=[0.1, -0.1],
-            sampling_rate=24_000,
-            generated_text="hello",
-            usage={},
-        )
         model = HiggsTTSForTextToSpeech(device="cpu")
-        model.model = backend
-        model._types = SimpleNamespace(
-            ChatMLSample=ChatMLSample,
-            Message=Message,
-        )
 
-        with patch(
-                "voicehub.models.higgstts.inference.seeded_inference",
-                return_value=nullcontext(29),
-        ):
-            model.generate("hello")
-
-        self.assertTrue(backend.generate.call_args.kwargs["force_audio_gen"])
+        self.assertTrue(model.generation_config.force_audio_gen)
+        with self.assertRaisesRegex(ValueError, "requires audio generation"):
+            model.generate("hello", force_audio_gen=False)
+        self.assertFalse(model.is_loaded)
 
     def test_csm_processor_batch_to_must_preserve_mapping_contract(self):
         batch = SimpleNamespace(to=Mock(return_value=object()))

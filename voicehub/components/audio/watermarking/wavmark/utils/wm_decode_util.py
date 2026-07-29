@@ -1,72 +1,90 @@
-# import pdb
+"""Native batched WavMark extraction and synchronization."""
+
+from __future__ import annotations
+
+import time
+from typing import Any
 
 import torch
-import numpy as np
-import tqdm
-import time
+
+from voicehub.processing.waveform import normalize_waveform
 
 
-def decode_trunck(trunck, model, device):
-    with torch.no_grad():
-        signal = torch.FloatTensor(trunck).to(device).unsqueeze(0)
-        message = (model.decode(signal) >= 0.5).int()
-        message = message.detach().cpu().numpy().squeeze()
-    return message
+def decode_chunk(chunk, model, device):
+    with torch.inference_mode():
+        signal = normalize_waveform(chunk).to(device).unsqueeze(0)
+        return (model.decode(signal) >= 0.5).int().cpu().squeeze(0)
 
 
-def extract_watermark_v3_batch(data, start_bit, shift_range, num_point, model, device, batch_size=10,
-                               shift_range_p=0.5, show_progress=False):
-    assert type(show_progress) == bool
-    start_time = time.time()
-    # 1.determine the shift step length:
+def extract_watermark_v3_batch(
+    data: Any,
+    start_bit: Any,
+    shift_range: float,
+    num_point: int,
+    model,
+    device,
+    batch_size: int = 10,
+    shift_range_p: float = 0.5,
+    show_progress: bool = False,
+):
+    if not isinstance(show_progress, bool):
+        raise TypeError("`show_progress` must be a boolean.")
+    if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size <= 0:
+        raise ValueError("`batch_size` must be a positive integer.")
+    waveform = normalize_waveform(data)
+    pattern = torch.as_tensor(start_bit, dtype=torch.int64).flatten()
+    started_at = time.monotonic()
     shift_step = int(shift_range * num_point * shift_range_p)
-
-    # 2.determine where to perform detection
-    # pdb.set_trace()
-    total_detections = (len(data) - num_point) // shift_step
-    total_detect_points = [i * shift_step for i in range(total_detections)]
-
-    # 3.construct batch for detection
-    total_batch_counts = len(total_detect_points) // batch_size + 1
+    if shift_step <= 0:
+        raise ValueError("WavMark detection requires a positive shift step.")
+    total_detections = max(
+        0,
+        (waveform.numel() - num_point) // shift_step,
+    )
+    detect_points = tuple(index * shift_step for index in range(total_detections))
     results = []
 
-    the_iter = range(total_batch_counts)
-    if show_progress:
-        the_iter = tqdm.tqdm(range(total_batch_counts))
-
-    for i in the_iter:
-        detect_points = total_detect_points[i * batch_size:i * batch_size + batch_size]
-        if len(detect_points) == 0:
-            break
-        current_batch = np.array([data[p:p + num_point] for p in detect_points])
-        with torch.no_grad():
-            signal = torch.FloatTensor(current_batch).to(device)
-            batch_message = (model.decode(signal) >= 0.5).int().detach().cpu().numpy()
-            for p, bit_array in zip(detect_points, batch_message):
-                decoded_start_bit = bit_array[0:len(start_bit)]
-                ber_start_bit = 1 - np.mean(start_bit == decoded_start_bit)
-                num_equal_bits = np.sum(start_bit == decoded_start_bit)
-                if ber_start_bit > 0:  # exact match
-                    continue
-                results.append({
-                    "sim": 1 - ber_start_bit,
-                    "num_equal_bits": num_equal_bits,
-                    "msg": bit_array,
-                    "start_position": p,
-                    "start_time_position": p / 16000
-                })
-
-    end_time = time.time()
-    time_cost = end_time - start_time
+    for batch_start in range(0, len(detect_points), batch_size):
+        batch_points = detect_points[batch_start:batch_start + batch_size]
+        if show_progress and batch_start == 0:
+            print(
+                "WavMark scanning "
+                f"{len(detect_points)} candidate positions"
+            )
+        current_batch = torch.stack(
+            [waveform[position:position + num_point] for position in batch_points],
+        ).to(device)
+        with torch.inference_mode():
+            messages = (model.decode(current_batch) >= 0.5).int().cpu()
+        for position, message in zip(batch_points, messages):
+            decoded_pattern = message[:pattern.numel()]
+            equal = pattern.eq(decoded_pattern)
+            if not bool(equal.all()):
+                continue
+            results.append({
+                "sim": 1.0,
+                "num_equal_bits": int(equal.sum()),
+                "msg": message,
+                "start_position": position,
+                "start_time_position": position / 16_000,
+            })
 
     info = {
-        "time_cost": time_cost,
+        "time_cost": time.monotonic() - started_at,
         "results": results,
     }
-
-    if len(results) == 0:
+    if not results:
         return None, info
+    messages = torch.stack([item["msg"] for item in results]).float()
+    return messages.mean(dim=0).ge(0.5).int(), info
 
-    results_1 = [i["msg"] for i in results if np.isclose(i["sim"], 1.0)]
-    mean_result = (np.array(results_1).mean(axis=0) >= 0.5).astype(int)
-    return mean_result, info
+
+# Preserve the misspelled upstream helper name.
+decode_trunck = decode_chunk
+
+
+__all__ = [
+    "decode_chunk",
+    "decode_trunck",
+    "extract_watermark_v3_batch",
+]

@@ -2,6 +2,7 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from voicehub.models.omnivoice.inference import OmniVoiceConfig, OmniVoiceForTextToSpeech
@@ -13,90 +14,93 @@ TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 class OmniVoiceTrainingRuntimeTests(unittest.TestCase):
 
     @staticmethod
-    def _fake_runtime_builder(wrapper, *, training):
+    def _runtime():
         import torch
 
-        class Runtime(torch.nn.Module):
+        from tests.test_native_omnivoice import _tiny_codec, _tiny_tokenizer
+        from voicehub.architectures.omnivoice.configuration import OmniVoiceArchitectureConfig
+        from voicehub.architectures.omnivoice.modeling import OmniVoiceModel
+        from voicehub.architectures.omnivoice.runtime import OmniVoiceRuntime
 
-            def __init__(self, *, training):
-                super().__init__()
-                self.weight = torch.nn.Parameter(torch.tensor(1.0))
-                self.text_tokenizer = None if training else object()
-                self.audio_tokenizer = None if training else object()
-                self.sampling_rate = 24_000
+        torch.manual_seed(17)
+        model = OmniVoiceModel(OmniVoiceArchitectureConfig.tiny(vocab_size=320))
+        runtime = OmniVoiceRuntime(model, _tiny_tokenizer(), _tiny_codec())
+        return runtime
 
-            def forward(self, input_ids, labels=None):
-                logits = input_ids.float() * self.weight
-                loss = ((logits - labels).square().mean() if labels is not None else None)
-                return {"loss": loss, "logits": logits}
-
-            def generate(self, **kwargs):
-                del kwargs
-                return [self.weight.detach().reshape(1)]
-
-        del wrapper
-        return Runtime(training=training), 24_000
-
-    def test_runtime_switches_preserve_fine_tuned_weights(self):
+    def test_runtime_mode_switches_preserve_the_trainable_graph(self):
+        runtime = self._runtime()
         wrapper = OmniVoiceForTextToSpeech(
             OmniVoiceConfig(name_or_path="test/omnivoice"),
             device="cpu",
         )
-        with patch.object(
-                OmniVoiceForTextToSpeech,
-                "_build_runtime",
-                autospec=True,
-                side_effect=self._fake_runtime_builder,
-        ):
-            wrapper.load_for_training()
-            wrapper.model.weight.data.fill_(7.0)
-            optimizer_owned_model = wrapper.model
+        wrapper._runtime = runtime
 
-            wrapper.load()
-            self.assertFalse(wrapper._loaded_for_training)
-            self.assertIs(wrapper.model, optimizer_owned_model)
-            self.assertIsNotNone(wrapper.model.text_tokenizer)
-            self.assertEqual(wrapper.model.weight.item(), 7.0)
+        wrapper.load_for_training()
+        optimizer_owned_model = wrapper.model
+        optimizer_owned_model.audio_heads.weight.data.fill_(0.125)
 
-            wrapper.load_for_training()
-            self.assertTrue(wrapper._loaded_for_training)
-            self.assertIs(wrapper.model, optimizer_owned_model)
-            self.assertIsNone(wrapper.model.text_tokenizer)
-            self.assertEqual(wrapper.model.weight.item(), 7.0)
+        self.assertTrue(wrapper._training_ready)
+        self.assertTrue(optimizer_owned_model.training)
+        self.assertFalse(any(parameter.requires_grad for parameter in runtime.audio_tokenizer.parameters()))
 
-    def test_portable_artifact_rebuilds_an_inference_capable_runtime(self):
-        import torch
+        wrapper.load()
+
+        self.assertTrue(wrapper._inference_ready)
+        self.assertFalse(wrapper._training_ready)
+        self.assertIs(wrapper.model, optimizer_owned_model)
+        self.assertFalse(optimizer_owned_model.training)
+        self.assertEqual(
+            float(optimizer_owned_model.audio_heads.weight[0, 0].detach()),
+            0.125,
+        )
+
+        wrapper.load_for_training()
+
+        self.assertTrue(wrapper._training_ready)
+        self.assertIs(wrapper.model, optimizer_owned_model)
+        self.assertTrue(optimizer_owned_model.training)
+        self.assertEqual(
+            float(optimizer_owned_model.audio_heads.weight[0, 0].detach()),
+            0.125,
+        )
+
+    def test_shared_training_registry_selects_native_adapter(self):
+        from voicehub.models.omnivoice.training import OmniVoiceTrainingAdapter
+        from voicehub.training.specs import get_training_spec
+
+        runtime = self._runtime()
+        wrapper = OmniVoiceForTextToSpeech(device="cpu")
+        wrapper._runtime = runtime
+
+        adapter = wrapper.get_training_adapter()
+        self.assertIsInstance(adapter, OmniVoiceTrainingAdapter)
+        self.assertEqual(adapter.spec, get_training_spec("omnivoice"))
+        self.assertEqual(adapter.spec.default_phase, "masked_audio")
+        self.assertEqual(
+            adapter.spec.source_entrypoints,
+            ("voicehub.architectures.omnivoice.modeling:"
+             "OmniVoiceModel.forward", ),
+        )
+        adapter.setup()
+        self.assertIs(adapter.primary_model, runtime.model)
+
+    def test_native_export_delegates_to_complete_runtime(self):
+        runtime = self._runtime()
+        wrapper = OmniVoiceForTextToSpeech(device="cpu")
+        wrapper._runtime = runtime
+        wrapper.model = runtime.model
 
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory)
-            config = OmniVoiceConfig(name_or_path="test/omnivoice")
-            config.save_pretrained(output)
-            source = OmniVoiceForTextToSpeech(config, device="cpu")
-
+            destination = Path(directory) / "omnivoice"
             with patch.object(
-                    OmniVoiceForTextToSpeech,
-                    "_build_runtime",
-                    autospec=True,
-                    side_effect=self._fake_runtime_builder,
-            ):
-                source.load_for_training()
-                source.model.weight.data.fill_(5.0)
-                torch.save(
-                    source.get_training_adapter().state_dict(),
-                    output / "model_state.pt",
-                )
+                    runtime,
+                    "save_pretrained",
+                    return_value=destination,
+            ) as save:
+                result = wrapper.export_native_pretrained(destination)
 
-                restored = OmniVoiceForTextToSpeech.from_pretrained(
-                    directory,
-                    device="cpu",
-                    lazy_load=False,
-                )
-                generated = restored.generate("hello")
-
-            self.assertFalse(restored._loaded_for_training)
-            self.assertIsNotNone(restored.model.text_tokenizer)
-            self.assertEqual(restored.model.weight.item(), 5.0)
-            self.assertEqual(float(generated.audio[0]), 5.0)
+        self.assertEqual(result, destination)
+        save.assert_called_once_with(destination)
 
 
 if __name__ == "__main__":

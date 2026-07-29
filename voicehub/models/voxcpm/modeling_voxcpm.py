@@ -1,5 +1,5 @@
-"""Stable model imports for voxcpm."""
+"""Stable model imports for VoiceHub-native VoxCPM2."""
 
-from voicehub.models.voxcpm.inference import VoxCPMForTextToSpeech
+from voicehub.models.voxcpm_native.modeling_voxcpm import VoxCPMForTextToSpeech, VoxCPMTTS
 
-__all__ = ["VoxCPMForTextToSpeech"]
+__all__ = ["VoxCPMForTextToSpeech", "VoxCPMTTS"]

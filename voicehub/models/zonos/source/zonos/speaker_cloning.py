@@ -1,13 +1,59 @@
 import math
-from functools import cache
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchaudio
-from huggingface_hub import hf_hub_download
 
+from voicehub.hub import resolve_pretrained_file
 from voicehub.models.zonos.source.zonos.utils import DEFAULT_DEVICE
+from voicehub.processing.waveform import resample_waveform
+
+
+def _htk_mel_filter_bank(
+    *,
+    sample_rate: int,
+    n_fft: int,
+    n_mels: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> torch.Tensor:
+    """Return torchaudio-compatible, unnormalized HTK mel filters."""
+    frequencies = torch.linspace(
+        0.0,
+        sample_rate / 2,
+        n_fft // 2 + 1,
+        dtype=dtype,
+        device=device,
+    )
+
+    def hz_to_mel(values):
+        return 2595.0 * torch.log10(1.0 + values / 700.0)
+
+    def mel_to_hz(values):
+        return 700.0 * (torch.pow(10.0, values / 2595.0) - 1.0)
+
+    lower = torch.tensor(0.0, dtype=dtype, device=device)
+    upper = torch.tensor(sample_rate / 2, dtype=dtype, device=device)
+    edges = mel_to_hz(
+        torch.linspace(
+            hz_to_mel(lower),
+            hz_to_mel(upper),
+            n_mels + 2,
+            dtype=dtype,
+            device=device,
+        )
+    )
+    left = (
+        frequencies.unsqueeze(0) - edges[:-2].unsqueeze(1)
+    ) / (
+        edges[1:-1] - edges[:-2]
+    ).unsqueeze(1)
+    right = (
+        edges[2:].unsqueeze(1) - frequencies.unsqueeze(0)
+    ) / (
+        edges[2:] - edges[1:-1]
+    ).unsqueeze(1)
+    return torch.minimum(left, right).clamp_min(0.0)
 
 
 class logFbankCal(nn.Module):
@@ -20,16 +66,45 @@ class logFbankCal(nn.Module):
         n_mels: int = 80,
     ):
         super().__init__()
-        self.fbankCal = torchaudio.transforms.MelSpectrogram(
-            sample_rate=sample_rate,
-            n_fft=n_fft,
-            win_length=int(win_length * sample_rate),
-            hop_length=int(hop_length * sample_rate),
-            n_mels=n_mels,
-        )
+        self.sample_rate = sample_rate
+        self.n_fft = n_fft
+        self.win_length = int(win_length * sample_rate)
+        self.hop_length = int(hop_length * sample_rate)
+        self.n_mels = n_mels
 
     def forward(self, x):
-        out = self.fbankCal(x)
+        if x.ndim not in (1, 2):
+            raise ValueError(
+                "Speaker audio must have shape [time] or [batch, time]."
+            )
+        if x.ndim == 1:
+            x = x.unsqueeze(0)
+        x = x.float()
+        window = torch.hann_window(
+            self.win_length,
+            dtype=x.dtype,
+            device=x.device,
+        )
+        spectrum = torch.stft(
+            x,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            win_length=self.win_length,
+            window=window,
+            center=True,
+            pad_mode="reflect",
+            normalized=False,
+            onesided=True,
+            return_complex=True,
+        ).abs().square()
+        filters = _htk_mel_filter_bank(
+            sample_rate=self.sample_rate,
+            n_fft=self.n_fft,
+            n_mels=self.n_mels,
+            dtype=spectrum.dtype,
+            device=spectrum.device,
+        )
+        out = torch.matmul(filters, spectrum)
         out = torch.log(out + 1e-6)
         out = out - out.mean(axis=2).unsqueeze(dim=2)
         return out
@@ -369,16 +444,25 @@ class SpeakerEmbedding(nn.Module):
     def dtype(self):
         return next(self.parameters()).dtype
 
-    @cache
-    def _get_resampler(self, orig_sample_rate: int):
-        return torchaudio.transforms.Resample(orig_sample_rate, 16_000).to(self.device)
-
     def prepare_input(self, wav: torch.Tensor, sample_rate: int) -> torch.Tensor:
         assert wav.ndim < 3
         if wav.ndim == 2:
             wav = wav.mean(0, keepdim=True)
-        wav = self._get_resampler(sample_rate)(wav)
-        return wav
+        if wav.ndim == 1:
+            wav = wav.unsqueeze(0)
+        if sample_rate == 16_000:
+            return wav
+        return torch.stack(
+            [
+                resample_waveform(
+                    channel,
+                    sample_rate,
+                    16_000,
+                )
+                for channel in wav
+            ],
+            dim=0,
+        )
 
     def forward(self, wav: torch.Tensor, sample_rate: int):
         wav = self.prepare_input(wav, sample_rate).to(self.device, self.dtype)
@@ -388,13 +472,13 @@ class SpeakerEmbedding(nn.Module):
 class SpeakerEmbeddingLDA(nn.Module):
     def __init__(self, device: str = DEFAULT_DEVICE):
         super().__init__()
-        spk_model_path = hf_hub_download(
-            repo_id="Zyphra/Zonos-v0.1-speaker-embedding",
-            filename="ResNet293_SimAM_ASP_base.pt",
+        spk_model_path = resolve_pretrained_file(
+            "Zyphra/Zonos-v0.1-speaker-embedding",
+            "ResNet293_SimAM_ASP_base.pt",
         )
-        lda_spk_model_path = hf_hub_download(
-            repo_id="Zyphra/Zonos-v0.1-speaker-embedding",
-            filename="ResNet293_SimAM_ASP_base_LDA-128.pt",
+        lda_spk_model_path = resolve_pretrained_file(
+            "Zyphra/Zonos-v0.1-speaker-embedding",
+            "ResNet293_SimAM_ASP_base_LDA-128.pt",
         )
 
         self.device = device

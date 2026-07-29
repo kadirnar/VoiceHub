@@ -226,43 +226,31 @@ class SourceTrainingRecipeTests(unittest.TestCase):
         }
         return adapter, model, batch
 
-    def test_higgs_losses_use_causal_shift_and_ignore_mask(self):
+    def test_higgs_adapter_combines_native_text_and_audio_losses(self):
         import torch
 
         adapter = HiggsTrainingAdapter(
-            SimpleNamespace(config=SimpleNamespace(model_type="higgstts"), ),
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    model_type="higgstts",
+                    training_audio_loss_weight=3.0,
+                    training_text_loss_weight=2.0,
+                ), ),
             get_training_spec("higgstts"),
         )
-        adapter.primary_model = SimpleNamespace(audio_codebook_weights=torch.tensor([1.0, 1.0]), )
+        text_loss = torch.tensor(2.0, requires_grad=True)
+        audio_loss = torch.tensor(5.0, requires_grad=True)
 
-        text_logits = torch.full((1, 3, 5), -10.0)
-        text_logits[0, 0, 1] = 10.0
-        text_logits[0, 1, 2] = 10.0
-        text_logits.requires_grad_(True)
+        loss = adapter._aggregate_losses({
+            "loss": text_loss + audio_loss,
+            "text_loss": text_loss,
+            "audio_loss": audio_loss,
+        })
 
-        audio_logits = torch.full((3, 2, 4), -10.0)
-        audio_logits[0, 0, 1] = 10.0
-        audio_logits[1, 0, 2] = 10.0
-        audio_logits[0, 1, 2] = 10.0
-        audio_logits.requires_grad_(True)
-
-        losses = adapter.compute_causal_losses(
-            SimpleNamespace(
-                logits=text_logits,
-                audio_logits=audio_logits,
-                expanded_labels=torch.tensor([[-100, 1, 2]]),
-            ),
-            torch.tensor([
-                [-100, 1, 2],
-                [-100, 2, -100],
-            ]),
-        )
-
-        self.assertLess(losses["text_loss"].item(), 1e-6)
-        self.assertLess(losses["audio_loss"].item(), 1e-6)
-        (losses["text_loss"] + losses["audio_loss"]).backward()
-        self.assertIsNotNone(text_logits.grad)
-        self.assertIsNotNone(audio_logits.grad)
+        self.assertEqual(loss.item(), 19.0)
+        loss.backward()
+        self.assertEqual(text_loss.grad.item(), 2.0)
+        self.assertEqual(audio_loss.grad.item(), 3.0)
 
     def test_xtts_preserves_the_published_loss_weighting(self):
         import torch
@@ -309,10 +297,10 @@ class SourceTrainingRecipeTests(unittest.TestCase):
         self.assertAlmostEqual(parameter.grad.item(), 3.02, places=6)
         self.assertEqual(
             adapter.artifact_manifest()["checkpoint_semantics"]["save_pretrained"],
-            "component-weight-warm-start",
+            "voicehub-native-xtts2-safetensors",
         )
 
-    def test_xtts_raw_evaluation_reports_adapter_prepared_loss(self):
+    def test_xtts_preencoded_evaluation_reports_native_loss(self):
         import torch
 
         class GPT(torch.nn.Module):
@@ -327,7 +315,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
                 mel_loss = self.scale * 3.0
                 return text_loss, mel_loss, self.scale.reshape(1)
 
-        class RawEvalAdapter(XTTSTrainingAdapter):
+        class PreencodedEvalAdapter(XTTSTrainingAdapter):
 
             def setup(self):
                 if self.primary_model is None:
@@ -338,30 +326,19 @@ class SourceTrainingRecipeTests(unittest.TestCase):
                     ]
                 return self
 
-            def _format_batch_on_device(self, batch):
-                batch_size = int(batch["padded_text"].shape[0])
-                return {
-                    "text_inputs": batch["padded_text"],
-                    "text_lengths": batch["text_lengths"],
-                    "audio_codes": torch.ones(
-                        batch_size,
-                        2,
-                        dtype=torch.long,
-                    ),
-                    "wav_lengths": batch["wav_lengths"],
-                    "cond_mels": torch.ones(batch_size, 1, 80, 2),
-                    "cond_idxs": batch["cond_idxs"],
-                    "cond_lens": batch["cond_lens"],
-                }
-
-        wrapper = SimpleNamespace(config=SimpleNamespace(model_type="xtts"), )
-        adapter = RawEvalAdapter(wrapper, get_training_spec("xtts"))
-        raw_record = {
-            "padded_text": torch.tensor([1, 2], dtype=torch.long),
+        wrapper = SimpleNamespace(
+            config=SimpleNamespace(
+                model_type="xtts",
+                training_text_loss_weight=0.01,
+                training_mel_loss_weight=1.0,
+            ), )
+        adapter = PreencodedEvalAdapter(wrapper, get_training_spec("xtts"))
+        preencoded_record = {
+            "text_inputs": torch.tensor([1, 2], dtype=torch.long),
             "text_lengths": torch.tensor(2),
-            "wav": torch.ones(1, 8),
+            "audio_codes": torch.ones(2, dtype=torch.long),
             "wav_lengths": torch.tensor(8),
-            "conditioning": torch.ones(1, 1, 8),
+            "cond_mels": torch.ones(1, 80, 2),
             "cond_idxs": torch.tensor([0, 1], dtype=torch.long),
             "cond_lens": torch.tensor(1),
         }
@@ -371,7 +348,7 @@ class SourceTrainingRecipeTests(unittest.TestCase):
                 per_device_eval_batch_size=1,
                 use_cpu=True,
             ),
-            eval_dataset=[raw_record],
+            eval_dataset=[preencoded_record],
             training_adapter=adapter,
         )
 
@@ -390,13 +367,36 @@ class SourceTrainingRecipeTests(unittest.TestCase):
                 super().__init__()
                 self.scale = torch.nn.Parameter(torch.tensor(2.0))
 
-            def forward(self, batch, device):
-                self.last_device = device
-                loss = batch["values"].to(device).mean() * self.scale
-                return {
-                    "loss": loss,
-                    "accuracy": torch.tensor(0.75, device=device),
-                }
+            def forward(self, values):
+                loss = values.mean() * self.scale
+                return SimpleNamespace(
+                    loss=loss,
+                    logits=values * self.scale,
+                    accuracy=torch.tensor(0.75, device=values.device),
+                )
+
+        class NativeGraph(torch.nn.Module):
+
+            def __init__(self, component):
+                super().__init__()
+                self.llm = component
+
+            def forward(self, *, component, **inputs):
+                self.selected_component = component
+                return self.llm(**inputs)
+
+        class Wrapper:
+
+            def __init__(self, graph):
+                self.config = SimpleNamespace(
+                    model_type="cosyvoice",
+                    training_component="llm",
+                )
+                self.model = graph
+
+            @staticmethod
+            def prepare_training_inputs(inputs, *, phase):
+                return dict(inputs)
 
         class ReadyCosyVoiceAdapter(CosyVoiceTrainingAdapter):
 
@@ -404,33 +404,26 @@ class SourceTrainingRecipeTests(unittest.TestCase):
                 return self
 
         component = SourceComponent()
-        wrapper = SimpleNamespace(
-            config=SimpleNamespace(
-                model_type="cosyvoice",
-                training_component="llm",
-            ),
-            model=SimpleNamespace(model=SimpleNamespace(llm=component), ),
-        )
+        wrapper = Wrapper(NativeGraph(component))
         adapter = ReadyCosyVoiceAdapter(
             wrapper,
             get_training_spec("cosyvoice"),
         )
         output = adapter.execute_training_phase(
             adapter.create_training_context(
-                {"batch": {
-                    "values": torch.tensor([1.0, 3.0])
-                }},
+                {"values": torch.tensor([1.0, 3.0])},
                 training_phase="language_model",
             ), )
 
         self.assertEqual(output.loss.item(), 4.0)
-        self.assertEqual(output.optimizer_names, ("language_model", ))
-        self.assertIn("accuracy", output.metadata["metrics"])
+        self.assertEqual(output.optimizer_names, ("llm", ))
+        self.assertEqual(wrapper.model.selected_component, "llm")
+        self.assertEqual(output.metadata["accuracy"].item(), 0.75)
         output.loss.backward()
         self.assertEqual(component.scale.grad.item(), 2.0)
         self.assertEqual(
             adapter.artifact_manifest()["checkpoint_semantics"]["save_pretrained"],
-            "component-weight-warm-start",
+            "inference-ready-voicehub-native-cosyvoice-safetensors",
         )
 
     def test_qwen_export_does_not_mutate_the_live_training_model(self):

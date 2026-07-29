@@ -1,0 +1,17 @@
+{
+  "architecture": "Vocos",
+  "checkpoint_repositories": {
+    "charactr/vocos-encodec-24khz": {
+      "license": "MIT",
+      "revision": "4e61d082c08045a4c11e5b148ad93b1d0c591a14"
+    },
+    "charactr/vocos-mel-24khz": {
+      "license": "MIT",
+      "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21"
+    }
+  },
+  "license": "MIT",
+  "policy": "VoiceHub owns the executable PyTorch graph, DSP, adversarial objectives, dataset, schedulers, safe configuration parser, and checkpoint lifecycle. Released legacy pickle weights are accepted only through PyTorch's restricted weights_only loader and steady-state exports use Safetensors.",
+  "revision": "c859e3b7b534f3776a357983029d34170ddd6fc3",
+  "upstream": "https://github.com/gemelo-ai/vocos"
+}

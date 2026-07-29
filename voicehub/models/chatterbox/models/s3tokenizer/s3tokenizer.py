@@ -1,13 +1,14 @@
-from typing import List, Tuple
+from __future__ import annotations
 
-import librosa
-import numpy as np
+import math
+from typing import Any
+
 import torch
 import torch.nn.functional as F
-from accelerate import Accelerator
 
-from voicehub.models.chatterbox.source.s3tokenizer.model_v2 import ModelConfig, S3TokenizerV2
-from voicehub.models.chatterbox.source.s3tokenizer.utils import padding
+from voicehub.models.chatterbox.models.s3tokenizer.model_v2 import ModelConfig, S3TokenizerV2
+from voicehub.models.chatterbox.models.s3tokenizer.native_utils import padding
+from voicehub.models.chatterbox.native_audio import s3tokenizer_log_mel, slaney_mel_filter_bank
 
 # Sampling rate of the inputs to S3TokenizerV2
 S3_SR = 16_000
@@ -26,33 +27,44 @@ class S3Tokenizer(S3TokenizerV2):
 
     ignore_state_dict_missing = ("_mel_filters", "window")
 
-    def __init__(self, name: str = "speech_tokenizer_v2_25hz", config: ModelConfig = ModelConfig()):
+    def __init__(
+        self,
+        name: str = "speech_tokenizer_v2_25hz",
+        config: ModelConfig | None = None,
+    ):
+        config = config or ModelConfig()
         super().__init__(name)
 
         self.n_fft = 400
-        _mel_filters = librosa.filters.mel(sr=S3_SR, n_fft=self.n_fft, n_mels=config.n_mels)
+        mel_filters = slaney_mel_filter_bank(
+            sample_rate=S3_SR,
+            n_fft=self.n_fft,
+            n_mels=config.n_mels,
+        )
         self.register_buffer(
             "_mel_filters",
-            torch.FloatTensor(_mel_filters),
+            mel_filters,
         )
 
         self.register_buffer(
             "window",
             torch.hann_window(self.n_fft),
+            persistent=False,
         )
 
-    def pad(self, wavs, sr) -> List[torch.Tensor]:
+    def pad(self, wavs, sr) -> list[torch.Tensor]:
         """Given a list of wavs with the same `sample_rate`, pad them so that
         the length is multiple of 40ms (S3 runs at 25 token/sec)."""
         processed_wavs = []
         for wav in wavs:
-            if isinstance(wav, np.ndarray):
-                wav = torch.from_numpy(wav)
+            wav = torch.as_tensor(wav)
             if wav.dim() == 1:
                 wav = wav.unsqueeze(0)
+            if wav.dim() != 2:
+                raise ValueError("Each waveform must have shape [samples] or [channels, samples].")
 
             n_tokens = (wav.shape[1] / sr) * S3_TOKEN_RATE
-            n_tokens = np.ceil(n_tokens)
+            n_tokens = math.ceil(n_tokens)
             intended_wav_len = n_tokens * (sr / S3_TOKEN_RATE)
             intended_wav_len = int(intended_wav_len)
             wav = torch.nn.functional.pad(
@@ -64,10 +76,11 @@ class S3Tokenizer(S3TokenizerV2):
         """Prepare a list of audios for s3tokenizer processing."""
         processed_wavs = []
         for wav in wavs:
-            if isinstance(wav, np.ndarray):
-                wav = torch.from_numpy(wav)
+            wav = torch.as_tensor(wav)
             if wav.dim() == 1:
                 wav = wav.unsqueeze(0)
+            if wav.dim() != 2:
+                raise ValueError("Each waveform must have shape [samples] or [channels, samples].")
 
             processed_wavs.append(wav)
         return processed_wavs
@@ -75,10 +88,10 @@ class S3Tokenizer(S3TokenizerV2):
     @torch.no_grad()
     def forward(
         self,
-        wavs: torch.Tensor,
-        accelerator: 'Accelerator' = None,
-        max_len: int = None,
-    ) -> Tuple[torch.Tensor, torch.LongTensor]:
+        wavs: torch.Tensor | list[torch.Tensor],
+        accelerator: Any = None,
+        max_len: int | None = None,
+    ) -> tuple[torch.Tensor, torch.LongTensor]:
         """
         NOTE: mel-spec has a hop size of 160 points (100 frame/sec).
         FIXME: this class inherits `nn.Module` but doesn't accept `torch.Tensor` and handles a list of wavs one by one, which is unexpected.
@@ -132,18 +145,11 @@ class S3Tokenizer(S3TokenizerV2):
         torch.Tensor, shape = (128, n_frames)
             A Tensor that contains the Mel spectrogram
         """
-        if not torch.is_tensor(audio):
-            audio = torch.from_numpy(audio)
-
-        audio = audio.to(self.device)
-        if padding > 0:
-            audio = F.pad(audio, (0, padding))
-        stft = torch.stft(audio, self.n_fft, S3_HOP, window=self.window.to(self.device), return_complex=True)
-        magnitudes = stft[..., :-1].abs()**2
-
-        mel_spec = self._mel_filters.to(self.device) @ magnitudes
-
-        log_spec = torch.clamp(mel_spec, min=1e-10).log10()
-        log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
-        log_spec = (log_spec + 4.0) / 4.0
-        return log_spec
+        return s3tokenizer_log_mel(
+            torch.as_tensor(audio, device=self.device),
+            mel_filters=self._mel_filters,
+            window=self.window,
+            n_fft=self.n_fft,
+            hop_length=S3_HOP,
+            padding=padding,
+        )

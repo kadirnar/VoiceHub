@@ -1,4 +1,10 @@
-"""Source-faithful rectified-flow fine-tuning for Echo-TTS."""
+"""Architecture-consistent rectified-flow fine-tuning for Echo-TTS.
+
+The public Echo repository is inference-only. VoiceHub reconstructs the
+standard velocity objective implied by its rectified-flow sampler, but
+does not present this integration as an author-verified reproduction of
+the original data or optimization recipe.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from voicehub.checkpointing import save_safetensors
 from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSTrainingOutput
 from voicehub.training.adapters import FlowMatchingTrainingAdapter
@@ -13,7 +20,7 @@ from voicehub.training.contracts import TrainingContext
 
 
 class EchoTrainingAdapter(FlowMatchingTrainingAdapter):
-    """Train Echo's released flow network from precomputed codec latents.
+    """Train Echo's flow network from precomputed codec latents.
 
     Echo's public checkpoint does not ship a raw-audio data recipe. This
     adapter therefore keeps the Fish codec frozen and requires the exact
@@ -186,6 +193,7 @@ class EchoTrainingAdapter(FlowMatchingTrainingAdapter):
                 "model_type": "echo",
                 "objective": "rectified-flow-velocity",
                 "preprocessing": "source-shaped-latents",
+                "recipe_status": "reconstructed-not-author-verified",
             },
             training_phase=context.phase.name,
             optimizer_names=context.phase.optimizer_names,
@@ -196,16 +204,14 @@ class EchoTrainingAdapter(FlowMatchingTrainingAdapter):
         self.setup()
         destination = Path(save_directory)
         destination.mkdir(parents=True, exist_ok=True)
-        safetensors = import_optional(
-            "safetensors.torch",
-            model_type="echo",
-            install_extra="training",
-        )
         state = {
             name: value.detach().cpu().contiguous()
             for name, value in self.primary_model.state_dict().items()
         }
-        safetensors.save_file(state, destination / "pytorch_model.safetensors")
+        save_safetensors(
+            state,
+            destination / "pytorch_model.safetensors",
+        )
 
         pca = getattr(self.model, "pca_state", None)
         if pca is None:
@@ -218,7 +224,10 @@ class EchoTrainingAdapter(FlowMatchingTrainingAdapter):
                 like=pca.pca_mean,
             ),
         }
-        safetensors.save_file(pca_state, destination / "pca_state.safetensors")
+        save_safetensors(
+            pca_state,
+            destination / "pca_state.safetensors",
+        )
         config = getattr(self.model, "config", None)
         if config is not None and hasattr(config, "save_pretrained"):
             config.save_pretrained(destination)

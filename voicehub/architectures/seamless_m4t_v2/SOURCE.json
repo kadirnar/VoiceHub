@@ -1,0 +1,60 @@
+{
+  "architecture": "seamless-m4t-v2-s2t",
+  "implementation": "voicehub-native",
+  "architecture_reference": {
+    "repository": "https://github.com/huggingface/transformers",
+    "reviewed_version": "5.14.1",
+    "revision": "a08ace4bbd97e721c98751deec37d87b026acadc",
+    "license": "Apache-2.0",
+    "files": [
+      "src/transformers/models/seamless_m4t_v2/modeling_seamless_m4t_v2.py",
+      "src/transformers/models/seamless_m4t_v2/configuration_seamless_m4t_v2.py",
+      "src/transformers/models/seamless_m4t/feature_extraction_seamless_m4t.py",
+      "src/transformers/models/seamless_m4t/tokenization_seamless_m4t.py"
+    ]
+  },
+  "checkpoint": {
+    "repository": "facebook/seamless-m4t-v2-large",
+    "revision": "5f8cc790b19fc3f67a61c105133b20b34e3dcb76",
+    "format": "two-shard-f32-safetensors",
+    "full_tensor_count": 2232,
+    "full_parameter_count": 2309249669,
+    "full_tensor_bytes": 9236998676,
+    "full_header_fingerprint": "e415ce94fe9bda5d062f9c777b4033eb1a340f75bdb20a3ae455aa7e690fb82e",
+    "s2t_tensor_count": 1429,
+    "s2t_parameter_count": 1501842240,
+    "s2t_tensor_bytes": 6007368960,
+    "s2t_header_fingerprint": "2f12727c9a2e9b844e57efaef0aa42dcaf5394425633561591e285455cb39bef",
+    "license": "CC-BY-NC-4.0",
+    "license_url": "https://creativecommons.org/licenses/by-nc/4.0/legalcode"
+  },
+  "verified_scope": {
+    "inference": [
+      "audited 16 kHz Kaldi-style stacked log-mel frontend",
+      "24-layer relative-key Conformer speech encoder and adapter",
+      "24-layer autoregressive text decoder",
+      "98 explicit target-language prompts",
+      "native SentencePiece ModelProto BPE with official ID offset",
+      "greedy generation",
+      "strict full-checkpoint and portable S2T checkpoint loading"
+    ],
+    "training": [
+      "target-language label construction",
+      "differentiable sequence cross-entropy",
+      "full-model autograd",
+      "gradient checkpointing",
+      "portable S2T-only Safetensors export and reload"
+    ],
+    "limitations": [
+      "Only speech-to-text recognition is implemented; translation and speech generation fail closed.",
+      "Generation is greedy only; beam search, sampling, timestamps, hotwords, and streaming state are not claimed.",
+      "Tokenizer parity was checked on representative multilingual text, not exhaustively over all Unicode.",
+      "No corpus-level accuracy or WER improvement is claimed."
+    ]
+  },
+  "runtime_dependencies": [
+    "Python standard library",
+    "PyTorch",
+    "VoiceHub"
+  ]
+}

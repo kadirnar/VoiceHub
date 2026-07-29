@@ -1,16 +1,39 @@
+from __future__ import annotations
+
+import logging
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Union
+from typing import Any, Union
 
-import numpy as np
 import torch
-import tqdm
 from torch import nn
 
 from voicehub.components.audio.codecs._compat import AudioSignal
 
 SUPPORTED_VERSIONS = ["1.0.0"]
+VOICEHUB_DAC_FILE_FORMAT = "voicehub-dac-v1"
+
+logger = logging.getLogger(__name__)
+
+
+def _progress_range(
+    start: int,
+    stop: int,
+    step: int,
+    *,
+    verbose: bool,
+    operation: str,
+):
+    """Iterate over codec chunks with optional standard-library logging."""
+    values = range(start, stop, step)
+    if verbose:
+        logger.info("%s %d codec chunk(s).", operation, len(values))
+    for index, value in enumerate(values, start=1):
+        yield value
+        if verbose and (index == len(values) or index % 25 == 0):
+            logger.info("%s codec chunk %d/%d.", operation, index, len(values))
 
 
 @dataclass
@@ -20,39 +43,82 @@ class DACFile:
     # Metadata
     chunk_length: int
     original_length: int
-    input_db: float
+    input_db: float | torch.Tensor
     channels: int
     sample_rate: int
     padding: bool
     dac_version: str
 
-    def save(self, path):
+    def save(self, path: str | Path) -> Path:
+        """Save a safe, PyTorch-native VoiceHub DAC archive."""
+        if not isinstance(self.codes, torch.Tensor) or self.codes.ndim != 3:
+            raise ValueError(
+                "DAC codes must be a rank-three PyTorch tensor."
+            )
+        input_db = (
+            self.input_db.detach().to(device="cpu")
+            if isinstance(self.input_db, torch.Tensor)
+            else float(self.input_db)
+        )
         artifacts = {
-            "codes": self.codes.numpy().astype(np.uint16),
+            "format": VOICEHUB_DAC_FILE_FORMAT,
+            "codes": self.codes.detach().to(device="cpu", dtype=torch.int32),
             "metadata": {
-                "input_db": self.input_db.numpy().astype(np.float32),
-                "original_length": self.original_length,
-                "sample_rate": self.sample_rate,
-                "chunk_length": self.chunk_length,
-                "channels": self.channels,
-                "padding": self.padding,
+                "input_db": input_db,
+                "original_length": int(self.original_length),
+                "sample_rate": int(self.sample_rate),
+                "chunk_length": int(self.chunk_length),
+                "channels": int(self.channels),
+                "padding": bool(self.padding),
                 "dac_version": SUPPORTED_VERSIONS[-1],
             },
         }
         path = Path(path).with_suffix(".dac")
-        with open(path, "wb") as f:
-            np.save(f, artifacts)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(artifacts, path)
         return path
 
     @classmethod
-    def load(cls, path):
-        artifacts = np.load(path, allow_pickle=True)[()]
-        codes = torch.from_numpy(artifacts["codes"].astype(int))
-        if artifacts["metadata"].get("dac_version", None) not in SUPPORTED_VERSIONS:
-            raise RuntimeError(
-                f"Given file {path} can't be loaded with this version of descript-audio-codec."
+    def load(cls, path: str | Path) -> DACFile:
+        """Load a VoiceHub DAC archive without NumPy or unsafe pickle data."""
+        source = Path(path).expanduser()
+        try:
+            try:
+                artifacts: Any = torch.load(
+                    source,
+                    map_location="cpu",
+                    weights_only=True,
+                )
+            except TypeError:  # pragma: no cover - older supported PyTorch
+                artifacts = torch.load(source, map_location="cpu")
+        except Exception as error:
+            raise ValueError(
+                "Could not load the DAC archive. Legacy NumPy `.dac` files "
+                "must be converted with an older Descript runtime before "
+                "loading them in VoiceHub."
+            ) from error
+        if not isinstance(artifacts, Mapping):
+            raise ValueError("The DAC archive root must be a mapping.")
+        if artifacts.get("format") != VOICEHUB_DAC_FILE_FORMAT:
+            raise ValueError(
+                "The DAC archive does not declare VoiceHub's native format."
             )
-        return cls(codes=codes, **artifacts["metadata"])
+        metadata = artifacts.get("metadata")
+        codes = artifacts.get("codes")
+        if not isinstance(metadata, Mapping):
+            raise ValueError("The DAC archive metadata must be a mapping.")
+        if not isinstance(codes, torch.Tensor) or codes.ndim != 3:
+            raise ValueError(
+                "The DAC archive must contain rank-three integer codes."
+            )
+        if codes.dtype == torch.bool or codes.is_floating_point() or codes.is_complex():
+            raise TypeError("The DAC archive codes must use an integer dtype.")
+        if metadata.get("dac_version") not in SUPPORTED_VERSIONS:
+            raise RuntimeError(
+                f"Given file {source} cannot be loaded with this DAC model "
+                "version."
+            )
+        return cls(codes=codes.to(dtype=torch.long), **dict(metadata))
 
 
 class CodecMixin:
@@ -202,9 +268,13 @@ class CodecMixin:
             hop = self.get_output_length(n_samples)
 
         codes = []
-        range_fn = range if not verbose else tqdm.trange
-
-        for i in range_fn(0, nt, hop):
+        for i in _progress_range(
+            0,
+            nt,
+            hop,
+            verbose=verbose,
+            operation="Encoding",
+        ):
             x = audio_signal[..., i : i + n_samples]
             x = x.zero_pad(0, max(0, n_samples - x.shape[-1]))
 
@@ -260,13 +330,18 @@ class CodecMixin:
         original_padding = self.padding
         self.padding = obj.padding
 
-        range_fn = range if not verbose else tqdm.trange
         codes = obj.codes
         original_device = codes.device
         chunk_length = obj.chunk_length
         recons = []
 
-        for i in range_fn(0, codes.shape[-1], chunk_length):
+        for i in _progress_range(
+            0,
+            codes.shape[-1],
+            chunk_length,
+            verbose=verbose,
+            operation="Decoding",
+        ):
             c = codes[..., i : i + chunk_length].to(self.device)
             z = self.quantizer.from_codes(c)[0]
             r = self.decode(z)

@@ -1,94 +1,84 @@
-import math
-import warnings
+"""Programmatic native DAC file encoder."""
+
+from __future__ import annotations
+
+import logging
 from pathlib import Path
 
-import argbind
-import numpy as np
 import torch
-from audiotools import AudioSignal
-from audiotools.core import util
-from tqdm import tqdm
 
+from voicehub.components.audio.codecs._compat import AudioSignal
 from voicehub.components.audio.codecs.dac.utils import load_model
 
-warnings.filterwarnings("ignore", category=UserWarning)
+logger = logging.getLogger(__name__)
 
 
-@argbind.bind(group="encode", positional=True, without_prefix=True)
+def _wave_files(source: Path) -> tuple[Path, ...]:
+    if source.is_file():
+        if source.suffix.lower() not in {".wav", ".wave"}:
+            raise ValueError("Native DAC encoding accepts PCM WAVE files.")
+        return (source,)
+    if not source.is_dir():
+        raise FileNotFoundError(f"DAC input was not found: {source}.")
+    return tuple(
+        sorted(
+            path
+            for path in source.rglob("*")
+            if path.is_file() and path.suffix.lower() in {".wav", ".wave"}
+        )
+    )
+
+
+def _relative_path(path: Path, source: Path) -> Path:
+    return Path(path.name) if source.is_file() else path.relative_to(source)
+
+
 @torch.inference_mode()
-@torch.no_grad()
 def encode(
     input: str,
     output: str = "",
     weights_path: str = "",
     model_tag: str = "latest",
     model_bitrate: str = "8kbps",
-    n_quantizers: int = None,
+    n_quantizers: int | None = None,
     device: str = "cuda",
     model_type: str = "44khz",
     win_duration: float = 5.0,
     verbose: bool = False,
-):
-    """Encode audio files in input path to .dac format.
-
-    Parameters
-    ----------
-    input : str
-        Path to input audio file or directory
-    output : str, optional
-        Path to output directory, by default "". If `input` is a directory, the directory sub-tree relative to `input` is re-created in `output`.
-    weights_path : str, optional
-        Path to weights file, by default "". If not specified, the weights file will be downloaded from the internet using the
-        model_tag and model_type.
-    model_tag : str, optional
-        Tag of the model to use, by default "latest". Ignored if `weights_path` is specified.
-    model_bitrate: str
-        Bitrate of the model. Must be one of "8kbps", or "16kbps". Defaults to "8kbps".
-    n_quantizers : int, optional
-        Number of quantizers to use, by default None. If not specified, all the quantizers will be used and the model will compress at maximum bitrate.
-    device : str, optional
-        Device to use, by default "cuda"
-    model_type : str, optional
-        The type of model to use. Must be one of "44khz", "24khz", or "16khz". Defaults to "44khz". Ignored if `weights_path` is specified.
-    """
+) -> tuple[Path, ...]:
+    """Encode one PCM WAVE file or directory tree to native ``.dac`` files."""
     generator = load_model(
         model_type=model_type,
         model_bitrate=model_bitrate,
         tag=model_tag,
-        load_path=weights_path,
+        load_path=weights_path or None,
     )
-    generator.to(device)
-    generator.eval()
-    kwargs = {"n_quantizers": n_quantizers}
-
-    # Find all audio files in input path
-    input = Path(input)
-    audio_files = util.find_audio(input)
-
-    output = Path(output)
-    output.mkdir(parents=True, exist_ok=True)
-
-    for i in tqdm(range(len(audio_files)), desc="Encoding files"):
-        # Load file
-        signal = AudioSignal(audio_files[i])
-
-        # Encode audio to .dac format
-        artifact = generator.compress(signal, win_duration, verbose=verbose, **kwargs)
-
-        # Compute output path
-        relative_path = audio_files[i].relative_to(input)
-        output_dir = output / relative_path.parent
-        if not relative_path.name:
-            output_dir = output
-            relative_path = audio_files[i]
-        output_name = relative_path.with_suffix(".dac").name
-        output_path = output_dir / output_name
+    generator.to(device).eval()
+    source = Path(input).expanduser()
+    audio_files = _wave_files(source)
+    destination = Path(output).expanduser()
+    destination.mkdir(parents=True, exist_ok=True)
+    outputs = []
+    for index, audio_path in enumerate(audio_files, start=1):
+        if verbose:
+            logger.info(
+                "Encoding DAC file %d/%d: %s",
+                index,
+                len(audio_files),
+                audio_path,
+            )
+        signal = AudioSignal.load_from_file_with_ffmpeg(audio_path)
+        artifact = generator.compress(
+            signal,
+            win_duration,
+            verbose=verbose,
+            n_quantizers=n_quantizers,
+        )
+        relative = _relative_path(audio_path, source).with_suffix(".dac")
+        output_path = destination / relative
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        outputs.append(artifact.save(output_path))
+    return tuple(outputs)
 
-        artifact.save(output_path)
 
-
-if __name__ == "__main__":
-    args = argbind.parse_args()
-    with argbind.scope(args):
-        encode()
+__all__ = ["encode"]

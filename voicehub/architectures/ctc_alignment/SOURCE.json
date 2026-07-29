@@ -1,0 +1,18 @@
+{
+  "component": "ctc-forced-alignment",
+  "implementation": "voicehub-native",
+  "license": "BSD-2-Clause",
+  "reference": {
+    "repository": "https://github.com/m-bain/whisperX",
+    "revision": "2cfd7b7c5c7bba144954364db747319b50e8232b",
+    "files": [
+      "whisperx/alignment.py",
+      "LICENSE"
+    ]
+  },
+  "notes": [
+    "The stay/change trellis, backtracking, wildcard-label behavior, and character confidence semantics follow the pinned WhisperX source.",
+    "VoiceHub replaces NumPy, pandas, NLTK, torchaudio, and Transformers with Torch-only typed processing.",
+    "VoiceHub preserves Whisper segment boundaries and adds aligned word intervals instead of re-segmenting sentences with downloaded Punkt data."
+  ]
+}

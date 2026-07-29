@@ -53,7 +53,15 @@ def _tokenize_by_seg_dic_or_bpe_model(
         # encode ch_or_w using bpe_model.
         else:
             if sp is not None:
-                for p in sp.encode_as_pieces(ch_or_w):
+                encode_as_pieces = getattr(sp, "encode_as_pieces", None)
+                if callable(encode_as_pieces):
+                    pieces = encode_as_pieces(ch_or_w)
+                else:
+                    pieces = [
+                        sp.id_to_piece(token_id)
+                        for token_id in sp.encode_as_ids(ch_or_w)
+                    ]
+                for p in pieces:
                     tokens.append(p)
             else:
                 for en_token in ch_or_w.split():

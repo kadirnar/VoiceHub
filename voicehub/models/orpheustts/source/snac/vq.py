@@ -1,9 +1,12 @@
+"""Residual vector quantization for the vendored VoiceHub SNAC graph."""
+
+from __future__ import annotations
+
 from typing import List
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
 
 from .layers import WNConv1d
 
@@ -42,7 +45,12 @@ class VectorQuantize(nn.Module):
         return self.embed_code(embed_id).transpose(1, 2)
 
     def decode_latents(self, latents):
-        encodings = rearrange(latents, "b d t -> (b t) d")
+        batch_size, dimension, time = latents.shape
+        encodings = (
+            latents.transpose(1, 2)
+            .contiguous()
+            .reshape(batch_size * time, dimension)
+        )
         codebook = self.codebook.weight  # codebook: (N x D)
 
         # L2 normalize encodings and codebook (ViT-VQGAN)
@@ -55,7 +63,7 @@ class VectorQuantize(nn.Module):
             - 2 * encodings @ codebook.t()
             + codebook.pow(2).sum(1, keepdim=True).t()
         )
-        indices = rearrange((-dist).max(1)[1], "(b t) -> b t", b=latents.size(0))
+        indices = (-dist).max(1)[1].reshape(batch_size, time)
         z_q = self.decode_code(indices)
         return z_q, indices
 

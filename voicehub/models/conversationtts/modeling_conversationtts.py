@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from math import isfinite
-from numbers import Real
+from numbers import Integral, Real
 from pathlib import Path
 from typing import Any
 
+from voicehub.architectures.conversationtts.checkpoint import export_conversationtts_checkpoint
+from voicehub.architectures.conversationtts.processing import (
+    ConversationTTSProtocol,
+    build_conversationtts_sequence,
+    collate_conversationtts_sequences,
+)
 from voicehub.dependencies import import_optional
+from voicehub.hub import resolve_pretrained_file
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
 from voicehub.models._shared import finish_audio_output, resolve_torch_dtype, seeded_inference, validate_local_file
@@ -27,8 +35,6 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
     config_class = ConversationTTSConfig
     default_model_name_or_path = "AudioFoundation/SpeechFoundation"
     passthrough_generation_options = frozenset()
-    _GENERATOR_MODULE = ("voicehub.models.conversationtts.source.conversationtts."
-                         "inference.generator")
 
     def __init__(
         self,
@@ -46,32 +52,46 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
         )
         self._generator = None
         self._generator_module = None
+        self._training_text_tokenizer = None
+        self._training_audio_tokenizer = None
         self._loaded_for_training = False
         super().__init__(config, device=device, lazy_load=lazy_load)
 
-    def _hub_file(self, repository_id: str, filename: str) -> Path:
-        huggingface_hub = import_optional(
-            "huggingface_hub",
-            model_type="conversationtts",
-            install_extra=None,
+    def _hub_file(
+        self,
+        repository_id: str,
+        filename: str,
+        *,
+        revision: str | None = None,
+    ) -> Path:
+        return resolve_pretrained_file(
+            repository_id,
+            filename,
+            cache_dir=self.config.cache_dir,
+            revision=revision,
+            local_files_only=self.config.local_files_only,
         )
-        return Path(huggingface_hub.hf_hub_download(
-            repo_id=repository_id,
-            filename=filename,
-        ))
 
     def _checkpoint_path(self) -> Path:
         source = Path(self.config.name_or_path).expanduser()
         if source.is_file():
             return source.resolve()
         if source.is_dir():
-            checkpoint = source / self.config.checkpoint_filename
-            if checkpoint.is_file():
-                return checkpoint.resolve()
-            raise FileNotFoundError(f"ConversationTTS checkpoint not found: {checkpoint}")
+            candidates = (
+                source / "model.safetensors",
+                source / "native_export" / "model.safetensors",
+                source / self.config.checkpoint_filename,
+            )
+            for checkpoint in candidates:
+                if checkpoint.is_file():
+                    return checkpoint.resolve()
+            searched = ", ".join(str(path) for path in candidates)
+            raise FileNotFoundError("ConversationTTS checkpoint was not found. Searched: "
+                                    f"{searched}.")
         return self._hub_file(
             self.config.name_or_path,
             self.config.checkpoint_filename,
+            revision=self.config.checkpoint_revision,
         )
 
     def _text_tokenizer_path(self) -> Path:
@@ -92,6 +112,7 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
         return self._hub_file(
             self.config.audio_tokenizer_repo_id,
             self.config.audio_tokenizer_filename,
+            revision=self.config.audio_tokenizer_revision,
         )
 
     def _build_raw_model(self):
@@ -102,12 +123,12 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
             install_extra=None,
         )
         model_module = import_optional(
-            "voicehub.models.conversationtts.source.conversationtts."
-            "models.model_new",
+            "voicehub.architectures.conversationtts.modeling",
             model_type="conversationtts",
             install_extra=None,
         )
-        model = model_module.Model(model_module.ModelArgs(**self.config.model_args))
+        model = model_module.ConversationTTSModel(
+            model_module.ConversationTTSArchitectureConfig(**self.config.model_args))
         dtype = resolve_torch_dtype(
             torch,
             self.config.torch_dtype,
@@ -128,7 +149,8 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
             return
 
         generator_module = import_optional(
-            self._GENERATOR_MODULE,
+            "voicehub.models.conversationtts.source.conversationtts."
+            "inference.generator",
             model_type="conversationtts",
             install_extra=None,
         )
@@ -197,6 +219,17 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
 
     def _prepare_for_training(self) -> None:
         """Return to the raw differentiable graph without changing weights."""
+        if self._generator is not None:
+            self._training_text_tokenizer = getattr(
+                self._generator,
+                "_text_tokenizer",
+                self._training_text_tokenizer,
+            )
+            self._training_audio_tokenizer = getattr(
+                self._generator,
+                "_audio_tokenizer",
+                self._training_audio_tokenizer,
+            )
         self._generator = None
         self._generator_module = None
         self._clear_inference_caches()
@@ -229,6 +262,426 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
             self.model = None
             self._loaded_for_training = False
             raise
+
+    def _training_protocol(self) -> ConversationTTSProtocol:
+        audio_vocab_size = int(self.config.model_args["audio_vocab_size"])
+        text_vocab_size = int(self.config.model_args["text_vocab_size"])
+        return ConversationTTSProtocol(
+            audio_num_codebooks=int(self.config.model_args["audio_num_codebooks"]),
+            audio_codebook_size=min(2_048, audio_vocab_size - 1),
+            audio_vocab_size=audio_vocab_size,
+            text_vocab_size=text_vocab_size,
+            text_padding_token_id=min(128_002, text_vocab_size - 1),
+            audio_padding_token_id=audio_vocab_size - 1,
+        )
+
+    def _get_training_text_tokenizer(self):
+        if self._training_text_tokenizer is None:
+            module = import_optional(
+                "voicehub.models.conversationtts.source.conversationtts."
+                "tools.tokenizer.Text2ID.text_tokenizer",
+                model_type="conversationtts",
+                install_extra=None,
+            )
+            self._training_text_tokenizer = module.TextTokenizer(self._text_tokenizer_path())
+        return self._training_text_tokenizer
+
+    def _get_training_audio_tokenizer(self):
+        if self._training_audio_tokenizer is None:
+            module = import_optional(
+                "voicehub.models.conversationtts.source.conversationtts."
+                "tools.tokenizer.MimiCodec.mimi_tokenizer",
+                model_type="conversationtts",
+                install_extra=None,
+            )
+            self._training_audio_tokenizer = module.MimiTokenizer(
+                self._audio_tokenizer_path(),
+                device=self.device,
+            )
+            self._training_audio_tokenizer.eval()
+            for parameter in self._training_audio_tokenizer.parameters():
+                parameter.requires_grad_(False)
+        return self._training_audio_tokenizer
+
+    @staticmethod
+    def _pop_alias(
+        values: dict[str, Any],
+        names: tuple[str, ...],
+        *,
+        description: str,
+    ) -> Any:
+        present = [name for name in names if name in values]
+        if len(present) > 1:
+            raise ValueError(f"Provide only one {description}; received {present!r}.")
+        return values.pop(present[0]) if present else None
+
+    @staticmethod
+    def _text_batch(value: Any) -> tuple[str, ...]:
+        if isinstance(value, str):
+            texts = (value, )
+        elif isinstance(value, Sequence) and not isinstance(value, bytes):
+            texts = tuple(value)
+        else:
+            raise TypeError("ConversationTTS `text` must be a string or sequence of "
+                            "strings.")
+        if not texts or any(not isinstance(text, str) or not text.strip() for text in texts):
+            raise ValueError("ConversationTTS training texts must be non-empty strings.")
+        return texts
+
+    @staticmethod
+    def _split_tensor_batch(
+        value: Any,
+        *,
+        batch_size: int,
+        unbatched_dimensions: int,
+        name: str,
+    ) -> list[Any]:
+        torch = import_optional(
+            "torch",
+            model_type="conversationtts",
+            install_extra=None,
+        )
+        is_sequence = isinstance(value, Sequence)
+        is_path_value = isinstance(value, (str, bytes, Path))
+        if isinstance(value, torch.Tensor):
+            if value.ndim == unbatched_dimensions and batch_size == 1:
+                return [value]
+            if (value.ndim == unbatched_dimensions + 1 and value.shape[0] == batch_size):
+                return list(value.unbind(0))
+            raise ValueError(
+                f"ConversationTTS `{name}` does not match batch size "
+                f"{batch_size}: shape={tuple(value.shape)!r}.")
+        if is_sequence and not is_path_value:
+            examples = list(value)
+            if batch_size == 1:
+                try:
+                    tensor = torch.as_tensor(value)
+                except (TypeError, ValueError):
+                    tensor = None
+                if (tensor is not None and tensor.ndim == unbatched_dimensions):
+                    return [tensor]
+            if len(examples) == batch_size:
+                return examples
+        raise TypeError(
+            f"ConversationTTS `{name}` must contain one tensor-like value "
+            "per training example.")
+
+    @staticmethod
+    def _split_audio_batch(
+        value: Any,
+        *,
+        batch_size: int,
+    ) -> list[Any]:
+        torch = import_optional(
+            "torch",
+            model_type="conversationtts",
+            install_extra=None,
+        )
+        if isinstance(value, Mapping):
+            waveform_key = next(
+                (name for name in (
+                    "array",
+                    "waveform",
+                    "audio",
+                    "input_values",
+                ) if name in value),
+                None,
+            )
+            if waveform_key is None:
+                raise ValueError("Batched audio mappings require a waveform-like field.")
+            waveforms = value[waveform_key]
+            if batch_size == 1 and not (isinstance(waveforms, torch.Tensor) and waveforms.ndim >= 2 and
+                                        waveforms.shape[0] == 1):
+                return [value]
+            if (not isinstance(waveforms, torch.Tensor) or waveforms.ndim < 2 or
+                    waveforms.shape[0] != batch_size):
+                raise ValueError(
+                    "Batched audio mapping waveforms must have one leading "
+                    "row per training example.")
+            examples = []
+            for index in range(batch_size):
+                example = {}
+                for name, item in value.items():
+                    if (isinstance(item, torch.Tensor) and item.ndim > 0 and item.shape[0] == batch_size):
+                        selected = item[index]
+                        example[name] = (selected.item() if selected.ndim == 0 else selected)
+                    elif (isinstance(item, Sequence) and not isinstance(item, (str, bytes)) and
+                          len(item) == batch_size):
+                        example[name] = item[index]
+                    else:
+                        example[name] = item
+                examples.append(example)
+            return examples
+        if isinstance(value, torch.Tensor):
+            if batch_size == 1:
+                return [value[0] if value.ndim == 2 and value.shape[0] == 1 else value]
+            if value.ndim < 2 or value.shape[0] != batch_size:
+                raise ValueError(
+                    "Batched ConversationTTS audio tensors require one "
+                    "leading row per text.")
+            return list(value.unbind(0))
+        if isinstance(value, (str, Path)):
+            if batch_size != 1:
+                raise ValueError("A single audio path cannot serve multiple texts.")
+            return [value]
+        if isinstance(value, Sequence) and not isinstance(value, bytes):
+            examples = list(value)
+            if batch_size == 1 and (not examples or isinstance(examples[0], (int, float, bool))):
+                return [value]
+            if len(examples) == batch_size:
+                return examples
+        raise TypeError("ConversationTTS `audio` must provide one waveform or path per "
+                        "training text.")
+
+    @staticmethod
+    def _batch_integers(
+        value: Any,
+        *,
+        batch_size: int,
+        name: str,
+        allow_none: bool = True,
+    ) -> tuple[int | None, ...]:
+        if value is None and allow_none:
+            return (None, ) * batch_size
+        is_sequence = isinstance(value, Sequence)
+        is_text_value = isinstance(value, (str, bytes))
+        if isinstance(value, Integral) and not isinstance(value, bool):
+            items = (int(value), ) * batch_size
+        elif is_sequence and not is_text_value:
+            items = tuple(value)
+        else:
+            torch = import_optional(
+                "torch",
+                model_type="conversationtts",
+                install_extra=None,
+            )
+            if isinstance(value, torch.Tensor):
+                if value.ndim == 0:
+                    items = (value.item(), ) * batch_size
+                elif value.ndim == 1:
+                    items = tuple(value.detach().cpu().tolist())
+                else:
+                    items = ()
+            else:
+                items = ()
+        if len(items) != batch_size or any(
+                isinstance(item, bool) or not isinstance(item, Integral) or item <= 0 for item in items):
+            raise ValueError(f"`{name}` must contain {batch_size} positive integers.")
+        return tuple(int(item) for item in items)
+
+    @staticmethod
+    def _mapping_audio_length(
+        audio: Any,
+        *,
+        default: int | None,
+    ) -> int | None:
+        if default is not None or not isinstance(audio, Mapping):
+            return default
+        value = audio.get("audio_lengths")
+        if value is None:
+            return None
+        item = getattr(value, "item", None)
+        if callable(item):
+            try:
+                value = item()
+            except (RuntimeError, ValueError):
+                pass
+        if (isinstance(value, bool) or not isinstance(value, Integral) or value <= 0):
+            raise ValueError("ConversationTTS mapped `audio_lengths` must be a positive "
+                             "integer.")
+        return int(value)
+
+    def prepare_training_inputs(
+        self,
+        inputs: Mapping[str, Any],
+        *,
+        phase: Any,
+    ) -> dict[str, Any]:
+        """Convert raw text/audio into the published 33-stream layout."""
+        del phase
+        batch = dict(inputs)
+        required = {"tokens", "labels", "tokens_mask"}
+        if required <= set(batch):
+            return batch
+
+        text_ids = self._pop_alias(
+            batch,
+            ("text_token_ids", "text_ids"),
+            description="text-token field",
+        )
+        texts = self._pop_alias(
+            batch,
+            ("text", "texts"),
+            description="text field",
+        )
+        if (text_ids is None) == (texts is None):
+            raise ValueError(
+                "ConversationTTS training requires exactly one of raw `text` "
+                "or precomputed `text_token_ids`.")
+        torch = import_optional(
+            "torch",
+            model_type="conversationtts",
+            install_extra=None,
+        )
+        if texts is not None:
+            text_values = self._text_batch(texts)
+            speakers = batch.pop("speaker", None)
+            if speakers is not None:
+                if isinstance(speakers, int) and not isinstance(speakers, bool):
+                    speakers = (speakers, ) * len(text_values)
+                elif isinstance(speakers, Sequence):
+                    speakers = tuple(speakers)
+                else:
+                    speakers = ()
+                if len(speakers) != len(text_values) or any(
+                        isinstance(speaker, bool) or not isinstance(speaker, int) or speaker < 0
+                        for speaker in speakers):
+                    raise ValueError(
+                        "`speaker` must contain one non-negative integer per "
+                        "ConversationTTS text.")
+                text_values = tuple(f"[{speaker}]{text}" for speaker, text in zip(speakers, text_values))
+            tokenizer = self._get_training_text_tokenizer()
+            token_examples = [
+                torch.tensor(tokenizer.tokenize(text), dtype=torch.long) for text in text_values
+            ]
+        else:
+            if isinstance(text_ids, torch.Tensor):
+                if text_ids.ndim == 1:
+                    token_examples = [text_ids]
+                elif text_ids.ndim == 2:
+                    token_examples = list(text_ids.unbind(0))
+                else:
+                    raise ValueError("`text_token_ids` must have shape [time] or "
+                                     "[batch, time].")
+            elif isinstance(text_ids, Sequence):
+                if not text_ids:
+                    raise ValueError("`text_token_ids` cannot be empty.")
+                if (isinstance(text_ids[0], Integral) and not isinstance(text_ids[0], bool)):
+                    token_examples = [torch.as_tensor(text_ids)]
+                else:
+                    token_examples = [torch.as_tensor(item) for item in text_ids]
+            else:
+                raise TypeError("`text_token_ids` must be a tensor or integer sequence.")
+            text_lengths = self._batch_integers(
+                batch.pop("text_token_lengths", None),
+                batch_size=len(token_examples),
+                name="text_token_lengths",
+            )
+            token_examples = [
+                tokens[:length] if length is not None else tokens
+                for tokens, length in zip(token_examples, text_lengths)
+            ]
+
+        batch_size = len(token_examples)
+        audio_codes = self._pop_alias(
+            batch,
+            ("audio_codes", "codes"),
+            description="audio-code field",
+        )
+        raw_audio = self._pop_alias(
+            batch,
+            ("audio", "audio_values"),
+            description="raw-audio field",
+        )
+        if (audio_codes is None) == (raw_audio is None):
+            raise ValueError(
+                "ConversationTTS training requires exactly one of "
+                "`audio_codes` or raw `audio`.")
+        if audio_codes is not None:
+            code_examples = self._split_tensor_batch(
+                audio_codes,
+                batch_size=batch_size,
+                unbatched_dimensions=2,
+                name="audio_codes",
+            )
+            code_lengths = self._batch_integers(
+                batch.pop("audio_code_lengths", None),
+                batch_size=batch_size,
+                name="audio_code_lengths",
+            )
+            code_examples = [
+                torch.as_tensor(codes)[..., :length] if length is not None else torch.as_tensor(codes)
+                for codes, length in zip(code_examples, code_lengths)
+            ]
+        else:
+            audio_examples = self._split_audio_batch(
+                raw_audio,
+                batch_size=batch_size,
+            )
+            audio_lengths = self._batch_integers(
+                batch.pop("audio_lengths", None),
+                batch_size=batch_size,
+                name="audio_lengths",
+            )
+            rates = self._batch_integers(
+                self._pop_alias(
+                    batch,
+                    (
+                        "sampling_rate",
+                        "sampling_rates",
+                        "audio_sampling_rate",
+                        "audio_sampling_rates",
+                    ),
+                    description="sampling-rate field",
+                ),
+                batch_size=batch_size,
+                name="sampling_rate",
+            )
+            from voicehub.audio import AudioInput, load_audio
+
+            codec = self._get_training_audio_tokenizer()
+            code_examples = []
+            for audio, length, rate in zip(
+                    audio_examples,
+                    audio_lengths,
+                    rates,
+            ):
+                length = self._mapping_audio_length(
+                    audio,
+                    default=length,
+                )
+                decoded = load_audio(
+                    audio,
+                    sampling_rate=rate,
+                )
+                waveform = decoded.waveform
+                if length is not None:
+                    if length > waveform.shape[-1]:
+                        raise ValueError(
+                            "ConversationTTS `audio_lengths` cannot exceed "
+                            "the decoded waveform length.")
+                    waveform = waveform[..., :length]
+                materialized = load_audio(
+                    AudioInput(
+                        waveform=waveform,
+                        sampling_rate=decoded.sampling_rate,
+                        path=decoded.path,
+                    ),
+                    target_sampling_rate=self.config.sample_rate,
+                )
+                waveform = materialized.waveform
+                with torch.no_grad():
+                    codes = codec.model.encode(
+                        waveform.to(
+                            device=codec.device,
+                            dtype=next(codec.model.parameters()).dtype,
+                        ).reshape(1, 1, -1))
+                code_examples.append(codes.squeeze(0).detach().cpu())
+
+        protocol = self._training_protocol()
+        sequences = [
+            build_conversationtts_sequence(
+                tokens,
+                codes,
+                protocol=protocol,
+            ) for tokens, codes in zip(token_examples, code_examples)
+        ]
+        prepared = collate_conversationtts_sequences(
+            sequences,
+            protocol=protocol,
+        )
+        prepared.update(batch)
+        return prepared
 
     def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
         super()._validate_generation_inputs(model_inputs)
@@ -349,6 +802,18 @@ class ConversationTTSForTextToSpeech(PreTrainedTTSModel):
                 "commercial_use": False,
             },
         )
+
+    def _save_pretrained(self, save_directory: Path) -> None:
+        """Export trained weights without serializing serving KV caches."""
+        if self.model is None:
+            raise RuntimeError("Load ConversationTTS before exporting its native weights.")
+        destination = Path(save_directory).expanduser()
+        destination.mkdir(parents=True, exist_ok=True)
+        export_conversationtts_checkpoint(
+            self.model,
+            destination / "model.safetensors",
+        )
+        self.config.save_pretrained(destination)
 
 
 ConversationTTS = ConversationTTSForTextToSpeech

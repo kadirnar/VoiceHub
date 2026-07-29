@@ -17,9 +17,12 @@
 # limitations under the License.
 # Modified by VoiceHub in 2026: vendored and namespaced for inference-only use.
 
-from .tokenize_utils import tokenize_by_bpe_model
-from typing import Dict, List, Tuple
 from collections import deque
+from typing import Dict, List, Tuple
+
+from voicehub.tokenization import SentencePieceUnigramTokenizer
+
+from .tokenize_utils import tokenize_by_bpe_model
 
 
 def tokenize(context_list_path, symbol_table, bpe_model=None):
@@ -27,9 +30,7 @@ def tokenize(context_list_path, symbol_table, bpe_model=None):
         into token id
     """
     if bpe_model is not None:
-        import sentencepiece as spm
-        sp = spm.SentencePieceProcessor()
-        sp.load(bpe_model)
+        sp = SentencePieceUnigramTokenizer.from_model_file(bpe_model)
     else:
         sp = None
 

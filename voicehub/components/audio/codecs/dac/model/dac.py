@@ -2,7 +2,6 @@ import math
 from typing import List
 from typing import Union
 
-import numpy as np
 import torch
 from torch import nn
 
@@ -172,7 +171,7 @@ class DAC(BaseModel, CodecMixin):
 
         self.latent_dim = latent_dim
 
-        self.hop_length = np.prod(encoder_rates)
+        self.hop_length = math.prod(encoder_rates)
         self.encoder = Encoder(encoder_dim, encoder_rates, latent_dim)
 
         self.n_codebooks = n_codebooks
@@ -324,18 +323,20 @@ class DAC(BaseModel, CodecMixin):
 
 
 if __name__ == "__main__":
-    import numpy as np
     from functools import partial
 
     model = DAC().to("cpu")
 
     for n, m in model.named_modules():
         o = m.extra_repr()
-        p = sum([np.prod(p.size()) for p in m.parameters()])
+        p = sum(math.prod(parameter.size()) for parameter in m.parameters())
         fn = lambda o, p: o + f" {p/1e6:<.3f}M params."
         setattr(m, "extra_repr", partial(fn, o=o, p=p))
     print(model)
-    print("Total # of params: ", sum([np.prod(p.size()) for p in model.parameters()]))
+    print(
+        "Total # of params: ",
+        sum(math.prod(parameter.size()) for parameter in model.parameters()),
+    )
 
     length = 88200 * 2
     x = torch.randn(1, 1, length).to(model.device)

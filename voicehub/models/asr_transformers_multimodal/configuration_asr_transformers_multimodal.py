@@ -1,88 +1,111 @@
-"""Configuration for chat-template Transformers ASR checkpoints."""
+"""Native compatibility dispatch for historical multimodal ASR configs."""
 
 from __future__ import annotations
 
-from voicehub.models.asr_transformers.configuration_asr_transformers import TransformersASRConfig
+from pathlib import Path
+from typing import Any
+
+from voicehub.models.asr_qwen3.configuration_asr_qwen3 import Qwen3ASRConfig
+from voicehub.models.asr_vibevoice.configuration_asr_vibevoice import VibeVoiceASRConfig
+
+_PROVIDER_ALIASES = {
+    "asr-qwen3": "qwen3",
+    "asr-vibevoice": "vibevoice",
+    "qwen": "qwen3",
+    "qwen3": "qwen3",
+    "qwen3-asr": "qwen3",
+    "vibe": "vibevoice",
+    "vibevoice": "vibevoice",
+    "vibevoice-asr": "vibevoice",
+}
+_PROVIDER_CONFIGS = {
+    "qwen3": Qwen3ASRConfig,
+    "vibevoice": VibeVoiceASRConfig,
+}
 
 
-class MultimodalTransformersASRConfig(TransformersASRConfig):
-    """Configure an ASR checkpoint driven by a multimodal chat template.
+def _normalize_provider(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("`provider` and `model_type` must be non-empty strings.")
+    normalized = value.strip().lower().replace("_", "-")
+    try:
+        return _PROVIDER_ALIASES[normalized]
+    except KeyError as error:
+        choices = ", ".join(sorted(_PROVIDER_CONFIGS))
+        raise ValueError(
+            f"Unsupported native multimodal ASR provider {value!r}; "
+            f"choose one of: {choices}.") from error
 
-    These checkpoints still expose a native sequence-to-sequence loss,
-    but their processor owns prompt construction and label masking.
-    Keeping them separate from the conventional ASR pipeline prevents
-    the tokenizer and feature extractor from being split apart.
+
+def _provider_from_source(value: Any) -> str | None:
+    if not isinstance(value, (str, Path)):
+        return None
+    normalized = str(value).strip().lower().replace("_", "-")
+    if "vibevoice" in normalized:
+        return "vibevoice"
+    if "qwen3" in normalized or "qwen-3" in normalized:
+        return "qwen3"
+    return None
+
+
+def _resolve_provider(
+    *,
+    provider: Any = None,
+    model_type: Any = None,
+    source: Any = None,
+) -> str:
+    """Resolve one explicit native multimodal family without guessing."""
+    values = [
+        candidate for candidate in (
+            _normalize_provider(provider),
+            _normalize_provider(model_type),
+            _provider_from_source(source),
+        ) if candidate is not None
+    ]
+    if not values:
+        raise ValueError(
+            "The generic multimodal ASR compatibility API requires "
+            "`provider='qwen3'` or `provider='vibevoice'`, a matching "
+            "`model_type`, or an identifiable checkpoint name.")
+    if any(candidate != values[0] for candidate in values[1:]):
+        raise ValueError("Conflicting multimodal ASR provider hints were supplied.")
+    return values[0]
+
+
+def _load_config_class(provider: str):
+    return _PROVIDER_CONFIGS[provider]
+
+
+class MultimodalTransformersASRConfig:
+    """Compatibility factory returning a dedicated native ASR config.
+
+    A single generic configuration cannot describe both Qwen3-ASR's
+    encoder-decoder graph and VibeVoice-ASR's causal multimodal graph.
+    The historical name therefore remains as an explicit factory instead
+    of pretending those architectures share one executable base class.
     """
 
-    model_type = "asr_transformers_multimodal"
-    architecture_family = "speech-seq2seq"
-
-    def __init__(
-        self,
+    def __new__(
+        cls,
         *,
-        architecture_family: str = "speech-seq2seq",
-        training_language: str | None = None,
-        sample_rate: int = 16_000,
-        **kwargs,
+        provider: str | None = None,
+        model_type: str | None = None,
+        **kwargs: Any,
     ):
-        normalized_family = str(architecture_family).strip().lower()
-        if normalized_family != self.architecture_family:
-            raise ValueError(
-                "Multimodal Transformers ASR checkpoints require "
-                "`architecture_family='speech-seq2seq'`.")
-        if training_language is not None:
-            if not isinstance(training_language, str) or not training_language.strip():
-                raise ValueError("`training_language` must be a non-empty string or None.")
-            training_language = training_language.strip()
-        self.training_language = training_language
-        super().__init__(
-            architecture_family=self.architecture_family,
-            sample_rate=sample_rate,
-            **kwargs,
+        resolved = _resolve_provider(
+            provider=provider,
+            model_type=model_type,
+            source=kwargs.get("name_or_path"),
         )
+        return _load_config_class(resolved)(**kwargs)
 
-
-class Qwen3ASRConfig(MultimodalTransformersASRConfig):
-    """Configuration for native Hugging Face Qwen3-ASR checkpoints."""
-
-    model_type = "asr_qwen3"
-
-    def __init__(
-        self,
-        *,
-        training_language: str | None = "English",
-        sample_rate: int = 16_000,
-        **kwargs,
-    ):
-        super().__init__(
-            training_language=training_language,
-            sample_rate=sample_rate,
-            **kwargs,
-        )
-
-
-class VibeVoiceASRConfig(MultimodalTransformersASRConfig):
-    """Configuration for native Hugging Face VibeVoice-ASR checkpoints."""
-
-    model_type = "asr_vibevoice"
-
-    def __init__(
-        self,
-        *,
-        training_language: str | None = None,
-        sample_rate: int = 24_000,
-        **kwargs,
-    ):
-        if training_language is not None:
-            raise ValueError(
-                "VibeVoice-ASR does not expose a language-conditioning "
-                "control. Omit `training_language` and let the checkpoint "
-                "infer language from the audio.")
-        super().__init__(
-            training_language=None,
-            sample_rate=sample_rate,
-            **kwargs,
-        )
+    @classmethod
+    def from_dict(cls, values: dict[str, Any]):
+        if not isinstance(values, dict):
+            raise TypeError("`values` must be a dictionary.")
+        return cls(**values)
 
 
 __all__ = [

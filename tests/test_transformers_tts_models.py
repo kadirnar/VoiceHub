@@ -12,10 +12,11 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 from voicehub import AutoInferenceModel, AutoModelForTextToSpeech, AutoTrainingAdapter, Trainer, TrainingArguments
+from voicehub.checkpointing import save_safetensors
 from voicehub.models.bark.inference import BarkConfig, BarkForTextToSpeech, _build_bark_training_model
 from voicehub.models.speecht5.inference import SpeechT5Config, SpeechT5ForTextToSpeech
 from voicehub.models.vits.inference import VitsConfig, VitsForTextToSpeech, _build_vits_training_model
-from voicehub.models.vits.training import VitsReconstructionTrainingAdapter
+from voicehub.models.vits.training import NativeVitsGeneratorTrainingAdapter
 from voicehub.registry import ModelSpec, get_model_spec
 from voicehub.training.contracts import TrainingSupport
 from voicehub.training.specs import TrainingFamily, get_training_spec
@@ -26,9 +27,22 @@ TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 
 class _FakeTorch:
 
+    float32 = object()
+
     @staticmethod
     def inference_mode():
         return nullcontext()
+
+    @staticmethod
+    def as_tensor(value, **kwargs):
+        del kwargs
+        import torch
+        return torch.as_tensor(value, dtype=torch.float32, device="cpu")
+
+    @staticmethod
+    def isfinite(value):
+        import torch
+        return torch.isfinite(value)
 
 
 @contextmanager
@@ -107,50 +121,45 @@ class TransformersTTSConfigurationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "non-empty string"):
                     model_class(token=" ")
 
-    def test_vits_reconstruction_training_requires_explicit_opt_in(self):
+    def test_vits_generator_training_requires_explicit_opt_in(self):
         model = VitsForTextToSpeech(lazy_load=True)
         adapter = AutoTrainingAdapter.from_model(model)
 
         self.assertIsInstance(
             adapter,
-            VitsReconstructionTrainingAdapter,
+            NativeVitsGeneratorTrainingAdapter,
         )
-        self.assertFalse(adapter.supports_custom_recipe)
+        self.assertTrue(adapter.supports_custom_recipe)
         self.assertFalse(adapter.experimental_reconstruction_enabled)
         with self.assertRaisesRegex(
                 ValueError,
-                "complete source training recipe",
+                "generator-only warm-start",
         ):
             adapter.validate_support()
         self.assertFalse(model.is_loaded)
 
     def test_raw_safetensors_source_uses_sibling_config_and_processor(self):
+        if not TORCH_AVAILABLE:
+            self.skipTest("Native Safetensors checkpoints require PyTorch")
+        import torch
+
         with tempfile.TemporaryDirectory() as directory:
             checkpoint = Path(directory) / "model.safetensors"
-            checkpoint.touch()
+            expected = torch.tensor([1.0])
+            save_safetensors({"weight": expected}, checkpoint)
             model = BarkForTextToSpeech(
                 checkpoint,
                 config_name_or_path=directory,
                 processor_name_or_path=directory,
             )
-            safetensors = SimpleNamespace(load_file=Mock(return_value={"weight": 1}))
+            state_dict = model._direct_state_dict()
 
-            with patch(
-                    "voicehub.models._transformers_tts.import_optional",
-                    return_value=safetensors,
-            ):
-                state_dict = model._direct_state_dict()
-
-            self.assertEqual(state_dict, {"weight": 1})
+            torch.testing.assert_close(state_dict["weight"], expected)
             self.assertEqual(
                 model._model_source(),
                 str(Path(directory).resolve()),
             )
             self.assertEqual(model._config_source(), directory)
-            safetensors.load_file.assert_called_once_with(
-                str(checkpoint.resolve()),
-                device="cpu",
-            )
 
     def test_modules_remain_lazy_without_torch_or_transformers(self):
         script = (
@@ -176,7 +185,7 @@ class TransformersTTSRegistryTests(unittest.TestCase):
             "suno/bark-small",
             TrainingFamily.COMPOSITE,
             TrainingSupport.PREPROCESSED,
-            False,
+            True,
             True,
         ),
         "speecht5": (
@@ -189,9 +198,9 @@ class TransformersTTSRegistryTests(unittest.TestCase):
         "vits": (
             "facebook/mms-tts-eng",
             TrainingFamily.VITS,
-            TrainingSupport.CUSTOM,
-            False,
-            False,
+            TrainingSupport.PREPROCESSED,
+            True,
+            True,
         ),
     }
 
@@ -328,39 +337,40 @@ class TransformersTTSInferenceTests(unittest.TestCase):
         )
         self.assertTrue(wrapper.model.kwargs["return_output_lengths"])
 
-    def test_vits_scopes_mutable_noise_controls_and_uses_sequence_length(self):
-
-        class Processor:
-
-            def __call__(self, **kwargs):
-                return {"input_ids": "ids"}
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is required for native VITS")
+    def test_vits_uses_request_local_sampling_and_sequence_length(self):
+        import torch
 
         class Model:
 
             def __init__(self):
-                self.config = SimpleNamespace(num_speakers=3)
-                self.noise_scale = 0.6
-                self.noise_scale_duration = 0.7
+                self.sampling = None
 
-            def __call__(self, **kwargs):
+            def synthesize(self, **kwargs):
                 self.kwargs = kwargs
-                self.noise_during_call = (
-                    self.noise_scale,
-                    self.noise_scale_duration,
-                )
+                self.sampling = kwargs["sampling"]
                 return SimpleNamespace(
-                    waveform=np.array([[0.2, 0.3, 0.4, 8.0]], dtype=np.float32),
-                    sequence_lengths=[3],
+                    waveform=torch.tensor([[0.2, 0.3, 0.4, 8.0]]),
+                    sequence_lengths=torch.tensor([3]),
                 )
 
         wrapper = VitsForTextToSpeech(device="cpu")
         wrapper.model = Model()
-        wrapper.transformers_processor = Processor()
-        wrapper._torch = _FakeTorch()
+        wrapper.native_config = SimpleNamespace(
+            num_speakers=3,
+            noise_scale=0.6,
+            noise_scale_duration=0.7,
+        )
+        wrapper.tokenizer = SimpleNamespace(config=SimpleNamespace(language="eng"), )
+        wrapper._torch = torch
 
-        with patch(
-                "voicehub.models.vits.inference.seeded_inference",
-                _fixed_seed,
+        with patch.object(
+                wrapper,
+                "_tokenize",
+                return_value={
+                    "input_ids": torch.tensor([[1, 2]]),
+                    "attention_mask": torch.tensor([[True, True]]),
+                },
         ):
             output = wrapper._generate(
                 "hello",
@@ -368,13 +378,15 @@ class TransformersTTSInferenceTests(unittest.TestCase):
                 speed=1.25,
                 noise_scale=0.2,
                 noise_scale_duration=0.3,
+                seed=123,
             )
 
         np.testing.assert_allclose(output.audio, [0.2, 0.3, 0.4])
-        self.assertEqual(wrapper.model.noise_during_call, (0.2, 0.3))
-        self.assertEqual(wrapper.model.noise_scale, 0.6)
-        self.assertEqual(wrapper.model.noise_scale_duration, 0.7)
-        self.assertEqual(wrapper.model.kwargs["speaking_rate"], 1.25)
+        self.assertEqual(wrapper.model.sampling.noise_scale, 0.2)
+        self.assertEqual(wrapper.model.sampling.noise_scale_duration, 0.3)
+        self.assertEqual(wrapper.model.sampling.speaking_rate, 1.25)
+        self.assertEqual(wrapper.model.sampling.seed, 123)
+        self.assertNotIn("noise_scale", wrapper.model.__dict__)
 
 
 @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is required for objective tests")
@@ -389,14 +401,36 @@ class TransformersTTSTrainingObjectiveTests(unittest.TestCase):
                 super().__init__()
                 self.scale = torch.nn.Parameter(torch.tensor(0.5))
 
-            def forward(self, input_ids, **kwargs):
+            def forward(self, input_ids, *, spectrogram, **kwargs):
                 del kwargs
                 waveform = input_ids.float().repeat_interleave(128, dim=-1)
-                return SimpleNamespace(waveform=waveform * self.scale)
+                batch_size = input_ids.shape[0]
+                frames = spectrogram.shape[-1]
+                latent = spectrogram[:, :1] * self.scale
+                mask = torch.ones(
+                    batch_size,
+                    1,
+                    frames,
+                    device=spectrogram.device,
+                )
+                return SimpleNamespace(
+                    waveform=waveform * self.scale,
+                    sequence_lengths=torch.full(
+                        (batch_size, ),
+                        waveform.shape[-1],
+                        dtype=torch.long,
+                    ),
+                    duration_loss=self.scale.square(),
+                    prior_latents=latent,
+                    posterior_log_variances=torch.zeros_like(latent),
+                    expanded_prior_means=torch.zeros_like(latent),
+                    expanded_prior_log_variances=torch.zeros_like(latent),
+                    spectrogram_mask=mask,
+                )
 
         wrapper = VitsForTextToSpeech(
             device="cpu",
-            enable_experimental_reconstruction_training=enabled,
+            enable_native_generator_training=enabled,
         )
         wrapper.model = NativeVits()
         wrapper._torch = torch
@@ -410,12 +444,13 @@ class TransformersTTSTrainingObjectiveTests(unittest.TestCase):
         adapter = AutoTrainingAdapter.from_model(wrapper)
         dataset = adapter.create_dataset([{
             "input_ids": torch.tensor([1, 2, 3, 4]),
+            "spectrogram": torch.ones(1, 4),
             "audio_values": torch.ones(512),
         }])
 
         self.assertIsInstance(
             adapter,
-            VitsReconstructionTrainingAdapter,
+            NativeVitsGeneratorTrainingAdapter,
         )
         self.assertTrue(adapter.experimental_reconstruction_enabled)
         self.assertTrue(adapter.supports_custom_recipe)
@@ -437,16 +472,20 @@ class TransformersTTSTrainingObjectiveTests(unittest.TestCase):
 
         self.assertIsInstance(
             trainer.training_adapter,
-            VitsReconstructionTrainingAdapter,
+            NativeVitsGeneratorTrainingAdapter,
         )
         self.assertEqual(result.global_step, 1)
         self.assertFalse(torch.equal(wrapper.model.scale, initial_scale))
         output = trainer.training_adapter(
             input_ids=torch.tensor([[1, 2, 3, 4]]),
+            spectrogram=torch.ones(1, 1, 4),
             audio_values=torch.ones(1, 512),
         )
-        self.assertTrue(output.metadata["experimental"])
         self.assertFalse(output.metadata["full_vits_fine_tuning"])
+        self.assertEqual(
+            output.metadata["objective"],
+            "preprocessed-generator-warm-start",
+        )
 
     def test_vits_shared_trainer_fails_closed_without_opt_in(self):
         import torch
@@ -465,12 +504,13 @@ class TransformersTTSTrainingObjectiveTests(unittest.TestCase):
                 ),
                 train_dataset=[{
                     "input_ids": torch.tensor([1, 2, 3, 4]),
+                    "spectrogram": torch.ones(1, 4),
                     "audio_values": torch.ones(512),
                 }],
             )
             with self.assertRaisesRegex(
                     ValueError,
-                    "complete source training recipe",
+                    "generator-only warm-start",
             ):
                 trainer.train()
 
@@ -524,10 +564,20 @@ class TransformersTTSTrainingObjectiveTests(unittest.TestCase):
                 super().__init__()
                 self.scale = torch.nn.Parameter(torch.tensor(0.5))
 
-            def forward(self, input_ids, **kwargs):
+            def forward(self, input_ids, *, spectrogram, **kwargs):
                 del kwargs
                 waveform = input_ids.float().repeat_interleave(128, dim=-1)
-                return SimpleNamespace(waveform=waveform * self.scale)
+                latent = spectrogram[:, :1] * self.scale
+                return SimpleNamespace(
+                    waveform=waveform * self.scale,
+                    sequence_lengths=torch.tensor([waveform.shape[-1]]),
+                    duration_loss=self.scale.square(),
+                    prior_latents=latent,
+                    posterior_log_variances=torch.zeros_like(latent),
+                    expanded_prior_means=torch.zeros_like(latent),
+                    expanded_prior_log_variances=torch.zeros_like(latent),
+                    spectrogram_mask=torch.ones_like(latent),
+                )
 
         native = NativeVits()
         facade = _build_vits_training_model(
@@ -537,6 +587,7 @@ class TransformersTTSTrainingObjectiveTests(unittest.TestCase):
         )
         output = facade(
             torch.tensor([[1, 2, 3, 4]]),
+            spectrogram=torch.ones(1, 1, 4),
             audio_values=torch.ones(1, 512),
         )
         output["loss"].backward()

@@ -1,0 +1,13 @@
+"""Lightweight provenance constants for the native DAC architecture."""
+
+from __future__ import annotations
+
+DESCRIPT_DAC_44KHZ_REVISION = ("c1bc521685adf9cfe247bc39a5ca58917eda1ac4")
+DESCRIPT_DAC_44KHZ_HEADER_FINGERPRINT = ("6185c0399176b35a6c4b972894b64acd142e082b870686b19554f31b451af4e6")
+TRANSFORMERS_DAC_REVISION = "ebea912f0bb6f9e28ad2df04acd9b4df035933a9"
+
+__all__ = [
+    "DESCRIPT_DAC_44KHZ_HEADER_FINGERPRINT",
+    "DESCRIPT_DAC_44KHZ_REVISION",
+    "TRANSFORMERS_DAC_REVISION",
+]

@@ -1,457 +1,553 @@
-import os
+"""Dependency-free Kokoro phoneme pipeline and voice-pack loader."""
+
+from __future__ import annotations
+
+import logging
 import re
+import unicodedata
+from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass
+from inspect import signature
 from pathlib import Path
-from typing import Callable, Generator, List, Optional, Tuple, Union
+from typing import Any
 
 import torch
-from huggingface_hub import hf_hub_download
-from loguru import logger
-from misaki import en, espeak
 
+from voicehub.architectures.kokoro.checkpoint import (
+    KOKORO_CHECKPOINT_REVISION,
+    import_legacy_kokoro_checkpoint,
+    import_legacy_kokoro_voice,
+    load_native_kokoro_checkpoint,
+    load_native_kokoro_voice,
+)
+from voicehub.hub import resolve_pretrained_file
+
+from .artifacts import KokoroArtifacts, resolve_kokoro_artifacts
 from .model import KModel
 
+_LOGGER = logging.getLogger(__name__)
+
 ALIASES = {
-    'en-us': 'a',
-    'en-gb': 'b',
-    'es': 'e',
-    'fr-fr': 'f',
-    'hi': 'h',
-    'it': 'i',
-    'pt-br': 'p',
-    'ja': 'j',
-    'zh': 'z',
+    "en-us": "a",
+    "en-gb": "b",
+    "es": "e",
+    "fr-fr": "f",
+    "hi": "h",
+    "it": "i",
+    "pt-br": "p",
+    "ja": "j",
+    "zh": "z",
 }
 
-LANG_CODES = dict(
-    # pip install misaki[en]
-    a='American English',
-    b='British English',
+LANG_CODES = {
+    "a": "American English",
+    "b": "British English",
+    "e": "Spanish",
+    "f": "French",
+    "h": "Hindi",
+    "i": "Italian",
+    "p": "Brazilian Portuguese",
+    "j": "Japanese",
+    "z": "Mandarin Chinese",
+}
 
-    # espeak-ng
-    e='es',
-    f='fr-fr',
-    h='hi',
-    i='it',
-    p='pt-br',
+_PUNCTUATION_TRANSLATION = str.maketrans({
+    "\u00a0": " ",
+    "\t": " ",
+    "\r": "\n",
+    "–": "—",
+    "―": "—",
+    "‘": "'",
+    "’": "'",
+    "„": '"',
+})
 
-    # pip install misaki[ja]
-    j='Japanese',
 
-    # pip install misaki[zh]
-    z='Mandarin Chinese',
-)
+class KokoroFrontendError(ValueError):
+    """Raised when a text frontend cannot produce supported phonemes."""
+
+
+class GraphemeFallbackFrontend:
+    """Minimal built-in text normalizer with explicit non-parity semantics.
+
+    The Kokoro repository delegates G2P to Misaki/espeak and does not
+    release its linguistic tables. VoiceHub therefore cannot reproduce
+    multilingual G2P without another runtime. This fallback only
+    normalizes Unicode, lowercases Latin text, and retains characters
+    present in the released phoneme vocabulary. It keeps raw-text
+    inference usable, but callers that need source-quality pronunciation
+    should pass phonemes or a frontend callable.
+    """
+
+    frontend_id = "voicehub-grapheme-fallback-v1"
+    source_equivalent = False
+
+    def __init__(self, vocabulary: dict[str, int]) -> None:
+        self.vocabulary = frozenset(vocabulary)
+
+    def __call__(self, text: str, *, language_code: str) -> str:
+        del language_code
+        if not isinstance(text, str) or not text.strip():
+            raise KokoroFrontendError("Kokoro text must be non-empty.")
+        normalized = unicodedata.normalize(
+            "NFKC",
+            text.translate(_PUNCTUATION_TRANSLATION),
+        ).lower()
+        output = []
+        previous_space = False
+        for character in normalized:
+            if character.isspace():
+                if output and not previous_space and " " in self.vocabulary:
+                    output.append(" ")
+                previous_space = True
+                continue
+            previous_space = False
+            if character in self.vocabulary:
+                output.append(character)
+        phonemes = "".join(output).strip()
+        if not phonemes:
+            raise KokoroFrontendError(
+                "The built-in Kokoro fallback could not map this text to the "
+                "released symbol vocabulary. Pass `phonemes=` or inject a "
+                "frontend callable.")
+        return phonemes
+
+
+class PhonemeFrontend:
+    """Validate caller-supplied phonemes without linguistic rewriting."""
+
+    frontend_id = "caller-supplied-phonemes"
+    source_equivalent = True
+
+    def __init__(self, vocabulary: dict[str, int]) -> None:
+        self.vocabulary = frozenset(vocabulary)
+
+    def __call__(self, text: str, *, language_code: str) -> str:
+        del language_code
+        if not isinstance(text, str) or not text:
+            raise KokoroFrontendError("Kokoro phonemes must be non-empty.")
+        unknown = sorted(set(text) - self.vocabulary)
+        if unknown:
+            display = ", ".join(repr(item) for item in unknown)
+            raise KokoroFrontendError("Kokoro phonemes contain unsupported symbols: "
+                                      f"{display}.")
+        return text
+
+
+def _call_frontend(
+    frontend: Callable[..., str],
+    text: str,
+    *,
+    language_code: str,
+) -> str:
+    try:
+        accepts_language = True
+        signature(frontend).bind(text, language_code=language_code)
+    except TypeError:
+        accepts_language = False
+    except (ValueError, AttributeError):
+        # Some extension callables do not expose a Python signature. Invoke
+        # their documented two-argument form once so an internal TypeError is
+        # never hidden by an accidental retry.
+        accepts_language = True
+    if accepts_language:
+        output = frontend(text, language_code=language_code)
+    else:
+        output = frontend(text)
+    if not isinstance(output, str) or not output:
+        raise KokoroFrontendError("Kokoro frontend callables must return a non-empty phoneme string.")
+    return output
+
+
+def _split_text(text: str, pattern: str | None) -> list[str]:
+    if pattern is None:
+        return [text]
+    return [segment for segment in re.split(pattern, text.strip()) if segment.strip()]
+
+
+def _segments(
+    value: str | Sequence[str],
+    *,
+    split_pattern: str | None,
+    name: str,
+) -> list[str]:
+    if isinstance(value, str):
+        segments = _split_text(value, split_pattern)
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        segments = list(value)
+    else:
+        raise TypeError(f"Kokoro {name} must be a string or string sequence.")
+    if not segments or any(not isinstance(segment, str) or not segment for segment in segments):
+        raise ValueError(f"Kokoro {name} segments must be non-empty strings.")
+    return segments
 
 
 class KPipeline:
-    '''
-    KPipeline is a language-aware support class with 2 main responsibilities:
-    1. Perform language-specific G2P, mapping (and chunking) text -> phonemes
-    2. Manage and store voices, lazily downloaded from HF if needed
-
-    You are expected to have one KPipeline per language. If you have multiple
-    KPipelines, you should reuse one KModel instance across all of them.
-
-    KPipeline is designed to work with a KModel, but this is not required.
-    There are 2 ways to pass an existing model into a pipeline:
-    1. On init: us_pipeline = KPipeline(lang_code='a', model=model)
-    2. On call: us_pipeline(text, voice, model=model)
-
-    By default, KPipeline will automatically initialize its own KModel. To
-    suppress this, construct a "quiet" KPipeline with model=False.
-
-    A "quiet" KPipeline yields (graphemes, phonemes, None) without generating
-    any audio. You can use this to phonemize and chunk your text in advance.
-
-    A "loud" KPipeline _with_ a model yields (graphemes, phonemes, audio).
-    '''
+    """Language/front-end orchestration around one native :class:`KModel`."""
 
     def __init__(
-            self,
-            lang_code: str,
-            repo_id: Optional[str] = None,
-            model: Union[KModel, bool] = True,
-            trf: bool = False,
-            en_callable: Optional[Callable[[str], str]] = None,
-            device: Optional[str] = None):
-        """Initialize a KPipeline.
-
-        Args:
-            lang_code: Language code for G2P processing
-            model: KModel instance, True to create new model, False for no model
-            trf: Whether to use transformer-based G2P
-            device: Override default device selection ('cuda' or 'cpu', or None for auto)
-                   If None, will auto-select cuda if available
-                   If 'cuda' and not available, will explicitly raise an error
-        """
-        if repo_id is None:
-            repo_id = 'hexgrad/Kokoro-82M'
-            print(
-                f"WARNING: Defaulting repo_id to {repo_id}. Pass repo_id='{repo_id}' to suppress this warning."
-            )
+        self,
+        lang_code: str,
+        repo_id: str | Path = "hexgrad/Kokoro-82M",
+        model: KModel | bool = True,
+        *,
+        frontend: Callable[..., str] | None = None,
+        device: str | torch.device = "cpu",
+        checkpoint_filename: str | None = None,
+        revision: str | None = None,
+        cache_dir: str | None = None,
+        token: str | bool | None = None,
+        local_files_only: bool = False,
+        allow_legacy_checkpoint_conversion: bool = False,
+    ) -> None:
+        normalized_language = ALIASES.get(
+            lang_code.lower(),
+            lang_code.lower(),
+        )
+        if normalized_language not in LANG_CODES:
+            choices = ", ".join(sorted(LANG_CODES))
+            raise ValueError(f"Unknown Kokoro language code {lang_code!r}; choose {choices}.")
+        self.lang_code = normalized_language
         self.repo_id = repo_id
-        lang_code = lang_code.lower()
-        lang_code = ALIASES.get(lang_code, lang_code)
-        assert lang_code in LANG_CODES, (lang_code, LANG_CODES)
-        self.lang_code = lang_code
-        self.model = None
+        self.device = torch.device(device)
+        self.cache_dir = cache_dir
+        self.revision = revision
+        self.token = token
+        self.local_files_only = local_files_only
+        self.allow_legacy_checkpoint_conversion = (allow_legacy_checkpoint_conversion)
+        self.artifacts: KokoroArtifacts | None = None
+        self.voices: dict[str, torch.Tensor] = {}
+
         if isinstance(model, KModel):
             self.model = model
-        elif model:
-            if device == 'cuda' and not torch.cuda.is_available():
-                raise RuntimeError("CUDA requested but not available")
-            if device == 'mps' and not torch.backends.mps.is_available():
-                raise RuntimeError("MPS requested but not available")
-            if device == 'mps' and os.environ.get('PYTORCH_ENABLE_MPS_FALLBACK') != '1':
-                raise RuntimeError("MPS requested but fallback not enabled")
-            if device is None:
-                if torch.cuda.is_available():
-                    device = 'cuda'
-                elif os.environ.get(
-                        'PYTORCH_ENABLE_MPS_FALLBACK') == '1' and torch.backends.mps.is_available():
-                    device = 'mps'
-                else:
-                    device = 'cpu'
-            try:
-                self.model = KModel(repo_id=repo_id).to(device).eval()
-            except RuntimeError as e:
-                if device == 'cuda':
-                    raise RuntimeError(
-                        f"Failed to initialize model on CUDA: {e}. "
-                        "Try setting device='cpu' or check CUDA installation.")
-                raise
-        self.voices = {}  # lazily populated voice embedding cache
-        if lang_code in 'ab':
-            try:
-                fallback = espeak.EspeakFallback(british=lang_code == 'b')
-            except Exception as e:
-                logger.warning("EspeakFallback not Enabled: OOD words will be skipped")
-                logger.warning({str(e)})
-                fallback = None
-            self.g2p = en.G2P(trf=trf, british=lang_code == 'b', fallback=fallback, unk='')
-        elif lang_code == 'j':
-            try:
-                from misaki import ja
-                self.g2p = ja.JAG2P()
-            except ImportError:
-                logger.error("You need to `pip install misaki[ja]` to use lang_code='j'")
-                raise
-        elif lang_code == 'z':
-            try:
-                from misaki import zh
-                self.g2p = zh.ZHG2P(
-                    version=None if repo_id.endswith('/Kokoro-82M') else '1.1', en_callable=en_callable)
-            except ImportError:
-                logger.error("You need to `pip install misaki[zh]` to use lang_code='z'")
-                raise
+        elif model is False:
+            self.model = None
+        elif model is True:
+            self.model = self._load_model(checkpoint_filename)
         else:
-            language = LANG_CODES[lang_code]
-            logger.warning(
-                f"Using EspeakG2P(language='{language}'). Chunking logic not yet implemented, so long texts may be truncated unless you split them with '\\n'."
+            raise TypeError("`model` must be a KModel or boolean.")
+        vocabulary = (
+            self.model.vocab
+            if self.model is not None else self._resolve_artifacts(checkpoint_filename).config.vocab)
+        self.phoneme_frontend = PhonemeFrontend(dict(vocabulary))
+        self.frontend = (GraphemeFallbackFrontend(dict(vocabulary)) if frontend is None else frontend)
+
+    def _resolve_artifacts(
+        self,
+        checkpoint_filename: str | None = None,
+    ) -> KokoroArtifacts:
+        if self.artifacts is None:
+            self.artifacts = resolve_kokoro_artifacts(
+                self.repo_id,
+                checkpoint_filename=checkpoint_filename,
+                revision=self.revision,
+                cache_dir=self.cache_dir,
+                token=self.token,
+                local_files_only=self.local_files_only,
             )
-            self.g2p = espeak.EspeakG2P(language=language)
+            self.revision = self.artifacts.revision
+        return self.artifacts
 
-    def load_single_voice(self, voice: str):
-        if voice in self.voices:
-            return self.voices[voice]
-        if voice.endswith('.pt'):
-            f = voice
-        else:
-            snapshot_root = Path(self.repo_id).expanduser()
-            if snapshot_root.is_dir():
-                voice_path = snapshot_root / 'voices' / f'{voice}.pt'
-                if not voice_path.is_file():
-                    raise FileNotFoundError(
-                        f"Kokoro voice {voice!r} was not found in the local "
-                        f"snapshot: {voice_path}.")
-                f = str(voice_path.resolve())
-            else:
-                f = hf_hub_download(
-                    repo_id=self.repo_id,
-                    filename=f'voices/{voice}.pt',
+    def _load_model(self, checkpoint_filename: str | None) -> KModel:
+        artifacts = self._resolve_artifacts(checkpoint_filename)
+        model = KModel(artifacts.config)
+        checkpoint = artifacts.checkpoint
+        if artifacts.legacy_pytorch:
+            native_checkpoint = checkpoint.with_suffix(".voicehub.safetensors")
+            if not native_checkpoint.is_file():
+                if (not artifacts.official_legacy_checkpoint and not self.allow_legacy_checkpoint_conversion):
+                    raise ValueError(
+                        "A local/custom Kokoro .pth requires explicit "
+                        "`allow_legacy_checkpoint_conversion=True`. The "
+                        "restricted weights-only importer will write a "
+                        "portable Safetensors file.")
+                # Use a meta graph for inventory validation so one-time
+                # conversion does not duplicate the initialized 82M graph.
+                with torch.device("meta"):
+                    shape_model = KModel(artifacts.config)
+                import_legacy_kokoro_checkpoint(
+                    shape_model,
+                    checkpoint,
+                    output_path=native_checkpoint,
+                    verify_official_hash=(artifacts.official_legacy_checkpoint),
                 )
-            if not voice.startswith(self.lang_code):
-                v = LANG_CODES.get(voice, voice)
-                p = LANG_CODES.get(self.lang_code, self.lang_code)
-                logger.warning(f'Language mismatch, loading {v} voice into {p} pipeline.')
-        pack = torch.load(f, weights_only=True)
-        self.voices[voice] = pack
-        return pack
+            checkpoint = native_checkpoint
+        load_native_kokoro_checkpoint(
+            model,
+            checkpoint,
+            device=self.device,
+        )
+        return model.to(self.device).eval()
 
-    def load_voice(self, voice: Union[str, torch.FloatTensor], delimiter: str = ",") -> torch.FloatTensor:
-        """Lazily download and load a voice embedding.
+    def _voice_paths(self, voice: str) -> tuple[Path | None, Path | None]:
+        explicit = Path(voice).expanduser()
+        if explicit.is_file():
+            if explicit.suffix == ".safetensors":
+                return explicit.resolve(), None
+            if explicit.suffix == ".pt":
+                return None, explicit.resolve()
+            raise ValueError("Explicit Kokoro voice files must use .safetensors or .pt.")
+        source = Path(self.repo_id).expanduser()
+        if source.is_dir():
+            native_candidates = (
+                source / "voices" / f"{voice}.safetensors",
+                source / "voices" / f"{voice}.voicehub.safetensors",
+            )
+            for candidate in native_candidates:
+                if candidate.is_file():
+                    return candidate.resolve(), None
+            legacy = source / "voices" / f"{voice}.pt"
+            if legacy.is_file():
+                return None, legacy.resolve()
+            raise FileNotFoundError(f"Kokoro voice {voice!r} was not found under "
+                                    f"{source / 'voices'}.")
+        legacy = resolve_pretrained_file(
+            self.repo_id,
+            f"voices/{voice}.pt",
+            cache_dir=self.cache_dir,
+            revision=self.revision,
+            token=self.token,
+            local_files_only=self.local_files_only,
+        )
+        return None, legacy
 
-        Multiple voices can be requested as a delimited string (e.g.
-        ``'af_bella,af_jessica'``); they will be averaged into a single
-        style.
-        """
-        if isinstance(voice, torch.FloatTensor):
-            return voice
+    def load_single_voice(self, voice: str) -> torch.Tensor:
+        if not isinstance(voice, str) or not voice.strip():
+            raise ValueError("Kokoro voice names must be non-empty.")
+        voice = voice.strip()
         if voice in self.voices:
             return self.voices[voice]
-        logger.debug(f"Loading voice: {voice}")
-        packs = [self.load_single_voice(v) for v in voice.split(delimiter)]
-        if len(packs) == 1:
-            return packs[0]
-        self.voices[voice] = torch.mean(torch.stack(packs), dim=0)
-        return self.voices[voice]
+        native_path, legacy_path = self._voice_paths(voice)
+        if native_path is None:
+            if legacy_path is None:  # pragma: no cover - invariant
+                raise RuntimeError("Kokoro voice resolver returned no file.")
+            native_path = legacy_path.with_suffix(".voicehub.safetensors")
+            if not native_path.is_file():
+                source_is_official = (
+                    str(self.repo_id) in KModel.MODEL_NAMES and self.revision == KOKORO_CHECKPOINT_REVISION)
+                if (not source_is_official and not self.allow_legacy_checkpoint_conversion):
+                    raise ValueError(
+                        "A local/custom Kokoro voice .pt requires explicit "
+                        "`allow_legacy_checkpoint_conversion=True`.")
+                import_legacy_kokoro_voice(
+                    legacy_path,
+                    output_path=native_path,
+                )
+        value = load_native_kokoro_voice(
+            native_path,
+            device=self.device,
+            dtype=(self.model.dtype if self.model is not None else torch.float32),
+        )
+        self.voices[voice] = value
+        return value
+
+    def load_voice(
+        self,
+        voice: str | torch.Tensor,
+        delimiter: str = ",",
+    ) -> torch.Tensor:
+        """Load or average one or more validated voice style tables."""
+        if torch.is_tensor(voice):
+            if (voice.ndim != 3 or voice.shape[1:] != (1, 256) or voice.shape[0] < 1):
+                raise ValueError("Kokoro tensor voices must have shape [length, 1, 256].")
+            return voice.to(
+                device=self.device,
+                dtype=(self.model.dtype if self.model is not None else torch.float32),
+            )
+        if not isinstance(voice, str) or not voice.strip():
+            raise ValueError("Kokoro `voice` must be a name or style tensor.")
+        if voice in self.voices:
+            return self.voices[voice]
+        names = [item.strip() for item in voice.split(delimiter)]
+        if not names or any(not item for item in names):
+            raise ValueError("Kokoro voice mixtures contain an empty name.")
+        packs = [self.load_single_voice(name) for name in names]
+        lengths = {pack.shape[0] for pack in packs}
+        if len(lengths) != 1:
+            raise ValueError("Kokoro voice packs must have equal length before mixing.")
+        mixed = packs[0] if len(packs) == 1 else torch.stack(packs).mean(0)
+        self.voices[voice] = mixed
+        return mixed
 
     @staticmethod
-    def tokens_to_ps(tokens: List[en.MToken]) -> str:
-        return ''.join(t.phonemes + (' ' if t.whitespace else '') for t in tokens).strip()
-
-    @staticmethod
-    def waterfall_last(
-            tokens: List[en.MToken],
-            next_count: int,
-            waterfall: List[str] = ['!.?…', ':;', ',—'],
-            bumps: List[str] = [')', '”']) -> int:
-        for w in waterfall:
-            z = next((i for i, t in reversed(list(enumerate(tokens))) if t.phonemes in set(w)), None)
-            if z is None:
-                continue
-            z += 1
-            if z < len(tokens) and tokens[z].phonemes in bumps:
-                z += 1
-            if next_count - len(KPipeline.tokens_to_ps(tokens[:z])) <= 510:
-                return z
-        return len(tokens)
-
-    @staticmethod
-    def tokens_to_text(tokens: List[en.MToken]) -> str:
-        return ''.join(t.text + t.whitespace for t in tokens).strip()
-
-    def en_tokenize(self, tokens: List[en.MToken]) -> Generator[Tuple[str, str, List[en.MToken]], None, None]:
-        tks = []
-        pcount = 0
-        for t in tokens:
-            # American English: ɾ => T
-            t.phonemes = '' if t.phonemes is None else t.phonemes
-            next_ps = t.phonemes + (' ' if t.whitespace else '')
-            next_pcount = pcount + len(next_ps.rstrip())
-            if next_pcount > 510:
-                z = KPipeline.waterfall_last(tks, next_pcount)
-                text = KPipeline.tokens_to_text(tks[:z])
-                logger.debug(f"Chunking text at {z}: '{text[:30]}{'...' if len(text) > 30 else ''}'")
-                ps = KPipeline.tokens_to_ps(tks[:z])
-                yield text, ps, tks[:z]
-                tks = tks[z:]
-                pcount = len(KPipeline.tokens_to_ps(tks))
-                if not tks:
-                    next_ps = next_ps.lstrip()
-            tks.append(t)
-            pcount += len(next_ps)
-        if tks:
-            text = KPipeline.tokens_to_text(tks)
-            ps = KPipeline.tokens_to_ps(tks)
-            yield ''.join(text).strip(), ''.join(ps).strip(), tks
+    def _style_for_phonemes(
+        model: KModel,
+        phonemes: str,
+        pack: torch.Tensor,
+    ) -> torch.Tensor:
+        token_count = len(model.tokenize_phonemes(phonemes))
+        index = token_count - 1
+        if index >= pack.shape[0]:
+            raise ValueError(
+                "Kokoro voice pack does not cover this phoneme sequence "
+                f"length ({token_count} > {pack.shape[0]}).")
+        return pack[index]
 
     @staticmethod
     def infer(
-            model: KModel,
-            ps: str,
-            pack: torch.FloatTensor,
-            speed: Union[float, Callable[[int], float]] = 1) -> KModel.Output:
-        if callable(speed):
-            speed = speed(len(ps))
-        return model(ps, pack[len(ps) - 1], speed, return_output=True)
-
-    def generate_from_tokens(
-            self,
-            tokens: Union[str, List[en.MToken]],
-            voice: str,
-            speed: float = 1,
-            model: Optional[KModel] = None) -> Generator['KPipeline.Result', None, None]:
-        """Generate audio from either raw phonemes or pre-processed tokens.
-
-        Args:
-            tokens: Either a phoneme string or list of pre-processed MTokens
-            voice: The voice to use for synthesis
-            speed: Speech speed modifier (default: 1)
-            model: Optional KModel instance (uses pipeline's model if not provided)
-
-        Yields:
-            KPipeline.Result containing the input tokens and generated audio
-
-        Raises:
-            ValueError: If no voice is provided or token sequence exceeds model limits
-        """
-        model = model or self.model
-        if model and voice is None:
-            raise ValueError('Specify a voice: pipeline.generate_from_tokens(..., voice="af_heart")')
-
-        pack = self.load_voice(voice).to(model.device) if model else None
-
-        # Handle raw phoneme string
-        if isinstance(tokens, str):
-            logger.debug("Processing phonemes from raw string")
-            if len(tokens) > 510:
-                raise ValueError(f'Phoneme string too long: {len(tokens)} > 510')
-            output = KPipeline.infer(model, tokens, pack, speed) if model else None
-            yield self.Result(graphemes='', phonemes=tokens, output=output)
-            return
-
-        logger.debug("Processing MTokens")
-        # Handle pre-processed tokens
-        for gs, ps, tks in self.en_tokenize(tokens):
-            if not ps:
-                continue
-            elif len(ps) > 510:
-                logger.warning(f"Unexpected len(ps) == {len(ps)} > 510 and ps == '{ps}'")
-                logger.warning("Truncating to 510 characters")
-                ps = ps[:510]
-            output = KPipeline.infer(model, ps, pack, speed) if model else None
-            if output is not None and output.pred_dur is not None:
-                KPipeline.join_timestamps(tks, output.pred_dur)
-            yield self.Result(graphemes=gs, phonemes=ps, tokens=tks, output=output)
-
-    @staticmethod
-    def join_timestamps(tokens: List[en.MToken], pred_dur: torch.LongTensor):
-        # Multiply by 600 to go from pred_dur frames to sample_rate 24000
-        # Equivalent to dividing pred_dur frames by 40 to get timestamp in seconds
-        # We will count nice round half-frames, so the divisor is 80
-        MAGIC_DIVISOR = 80
-        if not tokens or len(pred_dur) < 3:
-            # We expect at least 3: <bos>, token, <eos>
-            return
-        # We track 2 counts, measured in half-frames: (left, right)
-        # This way we can cut space characters in half
-        # TODO: Is -3 an appropriate offset?
-        left = right = 2 * max(0, pred_dur[0].item() - 3)
-        # Updates:
-        # left = right + (2 * token_dur) + space_dur
-        # right = left + space_dur
-        i = 1
-        for t in tokens:
-            if i >= len(pred_dur) - 1:
-                break
-            if not t.phonemes:
-                if t.whitespace:
-                    i += 1
-                    left = right + pred_dur[i].item()
-                    right = left + pred_dur[i].item()
-                    i += 1
-                continue
-            j = i + len(t.phonemes)
-            if j >= len(pred_dur):
-                break
-            t.start_ts = left / MAGIC_DIVISOR
-            token_dur = pred_dur[i:j].sum().item()
-            space_dur = pred_dur[j].item() if t.whitespace else 0
-            left = right + (2 * token_dur) + space_dur
-            t.end_ts = left / MAGIC_DIVISOR
-            right = left + space_dur
-            i = j + (1 if t.whitespace else 0)
+        model: KModel,
+        phonemes: str,
+        pack: torch.Tensor,
+        speed: float | Callable[[int], float] = 1.0,
+    ) -> KModel.Output:
+        resolved_speed = speed(len(phonemes)) if callable(speed) else speed
+        style = KPipeline._style_for_phonemes(model, phonemes, pack)
+        return model(
+            phonemes,
+            style,
+            float(resolved_speed),
+            return_output=True,
+        )
 
     @dataclass
     class Result:
+        """One normalized text/phoneme/audio segment."""
+
         graphemes: str
         phonemes: str
-        tokens: Optional[List[en.MToken]] = None
-        output: Optional[KModel.Output] = None
-        text_index: Optional[int] = None
+        output: KModel.Output | None = None
+        text_index: int | None = None
+        frontend_id: str | None = None
 
         @property
-        def audio(self) -> Optional[torch.FloatTensor]:
+        def audio(self) -> torch.Tensor | None:
             return None if self.output is None else self.output.audio
 
         @property
-        def pred_dur(self) -> Optional[torch.LongTensor]:
+        def pred_dur(self) -> torch.Tensor | None:
             return None if self.output is None else self.output.pred_dur
 
         def __iter__(self):
-            """Allow tuple-style unpacking for backward compatibility."""
             yield self.graphemes
             yield self.phonemes
             yield self.audio
 
-        def __getitem__(self, index):
-            """Index-based access for backward compatibility."""
+        def __getitem__(self, index: int):
             return [self.graphemes, self.phonemes, self.audio][index]
 
-        def __len__(self):
+        def __len__(self) -> int:
             return 3
 
-    def __call__(
-            self,
-            text: Union[str, List[str]],
-            voice: Optional[str] = None,
-            speed: Union[float, Callable[[int], float]] = 1,
-            split_pattern: Optional[str] = r'\n+',
-            model: Optional[KModel] = None) -> Generator['KPipeline.Result', None, None]:
-        model = model or self.model
-        if model and voice is None:
-            raise ValueError('Specify a voice: en_us_pipeline(text="Hello world!", voice="af_heart")')
-        pack = self.load_voice(voice).to(model.device) if model else None
-
-        # Convert input to list of segments
-        if isinstance(text, str):
-            text = re.split(split_pattern, text.strip()) if split_pattern else [text]
-
-        # Process each segment
-        for graphemes_index, graphemes in enumerate(text):
-            if not graphemes.strip():  # Skip empty segments
+    def _chunks(self, phonemes: str) -> list[str]:
+        if self.model is None:
+            limit = 510
+        else:
+            limit = self.model.context_length - 2
+        if len(phonemes) <= limit:
+            return [phonemes]
+        chunks: list[str] = []
+        current = ""
+        for item in re.split(r"(?<=[.!?…])\s+|\s+", phonemes):
+            if not item:
                 continue
+            candidate = f"{current} {item}".strip()
+            if len(candidate) <= limit:
+                current = candidate
+                continue
+            if current:
+                chunks.append(current)
+            while len(item) > limit:
+                chunks.append(item[:limit])
+                item = item[limit:]
+            current = item
+        if current:
+            chunks.append(current)
+        return chunks
 
-            # English processing (unchanged)
-            if self.lang_code in 'ab':
-                logger.debug(
-                    f"Processing English text: {graphemes[:50]}{'...' if len(graphemes) > 50 else ''}")
-                _, tokens = self.g2p(graphemes)
-                for gs, ps, tks in self.en_tokenize(tokens):
-                    if not ps:
-                        continue
-                    elif len(ps) > 510:
-                        logger.warning(f"Unexpected len(ps) == {len(ps)} > 510 and ps == '{ps}'")
-                        ps = ps[:510]
-                    output = KPipeline.infer(model, ps, pack, speed) if model else None
-                    if output is not None and output.pred_dur is not None:
-                        KPipeline.join_timestamps(tks, output.pred_dur)
-                    yield self.Result(
-                        graphemes=gs, phonemes=ps, tokens=tks, output=output, text_index=graphemes_index)
+    def generate_from_tokens(
+        self,
+        tokens: str | Sequence[Any],
+        voice: str | torch.Tensor,
+        speed: float | Callable[[int], float] = 1.0,
+        model: KModel | None = None,
+    ) -> Generator[Result]:
+        """Generate from a phoneme string.
 
-            # Non-English processing with chunking
-            else:
-                # Split long text into smaller chunks (roughly 400 characters each)
-                # Using sentence boundaries when possible
-                chunk_size = 400
-                chunks = []
+        Legacy token-object lists depended on Misaki classes and are
+        rejected with a precise migration message.
+        """
+        if not isinstance(tokens, str):
+            raise TypeError(
+                "Native Kokoro accepts a phoneme string here; Misaki token "
+                "objects are not part of the VoiceHub runtime.")
+        runtime = model or self.model
+        if runtime is None:
+            raise RuntimeError("Kokoro generation requires a loaded KModel.")
+        phonemes = _call_frontend(
+            self.phoneme_frontend,
+            tokens,
+            language_code=self.lang_code,
+        )
+        pack = self.load_voice(voice)
+        for chunk in self._chunks(phonemes):
+            output = self.infer(runtime, chunk, pack, speed)
+            yield self.Result(
+                graphemes="",
+                phonemes=chunk,
+                output=output,
+                frontend_id=self.phoneme_frontend.frontend_id,
+            )
 
-                # Try to split on sentence boundaries first
-                sentences = re.split(r'([.!?]+)', graphemes)
-                current_chunk = ""
+    def __call__(
+        self,
+        text: str | Sequence[str],
+        voice: str | torch.Tensor | None = None,
+        speed: float | Callable[[int], float] = 1.0,
+        split_pattern: str | None = r"\n+",
+        model: KModel | None = None,
+        *,
+        phonemes: str | Sequence[str] | None = None,
+    ) -> Generator[Result]:
+        runtime = model or self.model
+        if runtime is not None and voice is None:
+            raise ValueError("Kokoro generation requires `voice`.")
+        grapheme_segments = _segments(
+            text,
+            split_pattern=split_pattern,
+            name="text",
+        )
+        if phonemes is None:
+            frontend = self.frontend
+            frontend_segments = grapheme_segments
+        else:
+            frontend = self.phoneme_frontend
+            frontend_segments = _segments(
+                phonemes,
+                split_pattern=split_pattern,
+                name="phoneme",
+            )
+            if len(frontend_segments) != len(grapheme_segments):
+                raise ValueError(
+                    "Kokoro explicit phoneme segments must match the number "
+                    "of text segments.")
+        pack = self.load_voice(voice) if runtime is not None else None
+        frontend_id = getattr(
+            frontend,
+            "frontend_id",
+            frontend.__class__.__name__,
+        )
+        for text_index, (graphemes, frontend_input) in enumerate(zip(grapheme_segments, frontend_segments)):
+            normalized = _call_frontend(
+                frontend,
+                frontend_input,
+                language_code=self.lang_code,
+            )
+            for chunk in self._chunks(normalized):
+                output = (self.infer(runtime, chunk, pack, speed) if runtime is not None else None)
+                yield self.Result(
+                    graphemes=graphemes,
+                    phonemes=chunk,
+                    output=output,
+                    text_index=text_index,
+                    frontend_id=frontend_id,
+                )
 
-                for i in range(0, len(sentences), 2):
-                    sentence = sentences[i]
-                    # Add the punctuation back if it exists
-                    if i + 1 < len(sentences):
-                        sentence += sentences[i + 1]
 
-                    if len(current_chunk) + len(sentence) <= chunk_size:
-                        current_chunk += sentence
-                    else:
-                        if current_chunk:
-                            chunks.append(current_chunk.strip())
-                        current_chunk = sentence
-
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-
-                # If no chunks were created (no sentence boundaries), fall back to character-based chunking
-                if not chunks:
-                    chunks = [graphemes[i:i + chunk_size] for i in range(0, len(graphemes), chunk_size)]
-
-                # Process each chunk
-                for chunk in chunks:
-                    if not chunk.strip():
-                        continue
-
-                    ps, _ = self.g2p(chunk)
-                    if not ps:
-                        continue
-                    elif len(ps) > 510:
-                        logger.warning(f'Truncating len(ps) == {len(ps)} > 510')
-                        ps = ps[:510]
-
-                    output = KPipeline.infer(model, ps, pack, speed) if model else None
-                    yield self.Result(graphemes=chunk, phonemes=ps, output=output, text_index=graphemes_index)
+__all__ = [
+    "ALIASES",
+    "LANG_CODES",
+    "GraphemeFallbackFrontend",
+    "KPipeline",
+    "KokoroFrontendError",
+    "PhonemeFrontend",
+]

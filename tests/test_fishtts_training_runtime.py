@@ -1,9 +1,10 @@
 import importlib.util
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from voicehub.architectures.fishtts.configuration import FishS2Config
+from voicehub.architectures.fishtts.modeling import FishS2ForConditionalGeneration
 from voicehub.models.fishtts.inference import FishTTSConfig, FishTTSForTextToSpeech
 
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
@@ -13,112 +14,88 @@ TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 class FishTTSTrainingRuntimeTests(unittest.TestCase):
 
     @staticmethod
-    def _semantic_model():
+    def _wrapper():
         import torch
 
-        class Attention(torch.nn.Module):
-
-            def __init__(self):
-                super().__init__()
-                self.kv_cache = None
-
-        class Layer(torch.nn.Module):
-
-            def __init__(self):
-                super().__init__()
-                self.attention = Attention()
-
-        class SemanticModel(torch.nn.Module):
-
-            def __init__(self):
-                super().__init__()
-                self.weight = torch.nn.Parameter(torch.tensor(1.0))
-                self.config = SimpleNamespace(
-                    max_seq_len=128,
-                    use_cache=False,
-                )
-                self.layers = torch.nn.ModuleList([Layer()])
-                self.fast_layers = torch.nn.ModuleList([Layer()])
-                self.max_batch_size = -1
-                self.max_seq_len = -1
-                self._cache_setup_done = False
-
-            def setup_caches(
-                self,
-                *,
-                max_batch_size,
-                max_seq_len,
-                dtype,
-            ):
-                del dtype
-                self.max_batch_size = max_batch_size
-                self.max_seq_len = max_seq_len
-                for layer in (*self.layers, *self.fast_layers):
-                    layer.attention.kv_cache = torch.nn.Identity()
-
-        return SemanticModel()
+        semantic_model = FishS2ForConditionalGeneration(
+            FishS2Config.tiny(
+                vocab_size=32,
+                codebook_size=4,
+                num_codebooks=2,
+                hidden_size=8,
+                num_hidden_layers=1,
+                num_fast_layers=1,
+            ))
+        wrapper = FishTTSForTextToSpeech(
+            FishTTSConfig(
+                name_or_path="test/fish",
+                torch_dtype="float32",
+            ),
+            device="cpu",
+        )
+        wrapper.model = semantic_model
+        wrapper.native_config = semantic_model.config
+        wrapper._torch = torch
+        wrapper._loaded_for_training = True
+        wrapper._training_ready = True
+        semantic_model.train()
+        return wrapper
 
     @staticmethod
-    def _runtime(torch, codec):
-        decoder = object()
+    def _native_attachment(wrapper):
+        import torch
 
-        def prepare_model_for_inference(model, device, *, compile):
-            del device, compile
-            model.eval()
-            return decoder
+        codec = torch.nn.Linear(1, 1, bias=False).eval()
+        for parameter in codec.parameters():
+            parameter.requires_grad_(False)
 
-        def generate_long(**kwargs):
-            del kwargs
-            yield SimpleNamespace(
-                action="sample",
-                codes=torch.tensor([[1, 2]]),
-            )
-            yield SimpleNamespace(action="next", codes=None)
+        def prepare_for_inference():
+            wrapper.model.eval()
+            codec.eval()
 
-        return (
-            SimpleNamespace(
-                prepare_model_for_inference=Mock(side_effect=prepare_model_for_inference, ),
-                load_codec_model=Mock(return_value=codec),
-                generate_long=generate_long,
-                decode_to_audio=Mock(return_value=torch.tensor([0.25, -0.25]), ),
-            ),
-            decoder,
+        def prepare_for_training():
+            wrapper.model.clear_caches()
+            wrapper.model.train()
+            codec.eval()
+
+        runtime = SimpleNamespace(
+            infer=Mock(return_value=torch.tensor([0.25, -0.25])),
+            prepare_for_inference=Mock(side_effect=prepare_for_inference),
+            prepare_for_training=Mock(side_effect=prepare_for_training),
         )
+        wrapper.codec = codec
+        wrapper._codec = codec
+        wrapper._runtime = runtime
+        return runtime, codec
 
     def test_training_generation_training_preserves_optimizer_owned_model(self):
         import torch
 
-        semantic_model = self._semantic_model()
+        wrapper = self._wrapper()
+        semantic_model = wrapper.model
         optimizer = torch.optim.SGD(semantic_model.parameters(), lr=0.1)
         optimizer_parameter = optimizer.param_groups[0]["params"][0]
-        codec = SimpleNamespace(spec_transform=SimpleNamespace(sample_rate=32_000), )
-        runtime, decoder = self._runtime(torch, codec)
+        attachment = {}
 
-        wrapper = FishTTSForTextToSpeech(
-            FishTTSConfig(name_or_path="test/fish"),
-            device="cpu",
-        )
-        wrapper.model = semantic_model
-        wrapper._torch = torch
-        wrapper._model_directory = Path("/test/fish")
-        wrapper._loaded_for_training = True
+        def attach(*, torch, dtype):
+            del torch, dtype
+            runtime, codec = self._native_attachment(wrapper)
+            attachment.update(runtime=runtime, codec=codec)
 
-        with patch(
-                "voicehub.models.fishtts.inference.import_optional",
-                return_value=runtime,
-        ):
+        with patch.object(
+                wrapper,
+                "_attach_codec_runtime",
+                side_effect=attach,
+        ) as attach_runtime:
             output = wrapper.generate("hello")
 
             self.assertIs(wrapper.model, semantic_model)
-            self.assertIs(optimizer_parameter, wrapper.model.weight)
+            self.assertIs(optimizer_parameter, next(wrapper.model.parameters()))
             self.assertFalse(wrapper._loaded_for_training)
             self.assertFalse(wrapper.model.training)
-            self.assertIs(wrapper._runtime, runtime)
-            self.assertIs(wrapper._decode_one_token, decoder)
-            self.assertIs(wrapper._codec, codec)
-            self.assertEqual(wrapper.sample_rate, 32_000)
-            self.assertTrue(wrapper.model._cache_setup_done)
-            self.assertIsNotNone(wrapper.model.layers[0].attention.kv_cache, )
+            self.assertIs(wrapper._runtime, attachment["runtime"])
+            self.assertIs(wrapper._codec, attachment["codec"])
+            self.assertTrue(all(not parameter.requires_grad for parameter in wrapper._codec.parameters()))
             torch.testing.assert_close(
                 output.audio,
                 torch.tensor([0.25, -0.25]),
@@ -127,61 +104,38 @@ class FishTTSTrainingRuntimeTests(unittest.TestCase):
             wrapper.load_for_training()
 
             self.assertIs(wrapper.model, semantic_model)
-            self.assertIs(optimizer_parameter, wrapper.model.weight)
+            self.assertIs(optimizer_parameter, next(wrapper.model.parameters()))
             self.assertTrue(wrapper._loaded_for_training)
             self.assertTrue(wrapper.model.training)
-            self.assertIsNone(wrapper._runtime)
-            self.assertIsNone(wrapper._decode_one_token)
-            self.assertFalse(wrapper.model._cache_setup_done)
+            self.assertIs(wrapper._runtime, attachment["runtime"])
+            self.assertIs(wrapper._codec, attachment["codec"])
             self.assertEqual(wrapper.model.max_batch_size, -1)
-            self.assertEqual(wrapper.model.max_seq_len, -1)
-            self.assertIsNone(wrapper.model.layers[0].attention.kv_cache, )
-            self.assertIsNone(wrapper.model.fast_layers[0].attention.kv_cache, )
+            self.assertEqual(wrapper.model.max_sequence_length, -1)
 
             wrapper.load()
 
         self.assertIs(wrapper.model, semantic_model)
-        self.assertIs(optimizer_parameter, wrapper.model.weight)
+        self.assertIs(optimizer_parameter, next(wrapper.model.parameters()))
         self.assertFalse(wrapper._loaded_for_training)
+        attach_runtime.assert_called_once()
         self.assertEqual(
-            runtime.prepare_model_for_inference.call_count,
+            attachment["runtime"].prepare_for_inference.call_count,
             2,
         )
-        runtime.load_codec_model.assert_called_once_with(
-            Path("/test/fish/codec.pth"),
-            "cpu",
-            torch.float32,
-        )
+        attachment["runtime"].prepare_for_training.assert_called_once()
 
-    def test_failed_serving_attachment_rolls_back_to_training_state(self):
-        import torch
-
-        semantic_model = self._semantic_model()
-        codec_error = RuntimeError("codec unavailable")
-        runtime = SimpleNamespace(
-            prepare_model_for_inference=Mock(
-                side_effect=lambda model, device, compile: (
-                    model.eval(),
-                    object(),
-                )[-1],
-            ),
-            load_codec_model=Mock(side_effect=codec_error),
-        )
-        wrapper = FishTTSForTextToSpeech(
-            FishTTSConfig(name_or_path="test/fish"),
-            device="cpu",
-        )
-        wrapper.model = semantic_model
-        wrapper._torch = torch
-        wrapper._model_directory = Path("/test/fish")
-        wrapper._loaded_for_training = True
+    def test_failed_safe_codec_attachment_is_retryable(self):
+        wrapper = self._wrapper()
+        semantic_model = wrapper.model
+        codec_error = RuntimeError("safe codec unavailable")
 
         with (
-                patch(
-                    "voicehub.models.fishtts.inference.import_optional",
-                    return_value=runtime,
+                patch.object(
+                    wrapper,
+                    "_attach_codec_runtime",
+                    side_effect=codec_error,
                 ),
-                self.assertRaisesRegex(RuntimeError, "codec unavailable"),
+                self.assertRaisesRegex(RuntimeError, "safe codec unavailable"),
         ):
             wrapper.load()
 
@@ -189,9 +143,20 @@ class FishTTSTrainingRuntimeTests(unittest.TestCase):
         self.assertTrue(wrapper._loaded_for_training)
         self.assertTrue(wrapper.model.training)
         self.assertIsNone(wrapper._runtime)
-        self.assertIsNone(wrapper._decode_one_token)
-        self.assertFalse(wrapper.model._cache_setup_done)
-        self.assertEqual(wrapper.model.max_seq_len, -1)
+        self.assertIsNone(wrapper._codec)
+        self.assertFalse(wrapper._inference_ready)
+
+        with patch.object(
+                wrapper,
+                "_attach_codec_runtime",
+                side_effect=lambda **unused: self._native_attachment(wrapper),
+        ):
+            wrapper.load()
+
+        self.assertFalse(wrapper.model.training)
+        self.assertTrue(wrapper._inference_ready)
+        self.assertIsNotNone(wrapper._runtime)
+        self.assertIsNotNone(wrapper._codec)
 
 
 if __name__ == "__main__":

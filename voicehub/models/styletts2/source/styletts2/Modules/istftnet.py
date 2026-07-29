@@ -7,8 +7,8 @@ from .utils import init_weights, get_padding
 
 import math
 import random
-import numpy as np 
-from scipy.signal import get_window
+from functools import reduce
+from operator import mul
 
 LRELU_SLOPE = 0.1
 
@@ -86,12 +86,24 @@ class TorchSTFT(torch.nn.Module):
         self.filter_length = filter_length
         self.hop_length = hop_length
         self.win_length = win_length
-        self.window = torch.from_numpy(get_window(window, win_length, fftbins=True).astype(np.float32))
+        if window != "hann":
+            raise ValueError("Native StyleTTS 2 iSTFT supports the released Hann window.")
+        self.register_buffer(
+            "window",
+            torch.hann_window(win_length, periodic=True),
+            persistent=False,
+        )
 
     def transform(self, input_data):
         forward_transform = torch.stft(
             input_data,
-            self.filter_length, self.hop_length, self.win_length, window=self.window.to(input_data.device),
+            self.filter_length,
+            self.hop_length,
+            self.win_length,
+            window=self.window.to(
+                device=input_data.device,
+                dtype=input_data.dtype,
+            ),
             return_complex=True)
 
         return torch.abs(forward_transform), torch.angle(forward_transform)
@@ -99,7 +111,14 @@ class TorchSTFT(torch.nn.Module):
     def inverse(self, magnitude, phase):
         inverse_transform = torch.istft(
             magnitude * torch.exp(phase * 1j),
-            self.filter_length, self.hop_length, self.win_length, window=self.window.to(magnitude.device))
+            self.filter_length,
+            self.hop_length,
+            self.win_length,
+            window=self.window.to(
+                device=magnitude.device,
+                dtype=magnitude.dtype,
+            ),
+        )
 
         return inverse_transform.unsqueeze(-2)  # unsqueeze to stay consistent with conv_transpose1d implementation
 
@@ -180,7 +199,7 @@ class SineGen(torch.nn.Module):
 #             cumsum_shift = torch.zeros_like(rad_values)
 #             cumsum_shift[:, 1:, :] = tmp_over_one_idx * -1.0
     
-            phase = torch.cumsum(rad_values, dim=1) * 2 * np.pi
+            phase = torch.cumsum(rad_values, dim=1) * 2 * math.pi
             phase = torch.nn.functional.interpolate(phase.transpose(1, 2) * self.upsample_scale, 
                                                     scale_factor=self.upsample_scale, mode="linear").transpose(1, 2)
             sines = torch.sin(phase)
@@ -212,7 +231,7 @@ class SineGen(torch.nn.Module):
             i_phase = torch.cumsum(rad_values - tmp_cumsum, dim=1)
 
             # get the sines
-            sines = torch.cos(i_phase * 2 * np.pi)
+            sines = torch.cos(i_phase * 2 * math.pi)
         return sines
 
     def forward(self, f0):
@@ -309,9 +328,17 @@ class Generator(torch.nn.Module):
 
         self.m_source = SourceModuleHnNSF(
                     sampling_rate=24000,
-                    upsample_scale=np.prod(upsample_rates) * gen_istft_hop_size,
+                    upsample_scale=(
+                        reduce(mul, upsample_rates, 1)
+                        * gen_istft_hop_size
+                    ),
                     harmonic_num=8, voiced_threshod=10)
-        self.f0_upsamp = torch.nn.Upsample(scale_factor=np.prod(upsample_rates) * gen_istft_hop_size)
+        self.f0_upsamp = torch.nn.Upsample(
+            scale_factor=(
+                reduce(mul, upsample_rates, 1)
+                * gen_istft_hop_size
+            )
+        )
         self.noise_convs = nn.ModuleList()
         self.noise_res = nn.ModuleList()
         
@@ -330,7 +357,7 @@ class Generator(torch.nn.Module):
             c_cur = upsample_initial_channel // (2 ** (i + 1))
             
             if i + 1 < len(upsample_rates):  #
-                stride_f0 = np.prod(upsample_rates[i + 1:])
+                stride_f0 = reduce(mul, upsample_rates[i + 1:], 1)
                 self.noise_convs.append(Conv1d(
                     gen_istft_n_fft + 2, c_cur, kernel_size=stride_f0 * 2, stride=stride_f0, padding=(stride_f0+1) // 2))
                 self.noise_res.append(resblock(c_cur, 7, [1,3,5], style_dim))
@@ -503,9 +530,19 @@ class Decoder(nn.Module):
             downlist = [0, 3, 7, 15]
             N_down = downlist[random.randint(0, 3)]
             if F0_down:
-                F0_curve = nn.functional.conv1d(F0_curve.unsqueeze(1), torch.ones(1, 1, F0_down).to('cuda'), padding=F0_down//2).squeeze(1) / F0_down
+                kernel = F0_curve.new_ones((1, 1, F0_down))
+                F0_curve = nn.functional.conv1d(
+                    F0_curve.unsqueeze(1),
+                    kernel,
+                    padding=F0_down // 2,
+                ).squeeze(1) / F0_down
             if N_down:
-                N = nn.functional.conv1d(N.unsqueeze(1), torch.ones(1, 1, N_down).to('cuda'), padding=N_down//2).squeeze(1)  / N_down
+                kernel = N.new_ones((1, 1, N_down))
+                N = nn.functional.conv1d(
+                    N.unsqueeze(1),
+                    kernel,
+                    padding=N_down // 2,
+                ).squeeze(1) / N_down
 
         
         F0 = self.F0_conv(F0_curve.unsqueeze(1))
@@ -523,8 +560,7 @@ class Decoder(nn.Module):
             x = block(x, s)
             if block.upsample_type != "none":
                 res = False
-                
+
         x = self.generator(x, s, F0_curve)
         return x
-    
-    
+

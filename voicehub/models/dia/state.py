@@ -1,255 +1,78 @@
+"""Small compatibility state objects for the native Dia implementation."""
+
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
+from torch import Tensor
 
-from voicehub.models.dia.config import DiaConfig
+from voicehub.architectures.dia.modeling import DiaConditionalGenerationOutput, DiaEncoderOutput
 
 
 def create_attn_mask(
-    q_padding_mask_1d: torch.Tensor,
-    k_padding_mask_1d: torch.Tensor,
+    query_padding_mask: Tensor,
+    key_padding_mask: Tensor,
     device: torch.device,
     is_causal: bool = False,
-) -> torch.Tensor:
-    """Creates the attention mask (self or cross) mimicking JAX segment ID
-    logic."""
-    # B1, Tq = q_padding_mask_1d.shape
-    # B2, Tk = k_padding_mask_1d.shape
-
-    p_mask_q = q_padding_mask_1d.unsqueeze(2)  # Shape [B, Tq, 1]
-    p_mask_k = k_padding_mask_1d.unsqueeze(1)  # Shape [B, 1, Tk]
-
-    # Condition A: Non-padding query attends to non-padding key
-    non_pad_attends_non_pad = p_mask_q & p_mask_k  # Shape [B, Tq, Tk]
-
-    # Condition B: Padding query attends to padding key
-    pad_attends_pad = (~p_mask_q) & (~p_mask_k)  # Shape [B, Tq, Tk]
-
-    # Combine: True if padding status is compatible (both non-pad OR both pad)
-    mask = non_pad_attends_non_pad | pad_attends_pad  # Shape [B, Tq, Tk]
-
+) -> Tensor:
+    """Return the boolean padding mask used by legacy integrations."""
+    if query_padding_mask.ndim != 2 or key_padding_mask.ndim != 2:
+        raise ValueError("Dia padding masks must have shape [batch, sequence].")
+    query = query_padding_mask.to(device=device, dtype=torch.bool)[:, :, None]
+    key = key_padding_mask.to(device=device, dtype=torch.bool)[:, None, :]
+    mask = (query & key) | (~query & ~key)
     if is_causal:
-        # assert Tq == Tk, "Causal mask requires query and key sequence lengths to be equal"
-        causal_mask_2d = torch.tril(
-            torch.ones_like(mask[0], dtype=torch.bool, device=device))  # Shape [B, Tq, Tk]
-        causal_mask = mask & causal_mask_2d  # Shape [B, Tq, Tk]
-        return causal_mask.unsqueeze(1)  # Shape [B, 1, Tq, Tk]
-    else:
-        return mask.unsqueeze(1)  # Shape [B, 1, Tq, Tk]
-
-
-@dataclass
-class EncoderInferenceState:
-    """Parameters specifically for encoder inference."""
-
-    max_seq_len: int
-    device: torch.device
-    positions: torch.Tensor
-    padding_mask: torch.Tensor
-    attn_mask: torch.Tensor
-
-    @classmethod
-    def new(cls, config: DiaConfig, cond_src: torch.Tensor) -> "EncoderInferenceState":
-        """Create an ``EncoderInferenceState`` from a config and conditional
-        source tensor."""
-        device = cond_src.device
-
-        positions = torch.arange(config.data.text_length, dtype=torch.float32, device=device).unsqueeze(0)
-        padding_mask = ((cond_src.squeeze(1)
-                         != config.data.text_pad_value).to(device).repeat_interleave(2, dim=0))
-        attn_mask = create_attn_mask(padding_mask, padding_mask, device, is_causal=False)
-
-        return cls(
-            max_seq_len=config.data.text_length,
+        causal = torch.ones(
+            query.shape[1],
+            key.shape[2],
+            dtype=torch.bool,
             device=device,
-            positions=positions,
-            padding_mask=padding_mask,
-            attn_mask=attn_mask,
-        )
+        ).tril()
+        mask &= causal
+    return mask[:, None]
 
 
 class KVCache(torch.nn.Module):
-    """Fixed-size key/value cache stored as registered buffers for inference.
+    """Generic key/value cache available to optional optimization
+    strategies."""
 
-    The cache is pre-allocated with shape ``(2*B, H, T, D)`` (factor-
-    of-2 for classifier-free guidance) and updated in-place during
-    autoregressive decoding.
-    """
-
-    k: torch.Tensor
-    v: torch.Tensor
-
-    def __init__(
-        self,
-        batch_size: int,
-        num_heads: int,
-        max_len: int,
-        head_dim: int,
-        dtype: torch.dtype,
-        device: torch.device,
-        k: torch.Tensor | None = None,
-        v: torch.Tensor | None = None,
-    ):
-        k = (
-            torch.zeros(
-                (2 * batch_size, num_heads, max_len, head_dim),
-                dtype=dtype,
-                device=device,
-            ) if k is None else k)
-        v = (
-            torch.zeros(
-                (2 * batch_size, num_heads, max_len, head_dim),
-                dtype=dtype,
-                device=device,
-            ) if v is None else v)
+    def __init__(self, key: Tensor, value: Tensor) -> None:
         super().__init__()
-
-        self.register_buffer("k", k)
-        self.register_buffer("v", v)
+        if key.shape != value.shape:
+            raise ValueError("Dia cache key and value shapes must match.")
+        self.register_buffer("k", key)
+        self.register_buffer("v", value)
 
     @classmethod
-    def from_kv(cls, k: torch.Tensor, v: torch.Tensor) -> "KVCache":
-        """Wrap existing key/value tensors into a ``KVCache`` instance."""
-        return cls(
-            batch_size=k.shape[0] // 2,
-            num_heads=k.shape[1],
-            max_len=k.shape[2],
-            head_dim=k.shape[3],
-            dtype=k.dtype,
-            device=k.device,
-            k=k,
-            v=v,
-        )
+    def from_kv(cls, key: Tensor, value: Tensor) -> KVCache:
+        return cls(key, value)
 
-    def update(self, k: torch.Tensor, v: torch.Tensor,
-               current_idx: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Write *k* and *v* into the cache at *current_idx* and return full
-        cache tensors."""
-        k_out, v_out = self.k, self.v
-        k_out[:, :, current_idx, :] = k
-        v_out[:, :, current_idx, :] = v
+    def update(self, key: Tensor, value: Tensor, position: int) -> tuple[Tensor, Tensor]:
+        if key.shape != value.shape:
+            raise ValueError("Dia cache key and value shapes must match.")
+        width = key.shape[-2]
+        end = position + width
+        if position < 0 or end > self.k.shape[-2]:
+            raise IndexError("Dia cache update exceeds its allocated sequence.")
+        self.k[..., position:end, :] = key
+        self.v[..., position:end, :] = value
         return self.k, self.v
-
-    def prefill(self, k: torch.Tensor, v: torch.Tensor):
-        """Bulk-write the first *prefill_len* positions of the cache."""
-        prefill_len = k.shape[2]
-        self.k[:, :, :prefill_len, :] = k
-        self.v[:, :, :prefill_len, :] = v
-
-
-@dataclass
-class DecoderInferenceState:
-    """Parameters specifically for decoder inference."""
-
-    device: torch.device
-    dtype: torch.dtype
-    enc_out: torch.Tensor
-    enc_positions: torch.Tensor
-    dec_positions: torch.Tensor
-    self_attn_cache: list[KVCache]
-    cross_attn_cache: list[KVCache]
-    casual_attn_mask: torch.Tensor
-    cross_attn_mask: torch.Tensor
-
-    @classmethod
-    def new(
-        cls,
-        config: DiaConfig,
-        enc_state: EncoderInferenceState,
-        enc_out: torch.Tensor,
-        dec_cross_attn_cache: list[KVCache],
-        compute_dtype: torch.dtype,
-        max_generation_length: Optional[int] = None,
-    ) -> "DecoderInferenceState":
-        """Creates DecoderInferenceParams from DiaConfig and a device."""
-        device = enc_out.device
-        max_audio_len = max_generation_length or config.data.audio_length
-        batch_size = enc_out.shape[0] // 2
-
-        dec_positions = torch.full((2 * batch_size, 1), fill_value=0, dtype=torch.int32, device=device)
-        causal_mask = torch.tril(torch.ones(max_audio_len, max_audio_len, dtype=torch.bool, device=device))
-        dec_mask = torch.ones((2 * batch_size, 1), dtype=torch.bool, device=device)
-        cross_attn_mask = create_attn_mask(dec_mask, enc_state.padding_mask, device, is_causal=False)
-
-        self_attn_cache = [
-            KVCache(
-                batch_size,
-                config.model.decoder.kv_heads,
-                max_audio_len,
-                config.model.decoder.gqa_head_dim,
-                compute_dtype,
-                device,
-            ) for _ in range(config.model.decoder.n_layer)
-        ]
-
-        return cls(
-            device=device,
-            dtype=compute_dtype,
-            enc_out=enc_out,
-            enc_positions=enc_state.positions,
-            dec_positions=dec_positions,
-            self_attn_cache=self_attn_cache,
-            cross_attn_cache=dec_cross_attn_cache,
-            casual_attn_mask=causal_mask,
-            cross_attn_mask=cross_attn_mask,
-        )
-
-    def prepare_step(self, step_from: int, step_to: int | None = None) -> None:
-        """Set ``dec_positions`` to the range ``[step_from, step_to)`` for the
-        next forward pass."""
-        if step_to is None:
-            step_to = step_from + 1
-        self.dec_positions = torch.arange(
-            step_from, step_to, dtype=torch.int32, device=self.device).unsqueeze(0)
 
 
 @dataclass
 class DecoderOutput:
-    """Accumulator for tokens generated during autoregressive decoding.
-
-    Stores the full ``(B, T, C)`` grid of generated codebook indices and
-    tracks how many prefill steps each batch element consumed.
-    """
-
-    generated_tokens: torch.Tensor
+    generated_tokens: Tensor
     prefill_steps: list[int]
 
-    @classmethod
-    def new(cls, batch_size: int, config: DiaConfig, device: torch.device) -> "DecoderOutput":
-        """Allocate a blank output buffer filled with ``-1`` (uninitialised
-        marker)."""
-        max_audio_len = config.data.audio_length
-        return cls(
-            generated_tokens=torch.full(
-                (batch_size, max_audio_len, config.data.channels),
-                fill_value=-1,
-                dtype=torch.int,
-                device=device,
-            ),
-            prefill_steps=[],
-        )
 
-    def get_tokens_at(self, step_from: int, step_to: int | None = None) -> torch.Tensor:
-        """Return generated tokens in the half-open range ``[step_from,
-        step_to)``."""
-        if step_to is None:
-            step_to = step_from + 1
-        return self.generated_tokens[:, step_from:step_to, :]
+EncoderInferenceState = DiaEncoderOutput
+DecoderInferenceState = DiaConditionalGenerationOutput
 
-    def update_one(self, dec_out: torch.Tensor, step: int, apply_mask: bool = False):
-        """Write a single step's predictions, optionally preserving already-
-        filled positions."""
-        dec_out = dec_out.to(self.generated_tokens.dtype)
-        if apply_mask:
-            mask = self.generated_tokens[:, step, :] == -1
-            self.generated_tokens[:, step, :] = torch.where(mask, dec_out, self.generated_tokens[:, step, :])
-        else:
-            self.generated_tokens[:, step, :] = dec_out
-
-    def prefill(self, dec_out: torch.Tensor, prefill_steps: list[int]):
-        """Bulk-write the audio-prompt tokens and record per-item prefill
-        lengths."""
-        length = dec_out.shape[1]
-        self.generated_tokens[:, :length, :] = dec_out
-        self.prefill_steps = prefill_steps
+__all__ = [
+    "DecoderInferenceState",
+    "DecoderOutput",
+    "EncoderInferenceState",
+    "KVCache",
+    "create_attn_mask",
+]

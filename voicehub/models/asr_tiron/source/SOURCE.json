@@ -1,0 +1,27 @@
+{
+  "checkpoint_audits": [
+    {
+      "filename": "model.safetensors",
+      "model_id": "Trelis/tiron",
+      "notes": "Whisper large-v3 graph with 51904 embedding rows and eight declared speaker tokens at IDs 51866 through 51873.",
+      "revision": "90bc0a4d198cd5cf6679b0e478375ba3a0040575"
+    }
+  ],
+  "components": [
+    {
+      "license": "Apache-2.0",
+      "name": "tiron-inference-harness",
+      "revision": "d249c5a81fc6e0f1ecd34fd30cf2519f06fe671c",
+      "upstream": "https://github.com/TrelisResearch/tiron"
+    }
+  ],
+  "license": "Apache-2.0",
+  "limitations": [
+    "The native provider returns window-local speaker identities for one audio window of at most 30 seconds.",
+    "Cross-window speaker linking needs a separately modeled speaker-embedding and clustering architecture.",
+    "Fine-tuning requires inline speaker and 20 ms timestamp targets that satisfy the published speaker-block grammar."
+  ],
+  "model_type": "asr_tiron",
+  "policy": "VoiceHub owns architecture, preprocessing, constrained decoding, training, and export execution; external weights are accepted only through strict Safetensors loading.",
+  "upstream": "https://huggingface.co/Trelis/tiron"
+}

@@ -1,0 +1,69 @@
+{
+  "architecture": "fsmn-vad",
+  "implementation": "voicehub-native",
+  "upstream": {
+    "repository": "https://github.com/modelscope/FunASR",
+    "revision": "16cd165ac3946cc8c08bf845331f91fefec8e1a9",
+    "revision_date": "2026-07-27T15:25:14Z",
+    "license": "MIT",
+    "audited_files": [
+      "funasr/models/fsmn_vad_streaming/encoder.py",
+      "funasr/models/fsmn_vad_streaming/model.py",
+      "funasr/frontends/wav_frontend.py",
+      "funasr/download/name_maps_from_hub.py",
+      "tests_models/test_fsmn_vad.py",
+      "tests_models/test_fsmn_vad_streaming.py"
+    ]
+  },
+  "artifact": {
+    "canonical_repository": "funasr/fsmn-vad",
+    "canonical_revision": "df20e6b30c653645fa4ff125cacfcabd1020a669",
+    "modelscope_repository": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+    "modelscope_model_file_revision": "662fc7a38813d81305085696d59eb5b1141a204a",
+    "license": "Apache-2.0",
+    "files": {
+      "model.pt": {
+        "sha256": "b3be75be477f0780277f3bae0fe489f48718f585f3a6e45d7dd1fbb1a4255fc5",
+        "format": "pickle state_dict",
+        "tensor_count": 24,
+        "tensor_inventory_fingerprint": "26e28a75fe38fbfeaf21eaff15ea15054b030fd0bb69958b2ba0b4c4bf0d33c6"
+      },
+      "config.yaml": {
+        "sha256": "486861ca26ddb79081663b6179cb204c6bfae71c52f04aafc48a9e9d8dde1e93"
+      },
+      "am.mvn": {
+        "sha256": "df189fd5f4352df84a0fd464eeab4e450a5e645665d6b38f13c832492261a739",
+        "format": "Kaldi AddShift/Rescale text transform",
+        "dimension": 400
+      }
+    }
+  },
+  "compatibility": {
+    "frontend": "16 kHz, 25 ms Hamming fbank, 10 ms shift, 80 mel bins, LFR 5/1, fixed CMVN",
+    "encoder": "400-140-250, four 128-projection left-memory FSMN layers, 140-248 output",
+    "silence_pdf_ids": [
+      0
+    ],
+    "streaming": "per-session frontend emission, layer-local 19-frame caches, and isolated endpoint state",
+    "checkpoint_runtime": "Safetensors only after explicit trust-gated weights_only conversion"
+  },
+  "training": {
+    "upstream_public_boundary": "The pinned public FsmnVADStreaming implementation is inference-only and contains no loss, optimizer, data manifest, or fine-tuning recipe.",
+    "voicehub_objectives": [
+      "exact 248-PDF cross-entropy for aligned acoustic PDF labels",
+      "grouped silence-versus-speech negative log likelihood for portable binary frame labels"
+    ],
+    "label_alignment": "10 ms frame grid with 25 ms analysis windows; raw timestamp annotations use at least 50 percent speech coverage"
+  },
+  "verification": {
+    "completed": [
+      "official checkpoint SHA-256",
+      "complete 24-tensor namespace and shapes",
+      "ModelScope and Hugging Face artifact identity by SHA-256",
+      "Kaldi frontend and FSMN graph deterministic differential fixtures"
+    ],
+    "limitations": [
+      "The original private training corpus, PDF target generator, and loss recipe are not published with the checkpoint and therefore cannot be claimed as reproduced."
+    ]
+  }
+}

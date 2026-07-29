@@ -1,0 +1,26 @@
+{
+  "architecture": "qwen3-tts-12hz",
+  "checkpoint_license": "Apache-2.0",
+  "checkpoint_repositories": [
+    "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+    "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+  ],
+  "checkpoint_revisions": {
+    "Qwen/Qwen3-TTS-12Hz-0.6B-Base": "5d83992436eae1d760afd27aff78a71d676296fc",
+    "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice": "85e237c12c027371202489a0ec509ded67b5e4b5",
+    "Qwen/Qwen3-TTS-12Hz-1.7B-Base": "fd4b254389122332181a7c3db7f27e918eec64e3",
+    "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice": "0c0e3051f131929182e2c023b9537f8b1c68adfe",
+    "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign": "5ecdb67327fd37bb2e042aab12ff7391903235d3"
+  },
+  "implementation": "VoiceHub-owned PyTorch graph; no upstream runtime import",
+  "license": "Apache-2.0",
+  "limitations": [
+    "The native speech decoder is exact. The Mimi-derived speech encoder used to create ICL reference codes is not yet ported; x-vector-only cloning is supported, while ICL reference-audio cloning remains explicitly unavailable.",
+    "Native file and URL reference decoding accepts uncompressed PCM WAVE; callers can pass predecoded tensors for other audio containers."
+  ],
+  "revision": "022e286b98fbec7e1e916cb940cdf532cd9f488e",
+  "upstream": "https://github.com/QwenLM/Qwen3-TTS"
+}

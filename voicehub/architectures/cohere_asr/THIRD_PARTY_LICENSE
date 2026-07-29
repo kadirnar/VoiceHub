@@ -1,0 +1,31 @@
+Cohere Transcribe source attribution
+====================================
+
+The Cohere ASR configuration, model graph, feature extraction, processor,
+tokenizer behavior, and published checkpoint metadata adapted by VoiceHub
+were audited from:
+
+    https://github.com/huggingface/transformers
+    revision af71155683b4d34dd92d8f037392fa6bf334035e
+
+and:
+
+    https://huggingface.co/CohereLabs/cohere-transcribe-03-2026
+    revision b1eacc2686a3d08ceaae5f24a88b1d519620bc09
+
+Both sources identify the applicable license as Apache License, Version 2.0.
+The complete Apache-2.0 terms are distributed in VoiceHub's top-level
+LICENSE file and are available at:
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+Tokenizer behavior attribution
+==============================
+
+The native byte-fallback BPE and precompiled normalization behavior were
+audited from the Apache-2.0-licensed Hugging Face tokenizers and
+spm_precompiled projects at the immutable revisions recorded in SOURCE.json.

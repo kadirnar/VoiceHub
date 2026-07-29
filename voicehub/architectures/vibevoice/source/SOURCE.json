@@ -1,0 +1,81 @@
+{
+  "architecture": "vibevoice",
+  "implementation": "voicehub-native",
+  "implementation_sources": [
+    {
+      "license": "MIT",
+      "repository": "https://github.com/microsoft/VibeVoice",
+      "revision": "94da20d98b2fa7688e9cbfaf7692ddb4954f7600"
+    },
+    {
+      "license": "Apache-2.0",
+      "repository": "https://github.com/huggingface/transformers",
+      "revision": "af71155683b4d34dd92d8f037392fa6bf334035e"
+    }
+  ],
+  "checkpoints": [
+    {
+      "header_fingerprint": "013b5db1ca72e154c055182ace9a75d3a348ca4e922fadca608a7eb4e1ae4015",
+      "license": "MIT",
+      "parameters": 8330325888,
+      "repository": "microsoft/VibeVoice-ASR-HF",
+      "revision": "f22241c2062b3b25272bf117397e03d73381037a",
+      "tensor_bytes": 16660651776,
+      "tensors": 901
+    },
+    {
+      "header_fingerprint": "925fb3708482f1cfe7f4614a53731876ef8923435f36eda579c1d5e082f8001c",
+      "license": "MIT",
+      "parameters": 2704021987,
+      "repository": "microsoft/VibeVoice-1.5B",
+      "revision": "c00898d257e6b46004e3e2866a47534085fb685a",
+      "tensor_bytes": 5408043974,
+      "tensors": 1204
+    },
+    {
+      "header_fingerprint": "7fb07bd53c540e4b8de42c13d4a09615725e9b700b50a8f34b70906d7864395b",
+      "license": "MIT",
+      "parameters": 1017626724,
+      "repository": "microsoft/VibeVoice-Realtime-0.5B",
+      "revision": "6bce5f06044837fe6d2c5d7a71a84f0416bd57e4",
+      "tensor_bytes": 2035253448,
+      "tensors": 605
+    }
+  ],
+  "tokenizer_assets": [
+    {
+      "license": "Apache-2.0",
+      "repository": "Qwen/Qwen2.5-1.5B",
+      "revision": "8faed761d45a263340a0528343f099c05c9a4323"
+    },
+    {
+      "license": "Apache-2.0",
+      "repository": "Qwen/Qwen2.5-0.5B",
+      "revision": "060db6499f32faf8b98477b0a26969ef7d8b9987"
+    }
+  ],
+  "verified_scope": {
+    "inference": [
+      "complete native parameter namespaces for ASR-HF, TTS 1.5B, and Realtime 0.5B",
+      "ASR causal speech encoders, multimodal projection, greedy generation, and structured decoding",
+      "TTS acoustic and semantic codecs, Qwen2 backbones, diffusion head, and DPM-Solver stages",
+      "strict single and sharded Safetensors loading and portable export"
+    ],
+    "training": [
+      "ASR masked causal-token objective with the published frozen speech encoders",
+      "TTS 1.5B masked causal-token and v-prediction diffusion objectives with published frozen codecs",
+      "full trainability of every component that the published forward permits"
+    ],
+    "limitations": [
+      "Microsoft did not publish a raw-data TTS training serializer, dataset recipe, optimizer recipe, or benchmark protocol; VoiceHub requires explicit preprocessed segment and latent masks.",
+      "Realtime 0.5B publishes no unified training forward and is rejected for fine-tuning.",
+      "Realtime low-level stages are exposed, but high-level streaming parity is not claimed until chunk and cache differential tests are complete.",
+      "No corpus-level accuracy, speaker-similarity, latency, or audio-quality improvement is claimed."
+    ]
+  },
+  "security_boundary": {
+    "checkpoint_format": "Safetensors only",
+    "runtime_dependencies": "PyTorch, the Python standard library, and VoiceHub only",
+    "snapshot_policy": "Official Hub artifacts resolve to immutable commits and all indexed shard headers are reconciled before any tensor assignment."
+  }
+}

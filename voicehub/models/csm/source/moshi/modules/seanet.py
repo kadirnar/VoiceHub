@@ -1,6 +1,7 @@
 # Copyright (c) Kyutai, all rights reserved.
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
+# Modified by VoiceHub: replace external product helpers with the stdlib.
 
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
@@ -10,7 +11,7 @@
 
 import typing as tp
 
-import numpy as np
+import math
 import torch.nn as nn
 
 from .conv import StreamingConv1d, StreamingConvTranspose1d
@@ -154,7 +155,7 @@ class SEANetEncoder(StreamingContainer):
         self.ratios = list(reversed(ratios))
         del ratios
         self.n_residual_layers = n_residual_layers
-        self.hop_length = int(np.prod(self.ratios))
+        self.hop_length = math.prod(self.ratios)
         self.n_blocks = len(self.ratios) + 2  # first and last conv + residual blocks
         self.disable_norm_outer_blocks = disable_norm_outer_blocks
         assert (
@@ -300,7 +301,7 @@ class SEANetDecoder(StreamingContainer):
         self.ratios = ratios
         del ratios
         self.n_residual_layers = n_residual_layers
-        self.hop_length = int(np.prod(self.ratios))
+        self.hop_length = math.prod(self.ratios)
         self.n_blocks = len(self.ratios) + 2  # first and last conv + residual blocks
         self.disable_norm_outer_blocks = disable_norm_outer_blocks
         assert (

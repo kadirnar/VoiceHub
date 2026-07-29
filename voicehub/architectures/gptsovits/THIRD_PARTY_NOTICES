@@ -1,0 +1,53 @@
+GPT-SoVITS
+============
+
+The native GPT-SoVITS V1, V2, V2Pro, and V2ProPlus classic-S2 graphs and
+staged training equations are adapted from:
+
+  https://github.com/RVC-Boss/GPT-SoVITS
+  revision d523079fc05d9a8028d6085bffe4a2757c32abb6
+
+Copyright (c) 2024 RVC-Boss
+Licensed under the MIT License.
+
+The residual-vector-quantizer state topology derives from EnCodec:
+
+  https://github.com/facebookresearch/encodec
+
+Copyright (c) Meta Platforms, Inc. and affiliates.
+Licensed under the MIT License.
+
+The S2 generator, flow, posterior encoder, and discriminator equations derive
+from VITS:
+
+  https://github.com/jaywalnut310/vits
+  revision 2e561ba58618d021b5b8323d3765880f7e0ecfdb
+
+Copyright (c) 2020 Jaehyeon Kim
+Licensed under the MIT License.
+
+The S1 autoregressive semantic model is adapted through GPT-SoVITS from
+SoundStorm and references VALL-E. VoiceHub retains GPT-SoVITS's released
+checkpoint namespace and source-faithful non-DPO objective; it does not import
+either project at runtime.
+
+MIT License
+-----------
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

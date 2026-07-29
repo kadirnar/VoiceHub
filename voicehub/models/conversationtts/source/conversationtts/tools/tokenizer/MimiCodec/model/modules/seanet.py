@@ -8,9 +8,9 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import math
 import typing as tp
 
-import numpy as np
 import torch.nn as nn
 
 from voicehub.models.conversationtts.source.conversationtts.tools.tokenizer.MimiCodec.model.modules.conv import StreamingConv1d, StreamingConvTranspose1d
@@ -155,7 +155,7 @@ class SEANetEncoder(StreamingContainer):
         self.ratios = list(reversed(ratios))
         del ratios
         self.n_residual_layers = n_residual_layers
-        self.hop_length = int(np.prod(self.ratios))
+        self.hop_length = math.prod(self.ratios)
         self.n_blocks = len(self.ratios) + 2  # first and last conv + residual blocks
         self.disable_norm_outer_blocks = disable_norm_outer_blocks
         assert (
@@ -302,7 +302,7 @@ class SEANetDecoder(StreamingContainer):
         self.ratios = ratios
         del ratios
         self.n_residual_layers = n_residual_layers
-        self.hop_length = int(np.prod(self.ratios))
+        self.hop_length = math.prod(self.ratios)
         self.n_blocks = len(self.ratios) + 2  # first and last conv + residual blocks
         self.disable_norm_outer_blocks = disable_norm_outer_blocks
         assert (

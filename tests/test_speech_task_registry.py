@@ -163,6 +163,38 @@ class SpeechTaskRegistryTests(unittest.TestCase):
              for spec in list_model_specs(task="speech-to-text")},
         )
 
+    def test_native_filter_resolves_owned_architecture_contracts(self):
+        native_asr = list_model_specs(
+            task="asr",
+            native=True,
+        )
+
+        self.assertIn(
+            "asr_whisper",
+            {spec.model_type
+             for spec in native_asr},
+        )
+        whisper = get_model_spec("asr_whisper")
+        self.assertTrue(whisper.is_voicehub_native)
+        self.assertEqual(
+            whisper.native_architecture.architecture_id,
+            "whisper",
+        )
+        generic = get_model_spec("asr_transformers")
+        self.assertTrue(generic.is_voicehub_native)
+        self.assertEqual(
+            generic.native_architecture.architecture_id,
+            "native-asr-dispatch",
+        )
+        sherpa = get_model_spec("vad_sherpa_onnx")
+        self.assertTrue(sherpa.is_voicehub_native)
+        self.assertEqual(
+            sherpa.native_architecture.architecture_id,
+            "native-vad-dispatch",
+        )
+        with self.assertRaisesRegex(TypeError, "native"):
+            list_model_specs(native="yes")
+
     def test_alias_registration_is_idempotent_only_when_requested(self):
         register_model_spec(self._spec(
             self.ASR_MODEL_TYPE,

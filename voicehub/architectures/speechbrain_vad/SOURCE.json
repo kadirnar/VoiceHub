@@ -1,0 +1,47 @@
+{
+  "architecture": "speechbrain-crdnn-vad",
+  "implementation": "voicehub-native",
+  "source": {
+    "repository": "https://github.com/speechbrain/speechbrain",
+    "training_revision": "ea17d223cc7814f1027d657ed713676bbaacb608",
+    "audited_revision": "e5cb1f65b940634215650aa1171e0440d0808123",
+    "license": "Apache-2.0"
+  },
+  "artifact": {
+    "repository": "speechbrain/vad-crdnn-libriparty",
+    "revision": "c5d5ae4fce161d94c3ab0286e32fb4a041a21a04",
+    "checkpoint": "model.ckpt",
+    "checkpoint_sha256": "f378f95e8abae056ed46daee57884f96ac8f7057d42f92a74a491ebdeb3d7594",
+    "hyperparams_sha256": "6e50ba520586acce9d9d89e79ff88e3f85fcef543ef22b61939b85540fb93351",
+    "normalizer_sha256": "705be69730a6bf9d029c5c93b8adacc680e3c635b01d514859bdfec51fc97760",
+    "tensor_inventory_fingerprint": "c1fdcf768e0fa77503291f05b9f18593b941bdb1a8125ca93c3a198396c29f50",
+    "tensor_count": 49,
+    "parameters_and_buffers": 109810,
+    "license": "not-declared"
+  },
+  "verified_scope": {
+    "inference": [
+      "exact real-weight differential parity for Fbank, sentence normalization, CRDNN logits, and probabilities",
+      "author-compatible 30 s / 10 s chunking, optional 50 percent overlap, hysteresis, boundary extraction, merging, length filtering, energy refinement, and neural double-check",
+      "Safetensors export and fresh native reload"
+    ],
+    "training": [
+      "raw 16 kHz waveform preparation",
+      "LibriParty interval-to-10 ms target conversion",
+      "masked binary cross entropy with the author recipe's final-frame alignment",
+      "full CRDNN backward while retaining the author-frozen feature frontend"
+    ],
+    "limitations": [
+      "The artifact card declares no checkpoint license; users must review its terms before conversion.",
+      "The repository revision named by the artifact contains a GRU-only training recipe, not the published CRDNN graph. Exact author CRDNN augmentation and optimization cannot be verified and are not claimed.",
+      "The bidirectional GRU is offline and cannot provide causally correct streaming inference.",
+      "No corpus-level benchmark was run, so no accuracy improvement over the published checkpoint is claimed."
+    ]
+  },
+  "security_boundary": {
+    "source_format": "pickle-based model.ckpt",
+    "conversion": "Explicit trust_pickle_checkpoint=True, torch.load(weights_only=True), pinned SHA-256, and complete namespace/shape/fingerprint validation.",
+    "runtime_format": "Safetensors",
+    "runtime_dependencies": "PyTorch and VoiceHub only; no SpeechBrain, torchaudio, HyperPyYAML, NumPy, or Transformers imports."
+  }
+}

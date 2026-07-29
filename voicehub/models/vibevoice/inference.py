@@ -1,19 +1,31 @@
-"""VibeVoice realtime inference backed by vendored Microsoft source."""
+"""VoiceHub-native VibeVoice TTS loading and fine-tuning lifecycle.
+
+The published realtime checkpoint exposes a staged decoder, diffusion
+head, and causal acoustic decoder.  VoiceHub loads those stages
+natively, but does not present the upstream cached-prompt loop as
+equivalent until its mutable cache format and chunk boundaries have an
+independent parity suite.
+"""
 
 from __future__ import annotations
 
 import copy
-import json
 import math
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from voicehub.configuration_utils import VoiceHubConfig
-from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
-from voicehub.models._shared import finish_audio_output, resolve_model_directory, resolve_torch_dtype, seeded_inference
+
+_HIGH_LEVEL_GENERATION_ERROR = (
+    "VoiceHub has native VibeVoice TTS graphs, but high-level cached-prompt "
+    "synthesis is not enabled: cache serialization, chunk boundaries, and "
+    "waveform parity have not yet been independently verified. Load the "
+    "realtime checkpoint and use `forward_lm`, `forward_tts_lm`, "
+    "`sample_speech_latents`, and `decode_speech_latents` directly; the "
+    "non-streaming checkpoint is supported for fine-tuning.")
 
 
 class VibeVoiceConfig(VoiceHubConfig):
@@ -31,6 +43,9 @@ class VibeVoiceConfig(VoiceHubConfig):
         training_diffusion_loss_weight: float = 1.0,
         training_ddpm_batch_mul: int = 1,
         sample_rate: int = 24000,
+        revision: str | None = None,
+        cache_dir: str | None = None,
+        local_files_only: bool = False,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -40,6 +55,42 @@ class VibeVoiceConfig(VoiceHubConfig):
         self.training_ce_loss_weight = training_ce_loss_weight
         self.training_diffusion_loss_weight = training_diffusion_loss_weight
         self.training_ddpm_batch_mul = training_ddpm_batch_mul
+        self.revision = revision
+        self.cache_dir = cache_dir
+        self.local_files_only = local_files_only
+        self.validate()
+
+    def validate(self) -> None:
+        if self.sample_rate != 24_000:
+            raise ValueError("Published VibeVoice checkpoints require 24 kHz.")
+        if not isinstance(self.torch_dtype, str) or not self.torch_dtype.strip():
+            raise TypeError("`torch_dtype` must be a non-empty string.")
+        if self.attention_implementation != "sdpa":
+            raise ValueError(
+                "Native VibeVoice currently implements the audited SDPA "
+                "attention path only.")
+        if (isinstance(self.diffusion_steps, bool) or not isinstance(self.diffusion_steps, int) or
+                self.diffusion_steps <= 0):
+            raise ValueError("`diffusion_steps` must be a positive integer.")
+        for name in (
+                "training_ce_loss_weight",
+                "training_diffusion_loss_weight",
+        ):
+            value = getattr(self, name)
+            if (isinstance(value, bool) or not isinstance(value, (int, float)) or
+                    not math.isfinite(float(value)) or value < 0):
+                raise ValueError(f"`{name}` must be finite and non-negative.")
+        if (isinstance(self.training_ddpm_batch_mul, bool) or
+                not isinstance(self.training_ddpm_batch_mul, int) or self.training_ddpm_batch_mul <= 0):
+            raise ValueError("`training_ddpm_batch_mul` must be a positive integer.")
+        if self.revision is not None and (not isinstance(self.revision, str) or not self.revision.strip()):
+            raise ValueError("`revision` must be a non-empty string or None.")
+        if self.cache_dir is not None:
+            if not isinstance(self.cache_dir, (str, Path)):
+                raise TypeError("`cache_dir` must be path-like or None.")
+            self.cache_dir = str(Path(self.cache_dir).expanduser())
+        if not isinstance(self.local_files_only, bool):
+            raise TypeError("`local_files_only` must be a boolean.")
 
 
 class VibeVoiceForTextToSpeech(PreTrainedTTSModel):
@@ -48,6 +99,7 @@ class VibeVoiceForTextToSpeech(PreTrainedTTSModel):
 
     config_class = VibeVoiceConfig
     default_model_name_or_path = "microsoft/VibeVoice-Realtime-0.5B"
+    supports_gradient_checkpointing = True
 
     def __init__(
         self,
@@ -56,172 +108,105 @@ class VibeVoiceForTextToSpeech(PreTrainedTTSModel):
         model_path: str | None = None,
         device: str = "auto",
         lazy_load: bool = True,
+        token: str | bool | None = None,
         **config_overrides,
     ):
+        if token is not None and not isinstance(token, (str, bool)):
+            raise TypeError("`token` must be a string, boolean, or None.")
+        if isinstance(token, str) and not token.strip():
+            raise ValueError("String `token` values must be non-empty.")
         config = self._coerce_config(
             config,
             model_path=model_path,
             **config_overrides,
         )
+        config.validate()
+        self._hub_token = token
         self._torch = None
         self._processor = None
         self._safe_globals = ()
         self._runtime_kind = None
+        self.runtime = None
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     def _load_pretrained_model(self) -> None:
-        torch = import_optional(
-            "torch",
-            model_type="vibevoice",
-            install_extra=None,
-        )
-        model_directory = resolve_model_directory(
-            self.config.name_or_path,
-            model_type="vibevoice",
-        )
-        dtype = resolve_torch_dtype(
-            torch,
-            self.config.torch_dtype,
-            self.device,
-        )
-        if self.is_training_load:
-            self._load_non_streaming_training_runtime(
-                torch,
-                model_directory,
-                dtype,
-            )
-            return
-        model_module = import_optional(
-            "voicehub.models.vibevoice.source.vibevoice.modular."
-            "modeling_vibevoice_streaming_inference",
-            model_type="vibevoice",
-            install_extra=None,
-        )
-        processor_module = import_optional(
-            "voicehub.models.vibevoice.source.vibevoice.processor."
-            "vibevoice_streaming_processor",
-            model_type="vibevoice",
-            install_extra=None,
-        )
-        modeling_outputs = import_optional(
-            "transformers.modeling_outputs",
-            model_type="vibevoice",
-            install_extra=None,
-        )
-        cache_utils = import_optional(
-            "transformers.cache_utils",
-            model_type="vibevoice",
-            install_extra=None,
-        )
-        model = (
-            model_module.VibeVoiceStreamingForConditionalGenerationInference.from_pretrained(
-                str(model_directory),
-                torch_dtype=dtype,
-                device_map=None,
-                attn_implementation=self.config.attention_implementation,
-            ))
-        model.to(self.device).eval()
-        model.set_ddpm_inference_steps(num_steps=self.config.diffusion_steps)
-        self._processor = (processor_module.VibeVoiceStreamingProcessor.from_pretrained(str(model_directory)))
-        self.config.sample_rate = self._checkpoint_sample_rate(self._processor)
-        self._safe_globals = (
-            modeling_outputs.BaseModelOutputWithPast,
-            cache_utils.DynamicCache,
-        )
-        self._torch = torch
-        self._runtime_kind = "streaming"
-        self.model = model
+        import torch
 
-    def _load_non_streaming_training_runtime(
-        self,
-        torch,
-        model_directory: Path,
-        dtype,
-    ) -> None:
-        """Load the verified 1.5B graph instead of the realtime runtime."""
-        configuration_path = model_directory / "config.json"
-        if not configuration_path.is_file():
-            raise FileNotFoundError(f"VibeVoice training config was not found: {configuration_path}.")
-        configuration = json.loads(configuration_path.read_text(encoding="utf-8"), )
-        if str(configuration.get("model_type", "")).lower() != "vibevoice":
-            raise ValueError(
-                "VibeVoice fine-tuning supports only the non-streaming "
-                "`microsoft/VibeVoice-1.5B` architecture; the selected "
-                f"checkpoint declares model_type={configuration.get('model_type')!r}.")
-        model_module = import_optional(
-            "voicehub.models.vibevoice.source.vibevoice.modular."
-            "modeling_vibevoice",
-            model_type="vibevoice",
-            install_extra="training",
+        from voicehub.architectures.vibevoice.configuration import VibeVoiceTTSConfig as NativeVibeVoiceTTSConfig
+        from voicehub.architectures.vibevoice.runtime import load_vibevoice_runtime
+
+        runtime = load_vibevoice_runtime(
+            self.config.name_or_path,
+            device=self.device,
+            compute_dtype=self.config.torch_dtype,
+            revision=self.config.revision,
+            cache_dir=self.config.cache_dir,
+            token=self._hub_token,
+            local_files_only=self.config.local_files_only,
+            for_training=self.is_training_load,
         )
-        processor_module = import_optional(
-            "voicehub.models.vibevoice.source.vibevoice.processor."
-            "vibevoice_processor",
-            model_type="vibevoice",
-            install_extra="training",
-        )
-        model = model_module.VibeVoiceForConditionalGeneration.from_pretrained(
-            str(model_directory),
-            torch_dtype=dtype,
-            device_map=None,
-            attn_implementation=self.config.attention_implementation,
-        )
-        model.to(self.device)
-        self._processor = processor_module.VibeVoiceProcessor.from_pretrained(str(model_directory), )
-        self._processor.acoustic_tokenizer = model.model.acoustic_tokenizer
-        self._processor.semantic_tokenizer = model.model.semantic_tokenizer
-        self.config.sample_rate = self._checkpoint_sample_rate(self._processor)
+        if not isinstance(runtime.config, NativeVibeVoiceTTSConfig):
+            raise TypeError("VibeVoice TTS received an ASR checkpoint.")
+        self.runtime = runtime
+        self.model = runtime.model
+        self._processor = runtime.processor
         self._torch = torch
-        self._runtime_kind = "non-streaming-training"
-        self.model = model
-        self._prepare_for_training()
+        self.config.sample_rate = self._checkpoint_sample_rate(runtime.processor)
+        self._runtime_kind = (
+            "native-realtime-stages" if runtime.config.is_streaming else "native-non-streaming-training")
 
     def _validate_training_runtime(self) -> None:
-        """Reject the streaming checkpoint before allocating its fused
-        graph."""
+        """Reject published realtime checkpoints before graph allocation."""
         identifier = str(self.config.name_or_path)
         source = Path(identifier).expanduser()
-        if source.is_dir():
-            configuration_path = source / "config.json"
+        if source.exists():
+            root = source if source.is_dir() else source.parent
+            configuration_path = root / "config.json"
             if not configuration_path.is_file():
                 raise FileNotFoundError(
                     "A local VibeVoice training directory must contain "
                     f"`config.json`: {configuration_path}.")
-            configuration = json.loads(configuration_path.read_text(encoding="utf-8"), )
+            from voicehub.hub import read_json_file
+
+            configuration = read_json_file(configuration_path)
             if str(configuration.get("model_type", "")).lower() != "vibevoice":
                 raise ValueError(
                     "VibeVoice fine-tuning requires the non-streaming 1.5B "
-                    "architecture (`model_type=\"vibevoice\"`).")
+                    'architecture (`model_type="vibevoice"`).')
             return
-        if source.exists():
-            raise NotADirectoryError(
-                "VibeVoice fine-tuning expects a Hub ID or checkpoint directory, "
-                f"not a file: {source}.")
-        if identifier.strip().lower() != "microsoft/vibevoice-1.5b":
+        normalized = identifier.strip().lower()
+        if normalized in {
+                "microsoft/vibevoice-realtime-0.5b",
+                "microsoft/vibevoice-asr-hf",
+        }:
             raise ValueError(
-                "VibeVoice fine-tuning is verified only for the non-streaming "
-                "`microsoft/VibeVoice-1.5B` checkpoint. The default "
-                "`VibeVoice-Realtime-0.5B` runtime has no unified training "
-                "forward graph.")
+                "VibeVoice TTS fine-tuning requires a non-streaming "
+                '`model_type="vibevoice"` checkpoint. The realtime release '
+                "has no unified training forward, and the ASR release belongs "
+                "to the speech-recognition provider.")
 
     def _prepare_for_training(self) -> None:
-        if self._runtime_kind != "non-streaming-training":
+        if self._runtime_kind != "native-non-streaming-training":
             raise ValueError("VibeVoice fine-tuning requires the non-streaming 1.5B runtime.")
-        self.model.train()
-        for name in ("acoustic_tokenizer", "semantic_tokenizer"):
-            tokenizer = getattr(self.model.model, name, None)
-            if tokenizer is None:
-                raise RuntimeError(f"VibeVoice training runtime is missing `{name}`.")
-            tokenizer.eval()
-            for parameter in tokenizer.parameters():
-                parameter.requires_grad_(False)
+        if self.runtime is None:
+            raise RuntimeError("VibeVoice native runtime is not loaded.")
+        self.runtime.prepare_for_training()
+
+    def _prepare_for_inference(self) -> None:
+        if self.runtime is None:
+            raise RuntimeError("VibeVoice native runtime is not loaded.")
+        self.runtime.prepare_for_inference()
 
     @staticmethod
     def _checkpoint_sample_rate(processor: Any) -> int:
         audio_processor = getattr(processor, "audio_processor", None)
-        sample_rate = getattr(audio_processor, "sampling_rate", None)
+        sample_rate = getattr(
+            audio_processor,
+            "sample_rate",
+            getattr(audio_processor, "sampling_rate", None),
+        )
         if isinstance(sample_rate, bool) or not isinstance(sample_rate, int):
-            raise RuntimeError(
+            raise TypeError(
                 "The VibeVoice checkpoint processor does not define an "
                 "integer audio sampling rate.")
         if sample_rate <= 0:
@@ -231,25 +216,14 @@ class VibeVoiceForTextToSpeech(PreTrainedTTSModel):
         return sample_rate
 
     def _validate_generation_inputs(self, model_inputs: dict[str, Any]) -> None:
-        diffusion_steps = self.config.diffusion_steps
-        if (not isinstance(diffusion_steps, int) or isinstance(diffusion_steps, bool) or
-                diffusion_steps <= 0):
-            raise ValueError("`diffusion_steps` must be a positive integer.")
         voice_prompt_path = model_inputs.get("voice_prompt_path")
-        if not isinstance(voice_prompt_path, (str, Path)) or not str(voice_prompt_path).strip():
-            raise ValueError("`voice_prompt_path` must point to a cached VibeVoice `.pt` prompt.")
-        prompt_path = Path(voice_prompt_path).expanduser()
-        if not prompt_path.is_file():
-            raise FileNotFoundError(f"VibeVoice cached voice prompt was not found: {prompt_path}.")
-
-        cfg_scale = model_inputs.get("cfg_scale", 1.5)
-        if (not isinstance(cfg_scale, (int, float)) or isinstance(cfg_scale, bool) or
-                not math.isfinite(cfg_scale) or cfg_scale <= 0):
-            raise ValueError("`cfg_scale` must be a finite positive number.")
-        max_new_tokens = model_inputs.get("max_new_tokens")
-        if max_new_tokens is not None and (not isinstance(max_new_tokens, int) or
-                                           isinstance(max_new_tokens, bool) or max_new_tokens <= 0):
-            raise ValueError("`max_new_tokens` must be a positive integer or None.")
+        if voice_prompt_path is not None:
+            if (not isinstance(voice_prompt_path, (str, Path)) or not str(voice_prompt_path).strip()):
+                raise ValueError("`voice_prompt_path` must be a non-empty path or None.")
+            prompt_path = Path(voice_prompt_path).expanduser()
+            if not prompt_path.is_file():
+                raise FileNotFoundError(f"VibeVoice cached voice prompt was not found: {prompt_path}.")
+        raise RuntimeError(_HIGH_LEVEL_GENERATION_ERROR)
 
     def _load_cached_prompt(self, voice_prompt_path: str) -> Mapping[str, Any]:
         with self._torch.serialization.safe_globals(list(self._safe_globals)):
@@ -314,49 +288,23 @@ class VibeVoiceForTextToSpeech(PreTrainedTTSModel):
         seed: int | None = None,
         **generation_options,
     ) -> TTSOutput:
-        cached_prompt = self._load_cached_prompt(voice_prompt_path)
-        inputs = self._processor.process_input_with_cached_prompt(
-            text=text,
-            cached_prompt=cached_prompt,
-            padding=True,
-            return_tensors="pt",
-            return_attention_mask=True,
-        )
-        inputs = self._move_inputs_to_device(inputs)
-        options = self._generation_kwargs(
+        del (
+            text,
+            output_file,
+            voice_prompt_path,
+            cfg_scale,
+            max_new_tokens,
+            seed,
             generation_options,
-            max_new_tokens=max_new_tokens,
-            cfg_scale=cfg_scale,
-            tokenizer=self._processor.tokenizer,
-            cached_prompt=cached_prompt,
         )
-        with seeded_inference(
-                seed,
-                device=self.device,
-                model_type="vibevoice",
-        ) as effective_seed:
-            outputs = self.model.generate(
-                **inputs,
-                **options,
-            )
-        speech_outputs = getattr(outputs, "speech_outputs", None)
-        if not speech_outputs or speech_outputs[0] is None:
-            raise RuntimeError("VibeVoice did not return an audio waveform.")
-        waveform = speech_outputs[0]
-        if not hasattr(waveform, "detach"):
-            raise RuntimeError("VibeVoice returned a non-tensor audio waveform.")
-        if hasattr(waveform, "numel") and waveform.numel() == 0:
-            raise RuntimeError("VibeVoice returned an empty audio waveform.")
-        return finish_audio_output(
-            waveform.detach().float().cpu(),
-            self.sample_rate,
-            output_file=output_file,
-            metadata={
-                "cfg_scale": cfg_scale,
-                "seed": effective_seed,
-                "requested_seed": seed,
-            },
-        )
+        raise RuntimeError(_HIGH_LEVEL_GENERATION_ERROR)
+
+    def _save_pretrained(self, save_directory: Path) -> None:
+        if self.runtime is None:
+            self.load_for_training()
+        from voicehub.architectures.vibevoice.runtime import save_vibevoice_runtime
+
+        save_vibevoice_runtime(self.runtime, save_directory)
 
 
 VibeVoiceTTS = VibeVoiceForTextToSpeech

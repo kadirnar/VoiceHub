@@ -1,0 +1,7 @@
+Inflect v2 architecture code is adapted under the upstream Apache-2.0
+license. Portions derive from VITS (jaywalnut310/vits, MIT), BigVGAN
+(NVIDIA/BigVGAN, MIT), and alias-free-torch
+(junjun3518/alias-free-torch, Apache-2.0).
+
+The complete upstream Apache-2.0 text and bundled third-party notices are
+preserved at voicehub/models/inflecttts/source/.

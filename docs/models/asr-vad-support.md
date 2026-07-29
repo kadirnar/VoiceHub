@@ -23,33 +23,33 @@ Each integration provides:
 
 | Model type | Provider and family coverage | Normalized capability | Runtime setup | Fine-tuning boundary |
 | --- | --- | --- | --- | --- |
-| `asr_transformers` | Conventional Transformers CTC, speech seq2seq, RNN-T, and TDT auto-models; prompt/chat-template audio-language models use their dedicated providers below | Text, segments, word/segment timestamps when emitted, language | Default install | **VoiceHub native** for a compatible unquantized differentiable checkpoint and processor |
-| `asr_whisper` | Current native Transformers Whisper preset, defaulting to `openai/whisper-large-v3-turbo` | Multilingual transcription, translation, and timestamps | Default install | **VoiceHub native** teacher-forced Whisper fine-tuning |
-| `asr_tiron` | Tiron's Whisper-derived meeting ASR with added speaker and time tokens | Per-window speaker-attributed, timestamped segments for English and Chinese | Default install | **VoiceHub native** Whisper sequence-to-sequence fine-tuning; whole-meeting speaker linking is outside the model graph |
-| `asr_qwen3` | Qwen3-ASR HF checkpoints through their transcription request and multimodal chat template | Multilingual transcription, validated language forcing, language identification, and hotword context; word timing requires the separate Qwen forced aligner | Default install | **VoiceHub native** assistant-completion causal labels with prompt, audio, and padding positions masked |
-| `asr_vibevoice` | Official VibeVoice-ASR-HF Transformers checkpoint | Long-form multilingual text plus parsed speaker/timestamp segments and hotword context; language is inferred rather than forced | Default install | **VoiceHub native** processor-labeled multimodal fine-tuning; BitNet/GGML artifacts are inference-only |
-| `asr_granite_speech` | IBM Granite Speech 4.1 through its native Transformers processor and instruction prompt | Multilingual prompt-conditioned transcription and keyword biasing | Default install | **VoiceHub native** IBM-style prompt/target concatenation with completion-only causal labels; prompt and padding positions are masked |
-| `asr_parakeet_tdt` | NVIDIA Parakeet TDT 0.6B v3 through `AutoModelForTDT` | Multilingual text and native token-duration timestamps | Default install | **VoiceHub native** joint audio/text processing and native TDT loss |
-| `asr_nemotron` | NVIDIA Nemotron 3.5 streaming RNN-T through `AutoModelForRNNT` | Multilingual transcription, automatic language tags, and native token timestamps; common VoiceHub sessions remain buffered | Default install | **VoiceHub native** joint audio/text processing and native RNN-T loss |
-| `asr_cohere` | Cohere Transcribe general and `CohereLabs/cohere-transcribe-arabic-07-2026` checkpoint variants | Language-conditioned multilingual and long-form transcription with native chunk reassembly | Default install plus checkpoint access/token | **VoiceHub native** language-conditioned processor labels and sequence-to-sequence loss |
-| `asr_medasr` | Gated Google MedASR LASR/Conformer CTC checkpoint | English medical and radiology dictation | Default install plus checkpoint terms/token | **VoiceHub native** joint LASR processor labels and CTC loss |
-| `asr_wav2vec2` | Wav2Vec2 CTC checkpoints through the locked Transformers preset | Text and token timestamps when the tokenizer exposes offsets | Default install | **VoiceHub native** CTC fine-tuning |
-| `asr_hubert` | HuBERT CTC speech-recognition checkpoints through the locked Transformers preset | Text and token timestamps when emitted | Default install | **VoiceHub native** CTC fine-tuning |
-| `asr_wavlm` | WavLM CTC speech-recognition checkpoints through the locked Transformers preset | Text and token timestamps when emitted | Default install | **VoiceHub native** CTC fine-tuning |
-| `asr_moonshine` | Useful Sensors Moonshine speech sequence-to-sequence checkpoints | Compact English transcription | Default install | **VoiceHub native** teacher-forced sequence-to-sequence fine-tuning |
-| `asr_seamless_m4t_v2` | SeamlessM4T v2 multilingual speech recognition and speech-to-text translation | Multilingual text with an explicit target language | Default install | **VoiceHub native** teacher-forced sequence-to-sequence fine-tuning |
-| `asr_faster_whisper` | Whisper through CTranslate2 | Multilingual text and timestamps | Default install | **Inference-only**; fine-tune the Transformers checkpoint before conversion |
-| `asr_whisperx` | WhisperX transcription and optional alignment | Word alignment and speaker fields when emitted | Default install | **Inference-only**; fine-tune the underlying Whisper model separately |
-| `asr_openai_whisper` | OpenAI Whisper reference runtime | Multilingual text and timestamps | Default install | **Inference-only** in VoiceHub; use `asr_transformers` for fine-tuning |
-| `asr_nemo` | NeMo ASRModel families, including compatible Canary and Parakeet checkpoints | Provider text and timestamps when emitted; VoiceHub's current session API is buffered/offline | Default install | **Upstream-custom** NeMo Lightning/Hydra recipe |
-| `asr_speechbrain` | SpeechBrain encoder-decoder/CTC recipes such as CRDNN | Text and provider metadata | Default install | **Upstream-custom** Brain/hparams recipe |
-| `asr_funasr` | FunASR families such as Paraformer and SenseVoice | Multilingual text, timestamps, punctuation/VAD/speaker composition when configured | Default install | **Upstream-custom** FunASR task/configuration runner |
-| `asr_espnet` | ESPnet Speech2Text and model-zoo ASR artifacts | Text, hypotheses, scores when emitted | Default install | **Upstream-custom** ESPnet ASRTask recipe |
-| `asr_wenet` | WeNet ASR runtime, including upstream streaming-capable families | Text and provider metadata; VoiceHub's current session API is buffered/offline | Default install | **Upstream-custom** WeNet recipe |
+| `asr_transformers` | Closed VoiceHub-native dispatcher for verified Whisper, Wav2Vec2 CTC, HuBERT CTC, WavLM CTC, and Moonshine checkpoints | Family-native text, segment/timestamp, and language fields | Default install; Safetensors only | **VoiceHub native** inference, loss/backward, export, and reload |
+| `asr_whisper` | VoiceHub-native Whisper graph, tokenizer, log-mel frontend, generation engine, and strict Safetensors adapter, defaulting to `openai/whisper-large-v3-turbo` | Multilingual transcription, translation, and timestamps | Default install; Safetensors only | **VoiceHub native** teacher-forced Whisper fine-tuning |
+| `asr_tiron` | VoiceHub-native Tiron on the internal Whisper graph with the pinned public speaker-token layout and ported `speaker_blocks` constraint grammar | Per-window speaker-attributed, 20 ms timestamped segments; padded vocabulary rows are masked | Default install; Safetensors only | **VoiceHub native** grammar-validated sequence-to-sequence fine-tuning; whole-meeting speaker linking is outside the model graph |
+| `asr_qwen3` | VoiceHub-native Qwen3-ASR 0.6B/1.7B audio tower, Qwen3 decoder, byte-BPE tokenizer, log-mel frontend, cached generation, and strict Safetensors adapter | Multilingual transcription, validated language forcing, language identification, hotword context, and 20-minute energy-aware chunking; word timing requires the separate Qwen forced aligner | Default install; official immutable Safetensors revisions | **VoiceHub native** completion-only causal labels, full backward, native LoRA, and merged portable export |
+| `asr_vibevoice` | VoiceHub-native continuous acoustic/semantic encoders, multimodal projector, Qwen2 decoder, byte-BPE tokenizer, prompt renderer, and strict eight-shard Safetensors adapter | Long-form multilingual text plus parsed speaker/timestamp segments and prompt or terminology context; an optional language is context, not a forced decoder token | Default install; pinned MIT checkpoint | **VoiceHub native** completion-only causal fine-tuning with frozen speech encoders, trainable projector/LM/head, and portable export |
+| `asr_granite_speech` | VoiceHub-native Granite Speech 4.1 Conformer, windowed Q-Former, Granite decoder, byte-BPE tokenizer, HTK log-mel frontend, generation cache, and strict sharded-Safetensors adapter | Multilingual prompt-conditioned transcription, speech translation, and keyword biasing | Default install; official immutable Safetensors revision | **VoiceHub native** IBM-style prompt/target concatenation with completion-only labels, source-compatible projector plus native-LoRA optimization, full-graph backward, and merged portable export |
+| `asr_parakeet_tdt` | VoiceHub-native Parakeet TDT 0.6B v3 FastConformer, LSTM predictor, duration joint head, log-mel frontend, tokenizer, greedy decoder, and strict Safetensors adapter | Multilingual whole-waveform transcription and duration-derived word timestamps; language is automatic | Default install; pinned CC-BY-4.0 checkpoint | **VoiceHub native** raw-audio preparation, exact TDT loss, full-graph backward, gradient checkpointing, and portable export |
+| `asr_nemotron` | VoiceHub-native Nemotron 3.5 FastConformer, prompt projector, LSTM predictor, RNN-T joint, log-mel frontend, tokenizer, and strict Safetensors adapter | Multilingual transcription, automatic locale tags, and token timestamps; the graph has cache-aware chunk generation, while common VoiceHub sessions remain buffered | Default install; pinned OpenMDW-1.1 checkpoint | **VoiceHub native** raw-audio preparation, exact differentiable RNN-T loss, full-graph backward, gradient checkpointing, and portable export |
+| `asr_cohere` | VoiceHub-native Cohere Transcribe 03-2026 48-layer FastConformer, cross-attention decoder, log-mel frontend, byte-fallback BPE tokenizer, prompt builder, and strict Safetensors adapter | Explicitly language-conditioned transcription for 14 verified languages; offline quiet-boundary long-form reassembly | Default install plus gated checkpoint access/token; exact immutable Apache-2.0 checkpoint revision | **VoiceHub native** prompt-conditioned teacher forcing, full-graph backward, gradient checkpointing, and portable export/reload |
+| `asr_medasr` | VoiceHub-native 17-layer LASR/Conformer CTC graph, log-mel frontend, Unigram tokenizer, greedy decoder, and strict gated Safetensors adapter | English complete-waveform medical dictation; timestamps and non-English forcing are rejected | Default install plus Health AI Developer Foundations terms/token | **VoiceHub native** raw-audio full-model CTC fine-tuning, gradient checkpointing, and portable export/reload |
+| `asr_wav2vec2` | VoiceHub-native Wav2Vec2 CTC graph and declarative processor | Text and token timestamps when the tokenizer exposes offsets | Default install | **VoiceHub native** raw-waveform CTC fine-tuning |
+| `asr_hubert` | VoiceHub-native HuBERT CTC graph with exact `hubert.*` checkpoint mapping and stable-layer-norm support | Text and greedy CTC word timestamps | Default install; Safetensors only | **VoiceHub native** raw-waveform CTC fine-tuning with learned SpecAugment mask embedding |
+| `asr_wavlm` | VoiceHub-native WavLM CTC graph with gated bucketed relative-position attention and an exact `wavlm.*` checkpoint mapping | Text and greedy CTC word timestamps | Default install; Safetensors only | **VoiceHub native** raw-waveform CTC fine-tuning |
+| `asr_moonshine` | VoiceHub-native Useful Sensors Moonshine tiny/base graph with exact raw-waveform frontend, rotary attention, tied projection, and SentencePiece BPE checkpoint mapping | Compact English greedy transcription; timestamp, hotword, sampled, and beam modes are rejected | Default install; Safetensors only | **VoiceHub native** raw-waveform teacher-forced sequence-to-sequence fine-tuning |
+| `asr_seamless_m4t_v2` | VoiceHub-native SeamlessM4T-v2 S2T: stacked Kaldi-style frontend, 24-layer Conformer, 24-layer decoder, SentencePiece BPE, and strict sharded-Safetensors adapter | Multilingual complete-waveform recognition with one of 98 explicit output-language prompts; greedy text only | Default install; pinned CC-BY-NC-4.0 checkpoint | **VoiceHub native** target-language teacher forcing, full-model backward, gradient checkpointing, and portable S2T-only export |
+| `asr_faster_whisper` | Compatibility key backed by VoiceHub-native Whisper; CTranslate2 model names are normalized to their canonical Safetensors source | Multilingual text and timestamps | Default install; no CTranslate2 runtime | **VoiceHub native** teacher-forced Whisper fine-tuning and portable export |
+| `asr_whisperx` | VoiceHub-native Whisper plus language-specific native Wav2Vec2 CTC forced alignment, following pinned WhisperX trellis semantics | Multilingual transcription and aligned word intervals | Default install; Safetensors only; no upstream WhisperX runtime | **VoiceHub native** Whisper fine-tuning; the independent alignment checkpoint is fine-tuned through `asr_wav2vec2` |
+| `asr_openai_whisper` | Compatibility key backed by VoiceHub-native Whisper; official OpenAI aliases resolve to canonical Safetensors checkpoints | Multilingual text and timestamps | Default install; no `openai-whisper` runtime | **VoiceHub native** teacher-forced Whisper fine-tuning and portable export |
+| `asr_nemo` | VoiceHub-native NVIDIA QuartzNet15x5 character-CTC graph | English text and greedy CTC word timestamps; buffered/offline | Default install; the hash-pinned NGC `.nemo` release is converted once to Safetensors under NVIDIA NGC Terms | **VoiceHub native** raw-waveform CTC fine-tuning with the released log-mel frontend and rectangular spectrogram cutout |
+| `asr_speechbrain` | VoiceHub-native LibriSpeech CRDNN: legacy Fbank/global CMVN, two VGG blocks, four-layer bidirectional LSTM, location-aware GRU decoder, and frozen two-layer RNNLM | English text and beam score; buffered/offline | Default install; the three hash-pinned upstream pickle states require explicit `trust_pickle_checkpoint=True` once, then inference/training/export use Safetensors | **VoiceHub native** raw-waveform fine-tuning with label-smoothed attention NLL, CTC for epochs 1–5, released Adadelta settings, validation-WER NewBob scheduling, and portable export |
+| `asr_funasr` | VoiceHub-native SenseVoiceSmall SANM-CTC graph | Multilingual text, language ID, emotion, audio events, inverse text normalization controls, and native CTC word timestamps | Default install; Safetensors, or one explicit trust-gated conversion of the hash-pinned release pickle | **VoiceHub native** raw-audio CTC plus four-query rich-control fine-tuning, released AdamW/WarmupLR settings, and portable Safetensors export. Paraformer and other FunASR registry graphs are rejected. |
+| `asr_espnet` | VoiceHub-native LibriSpeech Transformer-e18 frontend, Transformer/CTC graph, RNNLM, tokenizer, and joint beam search | English text and beam score; buffered/offline | Default install; no ESPnet or model-zoo package. The exact hash-pinned release pickle requires explicit trust for one-time restricted conversion to Safetensors. | **VoiceHub native** raw-waveform or prepared-feature hybrid 0.3 CTC / 0.7 label-smoothed sequence fine-tuning, published SpecAugment, Adam/WarmupLR settings, and portable export |
+| `asr_wenet` | VoiceHub-native 20210728 GigaSpeech U2++ Conformer (conv2d6, relative attention, macaron FFN, causal convolution, dual Transformer decoder) | English text, CTC prefix search, bidirectional attention rescoring, confidence, and word timestamps; buffered/offline | Default install; the exact hash-pinned WeNet pickle archive requires explicit `trust_pickle_checkpoint=True` for one-time restricted conversion to Safetensors | **VoiceHub native** raw-waveform hybrid training with 0.3 CTC weight, 0.3 reverse-decoder weight, 0.1 label smoothing, Kaldi fbank/CMVN, and the released SpecAugment recipe |
 
 The `asr_transformers` provider uses `architecture_family="auto"` by default.
-Specify `ctc`, `speech-seq2seq`, `rnnt`, or `tdt` only when checkpoint
-metadata cannot identify its native graph. Qwen3-ASR, VibeVoice-ASR,
+Specify `ctc` or `speech-seq2seq` only when checkpoint metadata cannot
+identify its native graph. Qwen3-ASR, VibeVoice-ASR,
 Nemotron 3.5, Cohere Transcribe, Granite Speech, and Voxtral Realtime are
 deliberately rejected by this generic path because they require
 model-specific processor, prompt, or label semantics.
@@ -58,20 +58,23 @@ model-specific processor, prompt, or label semantics.
 
 | Model type | Provider and family coverage | Normalized capability | Runtime setup | Fine-tuning boundary |
 | --- | --- | --- | --- | --- |
-| `vad_transformers` | Compatible Transformers audio- and frame-classification checkpoints | Speech regions plus real frame/window probabilities when requested | Default install | **VoiceHub native** classification path for differentiable checkpoints |
-| `vad_silero` | Official Silero JIT or ONNX VAD runtime | Speech timestamps; 8/16 kHz; buffered streaming contract | Default install | **Inference-only**; the published package does not expose its training recipe |
-| `vad_webrtc` | WebRTC fixed-point GMM | Binary frame decisions normalized to regions; 8/16/32/48 kHz | Default install | **Inference-only** fixed algorithm |
-| `vad_pyannote` | pyannote.audio voice-activity pipeline/segmentation artifacts | Segmentation regions and scores when emitted | Default install | **Upstream-custom** pyannote task/data/trainer recipe |
-| `vad_speechbrain` | SpeechBrain CRDNN VAD | Native chunk post-processing normalized to regions | Default install | **Upstream-custom** SpeechBrain recipe |
-| `vad_nemo` | NeMo MarbleNet window/frame VAD | Frame/window probabilities normalized with common post-processing | Default install | **Upstream-custom** NeMo data/configuration recipe |
-| `vad_funasr` | FunASR FSMN VAD through ModelScope or Hugging Face artifacts | 16 kHz speech boundaries; native milliseconds normalized to public seconds | Default install | **Upstream-custom** FunASR configuration-driven training runner |
+| `vad_transformers` | Compatibility key for verified VoiceHub-native Wav2Vec2 audio- and frame-classification checkpoints | Speech regions plus real frame/window probabilities when requested | Default install; no Transformers runtime | **VoiceHub native** classification path for differentiable checkpoints |
+| `vad_silero` | VoiceHub-native Silero v6.2.1 graph; official JIT is accepted only for strict one-time weight conversion | Real frame probabilities and speech regions; 8/16 kHz; isolated recurrent streaming sessions | Default install | **VoiceHub native** frame BCE recipe with official timestamp records or aligned frame labels; decoder-only by default |
+| `vad_webrtc` | VoiceHub-native port of the pinned WebRTC six-band fixed-point GMM | Binary frame decisions normalized to regions; 8/16/32/48 kHz; isolated adaptive state | Default install; no WebRTC package or compiled extension | **Not applicable** fixed algorithm with no differentiable parameters |
+| `vad_pyannote` | VoiceHub-native PyanNet with the published pyannote segmentation weights | Segmentation regions and frame scores | Default install; no pyannote runtime | **VoiceHub native** multi-label frame fine-tuning |
+| `vad_speechbrain` | VoiceHub-native SpeechBrain CRDNN VAD with the pinned LibriParty weights | Real 10 ms frame probabilities and source-compatible offline chunk segmentation | Default install; no SpeechBrain, torchaudio, HyperPyYAML, or Transformers runtime | **VoiceHub native** raw-audio frame BCE, interval data preparation, portable Safetensors export; the archived author recipe is a different GRU-only graph |
+| `vad_nemo` | VoiceHub-native multilingual MarbleNet Frame-VAD using the pinned NVIDIA release | Real two-class scores on a 20 ms grid, normalized to common speech regions | Default install; no NeMo, Lightning, Hydra, OmegaConf, librosa, or torchaudio runtime | **VoiceHub native** raw-audio or aligned-frame cross-entropy with the released SGD and polynomial hold-decay recipe; portable Safetensors export |
+| `vad_funasr` | VoiceHub-native FSMN graph, Kaldi-compatible fbank/LFR/CMVN frontend, and endpoint state machine for the published FunASR checkpoint | Real 10 ms frame probabilities, isolated streaming state, and 16 kHz speech boundaries normalized from milliseconds to seconds | Default install; no FunASR, ModelScope, torchaudio, or Transformers runtime | **VoiceHub native** raw-audio binary frame fine-tuning or aligned 248-PDF cross-entropy, with portable Safetensors export |
 | `vad_auditok` | Auditok fixed or automatically calibrated energy detector | Dependency-light speech regions with configurable duration and silence constraints | Default install | **Inference-only** deterministic signal-processing algorithm |
-| `vad_sherpa_onnx` | Sherpa-ONNX Silero and TEN VAD artifacts on CPU, CUDA, or CoreML | Streaming-capable 16 kHz speech regions normalized from native sample offsets | Default install | **Inference-only** ONNX serving graph |
-| `vad_pyannote_segmentation` | `pyannote/segmentation-3.0` powerset segmentation preset | Frame scores and normalized speech regions | Default install | **Upstream-custom** pyannote task/data/trainer recipe |
-| `vad_pyannote_brouhaha` | `pyannote/brouhaha` multi-task speech, signal-to-noise, and reverberation model | Speech regions plus frame-level quality metadata | Default install | **Upstream-custom** pyannote multi-task recipe |
+| `vad_sherpa_onnx` | VoiceHub-native Silero and TEN graphs with pinned Sherpa-compatible streaming decisions | Real frame scores and isolated streaming-capable 16 kHz speech regions on CPU/CUDA; reviewed TEN ONNX weights convert once to Safetensors without ONNX execution | Default install; no Sherpa, ONNX, ONNX Runtime, Kaldi, librosa, or NumPy runtime | **VoiceHub native** Silero official decoder recipe or explicitly reconstructed TEN masked window BCE; portable Safetensors export |
+| `vad_pyannote_segmentation` | VoiceHub-native PyanNet with `pyannote/segmentation-3.0` powerset weights | Frame scores and normalized speech regions | Default install; no pyannote runtime | **VoiceHub native** seven-class powerset frame fine-tuning |
+| `vad_pyannote_brouhaha` | VoiceHub-native PyanNet with Brouhaha speech, signal-to-noise, and reverberation heads | Speech regions plus frame-level SNR/C50 metadata | Default install; no Brouhaha or pyannote runtime | **VoiceHub native** joint VAD/SNR/C50 fine-tuning |
 
 Authentication for gated pyannote checkpoints is passed at runtime and is
-never stored in serializable model configuration.
+never stored in serializable model configuration. The upstream repositories
+publish Lightning pickle files rather than Safetensors. VoiceHub requires an
+explicit, one-time restricted conversion and then uses only the converted
+Safetensors artifact for inference, training, export, and reload.
 
 ## Installation
 
@@ -87,9 +90,10 @@ Add the separate shared trainer and Weights & Biases reporting bundle:
 python -m pip install "voicehub[training]"
 ```
 
-This does not make every inference provider directly fine-tunable.
-VoiceHub-native profiles can use the shared trainer; upstream-custom profiles
-retain their source recipe, and inference-only profiles remain non-trainable.
+This does not make every inference algorithm trainable. VoiceHub-native
+profiles use the shared trainer with their architecture-specific objectives;
+fixed algorithms such as WebRTC and Auditok remain inference-only because
+they have no gradient-bearing parameters.
 
 There is no ASR/VAD or provider-specific inference extra. Every built-in
 speech-input `ModelSpec.install_extra` is `None`, meaning the runtime belongs to
@@ -101,7 +105,6 @@ weights or gated-repository access.
 | Boundary | What VoiceHub guarantees |
 | --- | --- |
 | **VoiceHub native** | `load_for_training()` retains or reconstructs a differentiable model, the training family is registered, and the model or adapter returns the intended scalar objective |
-| **Upstream-custom** | VoiceHub provides normalized inference and declares the upstream training ownership; use the provider's task/configuration runner until its complete recipe is integrated behind a specialized adapter |
 | **Inference-only** | The published or selected runtime has no verified trainable graph in VoiceHub |
 
 These statuses describe the current integration, not what is theoretically
@@ -111,9 +114,11 @@ trainable parameters can be reconstructed. GGUF, ONNX, CTranslate2, JIT,
 fixed-point, quantized, and other serving artifacts are not generic
 fine-tuning checkpoints.
 
-### Transformers ASR
+### Native ASR dispatch
 
-VoiceHub registers task-neutral adapters for:
+The historical `asr_transformers` key is a compatibility name for a closed
+dispatcher over audited VoiceHub architectures. VoiceHub registers
+task-neutral adapters for:
 
 - CTC, preserving backend-native blank and alignment semantics;
 - speech sequence-to-sequence, using the checkpoint's teacher-forced native
@@ -125,7 +130,7 @@ Do not replace a native CTC/RNN-T/TDT objective with ordinary cross entropy.
 The processor, label padding, lengths, blank ID, alignment topology, and
 duration terms are part of the model.
 
-### Transformers VAD
+### Native VAD dispatch
 
 Audio classification accepts one class or binary/multilabel target per
 window. Frame classification requires targets already aligned to the output
@@ -133,13 +138,70 @@ timebase and an explicit mask for padded frames. Native model loss is
 preferred; the classification fallback runs only when the profile declares
 it.
 
-### Native provider recipes
+### Native PyanNet VAD recipes
 
-NeMo, SpeechBrain, FunASR, ESPnet, WeNet, and pyannote have their own data
-modules, configuration systems, augmentation, losses, schedulers, distributed
-execution, or export steps. This includes both FunASR ASR and its FSMN VAD
-training runner. Marking these providers upstream-custom protects that
-behavior from an incomplete generic approximation.
+The three PyanNet providers own their graph and objectives inside VoiceHub.
+`vad_pyannote` consumes four-channel multi-label frame targets.
+`vad_pyannote_segmentation` consumes integer powerset class IDs from 0 through
+6. `vad_pyannote_brouhaha` consumes `[vad, snr_db, c50_db]` per frame; SNR loss
+is evaluated on speech frames and C50 loss on valid frames. Callers remain
+responsible for aligning labels to `model.frame_count(num_samples)`.
+
+### Native FSMN VAD recipe
+
+`vad_funasr` is a compatibility name; inference and training execute the
+VoiceHub-owned `fsmn-vad` architecture. The graph reproduces the released
+400→140→250→four-layer FSMN→140→248 topology, including the 16 kHz
+Kaldi-compatible fbank, 5-frame LFR stacking, fixed CMVN, per-layer streaming
+caches, and endpoint decoder. Raw timestamp segments are aligned to the
+25 ms analysis windows on a 10 ms grid using at least 50 percent speech
+coverage. Explicit `pdf_labels` select the 248-class objective; binary frame
+labels optimize the decoder's grouped silence-versus-speech probability.
+
+The public artifact contains an inference state dict and CMVN transform, but
+does not publish the private corpus, acoustic-PDF target generator, or original
+loss recipe. VoiceHub therefore guarantees checkpoint-compatible PDF
+cross-entropy and a documented binary VAD objective, not reproduction of an
+unpublished training run.
+
+### Native SpeechBrain CRDNN VAD recipe
+
+`vad_speechbrain` executes the exact published 40-bin
+Fbank→CNN→bidirectional-GRU→DNN graph and preserves all 49 released tensors.
+Raw interval annotations use the archived LibriParty recipe's 10 ms indexing;
+masked binary cross-entropy slices away the final centered-STFT frame exactly
+as that recipe does. Export and fresh reload use only `config.json` and
+Safetensors.
+
+The artifact points to SpeechBrain revision
+`ea17d223cc7814f1027d657ed713676bbaacb608`, but the VAD recipe at that
+revision builds a smaller GRU-only graph with global normalization. The
+published CRDNN training program and claimed augmentation path are therefore
+not author-verifiable. VoiceHub guarantees graph/checkpoint/inference parity
+and a documented native fine-tuning objective, not exact reproduction of
+that missing recipe.
+
+### Native MarbleNet Frame-VAD recipe
+
+`vad_nemo` executes the native `marblenet-vad` graph rather than importing
+NeMo. It preserves the released 25 ms Hann frontend with 10 ms feature hop,
+stride-two six-block MarbleNet encoder, and two-class 20 ms frame decoder.
+Timestamp segments are aligned to that 20 ms output grid; callers may instead
+provide explicit binary frame labels and masks.
+
+The trainer uses frame cross-entropy and source-native SGD defaults
+(`lr=0.01`, `momentum=0.9`, `weight_decay=0.001`) with five percent warmup,
+fifteen percent hold, and power-two polynomial decay to `1e-8`. The published
+white-noise, gain, noise-mixture, and spectrogram masking parameters are
+documented in the artifact manifest. The original multilingual corpora remain
+the user's responsibility.
+
+The native ESPnet key is deliberately narrower than the upstream project. It
+supports only the audited LibriSpeech Transformer-e18 release; other ESPnet
+architectures are rejected. VoiceHub owns its frontend, global CMVN,
+SpecAugment, hybrid loss, scheduler, decoding, checkpoint conversion, and
+export. Corpus acquisition and speed perturbation remain explicit dataset
+operations rather than hidden provider-runtime behavior.
 
 ## Discover support in code
 

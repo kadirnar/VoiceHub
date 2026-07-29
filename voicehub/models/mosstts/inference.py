@@ -1,18 +1,38 @@
-"""MOSS-TTS family integration backed entirely by vendored source."""
+"""Public VoiceHub integration for the native MOSS-TTS family.
+
+No Transformers, Accelerate, PEFT, or vendored provider runtime is
+imported here.  The executable graphs, Qwen byte-BPE tokenizer,
+processors, strict Safetensors loader, and fine-tuning adapter are owned
+by VoiceHub.
+"""
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping, Sequence
+from os import PathLike
 from pathlib import Path
+from typing import Any
 
 from voicehub.configuration_utils import VoiceHubConfig
-from voicehub.dependencies import import_optional
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
-from voicehub.models._shared import finish_audio_output, resolve_torch_dtype, seeded_inference
+from voicehub.models._shared import finish_audio_output, seeded_inference, validate_local_file
+from voicehub.trainer_utils import NATIVE_EXPORT_DIR
+
+_DEFAULT_MODEL = "OpenMOSS-Team/MOSS-TTS-v1.5"
+_SUPPORTED_VARIANTS = ("delay", "local", "local_v1_5", "realtime")
+_VARIANT_ALIASES = {"local_v15": "local_v1_5"}
+_DEFAULT_CODEC_BY_VARIANT = {
+    "delay": "OpenMOSS-Team/MOSS-Audio-Tokenizer",
+    "local": "OpenMOSS-Team/MOSS-Audio-Tokenizer",
+    "local_v1_5": "OpenMOSS-Team/MOSS-Audio-Tokenizer-v2",
+    "realtime": "OpenMOSS-Team/MOSS-Audio-Tokenizer",
+}
 
 
 class MossTTSConfig(VoiceHubConfig):
-    """Configuration shared by Delay, Local, Local v1.5, and Realtime."""
+    """Serializable controls for native MOSS-TTS loading and training."""
 
     model_type = "mosstts"
 
@@ -21,523 +41,554 @@ class MossTTSConfig(VoiceHubConfig):
         *,
         variant: str = "auto",
         codec_name_or_path: str | None = None,
-        torch_dtype: str = "bfloat16",
+        compute_dtype: str = "bfloat16",
+        torch_dtype: str | None = None,
         attention_implementation: str | None = None,
-        training_channelwise_loss_weights: tuple[float, ...] | str = (1.0, 32.0),
+        revision: str | None = None,
+        cache_dir: str | Path | None = None,
+        local_files_only: bool = False,
+        training_channelwise_loss_weights: (tuple[float, ...] | list[float] | str) = (1.0, 32.0),
         training_adam_beta1: float = 0.9,
         training_adam_beta2: float = 0.95,
         training_adam_epsilon: float = 1e-4,
-        sample_rate: int = 24000,
-        **kwargs,
-    ):
-        super().__init__(sample_rate=sample_rate, **kwargs)
+        sample_rate: int = 24_000,
+        generation_config: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        generation_defaults = {
+            "max_new_tokens": 4_096,
+        }
+        generation_defaults.update(dict(generation_config or {}))
+        super().__init__(
+            sample_rate=sample_rate,
+            generation_config=generation_defaults,
+            **kwargs,
+        )
         self.variant = variant
         self.codec_name_or_path = codec_name_or_path
-        self.torch_dtype = torch_dtype
+        self.compute_dtype = (compute_dtype if torch_dtype is None else torch_dtype)
+        # Retain the compatibility spelling in serialized wrapper configs.
+        self.torch_dtype = self.compute_dtype
         self.attention_implementation = attention_implementation
-        self.training_channelwise_loss_weights = training_channelwise_loss_weights
+        self.revision = revision
+        self.cache_dir = cache_dir
+        self.local_files_only = local_files_only
+        self.training_channelwise_loss_weights = (training_channelwise_loss_weights)
         self.training_adam_beta1 = training_adam_beta1
         self.training_adam_beta2 = training_adam_beta2
         self.training_adam_epsilon = training_adam_epsilon
+        self.validate()
+
+    @staticmethod
+    def normalize_variant(value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("MOSS-TTS `variant` must be a non-empty string.")
+        normalized = (value.strip().lower().replace("-", "_").replace(".", "_"))
+        return _VARIANT_ALIASES.get(normalized, normalized)
+
+    def validate(self) -> None:
+        # Keep unsupported release names serializable so tooling can inspect
+        # a configuration without importing or allocating a runtime.  The
+        # wrapper rejects them at its dependency-free validation boundary.
+        self.normalize_variant(self.variant)
+        if (self.codec_name_or_path is not None and
+            (not isinstance(self.codec_name_or_path,
+                            (str, Path)) or not str(self.codec_name_or_path).strip())):
+            raise ValueError("`codec_name_or_path` must be a non-empty identifier or "
+                             "path when supplied.")
+        if (not isinstance(self.compute_dtype, str) or not self.compute_dtype.strip()):
+            raise ValueError("`compute_dtype` must be a non-empty string.")
+        if self.attention_implementation is not None:
+            raise ValueError(
+                "MOSS-TTS no longer accepts a provider-specific "
+                "`attention_implementation`. Select a reversible VoiceHub "
+                "InferenceStrategy instead.")
+        if self.revision is not None and (not isinstance(self.revision, str) or not self.revision.strip()):
+            raise ValueError("`revision` must be non-empty or None.")
+        if self.cache_dir is not None and (not isinstance(self.cache_dir,
+                                                          (str, Path)) or not str(self.cache_dir).strip()):
+            raise ValueError("`cache_dir` must be a non-empty path or None.")
+        if not isinstance(self.local_files_only, bool):
+            raise TypeError("`local_files_only` must be a boolean.")
+        if (isinstance(self.sample_rate, bool) or not isinstance(self.sample_rate, int) or
+                self.sample_rate <= 0):
+            raise ValueError("`sample_rate` must be a positive integer.")
+        for name in (
+                "training_adam_beta1",
+                "training_adam_beta2",
+        ):
+            value = getattr(self, name)
+            if (isinstance(value, bool) or not isinstance(value, (int, float)) or
+                    not 0.0 <= float(value) < 1.0):
+                raise ValueError(f"`{name}` must be in [0, 1).")
+        epsilon = self.training_adam_epsilon
+        if (isinstance(epsilon, bool) or not isinstance(epsilon, (int, float)) or
+                not math.isfinite(float(epsilon)) or float(epsilon) <= 0):
+            raise ValueError("`training_adam_epsilon` must be finite and positive.")
 
 
 class MossTTSForTextToSpeech(PreTrainedTTSModel):
-    """Unified interface for the source-released MOSS-TTS architectures."""
+    """Inference and full semantic-model SFT for all official MOSS variants."""
 
     config_class = MossTTSConfig
-    default_model_name_or_path = "OpenMOSS-Team/MOSS-TTS-v1.5"
-    _SUPPORTED_VARIANTS = ("delay", "local", "local_v1_5", "realtime")
-    _VARIANT_ALIASES = {
-        "local_v15": "local_v1_5",
-    }
-    _DEFAULT_CODEC_BY_VARIANT = {
-        "delay": "OpenMOSS-Team/MOSS-Audio-Tokenizer",
-        "local": "OpenMOSS-Team/MOSS-Audio-Tokenizer",
-        "local_v1_5": "OpenMOSS-Team/MOSS-Audio-Tokenizer-v2",
-        "realtime": "OpenMOSS-Team/MOSS-Audio-Tokenizer",
-    }
-    _STANDARD_VARIANTS = {
-        "delay": (
-            "moss_tts_delay",
-            "MossTTSDelayConfig",
-            "MossTTSDelayModel",
-            "MossTTSDelayProcessor",
-            "moss_tts_delay",
-        ),
-        "local": (
-            "moss_tts_local",
-            "MossTTSDelayConfig",
-            "MossTTSDelayModel",
-            "MossTTSDelayProcessor",
-            "moss_tts_delay",
-        ),
-        "local_v1_5": (
-            "moss_tts_local_v1_5",
-            "MossTTSLocalConfig",
-            "MossTTSLocalModel",
-            "MossTTSLocalProcessor",
-            "moss_tts_local",
-        ),
-    }
-    _REALTIME_GENERATION_OPTIONS = frozenset({
-        "do_sample",
-        "repetition_penalty",
-        "repetition_window",
+    default_model_name_or_path = _DEFAULT_MODEL
+    training_default_model_name_or_path = _DEFAULT_MODEL
+    passthrough_generation_options = frozenset({
+        "ambient_sound",
+        "audio_repetition_penalty",
+        "audio_temperature",
+        "audio_top_k",
+        "audio_top_p",
+        "duration_tokens",
+        "instruction",
+        "language",
+        "max_new_tokens",
+        "n_vq_for_inference",
+        "output_file",
+        "quality",
+        "seed",
+        "sound_event",
+        "speaker_audio",
+        "speaker_audio_codes",
+        "speaker_audio_path",
+        "speed",
         "temperature",
-        "top_k",
+        "text_temperature",
+        "text_top_k",
+        "text_top_p",
         "top_p",
+        "use_kv_cache",
     })
 
     def __init__(
         self,
-        config: MossTTSConfig | str | None = None,
+        config: MossTTSConfig | str | Path | None = None,
         *,
-        model_path: str | None = None,
+        model_path: str | Path | None = None,
         device: str = "auto",
         lazy_load: bool = True,
-        **config_overrides,
-    ):
-        config = self._coerce_config(
+        token: str | bool | None = None,
+        **config_overrides: Any,
+    ) -> None:
+        if token is not None and not isinstance(token, (str, bool)):
+            raise TypeError("`token` must be a string, boolean, or None.")
+        if isinstance(token, str) and not token.strip():
+            raise ValueError("String `token` values must be non-empty.")
+        normalized = self._coerce_config(
             config,
             model_path=model_path,
             **config_overrides,
         )
-        self._processor = None
-        self._torch = None
+        if not isinstance(normalized, MossTTSConfig):
+            raise TypeError("MOSS-TTS requires MossTTSConfig.")
+        normalized.validate()
+        self._hub_token = token
+        self._mosstts_runtime = None
         self._variant = ""
-        self._codec_name_or_path = None
-        super().__init__(config, device=device, lazy_load=lazy_load)
-
-    @classmethod
-    def _normalize_variant(cls, variant: str) -> str:
-        if not isinstance(variant, str) or not variant.strip():
-            raise ValueError("MOSS-TTS `variant` must be a non-empty string.")
-        normalized = (variant.strip().lower().replace("-", "_").replace(".", "_"))
-        return cls._VARIANT_ALIASES.get(normalized, normalized)
+        self._codec_name_or_path: str | None = None
+        super().__init__(
+            normalized,
+            device=device,
+            lazy_load=lazy_load,
+        )
 
     def _resolve_variant(self) -> str:
-        variant = self._normalize_variant(self.config.variant)
+        runtime = self._mosstts_runtime
+        if runtime is not None:
+            return runtime.config.variant
+        variant = self.config.normalize_variant(self.config.variant)
         if variant != "auto":
-            if variant not in self._SUPPORTED_VARIANTS:
-                supported = ", ".join(("auto", *self._SUPPORTED_VARIANTS))
+            if variant not in _SUPPORTED_VARIANTS:
                 raise ValueError(
-                    f"Unsupported MOSS-TTS variant {self.config.variant!r}. "
-                    f"Choose one of: {supported}.")
+                    f"Unsupported MOSS-TTS variant "
+                    f"{self.config.variant!r}. Choose one of: auto, "
+                    f"{', '.join(_SUPPORTED_VARIANTS)}.")
             return variant
-        model_id = self.config.name_or_path.lower()
-        if "realtime" in model_id:
+        identifier = str(self.config.name_or_path).lower()
+        if "realtime" in identifier:
             return "realtime"
-        if "local" in model_id and "v1.5" in model_id:
+        if "local" in identifier and ("v1.5" in identifier or "v1_5" in identifier):
             return "local_v1_5"
-        if "local" in model_id:
+        if "local" in identifier:
             return "local"
         return "delay"
 
     def _resolve_codec_name_or_path(self, variant: str) -> str:
         configured = self.config.codec_name_or_path
         if configured is None:
-            return self._DEFAULT_CODEC_BY_VARIANT[variant]
-        if not isinstance(configured, str) or not configured.strip():
+            return _DEFAULT_CODEC_BY_VARIANT[variant]
+        return str(configured).strip()
+
+    def _runtime_source(self) -> str | Path:
+        source = Path(self.config.name_or_path).expanduser()
+        native_export = source / NATIVE_EXPORT_DIR
+        if source.is_dir() and (native_export / "config.json").is_file():
+            return native_export
+        return self.config.name_or_path
+
+    def _validate_training_runtime(self) -> None:
+        self._resolve_variant()
+        identifier = str(self.config.name_or_path).lower()
+        if any(marker in identifier for marker in (
+                ".gguf",
+                "-gguf",
+                "/gguf",
+                "llama.cpp",
+                "llama_cpp",
+        )):
             raise ValueError(
-                "MOSS-TTS `codec_name_or_path` must be a non-empty string "
-                "when explicitly configured.")
-        return configured.strip()
+                "MOSS-TTS fine-tuning requires an unquantized Safetensors "
+                "checkpoint, not a GGUF/llama.cpp serving artifact.")
+
+    def _load_pretrained_model(self) -> None:
+        from voicehub.architectures.mosstts.runtime import load_mosstts_runtime
+
+        variant = self.config.normalize_variant(self.config.variant)
+        runtime = load_mosstts_runtime(
+            self._runtime_source(),
+            device=self.device,
+            compute_dtype=self.config.compute_dtype,
+            variant=None if variant == "auto" else variant,
+            revision=self.config.revision,
+            cache_dir=(None if self.config.cache_dir is None else str(self.config.cache_dir)),
+            token=self._hub_token,
+            local_files_only=self.config.local_files_only,
+            codec_source=self.config.codec_name_or_path,
+            for_training=self.is_training_load,
+        )
+        self.model = runtime.model
+        self._mosstts_runtime = runtime
+        self._variant = runtime.config.variant
+        self._codec_name_or_path = self._resolve_codec_name_or_path(self._variant)
+        self.config.variant = self._variant
+        self.config.sample_rate = runtime.sample_rate
+
+    @property
+    def training_backend(self):
+        runtime = self._mosstts_runtime
+        if runtime is not None and runtime.model is self.model:
+            return runtime
+        return None
+
+    def _prepare_for_training(self) -> None:
+        runtime = self.training_backend
+        if runtime is None:
+            raise RuntimeError("MOSS-TTS native training runtime is not loaded.")
+        runtime.prepare_for_training()
+
+    def _prepare_for_inference(self) -> None:
+        runtime = self.training_backend
+        if runtime is None:
+            raise RuntimeError("MOSS-TTS native inference runtime is not loaded.")
+        runtime.prepare_for_inference()
+
+    def get_training_adapter(self):
+        from voicehub.architectures.mosstts.training import NativeMossTTSTrainingAdapter
+        from voicehub.training.specs import get_training_spec
+
+        adapter = NativeMossTTSTrainingAdapter(
+            self,
+            get_training_spec(self.config.model_type),
+        )
+        adapter._registered_specialization = True
+        return adapter
+
+    def prepare_training_inputs(
+        self,
+        inputs: dict[str, Any],
+        *,
+        phase: str,
+    ) -> dict[str, Any]:
+        del phase
+        runtime = self.training_backend
+        if runtime is None:
+            raise RuntimeError("MOSS-TTS training inputs require "
+                               "`load_for_training()` first.")
+        if {"input_ids", "attention_mask", "labels"} <= set(inputs):
+            return dict(inputs)
+        records = inputs.get("records")
+        if records is None:
+            records = (inputs, )
+        return runtime.prepare_training_batch(records).to_dict()
 
     @staticmethod
-    def _codec_sample_rate(codec) -> int:
-        codec_config = getattr(codec, "config", None)
-        candidates = (
-            getattr(codec_config, "sampling_rate", None),
-            getattr(codec_config, "sample_rate", None),
-            getattr(codec, "sampling_rate", None),
-            getattr(codec, "sample_rate", None),
-        )
-        for candidate in candidates:
-            if candidate is None:
-                continue
-            try:
-                sample_rate = int(candidate)
-            except (TypeError, ValueError):
-                continue
-            if sample_rate > 0:
-                return sample_rate
-        raise RuntimeError("MOSS-TTS audio tokenizer does not expose a valid sample rate.")
+    def _reference_codes(value: Any) -> tuple[Any, ...]:
+        if value is None:
+            return ()
+        try:
+            import torch
+        except ModuleNotFoundError:
+            torch = None
+        if torch is not None and isinstance(value, torch.Tensor):
+            return (value, )
+        if (not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray))):
+            raise TypeError("`speaker_audio_codes` must be a code matrix or sequence of "
+                            "code matrices.")
+        return tuple(value)
 
-    def _validate_generation_inputs(self, model_inputs: dict) -> None:
-        variant = self._resolve_variant()
-        self._resolve_codec_name_or_path(variant)
-        speaker_audio_path = model_inputs.get("speaker_audio_path")
-        if speaker_audio_path is not None:
-            if (not isinstance(speaker_audio_path, (str, Path)) or not str(speaker_audio_path).strip()):
-                raise ValueError("`speaker_audio_path` must be a non-empty local path or "
-                                 "None.")
-            reference_path = Path(speaker_audio_path).expanduser()
-            if not reference_path.is_file():
-                raise FileNotFoundError(f"MOSS-TTS reference audio was not found: {reference_path}.")
-        max_new_tokens = model_inputs.get("max_new_tokens", 4096)
+    def _validate_generation_inputs(
+        self,
+        model_inputs: dict[str, Any],
+    ) -> None:
+        text = model_inputs.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("MOSS-TTS text must be a non-empty string.")
+        supplied = [
+            name for name in (
+                "speaker_audio",
+                "speaker_audio_codes",
+                "speaker_audio_path",
+            ) if model_inputs.get(name) is not None
+        ]
+        if len(supplied) > 1:
+            raise ValueError(
+                "Pass only one of `speaker_audio`, `speaker_audio_codes`, "
+                "or `speaker_audio_path`.")
+        if model_inputs.get("speaker_audio_path") is not None:
+            validate_local_file(
+                model_inputs["speaker_audio_path"],
+                option_name="speaker_audio_path",
+            )
+        max_new_tokens = model_inputs.get("max_new_tokens", 4_096)
         if (isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or max_new_tokens <= 0):
             raise ValueError("`max_new_tokens` must be a positive integer.")
-        duration_tokens = model_inputs.get("duration_tokens")
-        if duration_tokens is not None and (isinstance(duration_tokens, bool) or
-                                            not isinstance(duration_tokens, int) or duration_tokens <= 0):
-            raise ValueError("`duration_tokens` must be a positive integer when provided.")
-        for name in ("language", "instruction"):
+        duration = model_inputs.get("duration_tokens")
+        if duration is not None and (isinstance(duration, bool) or not isinstance(duration, int) or
+                                     duration <= 0):
+            raise ValueError("`duration_tokens` must be a positive integer or None.")
+        for name in (
+                "instruction",
+                "language",
+                "quality",
+                "sound_event",
+                "ambient_sound",
+        ):
             value = model_inputs.get(name)
             if value is not None and (not isinstance(value, str) or not value.strip()):
                 raise ValueError(f"`{name}` must be a non-empty string or None.")
-        if variant == "realtime":
-            ignored = [
-                name for name in ("language", "instruction", "duration_tokens")
-                if model_inputs.get(name) is not None
-            ]
-            if ignored:
-                raise ValueError("MOSS-TTS Realtime does not support: "
-                                 f"{', '.join(ignored)}.")
-            common = {
-                "text",
-                "output_file",
-                "speaker_audio_path",
-                "max_new_tokens",
-                "seed",
-            }
-            unsupported = sorted(set(model_inputs) - common - self._REALTIME_GENERATION_OPTIONS)
-            if unsupported:
-                raise ValueError(
-                    "Unsupported MOSS-TTS Realtime generation option(s): "
-                    f"{', '.join(unsupported)}.")
-
-    def _validate_training_runtime(self) -> None:
-        # Local v1.5 uses a channel-wise supervised objective rather than a
-        # loss returned by its model forward. VoiceHub's built-in MOSS recipe
-        # supplies that objective for safetensors checkpoints.
-        identifier = self.config.name_or_path.lower()
-        if ("gguf" in identifier or "llama.cpp" in identifier or "llama_cpp" in identifier):
+        if model_inputs.get("speed") is not None:
             raise ValueError(
-                "MOSS-TTS fine-tuning requires the unquantized Hugging Face "
-                "safetensors graph, not its llama.cpp/GGUF serving artifact. "
-                "Use OpenMOSS-Team/MOSS-TTS-v1.5 (or the matching Local/"
-                "Realtime source checkpoint).")
-
-    def _register_vendored_architectures(self, transformers) -> None:
-        codec_config = import_optional(
-            "voicehub.models.mosstts.source.moss_audio_tokenizer."
-            "configuration_moss_audio_tokenizer",
-            model_type="mosstts",
-            install_extra=None,
-        )
-        codec_model = import_optional(
-            "voicehub.models.mosstts.source.moss_audio_tokenizer."
-            "modeling_moss_audio_tokenizer",
-            model_type="mosstts",
-            install_extra=None,
-        )
-        transformers.AutoConfig.register(
-            "moss-audio-tokenizer",
-            codec_config.MossAudioTokenizerConfig,
-            exist_ok=True,
-        )
-        transformers.AutoModel.register(
-            codec_config.MossAudioTokenizerConfig,
-            codec_model.MossAudioTokenizerModel,
-            exist_ok=True,
-        )
+                "Native MOSS-TTS has no source-defined speed control. Use "
+                "`duration_tokens` on non-Realtime releases.")
+        if self._resolve_variant() == "realtime":
+            unsupported = [
+                name for name in (
+                    "instruction",
+                    "duration_tokens",
+                    "quality",
+                    "sound_event",
+                    "ambient_sound",
+                    "language",
+                ) if model_inputs.get(name) is not None
+            ]
+            if unsupported:
+                raise ValueError("MOSS-TTS-Realtime does not support: " + ", ".join(unsupported) + ".")
 
     @staticmethod
-    def _variant_module_path(package: str, module: str) -> str:
-        return ("voicehub.models.mosstts.source."
-                f"{package}.{module}")
+    def _generation_options(values: Mapping[str, Any]) -> dict[str, Any]:
+        options = {name: value for name, value in values.items() if value is not None}
+        temperature = options.pop("temperature", None)
+        if temperature is not None:
+            options.setdefault("audio_temperature", temperature)
+            options.setdefault("text_temperature", temperature)
+        top_p = options.pop("top_p", None)
+        if top_p is not None:
+            options.setdefault("audio_top_p", top_p)
+        return options
 
-    def _load_standard_variant(
-        self,
-        transformers,
-        *,
-        dtype,
-    ) -> None:
-        (
-            package,
-            config_class_name,
-            model_class_name,
-            processor_class_name,
-            model_type,
-        ) = self._STANDARD_VARIANTS[self._variant]
-        configuration = import_optional(
-            self._variant_module_path(package, "configuration_moss_tts"),
-            model_type="mosstts",
-            install_extra=None,
-        )
-        modeling = import_optional(
-            self._variant_module_path(package, "modeling_moss_tts"),
-            model_type="mosstts",
-            install_extra=None,
-        )
-        processing = import_optional(
-            self._variant_module_path(package, "processing_moss_tts"),
-            model_type="mosstts",
-            install_extra=None,
-        )
-        config_class = getattr(configuration, config_class_name)
-        model_class = getattr(modeling, model_class_name)
-        processor_class = getattr(processing, processor_class_name)
-
-        transformers.AutoConfig.register(
-            model_type,
-            config_class,
-            exist_ok=True,
-        )
-        load_kwargs = {"dtype": dtype}
-        if self.config.attention_implementation:
-            load_kwargs["attn_implementation"] = (self.config.attention_implementation)
-        self.model = model_class.from_pretrained(
-            self.config.name_or_path,
-            **load_kwargs,
-        ).to(self.device)
-        self.model.eval()
-        self._processor = processor_class.from_pretrained(
-            self.config.name_or_path,
-            codec_path=self._codec_name_or_path,
-        )
-        codec = self._processor.audio_tokenizer
-        if callable(getattr(codec, "eval", None)):
-            codec.eval()
-        moved_codec = codec.to(self.device)
-        if moved_codec is not None:
-            codec = moved_codec
-        self._processor.audio_tokenizer = codec
-        self.config.sample_rate = self._codec_sample_rate(codec)
-
-    def _load_pretrained_model(self) -> None:
-        torch = import_optional(
-            "torch",
-            model_type="mosstts",
-            install_extra=None,
-        )
-        transformers = import_optional(
-            "transformers",
-            model_type="mosstts",
-            install_extra=None,
-        )
-        self._register_vendored_architectures(transformers)
-        self._variant = self._resolve_variant()
-        self._codec_name_or_path = self._resolve_codec_name_or_path(self._variant)
-        dtype = resolve_torch_dtype(
-            torch,
-            self.config.torch_dtype,
-            self.device,
-        )
-        if self._variant == "realtime":
-            self._load_realtime(torch, dtype)
-        else:
-            self._load_standard_variant(
-                transformers,
-                dtype=dtype,
-            )
-        self._torch = torch
-
-    def _load_realtime(self, torch, dtype) -> None:
-        modeling = import_optional(
-            "voicehub.models.mosstts.source.moss_tts_realtime."
-            "mossttsrealtime.modeling_mossttsrealtime",
-            model_type="mosstts",
-            install_extra=None,
-        )
-        inferencer = import_optional(
-            "voicehub.models.mosstts.source.moss_tts_realtime.inferencer",
-            model_type="mosstts",
-            install_extra=None,
-        )
-        tokenizer_module = import_optional(
-            "transformers",
-            model_type="mosstts",
-            install_extra=None,
-        )
-        codec_module = import_optional(
-            "voicehub.models.mosstts.source.moss_audio_tokenizer."
-            "modeling_moss_audio_tokenizer",
-            model_type="mosstts",
-            install_extra=None,
-        )
-        tokenizer = tokenizer_module.AutoTokenizer.from_pretrained(self.config.name_or_path)
-        codec = (
-            codec_module.MossAudioTokenizerModel.from_pretrained(
-                self._codec_name_or_path,
-                dtype=dtype,
-            ).eval().to(self.device))
-        runtime_model = modeling.MossTTSRealtime.from_pretrained(
-            self.config.name_or_path,
-            dtype=dtype,
-        ).to(self.device)
-        runtime_model.eval()
-        self.model = inferencer.MossTTSRealtimeInference(
-            runtime_model,
-            tokenizer,
-            codec=codec,
-            codec_sample_rate=self._codec_sample_rate(codec),
-        )
-        self._processor = codec
-        self.config.sample_rate = self._codec_sample_rate(codec)
-        self._torch = torch
-
-    @staticmethod
-    def _set_eval(module) -> None:
-        evaluate = getattr(module, "eval", None)
-        if callable(evaluate):
-            evaluate()
-
-    def _prepare_for_inference(self) -> None:
-        """Restore serving mode without replacing trained parameter objects."""
-        self._set_eval(self.model)
-        self._set_eval(getattr(self.model, "model", None))
-        self._set_eval(self._processor)
-        self._set_eval(getattr(self._processor, "audio_tokenizer", None))
-        self._set_eval(getattr(self.model, "codec", None))
-
-    def _normalize_mono_audio(self, audio):
-        """Return one detached float32 CPU waveform and its source channels."""
-        with self._torch.inference_mode():
-            waveform = self._torch.as_tensor(audio)
-            if waveform.numel() == 0:
-                raise RuntimeError("MOSS-TTS returned an empty audio waveform.")
-
-            while waveform.ndim > 2 and int(waveform.shape[0]) == 1:
-                waveform = waveform.squeeze(0)
-            if waveform.ndim == 1:
-                source_channels = 1
-            elif waveform.ndim == 2:
-                source_channels = int(waveform.shape[0])
-                if source_channels <= 0:
-                    raise RuntimeError("MOSS-TTS returned an empty audio channel dimension.")
-                waveform = (waveform.squeeze(0) if source_channels == 1 else waveform.mean(dim=0))
-            else:
-                raise RuntimeError(
-                    "MOSS-TTS must return one channel-first waveform; "
-                    f"received shape {tuple(waveform.shape)}.")
-
-            return waveform.detach().float().cpu(), source_channels
-
-    def _generate_realtime(
+    def _generate_code_segments(
         self,
         text: str,
         *,
-        speaker_audio_path: str | None,
-        max_new_tokens: int,
-        generation_options: dict,
-    ):
-        with self._torch.inference_mode():
-            token_batches = self.model.generate(
-                text,
-                reference_audio_path=speaker_audio_path,
-                max_length=max_new_tokens,
-                **generation_options,
-            )
-            if not token_batches:
-                raise RuntimeError("MOSS-TTS Realtime returned no audio tokens.")
-            codes = self._torch.as_tensor(
-                token_batches[0],
-                device=self.device,
-                dtype=self._torch.long,
-            )
-            if codes.ndim != 2 or codes.numel() == 0:
-                raise RuntimeError("MOSS-TTS Realtime returned an invalid audio-token matrix.")
-            decoded = self._processor.decode(codes.transpose(0, 1))
-            decoded_audio = getattr(decoded, "audio", None)
-            if decoded_audio is None or len(decoded_audio) == 0:
-                raise RuntimeError("MOSS-TTS Realtime returned no decoded audio.")
-            return decoded_audio[0]
-
-    def _generate_standard(
-        self,
-        text: str,
-        *,
-        speaker_audio_path: str | None,
-        language: str | None,
+        reference_codes: Sequence[Any],
         instruction: str | None,
         duration_tokens: int | None,
+        quality: str | None,
+        sound_event: str | None,
+        ambient_sound: str | None,
+        language: str | None,
         max_new_tokens: int,
-        generation_options: dict,
+        generation_options: Mapping[str, Any],
     ):
-        reference = ([speaker_audio_path] if speaker_audio_path is not None else None)
-        message = self._processor.build_user_message(
-            text=text,
-            reference=reference,
+        runtime = self._mosstts_runtime
+        if runtime is None:
+            raise RuntimeError("MOSS-TTS native runtime is not loaded.")
+        options = self._generation_options(generation_options)
+        return runtime.generate_codes(
+            text,
+            reference_codes=reference_codes,
             instruction=instruction,
-            tokens=duration_tokens,
+            duration_tokens=duration_tokens,
+            quality=quality,
+            sound_event=sound_event,
+            ambient_sound=ambient_sound,
             language=language,
+            max_new_tokens=max_new_tokens,
+            **options,
         )
-        batch = self._processor([[message]], mode="generation")
-        input_ids = batch["input_ids"].to(self.device)
-        attention_mask = batch["attention_mask"].to(self.device)
-        with self._torch.inference_mode():
-            generated = self.model.generate(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                max_new_tokens=max_new_tokens,
-                **generation_options,
-            )
-            messages = self._processor.decode(generated)
-        audio_segments = [
-            segment for message in messages if message is not None
-            for segment in getattr(message, "audio_codes_list", ())
-        ]
-        if not audio_segments:
-            raise RuntimeError("MOSS-TTS returned no decoded audio.")
-        if len(audio_segments) == 1:
-            return audio_segments[0]
-        return self._torch.cat(
-            tuple(audio_segments),
-            dim=-1,
-        )
+
+    def generate_codes(
+        self,
+        text: str,
+        *,
+        speaker_audio_codes: Any | None = None,
+        speaker_audio: Any | None = None,
+        instruction: str | None = None,
+        duration_tokens: int | None = None,
+        quality: str | None = None,
+        sound_event: str | None = None,
+        ambient_sound: str | None = None,
+        language: str | None = None,
+        max_new_tokens: int = 4_096,
+        seed: int | None = None,
+        **generation_options: Any,
+    ):
+        inputs = {
+            "text": text,
+            "speaker_audio_codes": speaker_audio_codes,
+            "speaker_audio": speaker_audio,
+            "instruction": instruction,
+            "duration_tokens": duration_tokens,
+            "quality": quality,
+            "sound_event": sound_event,
+            "ambient_sound": ambient_sound,
+            "language": language,
+            "max_new_tokens": max_new_tokens,
+            "seed": seed,
+            **generation_options,
+        }
+        self._validate_generation_inputs(inputs)
+        with self._lifecycle_lock:
+            self.load()
+            runtime = self._mosstts_runtime
+            if runtime is None:
+                raise RuntimeError("MOSS-TTS native runtime is not loaded.")
+            references = self._reference_codes(speaker_audio_codes)
+            if speaker_audio is not None:
+                references = (runtime.encode_reference(runtime.load_reference_audio(speaker_audio), ), )
+            with seeded_inference(
+                    seed,
+                    device=self.device,
+                    model_type="mosstts",
+            ):
+                return self._generate_code_segments(
+                    text,
+                    reference_codes=references,
+                    instruction=instruction,
+                    duration_tokens=duration_tokens,
+                    quality=quality,
+                    sound_event=sound_event,
+                    ambient_sound=ambient_sound,
+                    language=language,
+                    max_new_tokens=max_new_tokens,
+                    generation_options=generation_options,
+                )
+
+    @staticmethod
+    def _normalize_waveform(output: Any) -> tuple[Any, int]:
+        import torch
+
+        waveform = output.waveform
+        length = int(output.waveform_lengths[0].item())
+        if waveform.ndim == 3:
+            channels = int(waveform.shape[1])
+            waveform = waveform[0, :, :length]
+            waveform = (waveform[0] if channels == 1 else waveform.mean(dim=0))
+        else:
+            channels = 1
+            waveform = waveform[0, :length]
+        if waveform.numel() == 0:
+            raise RuntimeError("MOSS-TTS codec returned an empty waveform.")
+        return waveform.detach().float().cpu(), channels
 
     def _generate(
         self,
         text: str,
         *,
-        output_file: str | None = None,
-        speaker_audio_path: str | None = None,
-        language: str | None = None,
+        output_file: str | Path | None = None,
+        speaker_audio_path: str | PathLike[str] | None = None,
+        speaker_audio_codes: Any | None = None,
+        speaker_audio: Any | None = None,
         instruction: str | None = None,
         duration_tokens: int | None = None,
-        max_new_tokens: int = 4096,
+        quality: str | None = None,
+        sound_event: str | None = None,
+        ambient_sound: str | None = None,
+        language: str | None = None,
+        max_new_tokens: int = 4_096,
         seed: int | None = None,
-        **generation_options,
+        speed: float | None = None,
+        **generation_options: Any,
     ) -> TTSOutput:
+        del speed
+        runtime = self._mosstts_runtime
+        if runtime is None:
+            raise RuntimeError("MOSS-TTS native runtime is not loaded.")
+        references = self._reference_codes(speaker_audio_codes)
+        if speaker_audio_path is not None:
+            speaker_audio = runtime.load_reference_audio(speaker_audio_path)
+        if speaker_audio is not None:
+            references = (runtime.encode_reference(runtime.load_reference_audio(speaker_audio), ), )
         with seeded_inference(
                 seed,
                 device=self.device,
                 model_type="mosstts",
         ) as effective_seed:
-            if self._variant == "realtime":
-                audio = self._generate_realtime(
-                    text,
-                    speaker_audio_path=speaker_audio_path,
-                    max_new_tokens=max_new_tokens,
-                    generation_options=generation_options,
-                )
-            else:
-                audio = self._generate_standard(
-                    text,
-                    speaker_audio_path=speaker_audio_path,
-                    language=language,
-                    instruction=instruction,
-                    duration_tokens=duration_tokens,
-                    max_new_tokens=max_new_tokens,
-                    generation_options=generation_options,
-                )
+            generated = self._generate_code_segments(
+                text,
+                reference_codes=references,
+                instruction=instruction,
+                duration_tokens=duration_tokens,
+                quality=quality,
+                sound_event=sound_event,
+                ambient_sound=ambient_sound,
+                language=language,
+                max_new_tokens=max_new_tokens,
+                generation_options=generation_options,
+            )
+            decoded = [
+                runtime.decode_codes(item.audio_codes) for item in generated if item.audio_codes.numel()
+            ]
+        if not decoded:
+            raise RuntimeError("MOSS-TTS produced no decodable audio codes.")
+        normalized = [self._normalize_waveform(item) for item in decoded]
+        import torch
 
-        audio, source_channels = self._normalize_mono_audio(audio)
+        audio = torch.cat([item[0] for item in normalized])
+        source_channels = max(item[1] for item in normalized)
+        revision = (None if runtime.artifacts is None else runtime.artifacts.revision)
         return finish_audio_output(
             audio,
             self.sample_rate,
             output_file=output_file,
             metadata={
-                "variant": self._variant,
-                "language": language,
+                "backend": "voicehub-native",
+                "checkpoint_revision": revision,
                 "codec_name_or_path": self._codec_name_or_path,
-                "seed": effective_seed,
-                "requested_seed": seed,
-                "source_channels": source_channels,
                 "downmixed_to_mono": source_channels > 1,
+                "language": language,
+                "requested_seed": seed,
+                "seed": effective_seed,
+                "source_channels": source_channels,
+                "variant": self._variant,
             },
         )
 
+    def _save_pretrained(self, save_directory: Path) -> None:
+        if self._mosstts_runtime is None:
+            self.load()
+        runtime = self.training_backend
+        if runtime is None:
+            raise RuntimeError(
+                "Restore MOSS-TTS to its native trainable graph before "
+                "exporting an inference-reloadable checkpoint.")
+        runtime.save_pretrained(save_directory)
+
 
 MossTTS = MossTTSForTextToSpeech
+
+__all__ = [
+    "MossTTS",
+    "MossTTSConfig",
+    "MossTTSForTextToSpeech",
+]

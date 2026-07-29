@@ -467,6 +467,7 @@ class EchoDiT(nn.Module):
         super().__init__()
         self.speaker_patch_size = speaker_patch_size
         self.timestep_embed_size = timestep_embed_size
+        self.blockwise_generation_available = True
 
         self.text_encoder = TextEncoder(
             vocab_size=text_vocab_size,
@@ -591,6 +592,9 @@ class EchoDiT(nn.Module):
         self,
         prefix_latent: torch.Tensor,
     ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        if not self.blockwise_generation_available:
+            raise RuntimeError("This Echo runtime was loaded without blockwise-only "
+                               "checkpoint tensors.")
         latent_state = self.latent_encoder(prefix_latent)
         latent_state = self.latent_norm(latent_state)
 

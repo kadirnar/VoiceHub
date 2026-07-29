@@ -1,0 +1,62 @@
+{
+  "architecture": "speecht5-text-to-speech",
+  "implementation": "voicehub-native",
+  "source": {
+    "repository": "https://github.com/huggingface/transformers",
+    "revision": "9417c924af539be5f941c8a709a96b60dfe29eb3",
+    "tag": "v4.28.0",
+    "license": "Apache-2.0",
+    "files": [
+      "src/transformers/models/speecht5/configuration_speecht5.py",
+      "src/transformers/models/speecht5/feature_extraction_speecht5.py",
+      "src/transformers/models/speecht5/modeling_speecht5.py",
+      "src/transformers/models/speecht5/processing_speecht5.py",
+      "src/transformers/models/speecht5/tokenization_speecht5.py"
+    ]
+  },
+  "checkpoints": {
+    "text_to_spectrogram": {
+      "repository": "microsoft/speecht5_tts",
+      "revision": "30fcde30f19b87502b8435427b5f5068e401d5f6",
+      "filename": "pytorch_model.bin",
+      "license": "MIT",
+      "sha256": "d60d28067349ef66b50d8cd643ae56b6d6b8f27def929bc4ef6fcad907954190",
+      "size": 585476837,
+      "tensor_count": 398,
+      "state_values": 146335465,
+      "tensor_inventory_fingerprint": "0fea57520df3f1fa6039b070f0864fcac666b2cb3f6ef252440212fae3e99452"
+    },
+    "vocoder": {
+      "repository": "microsoft/speecht5_hifigan",
+      "revision": "bb6f429406e86a9992357a972c0698b22043307d",
+      "filename": "pytorch_model.bin",
+      "license": "MIT",
+      "sha256": "b171e9bcd8a2b50dc9780040478dfa26783a9ee4be012cf5776914f091d6887b",
+      "size": 50672453,
+      "tensor_count": 158,
+      "state_values": 12656417,
+      "tensor_inventory_fingerprint": "7fedb65f1e2432c8fbf49d9badeb84637bf9ae04e6f2411dea7fd533f0a4105e"
+    }
+  },
+  "verification": {
+    "graph": "The native graph has the complete published 398-tensor namespace, including the two persistent sinusoidal position buffers stored by the released checkpoint.",
+    "processor": "Native SentencePiece token IDs and all deterministic log-mel values are compared with the pinned reference implementation.",
+    "runtime_dependencies": "PyTorch, the Python standard library, and VoiceHub only.",
+    "checkpoint_boundary": "Released .bin files are accepted only through torch.load(weights_only=True), pinned SHA-256, and complete namespace/shape/dtype/inventory validation. Portable exports use VoiceHub's native Safetensors implementation."
+  },
+  "training": {
+    "objective": [
+      "L1 loss on pre-postnet and postnet spectrograms",
+      "binary stop-token loss with positive weight 5",
+      "guided multi-head cross-attention loss"
+    ],
+    "speaker_conditioning": "512-dimensional normalized x-vector",
+    "vocoder": "frozen during text-to-spectrogram fine-tuning",
+    "raw_data": "Native transcript tokenization, resampling, and log-mel target extraction"
+  },
+  "limitations": [
+    "The published checkpoint is an English character model.",
+    "VoiceHub does not claim corpus-level quality improvements without benchmark evidence.",
+    "The official repositories publish restricted-load PyTorch archives, not Safetensors; VoiceHub exports Safetensors after validated conversion."
+  ]
+}

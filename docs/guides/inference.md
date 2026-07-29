@@ -72,7 +72,7 @@ from voicehub import AutoModelForTextToSpeech
 model = AutoModelForTextToSpeech.from_pretrained(
     "nari-labs/Dia-1.6B-0626",
     model_type="dia",
-    backend="transformers",
+    backend="native",
     compute_dtype="bfloat16",
     device="cuda",
     lazy_load=True,
@@ -85,6 +85,11 @@ service can warm it explicitly:
 ```python
 model.load()
 ```
+
+Dia does not import Transformers, Hugging Face Hub, NumPy, Torchaudio, or the
+Nari runtime. VoiceHub resolves the pinned files with its own transport,
+validates the complete Safetensors header, loads its native PyTorch graph, and
+decodes through the bundled native DAC implementation.
 
 !!! tip "Match precision to the device"
 
@@ -107,16 +112,176 @@ model = AutoInferenceModel.from_pretrained(
 
 Prefer `AutoModelForTextToSpeech` in new code.
 
-## Use native Transformers TTS families
+## Use dedicated TTS families
 
-VoiceHub includes dedicated wrappers where the Transformers families have
-materially different inputs and training boundaries:
+VoiceHub includes dedicated wrappers where model families have materially
+different inputs and training boundaries. VITS/MMS-TTS uses VoiceHub's own
+PyTorch graph, Safetensors reader, and declarative character frontend; it does
+not import Transformers:
 
 | Model type | Default checkpoint | Conditioning |
 | --- | --- | --- |
+| `kokoro` | `hexgrad/Kokoro-82M` | Voice pack plus explicit phonemes or a caller-provided text frontend |
+| `f5tts` | `SWivid/F5-TTS` / `F5TTS_v1_Base` | Reference PCM WAVE plus its transcript |
+| `melotts` | Pinned EN/EN_V2/EN_NEWEST/FR/JP/ES/ZH/KR releases | Exact phone, tone, language, BERT features, and speaker ID |
+| `openvoice` | `myshell-ai/OpenVoiceV2` at its pinned commit | Base waveform plus target reference waveform or 256-D embedding |
+| `outetts` | `OuteAI/Llama-OuteTTS-1.0-1B` | Bundled English profile or an exact V3 speaker-profile mapping/JSON |
+| `fishtts` | `fishaudio/s2-pro` at its pinned commit | Optional reference waveform plus aligned transcript |
 | `bark` | `suno/bark-small` | Bark voice preset or custom semantic/coarse/fine prompt |
 | `speecht5` | `microsoft/speecht5_tts` | Speaker embedding plus a frozen HiFi-GAN vocoder |
 | `vits` | `facebook/mms-tts-eng` | Optional speaker ID and speaking-rate/noise controls |
+
+F5-TTS uses the VoiceHub-native DiT, flow sampler, mel frontend, and Vocos
+decoder. The transcript is deliberately explicit instead of invoking a hidden
+ASR dependency:
+
+```python
+model = AutoModelForTextToSpeech.from_pretrained(
+    "F5TTS_v1_Base",
+    model_type="f5tts",
+    device="cuda",
+)
+output = model.generate(
+    "The complete synthesis path is owned by VoiceHub.",
+    speaker_audio_path="reference.wav",
+    reference_text="This is the reference transcript.",
+    nfe_steps=32,
+    cfg_strength=2.0,
+    seed=42,
+)
+```
+
+The released multilingual vocabulary accepts pre-normalized token sequences.
+For raw Chinese, supply a native pinyin-with-tone normalizer or precompute
+those tokens; silently falling back to character IDs is not source-equivalent.
+
+Fish Speech S2 uses VoiceHub's native DualAR semantic graph, byte-BPE
+conversation protocol, repetition-aware sampler, and ModifiedDAC:
+
+```python
+model = AutoModelForTextToSpeech.from_pretrained(
+    "fishaudio/s2-pro",
+    model_type="fishtts",
+    codec_name_or_path="/models/fish-s2-codec-safetensors",
+    device="cuda",
+)
+output = model.generate(
+    "<|speaker:0|> Native boundaries make deployment predictable.",
+    speaker_audio_path="reference.wav",
+    reference_text="The exact transcript of reference.wav.",
+    seed=42,
+    output_file="fish-s2.wav",
+)
+```
+
+The official semantic model is already sharded Safetensors. Fish currently
+publishes ModifiedDAC as `codec.pth`, so first convert that immutable,
+digest-verified artifact with
+`voicehub.architectures.fishtts.convert_legacy_fish_codec(...)` and
+`trust_legacy_pickle=True`. The conversion uses
+`torch.load(weights_only=True)` once; normal inference, fine-tuning, and export
+accept only the resulting Safetensors directory. The Fish Audio Research
+License is non-commercial without separate written permission and requires
+the “Built with Fish Audio” attribution.
+
+MeloTTS also keeps its linguistic boundary explicit. A converted native
+artifact contains `config.json` and `model.safetensors`; synthesis receives
+the checkpoint-compatible features produced by the selected language
+frontend:
+
+```python
+from voicehub import AutoModelForTextToSpeech
+
+model = AutoModelForTextToSpeech.from_pretrained(
+    "/models/melotts-native",
+    model_type="melotts",
+    device="cuda",
+)
+output = model.generate(
+    "",
+    input_ids=phone_ids,             # [text]
+    tone_ids=tone_ids,               # [text]
+    language_ids=language_ids,       # [text]
+    bert_features=bert_features,     # [1024, text]
+    ja_bert_features=ja_bert,        # [768, text]
+    speaker=None,
+    seed=17,
+    output_file="melotts.wav",
+)
+```
+
+Raw text alone fails before model allocation. The pinned official releases
+currently publish legacy `.pth` containers; importing one requires
+`trust_pickle_checkpoint=True`, validates its recorded digest and complete
+tensor inventory through PyTorch's restricted `weights_only=True` loader,
+and should be followed by an immediate native Safetensors export.
+
+OpenVoice V2 is a tone-color converter. Its native graph receives speech from
+a base voice and transfers the target reference's timbre without changing the
+base waveform's words, rhythm, accent, or emotion:
+
+```python
+model = AutoModelForTextToSpeech.from_pretrained(
+    "myshell-ai/OpenVoiceV2",
+    model_type="openvoice",
+    trust_pickle_checkpoint=True,
+    device="cuda",
+)
+output = model.generate(
+    "Text is descriptive metadata for an explicit base waveform.",
+    base_audio="base.wav",
+    speaker_audio_path="target-reference.wav",
+    tau=0.3,
+    vad=False,
+    seed=42,
+    output_file="converted.wav",
+)
+model.export_native_pretrained("/models/openvoice-v2-native")
+```
+
+The trust flag is required only for the official, hash-pinned PyTorch release.
+Reload the exported `config.json` and `model.safetensors` directory without
+that flag. VoiceHub's converter path imports neither the upstream OpenVoice
+package nor Silero, Whisper, NumPy, Librosa, Torchaudio, or Transformers.
+References must already contain the desired speech segment; run a registered
+VoiceHub VAD explicitly when trimming is needed. Watermarking is likewise a
+separate postprocessing strategy.
+
+OuteTTS uses VoiceHub's native Llama/Qwen graph, byte-BPE tokenizer, V3 prompt
+processor, and frozen 24 kHz DAC. The historical `backend="hf"` spelling is a
+compatibility alias for this native path; it does not load Transformers:
+
+```python
+model = AutoModelForTextToSpeech.from_pretrained(
+    "OuteAI/Llama-OuteTTS-1.0-1B",
+    model_type="outetts",
+    backend="native",
+    interface_version="v3",
+    device="cuda",
+)
+output = model.generate(
+    "A native runtime keeps the prompt protocol explicit.",
+    speaker="EN-FEMALE-1-NEUTRAL",
+    generation_type="chunked",
+    sampler={
+        "temperature": 0.4,
+        "top_k": 40,
+        "top_p": 0.9,
+        "repetition_penalty": 1.1,
+        "repetition_range": 64,
+    },
+    seed=42,
+    output_file="outetts.wav",
+)
+```
+
+For another voice, pass exactly one of `speaker_profile` or
+`speaker_profile_path`. Raw speaker audio is rejected because equivalent V3
+conditioning needs word timestamps, two aligned DAC codebooks, and acoustic
+features. Native inference supports regular and chunked generation. GGUF,
+llama.cpp, EXL2, vLLM, remote-server, guided, batch, and streaming provider
+paths fail closed instead of importing another model runtime. The default 1B
+checkpoint is CC-BY-NC-SA-4.0; the native 0.6B Qwen checkpoint is Apache-2.0.
 
 ```python
 model = AutoModelForTextToSpeech.from_pretrained(
@@ -127,17 +292,50 @@ model = AutoModelForTextToSpeech.from_pretrained(
 output = model("VoiceHub supports multilingual VITS checkpoints.")
 ```
 
-These loaders accept Hub repositories, local Transformers directories, or a
-local `.safetensors`/`.bin` weight file paired with an explicit configuration
-and processor directory. A Hub access token is runtime-only and is never
-written to `config.json`.
+Kokoro's model graph, checkpoint reader, and waveform decoder are
+VoiceHub-native. The published checkpoint delegates grapheme-to-phoneme
+conversion to separate linguistic runtimes, so exact pronunciation has an
+explicit boundary. Pass author-compatible phonemes for reproducible,
+source-equivalent synthesis:
+
+```python
+model = AutoModelForTextToSpeech.from_pretrained(
+    "hexgrad/Kokoro-82M",
+    model_type="kokoro",
+    device="cpu",
+)
+output = model(
+    "Hello",
+    phonemes="həlˈoʊ",
+    voice="af_heart",
+    seed=42,
+    output_file="kokoro.wav",
+)
+print(output.metadata["source_equivalent_g2p"])  # True
+```
+
+Without `phonemes=`, VoiceHub uses a deliberately conservative Unicode and
+supported-grapheme fallback. It does not claim multilingual G2P parity. For
+production text input, inject a callable `text_frontend` that returns symbols
+from the released Kokoro vocabulary; the callable remains a runtime object and
+is never serialized.
+
+The VITS loader accepts a Hub repository, local checkpoint directory, or local
+`.safetensors` file whose directory also contains `config.json`, `vocab.json`,
+and `tokenizer_config.json`. Files are resolved from one coherent revision and
+only Safetensors weights are accepted. A Hub access token is runtime-only and
+is never written to `config.json`.
 
 Training support remains model-specific: SpeechT5 exposes its native
-supervised spectrogram objective; Bark requires stage-aligned pretokenized
-semantic/coarse/fine batches; Transformers VITS does not expose the complete
-posterior, duration, KL, and adversarial source recipe. See the
-[training matrix](../models/training-support.md) before selecting a
-checkpoint.
+supervised spectrogram objective; native Bark requires stage-aligned
+pretokenized semantic/coarse/fine batches; Inflect warm-starts its released
+generator and freshly initializes the absent posterior/discriminator. Native
+VITS provides two explicit routes: the full adversarial recipe requires an
+exact caller-supplied acoustic configuration and runs the posterior, monotonic
+alignment, duration, flow, decoder, discriminator, KL, mel, feature-matching,
+and least-squares GAN objectives; the partial generator warm-start remains
+available for precomputed spectrogram batches. See the
+[training matrix](../models/training-support.md) before selecting a checkpoint.
 
 ## Configure a reproducible request
 
@@ -278,6 +476,52 @@ An optimization strategy must:
 
 Do not assume that an ONNX, GGUF, TensorRT, vLLM, quantized, or compiled
 serving runtime remains differentiable.
+
+### Apply a composable pass plan
+
+Use a pass plan when several independent graph transformations should share
+one compatibility check, rollback boundary, and manifest:
+
+```python
+from voicehub.optimization import (
+    OPTIMIZATION_PASSES,
+    OptimizationContext,
+)
+
+OPTIMIZATION_PASSES.register("vendor-fusion", VendorFusionPass)
+result = model.apply_optimization_plan(
+    ("vendor-fusion", precision_pass),
+    mode="inference",
+    context=OptimizationContext(
+        mode="inference",
+        device="cuda",
+        dtype="float16",
+        streaming=False,
+    ),
+)
+
+print(result.manifest())
+```
+
+Pass factories are resolved lazily. VoiceHub applies no default plan and does
+not infer one from a checkpoint. A registered model automatically contributes
+its canonical architecture to the context. Before mutation, the manager checks
+the requested device, dtype, streaming mode, and each concrete pass's
+compatibility kind against that architecture's declared capabilities.
+Architecture-bound distributed inference is rejected because the current
+schema verifies distributed training, not distributed serving. Registered
+models without an architecture declaration remain agnostic. Compatibility
+declarations do not install a pass factory, so a listed `compile`, `sdpa`, or
+`lora` kind still requires an explicitly supplied or registered
+implementation.
+
+Every pass snapshots a strict JSON `manifest_configuration()` before any pass
+is applied; result metadata is snapshot after application. IDs, kinds,
+versions, capabilities, configuration, and metadata therefore remain stable
+even if a pass object or nested source mapping later changes. Call
+`model.restore_optimization_plan(mode="inference")` before switching this
+runtime to training; irreversible plans require rebuilding the original
+runtime instead.
 
 ## Service checklist
 

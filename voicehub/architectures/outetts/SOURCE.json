@@ -1,0 +1,54 @@
+{
+  "architecture": "outetts",
+  "implementation": "VoiceHub-owned PyTorch graph and V3 protocol; no provider runtime import",
+  "implementation_sources": [
+    {
+      "license": "Apache-2.0",
+      "repository": "edwko/OuteTTS",
+      "revision": "f5eac6e70d792844c6a6959d900a47af2c061a5b"
+    },
+    {
+      "license": "Apache-2.0",
+      "repository": "huggingface/transformers",
+      "revision": "ebea912f0bb6f9e28ad2df04acd9b4df035933a9",
+      "scope": "Llama/Qwen reference semantics"
+    },
+    {
+      "license": "CDLA-Permissive-2.0",
+      "repository": "ibm-research/DAC.speech.v1.0",
+      "revision": "1ea7f64cd0678415e2d8c32d67b190722cb9b149"
+    }
+  ],
+  "checkpoints": {
+    "models": {
+      "metadata_module": "voicehub.architectures.outetts.metadata",
+      "repositories": [
+        "OuteAI/Llama-OuteTTS-1.0-1B",
+        "OuteAI/OuteTTS-1.0-0.6B"
+      ]
+    },
+    "dac": {
+      "file": "weights_24khz_1.5kbps_v1.0.pth",
+      "license": "CDLA-Permissive-2.0",
+      "repository": "ibm-research/DAC.speech.v1.0",
+      "revision": "1ea7f64cd0678415e2d8c32d67b190722cb9b149",
+      "sha256": "d77ca0b04df942ec64e6a7a162bcac093b1127700acdaec0079f40d32c4405fb",
+      "size": 295731578,
+      "state_values": 73909506,
+      "tensor_count": 252,
+      "tensor_inventory_fingerprint": "c145b57cfa3d9b7976db61060f748ffbc02c9bf3bc2360c15129373e6461bea8"
+    }
+  },
+  "limitations": [
+    "Only OuteTTS 1.0 V3 dense Llama/Qwen Safetensors checkpoints are executable.",
+    "GGUF, EXL2, vLLM, ONNX, server, streaming, batch, and guided-words backends are rejected.",
+    "Raw speaker audio is not silently aligned; provide a validated V3 speaker profile.",
+    "The 1B checkpoint weights are CC-BY-NC-SA-4.0 and are not suitable for unrestricted commercial use."
+  ],
+  "training_recipe": {
+    "objective": "completion-only-causal-language-modeling",
+    "repository": "edwko/OuteTTS",
+    "revision": "05f51ffd06769a10155e77523cb9b32e8dc55d9a",
+    "scope": "full language model with frozen DAC"
+  }
+}

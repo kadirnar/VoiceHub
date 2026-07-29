@@ -1,7 +1,48 @@
 {
+  "components": [
+    {
+      "kind": "language-model checkpoint and tokenizer",
+      "license": "CC-BY-NC-4.0",
+      "repository": "HKUSTAudio/Llasa-1B-Multilingual",
+      "revision": "7f094cb62b0a9779b334c60d039a61c5a6e04456",
+      "tensor_count": 147,
+      "upstream": "https://huggingface.co/HKUSTAudio/Llasa-1B-Multilingual"
+    },
+    {
+      "kind": "fine-tuning recipe reference",
+      "license": "CC-BY-NC-4.0",
+      "repository": "zhenye234/LLaSA_training",
+      "revision": "479acd5277220f78a72093f63755c0892838d0c5",
+      "upstream": "https://github.com/zhenye234/LLaSA_training"
+    },
+    {
+      "kind": "self-contained XCodec2 checkpoint",
+      "license": "CC-BY-NC-4.0",
+      "repository": "HKUSTAudio/xcodec2-hf",
+      "revision": "64bd034d12d441299cdd535b15c33efd6ccdf252",
+      "sha256": "611a63e4dff70c19bd4718d701bb7bc522acf6293a109ab62f5db2f7ff395114",
+      "size": 2517231448,
+      "tensor_count": 811,
+      "upstream": "https://huggingface.co/HKUSTAudio/xcodec2-hf"
+    },
+    {
+      "kind": "XCodec2 architecture and frontend reference",
+      "license": "Apache-2.0",
+      "repository": "huggingface/transformers",
+      "revision": "7f5d5d1aaca3cc3d236c80ec8cb34d06f08a5fb8",
+      "upstream": "https://github.com/huggingface/transformers/tree/7f5d5d1aaca3cc3d236c80ec8cb34d06f08a5fb8/src/transformers/models/xcodec2"
+    },
+    {
+      "kind": "legacy vendored XCodec2 source snapshot",
+      "license": "CC-BY-NC-4.0",
+      "repository": "HKUSTAudio/xcodec2",
+      "revision": "e412427ed30f0cf9d5e3c95562113deb10a32d03",
+      "upstream": "https://huggingface.co/HKUSTAudio/xcodec2"
+    }
+  ],
   "license": "CC-BY-NC-4.0",
   "model_type": "llasa",
-  "policy": "XCodec2 architecture source is vendored. LLaSA and codec weights remain external Hub artifacts.",
-  "revision": "e412427ed30f0cf9d5e3c95562113deb10a32d03",
-  "upstream": "https://huggingface.co/HKUSTAudio/xcodec2"
+  "policy": "VoiceHub executes its own PyTorch graph and stdlib/native preprocessing. Hub repositories supply declarative configuration, tokenizer assets, and Safetensors weights only. The legacy snapshot is provenance-only and is not imported by the public runtime.",
+  "revision": "7f094cb62b0a9779b334c60d039a61c5a6e04456",
+  "upstream": "https://huggingface.co/HKUSTAudio/Llasa-1B-Multilingual"
 }

@@ -30,7 +30,7 @@ class LatestASRRegistryTests(unittest.TestCase):
         ),
         (
             "asr_qwen3",
-            "Qwen/Qwen3-ASR-0.6B-hf",
+            "Qwen/Qwen3-ASR-0.6B",
             "speech-sequence-to-sequence",
             "Qwen3ASRForSpeechRecognition",
         ),
@@ -38,7 +38,7 @@ class LatestASRRegistryTests(unittest.TestCase):
             "asr_vibevoice",
             "microsoft/VibeVoice-ASR-HF",
             "speech-sequence-to-sequence",
-            "VibeVoiceASRForSpeechRecognition",
+            "VibeVoiceForSpeechRecognition",
         ),
         (
             "asr_granite_speech",
@@ -63,6 +63,12 @@ class LatestASRRegistryTests(unittest.TestCase):
             "CohereLabs/cohere-transcribe-03-2026",
             "speech-sequence-to-sequence",
             "CohereForSpeechRecognition",
+        ),
+        (
+            "asr_seamless_m4t_v2",
+            "facebook/seamless-m4t-v2-large",
+            "speech-sequence-to-sequence",
+            "SeamlessM4Tv2ForSpeechRecognition",
         ),
         (
             "asr_medasr",
@@ -100,6 +106,7 @@ class LatestASRRegistryTests(unittest.TestCase):
             "parakeet-tdt-v3": "asr_parakeet_tdt",
             "nemotron-3.5-asr": "asr_nemotron",
             "cohere-transcribe": "asr_cohere",
+            "seamless-m4t": "asr_seamless_m4t_v2",
             "medasr": "asr_medasr",
             "tiron": "asr_tiron",
         }
@@ -143,8 +150,11 @@ class LatestASRRegistryTests(unittest.TestCase):
 
     def test_training_families_use_native_objective_shapes(self):
         expected = {
+            "asr_vibevoice": TrainingFamily.SPEECH_SEQ2SEQ,
             "asr_parakeet_tdt": TrainingFamily.TDT,
             "asr_nemotron": TrainingFamily.RNNT,
+            "asr_cohere": TrainingFamily.SPEECH_SEQ2SEQ,
+            "asr_seamless_m4t_v2": TrainingFamily.SPEECH_SEQ2SEQ,
             "asr_medasr": TrainingFamily.CTC,
         }
 
@@ -159,7 +169,7 @@ class LatestASRRegistryTests(unittest.TestCase):
         input_features = {
             "asr_whisper": (-1, "attention_mask"),
             "asr_tiron": (-1, "attention_mask"),
-            "asr_qwen3": (-1, "input_features_mask"),
+            "asr_qwen3": (-1, "feature_attention_mask"),
             "asr_parakeet_tdt": (-2, "attention_mask"),
             "asr_nemotron": (-2, "attention_mask"),
             "asr_cohere": (-2, "attention_mask"),
@@ -214,6 +224,28 @@ class LatestASRRegistryTests(unittest.TestCase):
         self.assertEqual(
             license_spec.upstream,
             "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b",
+        )
+
+    def test_seamless_exposes_noncommercial_checkpoint_terms(self):
+        license_spec = get_model_spec("asr_seamless_m4t_v2").license
+
+        self.assertIsNotNone(license_spec)
+        self.assertEqual(license_spec.license_id, "CC-BY-NC-4.0")
+        self.assertFalse(license_spec.commercial_use)
+        self.assertEqual(
+            license_spec.upstream,
+            "https://huggingface.co/facebook/seamless-m4t-v2-large",
+        )
+
+    def test_parakeet_exposes_checkpoint_attribution_terms(self):
+        license_spec = get_model_spec("asr_parakeet_tdt").license
+
+        self.assertIsNotNone(license_spec)
+        self.assertEqual(license_spec.license_id, "CC-BY-4.0")
+        self.assertTrue(license_spec.commercial_use)
+        self.assertEqual(
+            license_spec.upstream,
+            "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
         )
 
     def test_gated_checkpoints_are_discoverable_before_loading(self):

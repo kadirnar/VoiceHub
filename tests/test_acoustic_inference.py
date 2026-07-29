@@ -496,55 +496,42 @@ class InferenceHelperTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Available IDs"):
             MeloTTSForTextToSpeech._resolve_speaker_id(speakers, 3)
 
-    def test_openvoice_speaker_resolution_returns_name_and_id(self):
-        speakers = {
-            "EN-US": 4,
-            "EN-BR": 9,
-        }
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is the tensor substrate")
+    def test_openvoice_embedding_shape_is_validated_explicitly(self):
+        import torch
 
-        self.assertEqual(
-            OpenVoiceForTextToSpeech._resolve_speaker(speakers, None),
-            ("EN-US", 4),
+        valid = OpenVoiceForTextToSpeech._load_embedding(
+            torch.zeros(256, 1),
+            name="target_embedding",
+            device="cpu",
         )
-        with self.assertRaisesRegex(ValueError, "Available speakers"):
-            OpenVoiceForTextToSpeech._resolve_speaker(speakers, "missing")
+        self.assertEqual(tuple(valid.shape), (1, 256, 1))
+        with self.assertRaisesRegex(ValueError, r"shape \[batch, 256, 1\]"):
+            OpenVoiceForTextToSpeech._load_embedding(
+                torch.zeros(255, 1),
+                name="target_embedding",
+                device="cpu",
+            )
 
-    def test_openvoice_reference_extraction_uses_request_temp_directory(self):
-        captured = {}
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is the tensor substrate")
+    def test_openvoice_explicit_base_audio_uses_native_runtime(self):
+        import torch
 
-        def get_se(_path, _converter, *, target_dir, vad):
-            captured["target_dir"] = Path(target_dir)
-            captured["vad"] = vad
-            self.assertTrue(captured["target_dir"].parent.is_dir())
-            return object(), "reference"
-
-        base_model = SimpleNamespace(
-            hps=SimpleNamespace(data=SimpleNamespace(spk2id={"EN-US": 0}), ),
-            tts_to_file=Mock(),
-        )
-        converter = SimpleNamespace(convert=Mock())
         model = OpenVoiceForTextToSpeech(device="cpu")
         model.device = "cpu"
-        model.model = converter
-        model._se_extractor = SimpleNamespace(get_se=get_se)
-        model._base_model = Mock(return_value=base_model)
-        model._load_source_embedding = Mock(return_value=object())
-        soundfile = SimpleNamespace(
-            read=Mock(return_value=(
-                np.asarray([0.1], dtype=np.float32),
-                44_100,
-            )), )
-
+        model.runtime = SimpleNamespace(convert=Mock(return_value=torch.tensor([0.1, -0.1])), )
+        source_embedding = torch.zeros(1, 256, 1)
+        target_embedding = torch.ones(1, 256, 1)
         with patch(
-                "voicehub.models.openvoice.inference.import_optional",
-                return_value=soundfile,
-        ), patch(
                 "voicehub.models.openvoice.inference.seeded_inference",
                 return_value=nullcontext(31),
         ) as seeded:
             output = model._generate(
                 "hello",
-                speaker_audio_path="reference.wav",
+                base_audio=torch.zeros(2_048),
+                base_audio_sampling_rate=22_050,
+                source_embedding=source_embedding,
+                target_embedding=target_embedding,
                 vad=False,
                 seed=31,
             )
@@ -555,9 +542,8 @@ class InferenceHelperTests(unittest.TestCase):
             model_type="openvoice",
         )
         self.assertEqual(output.metadata["seed"], 31)
-        self.assertFalse(captured["vad"])
-        self.assertEqual(captured["target_dir"].name, "reference")
-        self.assertFalse(captured["target_dir"].exists())
+        self.assertEqual(output.metadata["base_source"], "provided-audio")
+        model.runtime.convert.assert_called_once()
 
     def test_supertonic_trims_runtime_padding_using_reported_duration(self):
         model = SupertonicForTextToSpeech()
@@ -571,45 +557,50 @@ class InferenceHelperTests(unittest.TestCase):
 
         np.testing.assert_array_equal(waveform, padded[0, :5])
 
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is the tensor substrate")
     def test_supertonic_trims_each_chunk_before_concatenation(self):
-        fake_ort = ModuleType("onnxruntime")
-        fake_ort.InferenceSession = object
-        fake_ort.SessionOptions = object
-        with _temporary_modules({"onnxruntime": fake_ort}):
-            helper = importlib.import_module("voicehub.models.supertonic.source.supertonic.helper")
+        import torch
 
-        runtime = object.__new__(helper.TextToSpeech)
-        runtime.sample_rate = 10
-        runtime._infer = Mock(
+        from voicehub.architectures.supertonic.runtime import NativeSupertonicRuntime
+
+        runtime = SimpleNamespace(
+            sample_rate=10,
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+        )
+        runtime.infer_batch = Mock(
             side_effect=[
                 (
-                    np.asarray([[1, 2, 3, 4, 5, 90, 91, 92]], dtype=np.float32),
-                    np.asarray([0.5], dtype=np.float32),
+                    torch.tensor([[1, 2, 3, 4, 5, 90, 91, 92]]),
+                    torch.tensor([0.5]),
                 ),
                 (
-                    np.asarray([[6, 7, 8, 9, 93, 94, 95, 96]], dtype=np.float32),
-                    np.asarray([0.4], dtype=np.float32),
+                    torch.tensor([[6, 7, 8, 9, 93, 94, 95, 96]]),
+                    torch.tensor([0.4]),
                 ),
-            ])
-        style = SimpleNamespace(
-            ttl=np.zeros((1, 1), dtype=np.float32),
-            dp=np.zeros((1, 1), dtype=np.float32),
-        )
+            ], )
 
-        with patch.object(helper, "chunk_text", return_value=["first", "second"]):
-            waveform, duration = runtime(
+        with patch(
+                "voicehub.architectures.supertonic.runtime.chunk_text",
+                return_value=("first", "second"),
+        ):
+            waveform, duration = NativeSupertonicRuntime.synthesize(
+                runtime,
                 "long input",
                 "en",
-                style,
-                total_step=2,
+                object(),
+                total_steps=2,
                 silence_duration=0.2,
             )
 
-        np.testing.assert_array_equal(
+        torch.testing.assert_close(
             waveform,
-            np.asarray([[1, 2, 3, 4, 5, 0, 0, 6, 7, 8, 9]], dtype=np.float32),
+            torch.tensor(
+                [[1, 2, 3, 4, 5, 0, 0, 6, 7, 8, 9]],
+                dtype=torch.float32,
+            ),
         )
-        self.assertAlmostEqual(float(duration[0]), 1.1)
+        self.assertAlmostEqual(float(duration[0]), 1.1, places=6)
 
     def test_parler_extracts_audio_from_model_output(self):
 
@@ -630,8 +621,15 @@ class InferenceHelperTests(unittest.TestCase):
             def cpu(self):
                 return self
 
-            def numpy(self):
-                return self.values
+            def squeeze(self):
+                self.values = np.squeeze(self.values)
+                return self
+
+            def contiguous(self):
+                return self
+
+            def __array__(self, dtype=None):
+                return np.asarray(self.values, dtype=dtype)
 
         class FakeOutput:
             audio_values = FakeTensor(np.asarray([[0.1, -0.1]], dtype=np.float32))
@@ -662,8 +660,15 @@ class InferenceHelperTests(unittest.TestCase):
             def cpu(self):
                 return self
 
-            def numpy(self):
-                return self.values
+            def squeeze(self):
+                self.values = np.squeeze(self.values)
+                return self
+
+            def contiguous(self):
+                return self
+
+            def __array__(self, dtype=None):
+                return np.asarray(self.values, dtype=dtype)
 
         output = SimpleNamespace(sequences=FakeTensor(np.asarray([[0.25, -0.25]], dtype=np.float32)), )
 
@@ -756,9 +761,6 @@ class InferenceHelperTests(unittest.TestCase):
     def test_vui_render_cleans_once_and_uses_codec_rate_and_final_vad_endpoint(self):
         import torch
 
-        fake_inflect = ModuleType("inflect")
-        fake_inflect.engine = Mock()
-        fake_torchaudio = ModuleType("torchaudio")
         fake_model_module = ModuleType("voicehub.models.vui.model")
         fake_model_module.Vui = object
         fake_sampling = ModuleType("voicehub.models.vui.sampling")
@@ -769,8 +771,6 @@ class InferenceHelperTests(unittest.TestCase):
         fake_vad = ModuleType("voicehub.models.vui.vad")
         fake_vad.detect_voice_activity = Mock()
         modules = {
-            "inflect": fake_inflect,
-            "torchaudio": fake_torchaudio,
             "voicehub.models.vui.model": fake_model_module,
             "voicehub.models.vui.sampling": fake_sampling,
             "voicehub.models.vui.vad": fake_vad,
@@ -803,11 +803,7 @@ class InferenceHelperTests(unittest.TestCase):
                     wraps=vui_tts.simple_clean,
                 ) as clean,
                 patch.object(vui_tts, "generate", side_effect=fake_generate),
-                patch.object(
-                    vui_tts,
-                    "torchaudio",
-                    SimpleNamespace(functional=SimpleNamespace(resample=resample), ),
-                ),
+                patch.object(vui_tts, "resample_waveform", resample),
                 patch.object(
                     vui_tts,
                     "vad",
@@ -850,16 +846,33 @@ class InferenceHelperTests(unittest.TestCase):
         self.assertEqual(sample_rate, 48_000)
 
     def test_xtts_scopes_generation_seed_and_reports_effective_value(self):
+        import torch
+
         model = XTTSForTextToSpeech(device="cpu")
         model.device = "cpu"
-        model._xtts_config = SimpleNamespace(languages=("en", ))
+        model._runtime_config = SimpleNamespace(
+            languages=("en", ),
+            max_ref_len=30,
+            gpt_cond_len=30,
+            gpt_cond_chunk_len=4,
+            sound_norm_refs=False,
+            temperature=0.75,
+            top_k=50,
+            top_p=0.85,
+            repetition_penalty=5.0,
+        )
+        model._tokenizer = SimpleNamespace(encode=Mock(return_value=(1, 2)), )
         model.model = SimpleNamespace(
-            synthesize=Mock(return_value={
-                "wav": np.asarray([0.1], dtype=np.float32),
-            }), )
+            gpt=SimpleNamespace(max_text_tokens=404),
+            conditioning_latents=Mock(return_value=(
+                torch.ones(1, 2, 4),
+                torch.ones(1, 4, 1),
+            ), ),
+            synthesize_tokens=Mock(return_value=torch.tensor([[[0.1]]]), ),
+        )
 
         with patch(
-                "voicehub.models.xtts.inference.seeded_inference",
+                "voicehub.models.xtts_native.modeling_xtts.seeded_inference",
                 return_value=nullcontext(37),
         ) as seeded:
             output = model._generate(
@@ -877,54 +890,37 @@ class InferenceHelperTests(unittest.TestCase):
         self.assertEqual(output.metadata["seed"], 37)
         self.assertEqual(output.metadata["requested_seed"], 37)
 
-    def test_zonos2_forwards_the_selected_cuda_device(self):
-        captured = {}
-
-        class FakeTTSLLM:
-
-            def __init__(self, **kwargs):
-                captured.update(kwargs)
-
+    def test_zonos2_forwards_the_selected_device_to_native_runtime(self):
+        runtime = SimpleNamespace(
+            model=_EvalModule(),
+            artifacts=object(),
+            config=object(),
+        )
         model = Zonos2ForTextToSpeech(device="cuda:1")
         model.device = "cuda:1"
-        imports = (
-            SimpleNamespace(),
-            SimpleNamespace(TTSLLM=FakeTTSLLM),
-            SimpleNamespace(TTSSamplingParams=object),
-        )
-        with (
-                patch(
-                    "voicehub.models.zonos2.inference.import_optional",
-                    side_effect=imports,
-                ),
-                patch(
-                    "voicehub.models.zonos2.inference.resolve_torch_dtype",
-                    return_value=object(),
-                ),
-        ):
+        with patch(
+                "voicehub.models.zonos2.inference."
+                "NativeZonos2Runtime.from_pretrained",
+                return_value=runtime,
+        ) as load_runtime:
             model._load_pretrained_model()
 
-        self.assertEqual(captured["device"], "cuda:1")
+        self.assertEqual(load_runtime.call_args.kwargs["device"], "cuda:1")
+        self.assertIs(model.model, runtime.model)
 
     def test_zonos2_materializes_a_request_local_seed(self):
-        captured = {}
-
-        class SamplingParams:
-
-            def __init__(self, **kwargs):
-                captured["sampling"] = kwargs
-
         runtime = SimpleNamespace(
             generate=Mock(
-                return_value=[{
-                    "audio": np.asarray([0.1], dtype=np.float32),
-                    "sample_rate": 44_100,
-                    "eos_frame": 3,
-                }]), )
-        model = Zonos2ForTextToSpeech(device="cuda:0")
-        model.device = "cuda:0"
-        model.model = runtime
-        model._sampling_class = SamplingParams
+                return_value=SimpleNamespace(
+                    audio=np.asarray([0.1], dtype=np.float32),
+                    sample_rate=44_100,
+                    eos_frame=3,
+                    text_frontend="raw-utf8",
+                ), ))
+        model = Zonos2ForTextToSpeech(device="cpu")
+        model.device = "cpu"
+        model._runtime = runtime
+        model.artifacts = SimpleNamespace(safe_conversion=False)
 
         with patch(
                 "voicehub.models.zonos2.inference.seeded_inference",
@@ -934,10 +930,11 @@ class InferenceHelperTests(unittest.TestCase):
 
         seeded.assert_called_once_with(
             None,
-            device="cuda:0",
+            device="cpu",
             model_type="zonos2",
         )
-        self.assertEqual(captured["sampling"]["seed"], 41)
+        options = runtime.generate.call_args.kwargs["options"]
+        self.assertEqual(options.seed, 41)
         self.assertEqual(output.metadata["seed"], 41)
         self.assertIsNone(output.metadata["requested_seed"])
 
@@ -947,18 +944,46 @@ class InferenceHelperTests(unittest.TestCase):
 
         self.assertEqual(model._runtime_device(), "cpu")
 
-    def test_zonos2_rejects_non_cuda_runtime(self):
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is required")
+    def test_zonos_speaker_audio_uses_the_native_pcm_boundary(self):
+        import torch
+
+        from voicehub.processing.waveform import save_pcm_wave
+
+        make_embedding = Mock(return_value=torch.ones(1, 4))
+        model = ZonosForTextToSpeech(device="cpu")
+        model.model = SimpleNamespace(make_speaker_embedding=make_embedding)
+        with tempfile.TemporaryDirectory() as directory:
+            path = save_pcm_wave(
+                Path(directory) / "speaker.wav",
+                torch.zeros(800),
+                16_000,
+            )
+            embedding = model._speaker_embedding(str(path))
+
+        waveform, sample_rate = make_embedding.call_args.args
+        self.assertEqual(waveform.shape, (1, 800))
+        self.assertEqual(sample_rate, 16_000)
+        self.assertEqual(embedding.shape, (1, 4))
+
+    def test_zonos2_supports_native_cpu_runtime(self):
+        runtime = SimpleNamespace(
+            model=_EvalModule(),
+            artifacts=object(),
+            config=object(),
+        )
         model = Zonos2ForTextToSpeech(device="cpu")
         model.device = "cpu"
 
-        with (
-                patch(
-                    "voicehub.models.zonos2.inference.import_optional",
-                    return_value=SimpleNamespace(),
-                ),
-                self.assertRaisesRegex(RuntimeError, "requires CUDA"),
-        ):
+        with patch(
+                "voicehub.models.zonos2.inference."
+                "NativeZonos2Runtime.from_pretrained",
+                return_value=runtime,
+        ) as load_runtime:
             model._load_pretrained_model()
+
+        self.assertEqual(load_runtime.call_args.kwargs["device"], "cpu")
+        self.assertIs(model.model, runtime.model)
 
     @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional Zonos2 extra")
     def test_zonos2_parallel_context_is_idempotent(self):

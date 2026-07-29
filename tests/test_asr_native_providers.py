@@ -30,6 +30,7 @@ from voicehub.models.asr_native.openai_whisper import OpenAIWhisperForSpeechReco
 from voicehub.models.asr_native.speechbrain import SpeechBrainASRForSpeechRecognition
 from voicehub.models.asr_native.wenet import WeNetASRForSpeechRecognition
 from voicehub.models.asr_native.whisperx import WhisperXForSpeechRecognition
+from voicehub.models.asr_whisper_native import NativeWhisperTrainingAdapter, WhisperForSpeechRecognition
 from voicehub.registry import get_model_spec
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -167,47 +168,26 @@ print(json.dumps({name: name in sys.modules for name in providers}))
         self.assertEqual(output.segments[0].words[1].confidence, 0.75)
 
     def test_inference_only_and_upstream_training_boundaries_are_explicit(self):
-        cases = (
-            (
-                FasterWhisperForSpeechRecognition(FasterWhisperConfig()),
-                "CTranslate2",
-            ),
-            (
-                OpenAIWhisperForSpeechRecognition(OpenAIWhisperConfig()),
-                "asr_transformers",
-            ),
-            (
-                WhisperXForSpeechRecognition(WhisperXConfig()),
-                "inference/alignment",
-            ),
-            (
-                NeMoASRForSpeechRecognition(NeMoASRConfig()),
-                "Lightning/Hydra",
-            ),
-            (
-                SpeechBrainASRForSpeechRecognition(SpeechBrainASRConfig()),
-                "Brain",
-            ),
-            (
-                FunASRForSpeechRecognition(FunASRConfig()),
-                "upstream",
-            ),
-            (
-                ESPnetASRForSpeechRecognition(ESPnetASRConfig()),
-                "ASRTask",
-            ),
-            (
-                WeNetASRForSpeechRecognition(WeNetASRConfig()),
-                "distributed",
-            ),
-        )
+        funasr = FunASRForSpeechRecognition(FunASRConfig())
+        self.assertIsNone(funasr._validate_training_runtime())
+        self.assertEqual(funasr.training_support, "native")
+        self.assertTrue(funasr.supports_generic_finetuning)
+        self.assertTrue(funasr.get_training_adapter().spec.native_training)
 
-        for model, message in cases:
-            with (
-                    self.subTest(model=model.config.model_type),
-                    self.assertRaisesRegex(ValueError, message),
-            ):
-                model._validate_training_runtime()
+        espnet = ESPnetASRForSpeechRecognition(ESPnetASRConfig())
+        self.assertIsNone(espnet._validate_training_runtime())
+        self.assertEqual(espnet.training_support, "native")
+        self.assertTrue(espnet.supports_generic_finetuning)
+        self.assertTrue(espnet.get_training_adapter().spec.native_training)
+        self.assertIsNone(NeMoASRForSpeechRecognition(NeMoASRConfig(), )._validate_training_runtime())
+        wenet = WeNetASRForSpeechRecognition(WeNetASRConfig())
+        self.assertIsNone(wenet._validate_training_runtime())
+        self.assertEqual(wenet.training_support, "native")
+        self.assertTrue(wenet.supports_generic_finetuning)
+        speechbrain = SpeechBrainASRForSpeechRecognition(SpeechBrainASRConfig(), )
+        self.assertIsNone(speechbrain._validate_training_runtime())
+        self.assertEqual(speechbrain.training_support, "native")
+        self.assertTrue(speechbrain.supports_generic_finetuning)
 
     def test_runtime_tokens_are_not_serialized(self):
         models = (
@@ -229,7 +209,9 @@ print(json.dumps({name: name in sys.modules for name in providers}))
             with self.subTest(model=model.config.model_type):
                 serialized = json.dumps(model.config.to_dict())
                 self.assertNotIn("secret", serialized)
-                self.assertNotIn("token", serialized)
+                self.assertNotIn('"token":', serialized)
+                self.assertNotIn('"auth_token":', serialized)
+                self.assertNotIn('"use_auth_token":', serialized)
 
     def test_configs_reject_nested_credentials_and_managed_loader_options(self):
         with self.assertRaisesRegex(ValueError, "credentials"):
@@ -244,6 +226,10 @@ print(json.dumps({name: name in sys.modules for name in providers}))
                 model_kwargs={
                     "map_location": "cuda",
                 }, )
+        with self.assertRaisesRegex(ValueError, "quantization pass"):
+            FasterWhisperConfig(compute_type="int8")
+        with self.assertRaisesRegex(ValueError, "cannot be applied silently"):
+            FasterWhisperConfig(cpu_threads=4)
 
     def test_funasr_wrapper_and_registry_use_the_same_default_checkpoint(self):
         self.assertEqual(
@@ -256,8 +242,6 @@ print(json.dumps({name: name in sys.modules for name in providers}))
         fake_torch.cuda = SimpleNamespace(is_available=lambda: False)
         fake_torch.backends = SimpleNamespace(mps=SimpleNamespace(is_available=lambda: True), )
         model_classes = (
-            FasterWhisperForSpeechRecognition,
-            WhisperXForSpeechRecognition,
             NeMoASRForSpeechRecognition,
             SpeechBrainASRForSpeechRecognition,
             FunASRForSpeechRecognition,
@@ -272,244 +256,56 @@ print(json.dumps({name: name in sys.modules for name in providers}))
                     with self.assertRaisesRegex(ValueError, "CPU and CUDA"):
                         model_class._resolve_device("mps")
 
-    def test_ctranslate2_wrappers_reject_half_precision_on_cpu(self):
-        models = (
-            FasterWhisperForSpeechRecognition(
-                FasterWhisperConfig(compute_type="float16"),
-                device="cpu",
-            ),
-            WhisperXForSpeechRecognition(
-                WhisperXConfig(compute_type="float16"),
-                device="cpu",
-            ),
+    def test_whisperx_rejects_half_precision_on_cpu(self):
+        model = WhisperXForSpeechRecognition(
+            WhisperXConfig(compute_type="float16"),
+            device="cpu",
         )
-        for model in models:
-            with (
-                    self.subTest(model=model.config.model_type),
-                    self.assertRaisesRegex(ValueError, "cannot use.*CPU"),
-            ):
-                model._load_pretrained_model()
+        with self.assertRaisesRegex(ValueError, "float16 execution on CPU"):
+            model._model_dtype()
 
 
 class WhisperProviderInferenceTests(unittest.TestCase):
 
-    def test_faster_whisper_normalizes_generator_segments_and_words(self):
-        captured = {}
-
-        class Runtime(_InferenceRuntime):
-
-            def transcribe(
-                self,
-                audio,
-                *,
-                language=None,
-                task=None,
-                word_timestamps=False,
-                chunk_length=None,
-                beam_size=None,
-                max_new_tokens=None,
-                hotwords=None,
-            ):
-                captured["audio"] = audio
-                captured["options"] = {
-                    "language": language,
-                    "task": task,
-                    "word_timestamps": word_timestamps,
-                    "chunk_length": chunk_length,
-                    "beam_size": beam_size,
-                    "max_new_tokens": max_new_tokens,
-                    "hotwords": hotwords,
-                }
-                segments = iter([
-                    SimpleNamespace(
-                        text=" hello ",
-                        start=0.1,
-                        end=0.4,
-                        words=[SimpleNamespace(
-                            word="hello",
-                            start=0.1,
-                            end=0.4,
-                            probability=0.92,
-                        )],
-                    )
-                ])
-                info = SimpleNamespace(
-                    language="en",
-                    language_probability=0.98,
-                    duration_after_vad=0.8,
-                )
-                return segments, info
-
-        runtime = Runtime()
-        module = ModuleType("faster_whisper")
-
-        def load_model(source, **kwargs):
-            captured["load"] = (source, kwargs)
-            return runtime
-
-        module.WhisperModel = load_model
+    def test_faster_whisper_alias_uses_the_native_trainable_graph(self):
         model = FasterWhisperForSpeechRecognition(
             FasterWhisperConfig(
                 name_or_path="small.en",
-                compute_type="int8",
+                compute_type="float32",
             ),
             device="cpu",
         )
+        adapter = model.get_training_adapter()
 
-        with _temporary_modules({"faster_whisper": module}):
-            output = model.transcribe(
-                np.zeros(8_000, dtype=np.float32),
-                sampling_rate=8_000,
-                language="en",
-                return_timestamps="word",
-                num_beams=3,
-                hotwords=("VoiceHub", "speech"),
-            )
+        self.assertIsInstance(model, WhisperForSpeechRecognition)
+        self.assertEqual(
+            model.config.name_or_path,
+            "openai/whisper-small.en",
+        )
+        self.assertEqual(model.config.torch_dtype, "float32")
+        self.assertIsInstance(adapter, NativeWhisperTrainingAdapter)
+        self.assertTrue(adapter.spec.native_training)
 
-        self.assertEqual(captured["load"][0], "small.en")
-        self.assertEqual(captured["load"][1]["compute_type"], "int8")
-        self.assertEqual(captured["audio"].shape, (16_000, ))
-        self.assertEqual(captured["options"]["hotwords"], "VoiceHub speech")
-        self.assertTrue(captured["options"]["word_timestamps"])
-        self.assertEqual(output.text, "hello")
-        self.assertEqual(output.segments[0].words[0].confidence, 0.92)
-        self.assertEqual(output.language, "en")
-        self.assertAlmostEqual(output.duration, 1.0)
-        self.assertEqual(output.metadata["artifact_format"], "ctranslate2")
-
-    def test_openai_whisper_normalizes_dictionary_output(self):
-        captured = {}
-
-        class Runtime(_InferenceRuntime):
-
-            def transcribe(
-                self,
-                audio,
-                *,
-                language=None,
-                task=None,
-                word_timestamps=False,
-                beam_size=None,
-            ):
-                captured["options"] = {
-                    "language": language,
-                    "task": task,
-                    "word_timestamps": word_timestamps,
-                    "beam_size": beam_size,
-                }
-                return {
-                    "text": "merhaba",
-                    "language": "tr",
-                    "segments": [
-                        {
-                            "start": 0.0,
-                            "end": 0.5,
-                            "text": "merhaba",
-                        },
-                    ],
-                }
-
-        runtime = Runtime()
-        module = ModuleType("whisper")
-
-        def load_model(source, *, device, **kwargs):
-            captured["load"] = (source, device, kwargs)
-            return runtime
-
-        module.load_model = load_model
+    def test_openai_whisper_alias_uses_the_native_trainable_graph(self):
         model = OpenAIWhisperForSpeechRecognition(
             OpenAIWhisperConfig(name_or_path="medium"),
             device="cpu",
         )
+        adapter = model.get_training_adapter()
 
-        with _temporary_modules({"whisper": module}):
-            output = model.transcribe(
-                np.zeros(16_000, dtype=np.float32),
-                sampling_rate=16_000,
-                language="tr",
-                return_timestamps=True,
-                num_beams=2,
-            )
+        self.assertIsInstance(model, WhisperForSpeechRecognition)
+        self.assertEqual(
+            model.config.name_or_path,
+            "openai/whisper-medium",
+        )
+        self.assertIsInstance(adapter, NativeWhisperTrainingAdapter)
+        self.assertTrue(adapter.spec.native_training)
+        self.assertEqual(
+            adapter.spec.source_entrypoints,
+            ("voicehub.architectures.whisper.WhisperModel", ),
+        )
 
-        self.assertEqual(captured["load"][:2], ("medium", "cpu"))
-        self.assertFalse(captured["options"]["word_timestamps"])
-        self.assertEqual(captured["options"]["beam_size"], 2)
-        self.assertEqual(output.text, "merhaba")
-        self.assertEqual(output.segments[0].end, 0.5)
-        self.assertEqual(output.metadata["backend"], "openai-whisper")
-
-    def test_whisperx_runs_alignment_only_when_requested(self):
-        captured = {}
-
-        class Runtime(_InferenceRuntime):
-
-            def transcribe(self, audio, *, batch_size=16, language=None):
-                captured["transcribe"] = (audio, batch_size, language)
-                return {
-                    "text": "aligned speech",
-                    "language": "en",
-                    "segments": [
-                        {
-                            "start": 0.0,
-                            "end": 1.0,
-                            "text": "aligned speech",
-                        },
-                    ],
-                }
-
-        runtime = Runtime()
-        module = ModuleType("whisperx")
-
-        def load_model(source, device, **kwargs):
-            captured["load"] = (source, device, kwargs)
-            return runtime
-
-        def load_align_model(*, language_code, device):
-            captured["align_load"] = (language_code, device)
-            return "align-model", {"dictionary": "metadata"}
-
-        def align(
-            segments,
-            align_model,
-            metadata,
-            audio,
-            device,
-            *,
-            return_char_alignments,
-        ):
-            captured["align"] = (
-                segments,
-                align_model,
-                metadata,
-                audio,
-                device,
-                return_char_alignments,
-            )
-            return {
-                "text":
-                "aligned speech",
-                "language":
-                "en",
-                "segments": [
-                    {
-                        "start": 0.0,
-                        "end": 1.0,
-                        "text": "aligned speech",
-                        "words": [
-                            {
-                                "word": "aligned",
-                                "start": 0.0,
-                                "end": 0.4,
-                                "score": 0.91,
-                            },
-                        ],
-                    },
-                ],
-            }
-
-        module.load_model = load_model
-        module.load_align_model = load_align_model
-        module.align = align
+    def test_whisperx_alias_uses_the_native_trainable_graph(self):
         model = WhisperXForSpeechRecognition(
             WhisperXConfig(
                 name_or_path="large-v3",
@@ -517,20 +313,15 @@ class WhisperProviderInferenceTests(unittest.TestCase):
             ),
             device="cpu",
         )
+        adapter = model.get_training_adapter()
 
-        with _temporary_modules({"whisperx": module}):
-            output = model.transcribe(
-                np.zeros(16_000, dtype=np.float32),
-                sampling_rate=16_000,
-                return_timestamps="word",
-                batch_size=4,
-            )
-
-        self.assertEqual(captured["load"][:2], ("large-v3", "cpu"))
-        self.assertEqual(captured["transcribe"][1], 4)
-        self.assertEqual(captured["align_load"], ("en", "cpu"))
-        self.assertEqual(output.segments[0].words[0].confidence, 0.91)
-        self.assertTrue(output.metadata["aligned"])
+        self.assertIsInstance(model, WhisperForSpeechRecognition)
+        self.assertEqual(
+            model.config.name_or_path,
+            "openai/whisper-large-v3",
+        )
+        self.assertIsInstance(adapter, NativeWhisperTrainingAdapter)
+        self.assertTrue(adapter.spec.native_training)
 
 
 class NativeToolkitInferenceTests(unittest.TestCase):
@@ -547,9 +338,9 @@ class NativeToolkitInferenceTests(unittest.TestCase):
             (
                 OpenAIWhisperForSpeechRecognition(OpenAIWhisperConfig()),
                 {
-                    "chunk_length_s": 15.0
+                    "num_beams": 2
                 },
-                "chunk_length_s",
+                "num_beams",
             ),
             (
                 WhisperXForSpeechRecognition(WhisperXConfig()),
@@ -568,9 +359,9 @@ class NativeToolkitInferenceTests(unittest.TestCase):
             (
                 SpeechBrainASRForSpeechRecognition(SpeechBrainASRConfig()),
                 {
-                    "num_beams": 4
+                    "hotwords": "VoiceHub"
                 },
-                "num_beams",
+                "hotwords",
             ),
             (
                 FunASRForSpeechRecognition(FunASRConfig()),
@@ -606,336 +397,142 @@ class NativeToolkitInferenceTests(unittest.TestCase):
                     **options,
                 )
 
-    def test_nemo_uses_supported_path_argument_and_normalizes_hypothesis(self):
-        captured = {}
-
-        class Runtime(_InferenceRuntime):
-
-            def to(self, device):
-                captured["device"] = device
-                return self
-
-            def transcribe(
-                self,
-                *,
-                paths2audio_files,
-                batch_size,
-                return_hypotheses,
-                timestamps,
-            ):
-                path = Path(paths2audio_files[0])
-                captured["transcribe"] = {
-                    "path": path,
-                    "exists": path.is_file(),
-                    "batch_size": batch_size,
-                    "return_hypotheses": return_hypotheses,
-                    "timestamps": timestamps,
-                }
-                return [
-                    SimpleNamespace(
-                        text="parakeet result",
-                        language="en",
-                        timestamp={"segment": [
-                            {
-                                "start": 0.0,
-                                "end": 0.5,
-                                "text": "parakeet result",
-                            },
-                        ]},
-                    )
-                ]
-
-        runtime = Runtime()
-
-        class ASRModel:
-
-            @classmethod
-            def from_pretrained(
-                cls,
-                *,
-                model_name,
-                map_location,
-                token=None,
-            ):
-                captured["load"] = (model_name, map_location, token)
-                return runtime
-
-        nemo = ModuleType("nemo")
-        nemo.__path__ = []
-        collections = ModuleType("nemo.collections")
-        collections.__path__ = []
-        asr = ModuleType("nemo.collections.asr")
-        asr.__path__ = []
-        asr.models = SimpleNamespace(ASRModel=ASRModel)
-        modules = {
-            "nemo": nemo,
-            "nemo.collections": collections,
-            "nemo.collections.asr": asr,
-        }
+    def test_nemo_rejects_unverified_graph_families_before_import(self):
         model = NeMoASRForSpeechRecognition(
             NeMoASRConfig(name_or_path="nvidia/parakeet-test"),
             device="cpu",
-            token="private",
         )
 
-        with _temporary_modules(modules):
-            output = model.transcribe(
-                np.zeros(8_000, dtype=np.float32),
-                sampling_rate=8_000,
-                language="en",
-                return_timestamps=True,
-                batch_size=2,
-            )
+        with self.assertRaisesRegex(ValueError, "not the verified QuartzNet15x5"):
+            model.load()
+        self.assertNotIn("nemo", sys.modules)
 
-        self.assertEqual(
-            captured["load"],
-            ("nvidia/parakeet-test", "cpu", "private"),
-        )
-        self.assertEqual(captured["device"], "cpu")
-        self.assertTrue(captured["transcribe"]["exists"])
-        self.assertFalse(captured["transcribe"]["path"].exists())
-        self.assertEqual(captured["transcribe"]["batch_size"], 2)
-        self.assertTrue(captured["transcribe"]["timestamps"])
-        self.assertEqual(output.text, "parakeet result")
-        self.assertEqual(output.segments[0].end, 0.5)
-        self.assertEqual(output.metadata["decoder"], "SimpleNamespace")
-
-    def test_speechbrain_materializes_one_short_lived_audio_file(self):
-        captured = {}
-
-        class Runtime(_InferenceRuntime):
-
-            def transcribe_file(self, audio_path):
-                path = Path(audio_path)
-                captured["path"] = path
-                captured["exists"] = path.is_file()
-                return "speech brain"
-
-        runtime = Runtime()
-
-        class EncoderDecoderASR:
-
-            @classmethod
-            def from_hparams(cls, **kwargs):
-                captured["load"] = kwargs
-                return runtime
-
-        speechbrain = ModuleType("speechbrain")
-        speechbrain.__path__ = []
-        inference = ModuleType("speechbrain.inference")
-        inference.__path__ = []
-        asr_module = ModuleType("speechbrain.inference.ASR")
-        asr_module.EncoderDecoderASR = EncoderDecoderASR
-        modules = {
-            "speechbrain": speechbrain,
-            "speechbrain.inference": inference,
-            "speechbrain.inference.ASR": asr_module,
-        }
+    def test_speechbrain_uses_native_beam_search_and_training_boundaries(self):
         model = SpeechBrainASRForSpeechRecognition(
             SpeechBrainASRConfig(savedir="cache/speechbrain"),
             device="cpu",
             token="private",
         )
 
-        with _temporary_modules(modules):
-            output = model.transcribe(
-                np.zeros(16_000, dtype=np.float32),
-                sampling_rate=16_000,
-                language="en",
-            )
-
-        self.assertEqual(captured["load"]["source"], model.default_model_name_or_path)
-        self.assertEqual(captured["load"]["run_opts"], {"device": "cpu"})
-        self.assertEqual(captured["load"]["savedir"], "cache/speechbrain")
-        self.assertEqual(captured["load"]["use_auth_token"], "private")
-        self.assertTrue(captured["exists"])
-        self.assertFalse(captured["path"].exists())
-        self.assertEqual(output.text, "speech brain")
-        self.assertEqual(output.metadata["backend"], "speechbrain")
-        with self.assertRaisesRegex(ValueError, "timestamps"):
-            model.transcribe(
-                np.zeros(16, dtype=np.float32),
-                sampling_rate=16_000,
-                return_timestamps=True,
-            )
-
-    def test_funasr_maps_millisecond_timestamps(self):
-        captured = {}
-
-        class Runtime(_InferenceRuntime):
-
-            def generate(
-                self,
-                *,
-                input,
-                batch_size_s=None,
-                hotword=None,
-                language=None,
-            ):
-                path = Path(input)
-                captured["generate"] = {
-                    "path": path,
-                    "exists": path.is_file(),
-                    "batch_size_s": batch_size_s,
-                    "hotword": hotword,
-                    "language": language,
-                }
-                return [{
-                    "text": "ni hao",
-                    "language": "zh",
-                    "timestamp": [
-                        [100, 400, "ni"],
-                        [450, 800, "hao"],
-                    ],
-                }]
-
-        runtime = Runtime()
-        module = ModuleType("funasr")
-
-        def auto_model(**kwargs):
-            captured["load"] = kwargs
-            return runtime
-
-        module.AutoModel = auto_model
-        model = FunASRForSpeechRecognition(
-            FunASRConfig(
-                name_or_path="paraformer-test",
-                vad_model="fsmn-vad",
-                generate_kwargs={
-                    "batch_size_s": 12,
-                },
+        self.assertEqual(model.config.cache_dir, "cache/speechbrain")
+        self.assertEqual(model.architecture_family, "speech-seq2seq")
+        self.assertEqual(
+            model._validate_inference_request(
+                language="english",
+                task="transcribe",
+                return_timestamps=False,
+                chunk_length_s=None,
+                stride_length_s=None,
+                batch_size=1,
+                num_beams=4,
+                max_new_tokens=None,
+                hotwords=None,
             ),
+            ("en", 4),
+        )
+        self.assertIsNone(model._validate_training_runtime())
+        with self.assertRaisesRegex(ValueError, "timestamps"):
+            model._validate_inference_request(
+                language=None,
+                task="transcribe",
+                return_timestamps=True,
+                chunk_length_s=None,
+                stride_length_s=None,
+                batch_size=None,
+                num_beams=None,
+                max_new_tokens=None,
+                hotwords=None,
+            )
+
+    def test_funasr_compatibility_is_scope_limited_to_native_sensevoice(self):
+        model = FunASRForSpeechRecognition(
+            FunASRConfig(vad_model="fsmn-vad"),
             device="cpu",
         )
-
-        with _temporary_modules({"funasr": module}):
-            output = model.transcribe(
-                np.zeros(16_000, dtype=np.float32),
-                sampling_rate=16_000,
+        with self.assertRaisesRegex(ValueError, "separate architectures"):
+            model._validate_composed_options()
+        with self.assertRaisesRegex(ValueError, "SenseVoiceSmall artifact"):
+            model._validate_architecture({
+                "model_type": "paraformer",
+                "architectures": ["Paraformer"],
+            })
+        with self.assertRaisesRegex(ValueError, "hotwords"):
+            model._validate_request(
                 language="zh",
+                task="transcribe",
                 return_timestamps=True,
+                chunk_length_s=None,
+                stride_length_s=None,
+                batch_size=1,
+                num_beams=1,
+                max_new_tokens=None,
                 hotwords=("VoiceHub", ),
             )
 
-        self.assertEqual(captured["load"]["model"], "paraformer-test")
-        self.assertEqual(captured["load"]["vad_model"], "fsmn-vad")
-        self.assertTrue(captured["generate"]["exists"])
-        self.assertFalse(captured["generate"]["path"].exists())
-        self.assertEqual(captured["generate"]["batch_size_s"], 12)
-        self.assertEqual(captured["generate"]["hotword"], ("VoiceHub", ))
-        self.assertEqual(output.segments[0].start, 0.1)
-        self.assertEqual(output.segments[1].end, 0.8)
-        self.assertEqual(output.metadata["raw_keys"], ("language", "text", "timestamp"))
+    def test_espnet_native_request_contract_is_narrow_and_explicit(self):
+        language, beam_size = (
+            ESPnetASRForSpeechRecognition._validate_inference_request(
+                language="english",
+                task="transcribe",
+                return_timestamps=False,
+                chunk_length_s=None,
+                stride_length_s=None,
+                batch_size=1,
+                num_beams=4,
+                max_new_tokens=None,
+                hotwords=None,
+            ))
 
-    def test_espnet_normalizes_first_beam_without_promising_timestamps(self):
-        captured = {}
-
-        class Runtime(_InferenceRuntime):
-
-            def __call__(self, waveform):
-                captured["waveform"] = waveform
-                return [
-                    ("espnet hypothesis", ["token"], [1], "hypothesis"),
-                ]
-
-        runtime = Runtime()
-
-        class Speech2Text:
-
-            @classmethod
-            def from_pretrained(cls, **kwargs):
-                captured["load"] = kwargs
-                return runtime
-
-        espnet = ModuleType("espnet2")
-        espnet.__path__ = []
-        binary = ModuleType("espnet2.bin")
-        binary.__path__ = []
-        inference = ModuleType("espnet2.bin.asr_inference")
-        inference.Speech2Text = Speech2Text
-        modules = {
-            "espnet2": espnet,
-            "espnet2.bin": binary,
-            "espnet2.bin.asr_inference": inference,
-        }
-        model = ESPnetASRForSpeechRecognition(
-            ESPnetASRConfig(
-                name_or_path="espnet/test",
-                beam_size=4,
-                ctc_weight=0.2,
-            ),
-            device="cpu",
-        )
-
-        with _temporary_modules(modules):
-            output = model.transcribe(
-                np.zeros(8_000, dtype=np.float32),
-                sampling_rate=8_000,
-                language="en",
-            )
-
-        self.assertEqual(captured["load"]["model_tag"], "espnet/test")
-        self.assertEqual(captured["load"]["beam_size"], 4)
-        self.assertEqual(captured["waveform"].shape, (16_000, ))
-        self.assertEqual(output.text, "espnet hypothesis")
-        self.assertEqual(output.duration, 1.0)
+        self.assertEqual(language, "en")
+        self.assertEqual(beam_size, 4)
         with self.assertRaisesRegex(ValueError, "timestamps"):
-            model.transcribe(
-                np.zeros(16, dtype=np.float32),
-                sampling_rate=16_000,
+            ESPnetASRForSpeechRecognition._validate_inference_request(
+                language="en",
+                task="transcribe",
                 return_timestamps=True,
+                chunk_length_s=None,
+                stride_length_s=None,
+                batch_size=1,
+                num_beams=None,
+                max_new_tokens=None,
+                hotwords=None,
             )
 
-    def test_wenet_normalizes_mapping_and_keeps_language_default(self):
-        captured = {}
-
-        class Runtime(_InferenceRuntime):
-
-            def transcribe(self, audio_path):
-                path = Path(audio_path)
-                captured["path"] = path
-                captured["exists"] = path.is_file()
-                return {
-                    "text": "wenet result",
-                    "confidence": 0.9,
-                }
-
-        runtime = Runtime()
-        vendored_runtime = ModuleType("voicehub.models.asr_native._wenet", )
-
-        def load_model(source, *, device, **kwargs):
-            captured["load"] = (source, device, kwargs)
-            return runtime
-
-        vendored_runtime.load_model = load_model
+    def test_wenet_is_native_and_validates_english_requests(self):
         model = WeNetASRForSpeechRecognition(
             WeNetASRConfig(
-                name_or_path="english",
+                name_or_path="wenet/gigaspeech-u2pp-conformer",
                 language="en",
+                decoding_strategy="attention_rescoring",
             ),
             device="cpu",
         )
 
-        with patch(
-                "voicehub.models.asr_native.wenet.import_optional",
-                return_value=vendored_runtime,
-        ) as import_runtime:
-            output = model.transcribe(
-                np.zeros(16_000, dtype=np.float32),
-                sampling_rate=16_000,
-            )
-
-        import_runtime.assert_called_once_with(
-            "voicehub.models.asr_native._wenet",
-            model_type="asr_wenet",
-            install_extra=None,
+        language, timestamps = model._validate_request(
+            language=None,
+            task="transcribe",
+            return_timestamps="word",
+            chunk_length_s=None,
+            stride_length_s=None,
+            batch_size=None,
+            max_new_tokens=None,
+            hotwords=None,
         )
-        self.assertEqual(captured["load"][:2], ("english", "cpu"))
-        self.assertTrue(captured["exists"])
-        self.assertFalse(captured["path"].exists())
-        self.assertEqual(output.text, "wenet result")
-        self.assertEqual(output.language, "en")
-        self.assertEqual(output.metadata["backend"], "wenet")
+
+        self.assertEqual(language, "en")
+        self.assertTrue(timestamps)
+        self.assertEqual(model.training_support, "native")
+        with self.assertRaisesRegex(ValueError, "English-only"):
+            model._validate_request(
+                language="tr",
+                task="transcribe",
+                return_timestamps=False,
+                chunk_length_s=None,
+                stride_length_s=None,
+                batch_size=None,
+                max_new_tokens=None,
+                hotwords=None,
+            )
 
 
 if __name__ == "__main__":

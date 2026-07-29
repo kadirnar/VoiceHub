@@ -3,9 +3,22 @@ from voicehub.components.audio.codecs.dac.model import DAC
 from torch import nn
 
 from transformers import PreTrainedModel
-from transformers.models.encodec.modeling_encodec import EncodecDecoderOutput, EncodecEncoderOutput
 
 from .configuration_dac import DACConfig
+from .modeling_outputs import (
+    DACDecoderOutput,
+    DACEncoderOutput,
+    EncodecDecoderOutput,
+    EncodecEncoderOutput,
+)
+
+__all__ = [
+    "DACDecoderOutput",
+    "DACEncoderOutput",
+    "DACModel",
+    "EncodecDecoderOutput",
+    "EncodecEncoderOutput",
+]
 
 
 # model doesn't support batching yet
@@ -101,7 +114,10 @@ class DACModel(PreTrainedModel):
         if not return_dict:
             return (encoded_frames, scales)
 
-        return EncodecEncoderOutput(encoded_frames, scales)
+        return DACEncoderOutput(
+            audio_codes=encoded_frames,
+            audio_scales=scales,
+        )
 
     def decode(
         self,
@@ -139,7 +155,7 @@ class DACModel(PreTrainedModel):
         audio_values = self.model.decode(audio_values)
         if not return_dict:
             return (audio_values,)
-        return EncodecDecoderOutput(audio_values)
+        return DACDecoderOutput(audio_values=audio_values)
 
     def forward(self, tensor):
         raise ValueError("`DACModel.forward` not implemented yet")

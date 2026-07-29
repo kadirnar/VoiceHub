@@ -1,0 +1,67 @@
+{
+  "component": "VoiceHub-native Encodec",
+  "implemented_contracts": [
+    "exact official 24 kHz mono causal SEANet graph",
+    "exact official 48 kHz stereo non-causal segmented SEANet graph",
+    "EMA residual vector quantization and straight-through fine-tuning",
+    "strict Safetensors export and reload",
+    "trust-gated weights_only conversion of pinned official .th artifacts"
+  ],
+  "source": {
+    "license": "MIT",
+    "repository": "https://github.com/facebookresearch/encodec",
+    "revision": "0e2d0aed29362c8e8f52494baf3e6f99056b214f"
+  },
+  "source_files": [
+    "encodec/model.py",
+    "encodec/distrib.py",
+    "encodec/utils.py",
+    "encodec/modules/conv.py",
+    "encodec/modules/lstm.py",
+    "encodec/modules/norm.py",
+    "encodec/modules/seanet.py",
+    "encodec/quantization/core_vq.py",
+    "encodec/quantization/vq.py"
+  ],
+  "checkpoint_release": {
+    "license": "MIT (distributed from the source project's release origin)",
+    "origin": "https://dl.fbaipublicfiles.com/encodec/v0/",
+    "artifacts": [
+      {
+        "filename": "encodec_24khz-d7cc33bc.th",
+        "inventory_fingerprint": "dcbde1e504bcd99130889f578c937991ac226a65ab6bbb6b15b033aa33b83372",
+        "sha256_prefix": "d7cc33bc",
+        "size": 93171529,
+        "state_values": 23273218,
+        "tensor_count": 252
+      },
+      {
+        "filename": "encodec_48khz-7e698e3e.th",
+        "inventory_fingerprint": "142c41114348d8b894f70b6bbc17ff337b34d7b9b26ae89ed380f9334790edf1",
+        "sha256_prefix": "7e698e3e",
+        "size": 76337089,
+        "state_values": 19066998,
+        "tensor_count": 224
+      }
+    ]
+  },
+  "verification": {
+    "date": "2026-07-28",
+    "functional_equivalence": "With identical random state, native and pinned upstream evaluation produced bit-identical encoder/codes/scale/decoded waveform results for odd-length 641-sample 24 kHz and 48 kHz inputs, plus a three-segment 48 kHz overlap-add case.",
+    "method": "HTTPS range reads of each PyTorch zip central directory and archive/data.pkl, followed by a symbolic restricted pickle walk that materialized no tensor storage payloads",
+    "result": "Generated native names, dtypes, shapes, tensor counts, state-value counts, and sorted inventory fingerprints match both published artifacts exactly."
+  },
+  "voicehub_changes": [
+    "Replaced NumPy products with math.prod.",
+    "Replaced einops rearrange/repeat operations with PyTorch transpose, reshape, and expand.",
+    "Removed torchaudio and provider-library runtime imports.",
+    "Added strict public validation, deterministic native export, atomic official artifact transport, and lazy package imports.",
+    "Detached RVQ residual updates during training to fix the later-stage zero-gradient defect documented in facebookresearch/encodec issue 25; forward values and checkpoint state remain unchanged.",
+    "Fixed the unused upstream ConvLayerNorm forward return while preserving released graph behavior."
+  ],
+  "additional_attribution": {
+    "license_file": "VECTOR_QUANTIZE_THIRD_PARTY_LICENSE",
+    "project": "lucidrains/vector-quantize-pytorch",
+    "revision_context": "The pinned Meta core_vq.py states that its implementation was inspired by this MIT-licensed project."
+  }
+}

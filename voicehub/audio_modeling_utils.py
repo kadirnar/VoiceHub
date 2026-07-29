@@ -219,6 +219,7 @@ class PreTrainedAudioModel(
         """Load model weights and enter inference mode exactly once."""
         with self._lifecycle_lock:
             requested_training = self._loading_for_training
+            self._validate_optimization_transition("training" if requested_training else "inference")
             if not requested_training:
                 self._validate_inference_strategy()
             if self.model is None:
@@ -267,6 +268,7 @@ class PreTrainedAudioModel(
     def load_for_training(self):
         """Load or restore the differentiable runtime."""
         with self._lifecycle_lock:
+            self._validate_optimization_transition("training")
             self._validate_training_runtime()
             if self.model is None:
                 self._loading_for_training = True
@@ -455,6 +457,16 @@ class PreTrainedAudioModel(
         if include_native_export:
             self._save_pretrained(output_directory / NATIVE_EXPORT_DIR)
         return output_directory
+
+    def export_native_pretrained(
+        self,
+        save_directory: str | Path,
+    ) -> Path:
+        """Write a flat provider-native artifact for trainer interop."""
+        destination = Path(save_directory).expanduser()
+        destination.mkdir(parents=True, exist_ok=True)
+        self._save_pretrained(destination)
+        return destination
 
     def get_training_adapter(self):
         from voicehub.training.auto import AutoTrainingAdapter

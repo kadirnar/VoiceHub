@@ -1,0 +1,71 @@
+{
+  "architecture": "ten-vad",
+  "implementation": "voicehub-native",
+  "main_library": {
+    "repository": "https://github.com/TEN-framework/ten-vad",
+    "revision": "22a3bcd4509d0faaa8eef4881e8af5f39c178950",
+    "license": "LicenseRef-TEN-VAD-Open-Source-License",
+    "license_file": "THIRD_PARTY_LICENSE",
+    "notes": "Reviewed for the released ONNX graph, tensor inventory, recurrent-state ordering, and public deployment license. The upstream license adds deployment restrictions to Apache-2.0; users must review THIRD_PARTY_LICENSE before conversion, distribution, or deployment."
+  },
+  "compatibility_reference": {
+    "repository": "https://github.com/k2-fsa/sherpa-onnx",
+    "revision": "d1fedc1daac9304cd8f85350a38aed2e5e120f02",
+    "license": "Apache-2.0",
+    "notes": "Reviewed TEN feature extraction, streaming sample buffering, hysteresis, segment offsets, reset, and flush behavior. VoiceHub does not import or execute sherpa-onnx."
+  },
+  "frontend_reference": {
+    "library": "kaldi-native-fbank",
+    "version": "1.22.3",
+    "archive_sha256": "9176cc66fc7ce1edf85cf355b06e320c57db6297df74277f575183468893cf61",
+    "notes": "VoiceHub reproduces the reviewed Librosa-Slaney 40-bin path, 1024-point FFT, pre-emphasis, symmetric 768-sample Hann window, normalization, and three-frame context in differentiable PyTorch. Sherpa fixes the pitch feature to zero for this model."
+  },
+  "source_checkpoints": {
+    "official_ten_onnx_sha256": "e10b98a0cab1c98e847fbdda14cb3d45a38336d47535a3f63a0fb6c4e0f4cdf4",
+    "sherpa_metadata_onnx_sha256": "718cb7eef47e3cf5ddbe7e967a7503f46b8b469c0706872f494dfa921b486206",
+    "graph_fingerprint": "dab7b42f99ed09274a54aa433c1add4d113f5d20ce068da8af84d16c30548705",
+    "initializer_inventory_fingerprint": "ca75eb529279b56abcc8438fda466f1d8e40d9994483a35c01f5f8a1f9a0db13",
+    "notes": "Conversion uses VoiceHub's standard-library protobuf reader. It validates IR 4, opset 9, all graph connections and operator attributes, all 27 source initializers, static input/output namespaces, graph and inventory fingerprints, and an optional caller-supplied SHA-256 before writing Safetensors. ONNX, protobuf, and ONNX Runtime are not imported."
+  },
+  "native_checkpoint": {
+    "format": "voicehub-native-ten-vad-v1",
+    "state_tensors": 25,
+    "trainable_parameters": 75498,
+    "stored_values_including_frontend_buffers": 96868,
+    "notes": "The safe artifact stores the complete graph plus frontend mean, inverse standard deviation, Hann window, and mel filters. Inference and fine-tuning need only PyTorch and VoiceHub."
+  },
+  "verified_scope": {
+    "inference": [
+      "exact separable-convolution topology",
+      "two explicit 64-unit ONNX-order LSTM cells",
+      "four request-local recurrent tensors",
+      "raw-audio frontend state across chunks",
+      "Sherpa-compatible TEN and Silero segment decisions",
+      "stream reset and final flush",
+      "native Safetensors export and strict reload"
+    ],
+    "training": [
+      "raw 16 kHz waveform batches",
+      "explicit soft or binary frame labels",
+      "speech-interval-to-window target construction",
+      "variable-length padding and target masks",
+      "positive-class weighting",
+      "full-graph backward and native export"
+    ],
+    "numerical_parity": {
+      "graph_oracle": "ONNX Runtime over 25 recurrent random-feature steps",
+      "maximum_probability_absolute_error": 1.1920928955078125e-7,
+      "maximum_recurrent_state_absolute_error": 1.9073486328125e-6,
+      "frontend_oracle": "Compiled kaldi-native-fbank 1.22.3 over 10 sequential deterministic 256-sample frames",
+      "maximum_frontend_absolute_error": 9.5367431640625e-6,
+      "mean_frontend_absolute_error": 6.377696877279959e-7,
+      "frontend_p99_absolute_error": 3.824243322014809e-6
+    },
+    "limitations": [
+      "TEN does not publish the recipe or dataset used to train the released graph. VoiceHub exposes an explicitly reconstructed masked window-level BCE fine-tuning recipe and does not claim source-training parity.",
+      "The reviewed Sherpa compatibility frontend fixes pitch to zero. VoiceHub preserves that behavior for checkpoint parity; changing it would require retraining and a distinct checkpoint format.",
+      "No corpus-level accuracy improvement is claimed. The native port preserves the released model numerically; model-quality changes require dataset-specific evaluation.",
+      "Differential ONNX checks are development-only oracles. Production and CI runtime paths do not depend on ONNX Runtime."
+    ]
+  }
+}

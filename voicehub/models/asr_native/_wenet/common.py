@@ -22,9 +22,9 @@ from typing import List, Tuple
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-from whisper.tokenizer import LANGUAGES as WhiserLanguages
+from voicehub.architectures.whisper.tokenization import LANGUAGES
 
-WHISPER_LANGS = tuple(WhiserLanguages.keys())
+WHISPER_LANGS = tuple(LANGUAGES)
 IGNORE_ID = -1
 
 
