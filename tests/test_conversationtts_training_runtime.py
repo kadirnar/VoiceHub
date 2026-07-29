@@ -303,35 +303,37 @@ class ConversationTTSProcessingTests(unittest.TestCase):
             [sequence],
             protocol=self.protocol,
         )
-        with patch.dict(model_new.FLAVORS, {"tiny": tiny_decoder}):
-            model = model_new.Model(
-                model_new.ModelArgs(
-                    backbone_flavor="tiny",
-                    decoder_flavor="tiny",
-                    text_vocab_size=32,
-                    audio_vocab_size=11,
-                    audio_num_codebooks=2,
-                ))
-        model.random_type = "none"
-        c0_logits, residual_logits, residual_labels = model(
-            tokens=batch["tokens"],
-            labels=batch["labels"],
-            tokens_mask=batch["tokens_mask"],
-        )
-        zero_loss, _ = model_new.CrossEntropyAndAccuracy_zero(
-            c0_logits,
-            batch["labels"][..., 0],
-            batch["loss_mask"],
-            ignore_id=10,
-        )
-        residual_loss, _ = model_new.CrossEntropyAndAccuracy_residual(
-            residual_logits,
-            residual_labels,
-            loss_weights=[1.0],
-            ignore_id=10,
-        )
-        loss = zero_loss + residual_loss
-        loss.backward()
+        with self.torch.random.fork_rng():
+            self.torch.manual_seed(0)
+            with patch.dict(model_new.FLAVORS, {"tiny": tiny_decoder}):
+                model = model_new.Model(
+                    model_new.ModelArgs(
+                        backbone_flavor="tiny",
+                        decoder_flavor="tiny",
+                        text_vocab_size=32,
+                        audio_vocab_size=11,
+                        audio_num_codebooks=2,
+                    ))
+            model.random_type = "none"
+            c0_logits, residual_logits, residual_labels = model(
+                tokens=batch["tokens"],
+                labels=batch["labels"],
+                tokens_mask=batch["tokens_mask"],
+            )
+            zero_loss, _ = model_new.CrossEntropyAndAccuracy_zero(
+                c0_logits,
+                batch["labels"][..., 0],
+                batch["loss_mask"],
+                ignore_id=10,
+            )
+            residual_loss, _ = model_new.CrossEntropyAndAccuracy_residual(
+                residual_logits,
+                residual_labels,
+                loss_weights=[1.0],
+                ignore_id=10,
+            )
+            loss = zero_loss + residual_loss
+            loss.backward()
 
         self.assertTrue(self.torch.isfinite(loss))
         self.assertIsNotNone(model.codebook0_head.weight.grad)
