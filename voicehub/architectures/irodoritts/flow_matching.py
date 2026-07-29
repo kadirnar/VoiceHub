@@ -534,8 +534,9 @@ def sample_euler_rf_cfg(
                 rescale_sigma=float(rescale_sigma),
             )
 
-        if (speaker_kv_active and speaker_kv_min_t is not None and (t_next < speaker_kv_min_t) and
-            (t >= speaker_kv_min_t)):
+        speaker_kv_threshold_crossed = (
+            speaker_kv_active and speaker_kv_min_t is not None and t_next < speaker_kv_min_t <= t)
+        if speaker_kv_threshold_crossed:
             inv_scale = 1.0 / float(speaker_kv_scale)
             scale_speaker_kv_cache(
                 context_kv_cache=context_kv_cond,

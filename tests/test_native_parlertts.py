@@ -526,20 +526,17 @@ class NativeParlerTTSGraphTests(unittest.TestCase):
         "Upstream parity audit requires the vendored reference runtime.",
     )
     def test_decoder_is_bit_exact_to_pinned_upstream_on_a_tiny_graph(self):
-        from voicehub.models.parlertts.source.parler_tts.configuration_parler_tts import (
-            ParlerTTSDecoderConfig as UpstreamConfig, )
-        from voicehub.models.parlertts.source.parler_tts.modeling_parler_tts import (
-            ParlerTTSForCausalLM as UpstreamModel, )
+        from voicehub.models.parlertts.source.parler_tts import configuration_parler_tts, modeling_parler_tts
 
         native_config = _tiny_decoder_config()
         values = native_config.to_dict()
         values.pop("model_type")
-        upstream_config = UpstreamConfig(
+        upstream_config = configuration_parler_tts.ParlerTTSDecoderConfig(
             **values,
             attn_implementation="eager",
         )
         upstream_config._attn_implementation = "eager"
-        upstream = UpstreamModel(upstream_config).eval()
+        upstream = modeling_parler_tts.ParlerTTSForCausalLM(upstream_config).eval()
         native = ParlerTTSForCausalLM(native_config).eval()
         native.load_state_dict(upstream.state_dict(), strict=True)
         decoder_ids = torch.tensor(

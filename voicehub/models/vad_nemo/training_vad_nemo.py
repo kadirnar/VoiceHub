@@ -221,8 +221,10 @@ def _augment_waveform(
             device=values.device,
         )
         values = values * torch.pow(values.new_tensor(10.0), gain / 20.0)
-    if (noise_source is not None and torch.rand(
-        (), device=values.device) < config.training_noise_probability):
+    should_mix_noise = False
+    if noise_source is not None:
+        should_mix_noise = bool(torch.rand((), device=values.device) < config.training_noise_probability)
+    if should_mix_noise:
         from voicehub.processing.waveform import load_native_audio
 
         noise = load_native_audio(

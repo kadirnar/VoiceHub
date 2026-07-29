@@ -87,12 +87,12 @@ class SpeakerInversionEmbedding(nn.Module):
         device: torch.device,
         dtype: torch.dtype,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        state = self.embedding.to(
-            device=device, dtype=dtype)[None, :, :].expand(
-                int(batch_size),
-                -1,
-                -1,
-            )
+        embedding = self.embedding.to(device=device, dtype=dtype)
+        state = embedding[None, :, :].expand(
+            int(batch_size),
+            -1,
+            -1,
+        )
         mask = torch.ones((int(batch_size), self.num_tokens), dtype=torch.bool, device=device)
         return state, mask
 

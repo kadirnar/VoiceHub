@@ -1,8 +1,6 @@
 """Exact Inflect v2 character inventory derived from the VITS frontend."""
 
-'''
-Defines the set of symbols used in text input to the model.
-'''
+# Defines the symbols accepted by the model's text frontend.
 _pad = '_'
 _punctuation = ';:,.!?¡¿—…"«»“” '
 _letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'

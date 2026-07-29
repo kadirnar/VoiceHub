@@ -926,9 +926,10 @@ class XCodec2Quantizer(nn.Module):
 
     def from_codes(self, indices: Tensor) -> Tensor:
         indices = indices.squeeze(-1).long()
-        if (indices.numel() and (bool((indices < 0).any()) or bool(
-            (indices >= math.prod(self.quantizer.quantization_levels)).any()))):
-            raise ValueError("XCodec2 audio codes are outside the codebook.")
+        if indices.numel():
+            maximum_index = math.prod(self.quantizer.quantization_levels)
+            if bool((indices < 0).any()) or bool((indices >= maximum_index).any()):
+                raise ValueError("XCodec2 audio codes are outside the codebook.")
         codes = self.quantizer.codes_from_indices(indices)
         return self.project_out(codes)
 

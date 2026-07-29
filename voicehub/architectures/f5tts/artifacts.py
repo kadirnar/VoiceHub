@@ -121,7 +121,6 @@ def resolve_f5tts_artifacts(
     source_path = Path(source).expanduser()
     source_string = str(source)
     alias_source = key in _OFFICIAL_MODEL_FILES and source_string == model_name
-    official_source = alias_source or source_string == F5TTS_CHECKPOINT_REPOSITORY
 
     if source_path.exists() or checkpoint_path is not None:
         if checkpoint_path is not None:

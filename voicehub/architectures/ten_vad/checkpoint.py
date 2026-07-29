@@ -39,6 +39,8 @@ _OFFICIAL_DIGESTS = frozenset({
     TEN_VAD_ONNX_SHA256,
     TEN_VAD_SHERPA_ONNX_SHA256,
 })
+_ConfigInput = TENVADConfig | Mapping[str, Any] | None
+_TensorShapes = dict[str, tuple[int, ...]]
 _SOURCE_TO_NATIVE = {
     "const_fold_opt__178": "spatial_depthwise.weight",
     "StatefulPartitionedCall/vad_model/separable_conv2d/"
@@ -135,8 +137,7 @@ def _inventory_fingerprint(model: Any) -> str:
     return hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest()
 
 
-def native_ten_vad_tensor_shapes(
-    config: TENVADConfig | Mapping[str, Any] | None = None, ) -> dict[str, tuple[int, ...]]:
+def native_ten_vad_tensor_shapes(config: _ConfigInput = None) -> _TensorShapes:
     from voicehub.architectures.ten_vad.modeling import TENVADModel
 
     resolved = TENVADConfig.coerce(config or {})

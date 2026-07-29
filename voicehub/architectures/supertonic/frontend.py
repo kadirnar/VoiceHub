@@ -132,8 +132,8 @@ class SupertonicUnicodeProcessor:
             while repeated in value:
                 value = value.replace(repeated, replacement)
         value = re.sub(r"\s+", " ", value).strip()
-        if not re.search(r"""[.!?;:,'"')\]}…。」』】〉》›»]$"""
-                                                         , value):
+        sentence_ending = r"[.!?;:,'\")\]}…。」』】〉》›»]$"
+        if not re.search(sentence_ending, value):
             value += "."
         return f"<{language}>{value}</{language}>"
 

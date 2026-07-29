@@ -22,6 +22,8 @@ from voicehub.hub import write_json_file
 NATIVE_MARBLENET_VAD_FORMAT = "voicehub-marblenet-vad-v1"
 NATIVE_MARBLENET_VAD_FILENAME = "model.safetensors"
 _MAX_ARCHIVE_MEMBER_BYTES = 16 * 1024 * 1024
+_ConfigInput = MarbleNetVADConfig | Mapping[str, Any] | None
+_TensorShapes = dict[str, tuple[int, ...]]
 
 
 def _file_sha256(path: Path) -> str:
@@ -49,8 +51,7 @@ def tensor_inventory_fingerprint(tensors: Mapping[str, Any]) -> str:
     return hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest()
 
 
-def native_marblenet_vad_tensor_shapes(
-    config: MarbleNetVADConfig | Mapping[str, Any] | None = None, ) -> dict[str, tuple[int, ...]]:
+def native_marblenet_vad_tensor_shapes(config: _ConfigInput = None) -> _TensorShapes:
     from voicehub.architectures.marblenet_vad.modeling import MarbleNetVADModel
 
     model = MarbleNetVADModel(MarbleNetVADConfig.coerce(config or {}))

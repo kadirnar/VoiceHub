@@ -115,11 +115,8 @@ class _FakeSpeechTokenizer:
 
     def __call__(self, waveforms, max_len=None):
         length = 4 if max_len is None else min(4, int(max_len))
-        tokens = torch.arange(
-            1, length + 1, dtype=torch.long).repeat(
-                len(waveforms),
-                1,
-            )
+        tokens = torch.arange(1, length + 1, dtype=torch.long)
+        tokens = tokens.repeat(len(waveforms), 1)
         return tokens, torch.full(
             (len(waveforms), ),
             length,

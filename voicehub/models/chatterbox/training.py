@@ -225,11 +225,12 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
                     ),
                 ),
             )
-            for module_name in getattr(
-                    self.model.config,
-                    "training_lora_modules_to_train",
+            lora_modules_to_train = getattr(
+                self.model.config,
+                "training_lora_modules_to_train",
                 ("text_emb", "text_head"),
-            ):
+            )
+            for module_name in lora_modules_to_train:
                 module = runtime.t3.get_submodule(str(module_name))
                 for parameter in module.parameters():
                     parameter.requires_grad_(True)
@@ -362,10 +363,7 @@ class ChatterboxTrainingAdapter(CompositeTrainingAdapter):
             return [None] * batch_size
         if isinstance(value, torch.Tensor):
             values = value.detach().cpu().reshape(-1).tolist()
-        elif isinstance(value, Sequence) and not isinstance(
-                value,
-            (str, bytes),
-        ):
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
             values = list(value)
         else:
             values = [value]

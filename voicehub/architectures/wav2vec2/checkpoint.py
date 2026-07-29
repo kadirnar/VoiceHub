@@ -23,6 +23,8 @@ FACEBOOK_WAV2VEC2_BASE_960H_HEADER_FINGERPRINT = (
 
 TensorMapping = tuple[tuple[str, str], ...]
 TensorShapes = dict[str, tuple[int, ...]]
+_ConfigInput = Wav2Vec2Config | Mapping[str, Any]
+_BaseTensorShapes = tuple[Wav2Vec2Config, TensorShapes]
 
 
 def native_wav2vec2_tensor_shapes(config: Wav2Vec2Config | Mapping[str, Any], ) -> TensorShapes:
@@ -104,8 +106,7 @@ def native_wav2vec2_tensor_names(config: Wav2Vec2Config | Mapping[str, Any], ) -
     return tuple(sorted(native_wav2vec2_tensor_shapes(config)))
 
 
-def _native_wav2vec2_base_tensor_shapes(
-    config: Wav2Vec2Config | Mapping[str, Any], ) -> tuple[Wav2Vec2Config, TensorShapes]:
+def _native_wav2vec2_base_tensor_shapes(config: _ConfigInput) -> _BaseTensorShapes:
     resolved = Wav2Vec2Config.coerce(config)
     shapes = native_wav2vec2_tensor_shapes(resolved)
     del shapes["lm_head.weight"]
@@ -113,8 +114,7 @@ def _native_wav2vec2_base_tensor_shapes(
     return resolved, shapes
 
 
-def native_wav2vec2_sequence_classification_tensor_shapes(
-    config: Wav2Vec2Config | Mapping[str, Any], ) -> TensorShapes:
+def native_wav2vec2_sequence_classification_tensor_shapes(config: _ConfigInput) -> TensorShapes:
     """Return the official clip-classification checkpoint namespace."""
     resolved, shapes = _native_wav2vec2_base_tensor_shapes(config)
     if resolved.use_weighted_layer_sum:
@@ -132,8 +132,7 @@ def native_wav2vec2_sequence_classification_tensor_shapes(
     return shapes
 
 
-def native_wav2vec2_frame_classification_tensor_shapes(
-    config: Wav2Vec2Config | Mapping[str, Any], ) -> TensorShapes:
+def native_wav2vec2_frame_classification_tensor_shapes(config: _ConfigInput) -> TensorShapes:
     """Return the official frame-classification checkpoint namespace."""
     resolved, shapes = _native_wav2vec2_base_tensor_shapes(config)
     if resolved.use_weighted_layer_sum:

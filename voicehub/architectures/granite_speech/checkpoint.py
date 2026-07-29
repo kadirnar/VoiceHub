@@ -21,6 +21,8 @@ from voicehub.checkpointing.errors import CheckpointCompatibilityError
 from voicehub.checkpointing.transforms import CopyTensor, TensorPlan
 
 _ConfigValue = (GraniteSpeechArchitectureConfig | Mapping[str, Any])
+_Reader = SafeTensorReader | ShardedSafeTensorReader
+_TensorInventory = dict[str, tuple[str, tuple[int, ...]]]
 
 
 def _coerce_config(config: _ConfigValue, ) -> GraniteSpeechArchitectureConfig:
@@ -68,8 +70,7 @@ def _dtype_bytes(dtype: str) -> int:
             f"Unsupported Granite Speech Safetensors dtype {dtype!r}.") from error
 
 
-def _reader_inventory(
-    reader: SafeTensorReader | ShardedSafeTensorReader, ) -> dict[str, tuple[str, tuple[int, ...]]]:
+def _reader_inventory(reader: _Reader) -> _TensorInventory:
     if isinstance(reader, SafeTensorReader):
         return {
             name: (
