@@ -303,9 +303,25 @@ class ConversationTTSProcessingTests(unittest.TestCase):
             [sequence],
             protocol=self.protocol,
         )
+
+        real_empty = self.torch.empty
+
+        def poisoned_empty(*args, **kwargs):
+            tensor = real_empty(*args, **kwargs)
+            if tensor.is_floating_point():
+                tensor.fill_(float("nan"))
+            return tensor
+
         with self.torch.random.fork_rng():
             self.torch.manual_seed(0)
-            with patch.dict(model_new.FLAVORS, {"tiny": tiny_decoder}):
+            with (
+                    patch.object(
+                        self.torch,
+                        "empty",
+                        side_effect=poisoned_empty,
+                    ),
+                    patch.dict(model_new.FLAVORS, {"tiny": tiny_decoder}),
+            ):
                 model = model_new.Model(
                     model_new.ModelArgs(
                         backbone_flavor="tiny",
@@ -314,6 +330,7 @@ class ConversationTTSProcessingTests(unittest.TestCase):
                         audio_vocab_size=11,
                         audio_num_codebooks=2,
                     ))
+            self.assertTrue(self.torch.isfinite(model.audio_head).all())
             model.random_type = "none"
             c0_logits, residual_logits, residual_labels = model(
                 tokens=batch["tokens"],

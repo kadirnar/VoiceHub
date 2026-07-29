@@ -197,6 +197,7 @@ class Model(nn.Module):
         self.projection = nn.Linear(backbone_dim, decoder_dim, bias=False)
         self.codebook0_head = nn.Linear(backbone_dim, config.audio_vocab_size, bias=False)
         self.audio_head = nn.Parameter(torch.empty(config.audio_num_codebooks - 1, decoder_dim, config.audio_vocab_size))
+        nn.init.normal_(self.audio_head, mean=0.0, std=0.02)
         self.random_type = 'k_style' # or batch style
 
     def sequence_randomly_drop_based_batch(self, x: torch.Tensor, reserved_part=2) -> Tuple[torch.Tensor, torch.Tensor]:
