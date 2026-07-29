@@ -75,8 +75,10 @@ def create_inflect_architecture_spec() -> ArchitectureSpec:
             batched_inference=False,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", ),
+            optimization_passes=("compile", "custom-kernels"),
             features=(
+                "vits-family",
+                "vits-wavenet-gate",
                 "fixed-single-voice",
                 "deterministic-duration-predictor",
                 "monotonic-alignment-search",
@@ -96,6 +98,7 @@ def create_inflect_architecture_spec() -> ArchitectureSpec:
         upstream_revision=INFLECT_MICRO_V2_REVISION,
         license_id=INFLECT_LICENSE,
         metadata={
+            "vits_architecture_kind": "classic",
             "implementation": "voicehub-native",
             "tensor_backend": "pytorch",
             "source_repository": INFLECT_SOURCE_REPOSITORY,

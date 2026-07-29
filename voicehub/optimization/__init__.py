@@ -75,6 +75,12 @@ _TTS_EXPORTS = frozenset({
     "tts_optimization_config_from_options",
     "validate_tts_optimization_config",
 })
+_VITS_EXPORTS = frozenset({
+    "VITSArchitectureKind",
+    "VITSModelOptimizationSupport",
+    "get_vits_model_optimization_support",
+    "list_vits_model_optimization_support",
+})
 
 
 def _create_flash_attention4_pass():
@@ -130,6 +136,11 @@ def __getattr__(name: str):
         value = getattr(module, name)
         globals()[name] = value
         return value
+    if name in _VITS_EXPORTS:
+        module = import_module("voicehub.optimization.vits")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -139,7 +150,8 @@ def __dir__() -> list[str]:
         | _ACCELERATOR_EXPORTS
         | _LORA_EXPORTS
         | _TORCH_COMPILE_EXPORTS
-        | _TTS_EXPORTS)
+        | _TTS_EXPORTS
+        | _VITS_EXPORTS)
 
 
 __all__ = [
@@ -186,15 +198,19 @@ __all__ = [
     "TTSOptimizationPlan",
     "TTSOptimizationResult",
     "TTSOptimizationSupport",
+    "VITSArchitectureKind",
+    "VITSModelOptimizationSupport",
     "bind_registered_architecture",
     "canonical_json_string",
     "canonical_json_tree",
     "coerce_tts_optimization_config",
     "get_tts_optimization_config",
     "get_tts_optimization_support",
+    "get_vits_model_optimization_support",
     "inject_lora",
     "inspect_torch_compile",
     "list_tts_optimization_support",
+    "list_vits_model_optimization_support",
     "normalize_optimization_dtype",
     "normalize_optimization_kind",
     "resolve_tts_optimization",

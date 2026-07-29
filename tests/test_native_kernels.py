@@ -15,6 +15,7 @@ from voicehub.kernels import (
     CUDA_EXTENSIONS,
     DIFFUSION_FUSED_BIAS_GELU,
     LLM_GATED_SILU,
+    VITS_FUSED_ADD_TANH_SIGMOID,
     VITS_TANH_SIGMOID_GATE,
     CapabilityStatus,
     CudaExtensionRegistry,
@@ -26,6 +27,8 @@ from voicehub.kernels import (
     KernelRegistry,
     KernelSupport,
     cuda_extension_capability,
+    fused_add_tanh_sigmoid,
+    fused_add_tanh_sigmoid_reference,
     fused_bias_gelu,
     fused_bias_gelu_reference,
     gated_silu,
@@ -41,6 +44,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUN_TRITON_KERNELS = (os.environ.get("VOICEHUB_TEST_TRITON_KERNELS") == "1" and triton_capability().available)
 RUN_CUDA_EXTENSION = (
     os.environ.get("VOICEHUB_TEST_CUDA_EXTENSIONS") == "1" and cuda_extension_capability().available)
+
+
+def _clone_kernel_arguments(arguments):
+    return tuple(
+        argument.detach().clone(memory_format=torch.preserve_format, ).
+        requires_grad_(True) if isinstance(argument, torch.Tensor) else argument for argument in arguments)
 
 
 class KernelRegistryTests(unittest.TestCase):
@@ -134,6 +143,8 @@ print(json.dumps({
         gate = torch.randn(2, 3)
         up = torch.randn(2, 3)
         activation = torch.randn(2, 3)
+        vits_input = torch.randn(2, 6, 5)
+        vits_condition = torch.randn(2, 6, 1)
         inputs = torch.randn(2, 4)
         bias = torch.randn(4)
 
@@ -146,12 +157,24 @@ print(json.dumps({
             tanh_sigmoid_gate_reference(activation, gate),
         )
         torch.testing.assert_close(
+            fused_add_tanh_sigmoid(vits_input, vits_condition, 3),
+            fused_add_tanh_sigmoid_reference(
+                vits_input,
+                vits_condition,
+                3,
+            ),
+        )
+        torch.testing.assert_close(
             fused_bias_gelu(inputs, bias),
             fused_bias_gelu_reference(inputs, bias),
         )
         for operation, args in (
             (LLM_GATED_SILU, (gate, up)),
             (VITS_TANH_SIGMOID_GATE, (activation, gate)),
+            (
+                VITS_FUSED_ADD_TANH_SIGMOID,
+                (vits_input, vits_condition, 3),
+            ),
             (DIFFUSION_FUSED_BIAS_GELU, (inputs, bias)),
         ):
             with self.subTest(operation=operation):
@@ -197,6 +220,7 @@ from voicehub.kernels import triton_activations
 print(json.dumps([
     str(triton_activations.gated_silu_triton),
     str(triton_activations.tanh_sigmoid_gate_triton),
+    str(triton_activations.fused_add_tanh_sigmoid_triton),
     str(triton_activations.fused_bias_gelu_triton),
 ]))
 """
@@ -209,6 +233,10 @@ print(json.dumps([
         )
         self.assertIn("voicehub_triton::gated_silu", result.stdout)
         self.assertIn("voicehub_triton::tanh_sigmoid_gate", result.stdout)
+        self.assertIn(
+            "voicehub_triton::fused_add_tanh_sigmoid",
+            result.stdout,
+        )
         self.assertIn("voicehub_triton::fused_bias_gelu", result.stdout)
 
     def test_torch_fallback_gradients_cover_all_inputs_and_bias(self):
@@ -270,6 +298,7 @@ class CudaExtensionInfrastructureTests(unittest.TestCase):
         for kernel_name in (
                 "gated_silu_kernel",
                 "tanh_sigmoid_gate_kernel",
+                "fused_add_tanh_sigmoid_kernel",
                 "fused_bias_gelu_kernel",
         ):
             self.assertIn(kernel_name, cuda_source)
@@ -287,6 +316,10 @@ definitions.define("gated_silu(Tensor gate, Tensor up) -> Tensor")
 definitions.define(
     "tanh_sigmoid_gate(Tensor activation, Tensor gate) -> Tensor"
 )
+definitions.define(
+    "fused_add_tanh_sigmoid(Tensor input_a, Tensor input_b, int channels) "
+    "-> Tensor"
+)
 definitions.define("fused_bias_gelu(Tensor input, Tensor bias) -> Tensor")
 implementations = torch.library.Library("voicehub_kernels", "IMPL", "CPU")
 implementations.impl(
@@ -297,6 +330,13 @@ implementations.impl(
     "tanh_sigmoid_gate",
     lambda activation, gate: (
         torch.tanh(activation) * torch.sigmoid(gate)
+    ).contiguous(),
+)
+implementations.impl(
+    "fused_add_tanh_sigmoid",
+    lambda input_a, input_b, channels: (
+        torch.tanh((input_a + input_b)[:, :channels])
+        * torch.sigmoid((input_a + input_b)[:, channels:])
     ).contiguous(),
 )
 implementations.impl(
@@ -332,6 +372,14 @@ cases = (
         ),
     ),
     (
+        "fused_add_tanh_sigmoid",
+        (
+            torch.randn(2, 8, 5).requires_grad_(),
+            torch.randn(2, 8, 1).requires_grad_(),
+            4,
+        ),
+    ),
+    (
         "fused_bias_gelu",
         (
             torch.randn(2, 4, 3).transpose(1, 2).requires_grad_(),
@@ -349,20 +397,29 @@ for name, arguments in cases:
         fullgraph=True,
     )
     compiled_arguments = tuple(
-        argument.detach().clone(
-            memory_format=torch.preserve_format,
-        ).requires_grad_(True)
+        (
+            argument.detach().clone(
+                memory_format=torch.preserve_format,
+            ).requires_grad_(True)
+            if isinstance(argument, torch.Tensor)
+            else argument
+        )
         for argument in arguments
     )
     output = compiled(*compiled_arguments)
     assert output.is_contiguous()
+    tensor_arguments = tuple(
+        argument
+        for argument in compiled_arguments
+        if isinstance(argument, torch.Tensor)
+    )
     gradients = torch.autograd.grad(
         output.sum(),
-        compiled_arguments,
+        tensor_arguments,
     )
     assert all(
         gradient.shape == argument.shape
-        for gradient, argument in zip(gradients, compiled_arguments)
+        for gradient, argument in zip(gradients, tensor_arguments)
     )
 
 print("cuda registrations passed")
@@ -434,12 +491,12 @@ print("cuda registrations passed")
                         return_value=capability,
                     ),
                     patch("voicehub.kernels.cuda_extensions._compile_extension", ) as compile_extension,
-            ):
-                with self.assertRaisesRegex(
+                    self.assertRaisesRegex(
                         CudaExtensionUnavailableError,
                         "toolkit is absent",
-                ):
-                    registry.load("voicehub_unavailable_extension")
+                    ),
+            ):
+                registry.load("voicehub_unavailable_extension")
         compile_extension.assert_not_called()
 
 
@@ -455,22 +512,26 @@ class TritonActivationKernelTests(unittest.TestCase):
         reference,
         arguments,
     ):
-        triton_arguments = tuple(argument.detach().clone().requires_grad_(True) for argument in arguments)
-        reference_arguments = tuple(argument.detach().clone().requires_grad_(True) for argument in arguments)
+        triton_arguments = _clone_kernel_arguments(arguments)
+        reference_arguments = _clone_kernel_arguments(arguments)
         triton_output = function(
             *triton_arguments,
             backend=KernelBackend.TRITON,
         )
         reference_output = reference(*reference_arguments)
         gradient = torch.randn_like(triton_output)
+        triton_tensors = tuple(
+            argument for argument in triton_arguments if isinstance(argument, torch.Tensor))
+        reference_tensors = tuple(
+            argument for argument in reference_arguments if isinstance(argument, torch.Tensor))
         triton_gradients = torch.autograd.grad(
             triton_output,
-            triton_arguments,
+            triton_tensors,
             gradient,
         )
         reference_gradients = torch.autograd.grad(
             reference_output,
-            reference_arguments,
+            reference_tensors,
             gradient,
         )
         torch.testing.assert_close(
@@ -506,6 +567,15 @@ class TritonActivationKernelTests(unittest.TestCase):
             ),
         )
         self._compare_forward_and_backward(
+            fused_add_tanh_sigmoid,
+            fused_add_tanh_sigmoid_reference,
+            (
+                torch.randn(2, 257, 128, device=device).transpose(1, 2),
+                torch.randn(2, 128, 1, device=device),
+                64,
+            ),
+        )
+        self._compare_forward_and_backward(
             fused_bias_gelu,
             fused_bias_gelu_reference,
             (
@@ -530,6 +600,8 @@ class CompiledCudaActivationKernelTests(unittest.TestCase):
         gate = torch.randn(8, 256, device=device)
         up = torch.randn(8, 256, device=device)
         activation = torch.randn(8, 256, device=device)
+        vits_input = torch.randn(2, 257, 128, device=device).transpose(1, 2)
+        vits_condition = torch.randn(2, 128, 1, device=device)
         inputs = torch.randn(4, 8, 256, device=device)
         bias = torch.randn(256, device=device)
         for function, reference, arguments in (
@@ -540,30 +612,37 @@ class CompiledCudaActivationKernelTests(unittest.TestCase):
                 (activation, gate),
             ),
             (
+                fused_add_tanh_sigmoid,
+                fused_add_tanh_sigmoid_reference,
+                (vits_input, vits_condition, 64),
+            ),
+            (
                 fused_bias_gelu,
                 fused_bias_gelu_reference,
                 (inputs, bias),
             ),
         ):
             with self.subTest(function=function.__name__):
-                cuda_arguments = tuple(
-                    argument.detach().clone().requires_grad_(True) for argument in arguments)
-                reference_arguments = tuple(
-                    argument.detach().clone().requires_grad_(True) for argument in arguments)
+                cuda_arguments = _clone_kernel_arguments(arguments)
+                reference_arguments = _clone_kernel_arguments(arguments)
                 actual = function(
                     *cuda_arguments,
                     backend=KernelBackend.CUDA_EXTENSION,
                 )
                 expected = reference(*reference_arguments)
                 gradient = torch.randn_like(actual)
+                cuda_tensors = tuple(
+                    argument for argument in cuda_arguments if isinstance(argument, torch.Tensor))
+                reference_tensors = tuple(
+                    argument for argument in reference_arguments if isinstance(argument, torch.Tensor))
                 actual_gradients = torch.autograd.grad(
                     actual,
-                    cuda_arguments,
+                    cuda_tensors,
                     gradient,
                 )
                 expected_gradients = torch.autograd.grad(
                     expected,
-                    reference_arguments,
+                    reference_tensors,
                     gradient,
                 )
                 torch.testing.assert_close(

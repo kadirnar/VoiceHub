@@ -58,8 +58,10 @@ def create_openvoice_architecture_spec() -> ArchitectureSpec:
             batched_inference=False,
             distributed_training=False,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", ),
+            optimization_passes=("compile", "custom-kernels"),
             features=(
+                "vits-family",
+                "vits-wavenet-gate",
                 "tone-color-conversion",
                 "voice-cloning",
                 "native-magnitude-stft",
@@ -77,6 +79,8 @@ def create_openvoice_architecture_spec() -> ArchitectureSpec:
         upstream_revision=OPENVOICE_SOURCE_REVISION,
         license_id="MIT",
         metadata={
+            "vits_architecture_kind":
+            "converter",
             "implementation":
             "voicehub-native",
             "tensor_backend":

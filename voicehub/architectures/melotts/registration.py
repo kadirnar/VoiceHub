@@ -61,8 +61,10 @@ def create_melotts_architecture_spec() -> ArchitectureSpec:
             batched_inference=False,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", ),
+            optimization_passes=("compile", "custom-kernels"),
             features=(
+                "vits-family",
+                "vits-wavenet-gate",
                 "multilingual-vits2",
                 "multi-speaker",
                 "explicit-phone-tone-language-input",
@@ -77,6 +79,8 @@ def create_melotts_architecture_spec() -> ArchitectureSpec:
         upstream_revision=MELOTTS_SOURCE_REVISION,
         license_id=MELOTTS_SOURCE_LICENSE,
         metadata={
+            "vits_architecture_kind":
+            "vits2",
             "implementation":
             "voicehub-native",
             "tensor_backend":

@@ -15,6 +15,7 @@ from typing import Any
 from torch import nn
 
 from voicehub.kernels.activations import ACTIVATION_CUDA_EXTENSION_NAME
+from voicehub.kernels.capabilities import triton_capability
 from voicehub.kernels.cuda_extensions import CUDA_EXTENSIONS
 from voicehub.kernels.registry import KernelBackend
 from voicehub.neural.backends.flash_attention4 import FlashAttention4Policy
@@ -197,6 +198,18 @@ class _SelectorPass(OptimizationPass):
     def _coerce_previous(self, value: Any) -> Any:
         raise NotImplementedError
 
+    def _selection_for_context(self, context: OptimizationContext) -> Any:
+        del context
+        return self.selection
+
+    def _selection_for_target(
+        self,
+        target: _SelectorTarget,
+        context: OptimizationContext,
+    ) -> Any:
+        del target
+        return self._selection_for_context(context)
+
     def _selection_issues(self, context: OptimizationContext) -> tuple[str, ...]:
         del context
         return ()
@@ -286,6 +299,10 @@ class _SelectorPass(OptimizationPass):
             raise AcceleratorOptimizationError(
                 f"Optimization pass {self.qualified_id!r} cannot be applied: "
                 f"{'; '.join(issues)}.")
+        target_selections = tuple((
+            target,
+            self._selection_for_target(target, context),
+        ) for target in targets)
         before_keys = _state_dict_keys(model)
         patches = tuple(
             _SelectorPatch(
@@ -293,9 +310,9 @@ class _SelectorPass(OptimizationPass):
                 previous=getattr(target.module, target.state_attribute),
             ) for target in targets)
         try:
-            for target in targets:
+            for target, effective_selection in target_selections:
                 setter = getattr(target.module, target.setter_name)
-                setter(self.selection)
+                setter(effective_selection)
             after_keys = _state_dict_keys(model)
         except BaseException as error:
             try:
@@ -316,15 +333,25 @@ class _SelectorPass(OptimizationPass):
                 f"state_dict keys.{suffix}")
 
         previous = sorted({_selector_token(patch.previous) for patch in patches})
+        effective_tokens = sorted(
+            {_selector_token(effective_selection)
+             for _target, effective_selection in target_selections})
         metadata = {
             "outcome":
             "configured",
             "selection":
+            (effective_tokens[0] if len(effective_tokens) == 1 else f"mixed:{'/'.join(effective_tokens)}"),
+            "requested_selection":
             self.selection_token,
             "target_count":
             len(targets),
             "changed_target_count":
-            sum(_selector_token(patch.previous) != self.selection_token for patch in patches),
+            sum(
+                _selector_token(patch.previous) != _selector_token(effective_selection)
+                for patch, (_target, effective_selection) in zip(
+                    patches,
+                    target_selections,
+                )),
             "targets": [target.label for target in targets],
             "previous_selections":
             previous,
@@ -334,6 +361,17 @@ class _SelectorPass(OptimizationPass):
             True,
             **dict(self._extra_metadata()),
         }
+        operations = sorted({
+            operation
+            for target in targets
+            for operation in getattr(
+                target.module,
+                "supported_kernel_operations",
+                (),
+            ) if isinstance(operation, str) and operation
+        })
+        if operations:
+            metadata["kernel_operations"] = operations
         return PassResult(
             model=model,
             state={
@@ -438,7 +476,25 @@ class CustomKernelPass(_SelectorPass):
                 issues.append(
                     f"CUDA extension {ACTIVATION_CUDA_EXTENSION_NAME!r} is not already loaded; "
                     "load it explicitly before applying this pass")
+        if (self.backend is KernelBackend.TRITON and device_family == "cuda"):
+            capability = triton_capability(context.device)
+            if not capability.available:
+                issues.append(f"triton backend is unavailable: {capability.reason}")
         return tuple(issues)
+
+    def _selection_for_target(
+        self,
+        target: _SelectorTarget,
+        context: OptimizationContext,
+    ) -> KernelBackend:
+        resolver = getattr(target.module, "resolve_kernel_backend", None)
+        if not callable(resolver):
+            return self.backend
+        return KernelBackend.coerce(resolver(
+            self.backend,
+            device=context.device,
+            dtype=context.dtype,
+        ))
 
     def _extra_metadata(self) -> Mapping[str, Any]:
         return {

@@ -1,5 +1,6 @@
 import importlib.util
 import unittest
+from unittest import mock
 
 from voicehub import (
     DiffusionTTSOptimizationConfig,
@@ -261,14 +262,18 @@ class SchedulerOptimizationTests(unittest.TestCase):
     def test_new_optimizer_arguments_validate_and_round_trip(self):
         arguments = TrainingArguments(
             adamw_fused=True,
+            adamw_torch_compile=True,
             lr_scheduler_type="exponential",
             lr_scheduler_gamma=0.95,
         )
 
         self.assertTrue(arguments.to_dict()["adamw_fused"])
+        self.assertTrue(arguments.to_dict()["adamw_torch_compile"])
         self.assertEqual(arguments.to_dict()["lr_scheduler_gamma"], 0.95)
         with self.assertRaisesRegex(TypeError, "adamw_fused"):
             TrainingArguments(adamw_fused="yes")
+        with self.assertRaisesRegex(TypeError, "adamw_torch_compile"):
+            TrainingArguments(adamw_torch_compile="yes")
         with self.assertRaisesRegex(ValueError, "lr_scheduler_gamma"):
             TrainingArguments(lr_scheduler_gamma=0.0)
 
@@ -303,6 +308,30 @@ class FusedAdamWTests(unittest.TestCase):
         optimizer = trainer.create_optimizer()
 
         self.assertFalse(bool(optimizer.defaults.get("fused", False)))
+
+    def test_compiled_adamw_is_explicit_and_preserves_optimizer_type(self):
+        import torch
+
+        model = torch.nn.Linear(2, 1)
+        with mock.patch.object(
+                torch,
+                "compile",
+                side_effect=lambda function, **kwargs: function,
+        ) as compile_step:
+            optimizer = Trainer(
+                model=model,
+                args=TrainingArguments(
+                    use_cpu=True,
+                    adamw_torch_compile=True,
+                ),
+            ).create_optimizer()
+
+        self.assertIsInstance(optimizer, torch.optim.AdamW)
+        self.assertTrue(optimizer._voicehub_step_compiled)
+        self.assertEqual(
+            compile_step.call_args.kwargs["mode"],
+            "max-autotune-no-cudagraphs",
+        )
 
 
 if __name__ == "__main__":

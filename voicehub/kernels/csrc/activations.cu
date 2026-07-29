@@ -49,6 +49,46 @@ tanh_sigmoid_gate_kernel(const scalar_t *__restrict__ activation,
 }
 
 template <typename scalar_t>
+__global__ void fused_add_tanh_sigmoid_kernel(
+    const scalar_t *__restrict__ input_a,
+    const scalar_t *__restrict__ input_b, scalar_t *__restrict__ output,
+    const int64_t channels, const int64_t output_frames,
+    const int64_t input_a_batches, const int64_t input_a_frames,
+    const int64_t input_b_batches, const int64_t input_b_frames,
+    const int64_t output_size) {
+  const int64_t index =
+      static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (index >= output_size) {
+    return;
+  }
+  const int64_t frame = index % output_frames;
+  const int64_t batch_channel = index / output_frames;
+  const int64_t channel = batch_channel % channels;
+  const int64_t batch = batch_channel / channels;
+  const int64_t input_a_batch = input_a_batches == 1 ? 0 : batch;
+  const int64_t input_a_frame = input_a_frames == 1 ? 0 : frame;
+  const int64_t input_b_batch = input_b_batches == 1 ? 0 : batch;
+  const int64_t input_b_frame = input_b_frames == 1 ? 0 : frame;
+  const int64_t activation_a_index =
+      (input_a_batch * 2 * channels + channel) * input_a_frames +
+      input_a_frame;
+  const int64_t gate_a_index =
+      activation_a_index + channels * input_a_frames;
+  const int64_t activation_b_index =
+      (input_b_batch * 2 * channels + channel) * input_b_frames +
+      input_b_frame;
+  const int64_t gate_b_index =
+      activation_b_index + channels * input_b_frames;
+  const float activation =
+      static_cast<float>(input_a[activation_a_index]) +
+      static_cast<float>(input_b[activation_b_index]);
+  const float gate = static_cast<float>(input_a[gate_a_index]) +
+                     static_cast<float>(input_b[gate_b_index]);
+  const float sigmoid = 1.0f / (1.0f + expf(-gate));
+  output[index] = static_cast<scalar_t>(tanhf(activation) * sigmoid);
+}
+
+template <typename scalar_t>
 __global__ void fused_bias_gelu_kernel(const scalar_t *__restrict__ input,
                                        const scalar_t *__restrict__ bias,
                                        scalar_t *__restrict__ output,
@@ -135,6 +175,70 @@ at::Tensor voicehub_tanh_sigmoid_gate_cuda(const at::Tensor &activation,
         tanh_sigmoid_gate_kernel<<<blocks, kThreads, 0, stream>>>(
             activation_pointer, gate_pointer, output_pointer, size);
       });
+}
+
+at::Tensor voicehub_fused_add_tanh_sigmoid_cuda(
+    const at::Tensor &input_a, const at::Tensor &input_b,
+    const int64_t channels) {
+  TORCH_CHECK(input_a.is_cuda() && input_b.is_cuda(),
+              "voicehub_kernels::fused_add_tanh_sigmoid expects CUDA "
+              "tensors");
+  TORCH_CHECK(input_a.device() == input_b.device(),
+              "voicehub_kernels::fused_add_tanh_sigmoid expects tensors on "
+              "the same CUDA device");
+  TORCH_CHECK(input_a.scalar_type() == input_b.scalar_type(),
+              "voicehub_kernels::fused_add_tanh_sigmoid expects tensors "
+              "with the same dtype");
+  const auto scalar_type = input_a.scalar_type();
+  TORCH_CHECK(
+      scalar_type == at::kHalf || scalar_type == at::kBFloat16 ||
+          scalar_type == at::kFloat,
+      "voicehub_kernels::fused_add_tanh_sigmoid supports float16, bfloat16, "
+      "and float32 tensors");
+  TORCH_CHECK(input_a.dim() == 3 && input_b.dim() == 3,
+              "voicehub_kernels::fused_add_tanh_sigmoid expects "
+              "[batch, 2 * channels, frames] tensors");
+  TORCH_CHECK(channels > 0 && input_a.size(1) == 2 * channels &&
+                  input_b.size(1) == 2 * channels,
+              "voicehub_kernels::fused_add_tanh_sigmoid input channel size "
+              "must equal 2 * channels");
+  TORCH_CHECK(input_a.size(0) == input_b.size(0) || input_a.size(0) == 1 ||
+                  input_b.size(0) == 1,
+              "voicehub_kernels::fused_add_tanh_sigmoid batch dimensions "
+              "must be broadcastable");
+  TORCH_CHECK(input_a.size(2) == input_b.size(2) || input_a.size(2) == 1 ||
+                  input_b.size(2) == 1,
+              "voicehub_kernels::fused_add_tanh_sigmoid frame dimensions "
+              "must be broadcastable");
+
+  const c10::cuda::CUDAGuard guard(input_a.device());
+  const auto input_a_contiguous = input_a.contiguous();
+  const auto input_b_contiguous = input_b.contiguous();
+  const int64_t output_batches =
+      input_a.size(0) == 1 ? input_b.size(0) : input_a.size(0);
+  const int64_t output_frames =
+      input_a.size(2) == 1 ? input_b.size(2) : input_a.size(2);
+  auto output = at::empty(
+      {output_batches, channels, output_frames}, input_a.options());
+  const int64_t output_size = output.numel();
+  if (output_size == 0) {
+    return output;
+  }
+  const int blocks =
+      static_cast<int>((output_size + kThreads - 1) / kThreads);
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16, input_a.scalar_type(),
+      "voicehub_kernels::fused_add_tanh_sigmoid", [&] {
+        fused_add_tanh_sigmoid_kernel<<<blocks, kThreads, 0, stream>>>(
+            input_a_contiguous.data_ptr<scalar_t>(),
+            input_b_contiguous.data_ptr<scalar_t>(),
+            output.data_ptr<scalar_t>(), channels, output_frames,
+            input_a.size(0), input_a.size(2), input_b.size(0),
+            input_b.size(2), output_size);
+      });
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  return output;
 }
 
 at::Tensor voicehub_fused_bias_gelu_cuda(const at::Tensor &input,

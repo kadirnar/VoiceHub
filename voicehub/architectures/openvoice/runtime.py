@@ -14,6 +14,7 @@ from voicehub.architectures.openvoice.checkpoint import load_openvoice_checkpoin
 from voicehub.architectures.openvoice.modeling import OpenVoiceConverterOutput, OpenVoiceToneColorConverter
 from voicehub.architectures.openvoice.processing import OpenVoiceAudioProcessor
 from voicehub.hub import write_json_file
+from voicehub.optimization.protocols import OptimizationCompileTarget, OptimizationModuleRoot
 
 
 class OpenVoiceRuntime:
@@ -34,6 +35,25 @@ class OpenVoiceRuntime:
         self.processor = processor
         self.artifacts = artifacts
         self.config = model.config
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Compile the tensor graph while leaving audio preparation eager."""
+        if mode not in {"inference", "training"}:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            "model.forward",
+            self.model,
+            "forward",
+        ), )
+
+    def optimization_module_roots(self) -> tuple[OptimizationModuleRoot, ...]:
+        return (OptimizationModuleRoot("model", self.model), )
+
+    def state_dict(self):
+        return self.model.state_dict()
 
     @property
     def device(self) -> torch.device:

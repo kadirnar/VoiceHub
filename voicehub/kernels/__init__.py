@@ -10,7 +10,10 @@ from voicehub.kernels.activations import (
     ACTIVATION_CUDA_EXTENSION_NAME,
     DIFFUSION_FUSED_BIAS_GELU,
     LLM_GATED_SILU,
+    VITS_FUSED_ADD_TANH_SIGMOID,
     VITS_TANH_SIGMOID_GATE,
+    fused_add_tanh_sigmoid,
+    fused_add_tanh_sigmoid_reference,
     fused_bias_gelu,
     fused_bias_gelu_reference,
     gated_silu,
@@ -51,6 +54,7 @@ from voicehub.kernels.registry import (
     register_kernel,
     resolve_kernel,
 )
+from voicehub.kernels.vits import VITSKernelOptimizable
 
 __all__ = [
     "ACTIVATION_CUDA_EXTENSION_NAME",
@@ -73,10 +77,14 @@ __all__ = [
     "LLM_GATED_SILU",
     "LoadedCudaExtension",
     "RegisteredKernel",
+    "VITS_FUSED_ADD_TANH_SIGMOID",
     "VITS_TANH_SIGMOID_GATE",
+    "VITSKernelOptimizable",
     "cuda_extension_capability",
     "cuda_runtime_capability",
     "dispatch_kernel",
+    "fused_add_tanh_sigmoid",
+    "fused_add_tanh_sigmoid_reference",
     "fused_bias_gelu",
     "fused_bias_gelu_reference",
     "gated_silu",

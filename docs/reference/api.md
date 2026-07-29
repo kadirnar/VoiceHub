@@ -665,8 +665,9 @@ every model. Apply-time discovery still validates that the loaded execution
 mode has a real target: an explicit empty target set selects eager execution
 for an automatic policy and fails a required policy. `conversationtts`,
 `f5tts`, and `qwen3tts` additionally declare the selectable
-FlashAttention-4 protocol; those three plus `vits` declare the
-architecture-owned custom-kernel protocol. Capability discovery is
+FlashAttention-4 protocol. Those three plus the trait-discovered VITS family
+(`vits`, `melotts`, `inflecttts`, GPT-SoVITS S2, and the OpenVoice converter)
+declare architecture-owned custom-kernel protocols. Capability discovery is
 registry-driven, so callers should query the support functions instead of
 depending on those counts.
 
@@ -1245,6 +1246,7 @@ built-in execution strategy is single-process PyTorch.
 | `adam_beta2` | `0.999` | Adam second-moment coefficient |
 | `adam_epsilon` | `1e-8` | Adam numerical-stability value |
 | `adamw_fused` | `False` | Request fused AdamW when all parameters are on CUDA and PyTorch supports it; otherwise fall back safely |
+| `adamw_torch_compile` | `False` | Compile AdamW `step` with Inductor's no-CUDA-graphs mode; on CUDA this can generate fused Triton code |
 | `max_grad_norm` | `1.0` | Gradient clipping norm; `0` disables effective clipping |
 | `num_train_epochs` | `3.0` | Epoch target when `max_steps` is not positive |
 | `max_steps` | `-1` | Positive value overrides the epoch-derived update count |
@@ -1853,6 +1855,9 @@ DiffusionTTSOptimizationConfig().acceleration_plan(...)
 vits_acceleration_plan(...)
 llm_tts_acceleration_plan(...)
 diffusion_tts_acceleration_plan(...)
+
+list_vits_model_optimization_support()
+get_vits_model_optimization_support(model_type)
 ```
 
 `TTSTrainingOptimizationProfile` is the union of
@@ -1867,8 +1872,13 @@ returns EMA and activation-checkpoint settings through
 `model_config_overrides()`. `acceleration_plan()` returns custom-kernel and
 attention passes followed by `TorchCompilePass`; VITS intentionally omits FA4
 because its relative-position terms are not equivalent to dense scaled
-dot-product attention. Profiles are opt-in and do not mutate a model or
+dot-product attention. `VITSOptimizationConfig.acceleration_plan()` also
+accepts `cuda_graphs="auto" | "disabled" | "required"` (or a boolean).
+Required graphs select static shapes and `reduce-overhead`; the default
+training policy retains dynamic shapes and
+`max-autotune-no-cudagraphs`. Profiles are opt-in and do not mutate a model or
 existing arguments. See
+[VITS-family optimization](../guides/vits-optimization.md) and
 [TTS optimization](../guides/tts-optimization.md) for the
 pinned recipes and tradeoffs.
 

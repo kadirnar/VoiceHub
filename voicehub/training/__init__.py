@@ -73,6 +73,7 @@ from voicehub.training.strategy import (
     unregister_training_strategy,
 )
 from voicehub.training.tts_acceleration import (
+    VITSCUDAGraphPolicy,
     diffusion_tts_acceleration_plan,
     llm_tts_acceleration_plan,
     vits_acceleration_plan,
@@ -152,6 +153,7 @@ __all__ = [
     "UpstreamNativeTrainingAdapter",
     "VITSTrainingAdapter",
     "VITSOptimizationConfig",
+    "VITSCUDAGraphPolicy",
     "VITSDiscriminatorLoss",
     "build_diffusion_training_pair",
     "build_flow_matching_training_pair",

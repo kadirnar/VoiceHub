@@ -217,7 +217,9 @@ class LLMServingClient:
             raise ValueError(
                 f"`{option_name}` is {size} bytes; the remote-reference "
                 f"limit is {max_bytes}.")
-        media_type = mimetypes.guess_type(path.name)[0] or "audio/wav"
+        media_type = (
+            "audio/x-wav"
+            if path.suffix.lower() == ".wav" else mimetypes.guess_type(path.name)[0] or "audio/wav")
         if not media_type.startswith("audio/"):
             media_type = "audio/wav"
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")

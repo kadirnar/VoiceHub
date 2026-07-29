@@ -297,6 +297,10 @@ class UniversalTTSOptimizationTests(unittest.TestCase):
         custom_kernel_models = {
             "conversationtts",
             "f5tts",
+            "gptsovits",
+            "inflecttts",
+            "melotts",
+            "openvoice",
             "qwen3tts",
             "vits",
         }

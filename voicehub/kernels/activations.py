@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from functools import lru_cache
+from functools import cache
 from importlib import import_module
 from pathlib import Path
 from threading import RLock
@@ -11,6 +11,12 @@ from threading import RLock
 import torch
 from torch.nn import functional as F
 
+from voicehub.kernel_operations import (
+    DIFFUSION_FUSED_BIAS_GELU,
+    LLM_GATED_SILU,
+    VITS_FUSED_ADD_TANH_SIGMOID,
+    VITS_TANH_SIGMOID_GATE,
+)
 from voicehub.kernels.capabilities import triton_capability
 from voicehub.kernels.cuda_extensions import (
     CudaExtensionSpec,
@@ -20,9 +26,6 @@ from voicehub.kernels.cuda_extensions import (
 )
 from voicehub.kernels.registry import KernelBackend, KernelSupport, dispatch_kernel, register_kernel
 
-LLM_GATED_SILU = "tts.llm.gated_silu"
-VITS_TANH_SIGMOID_GATE = "tts.vits.tanh_sigmoid_gate"
-DIFFUSION_FUSED_BIAS_GELU = "tts.diffusion.fused_bias_gelu"
 ACTIVATION_CUDA_EXTENSION_NAME = "voicehub_kernels_activations"
 
 _TRITON_DTYPES = frozenset({
@@ -40,6 +43,7 @@ _ACTIVATION_CUDA_SPEC = CudaExtensionSpec(
     operators=(
         "voicehub_kernels::gated_silu",
         "voicehub_kernels::tanh_sigmoid_gate",
+        "voicehub_kernels::fused_add_tanh_sigmoid",
         "voicehub_kernels::fused_bias_gelu",
     ),
     extra_cflags=("-O3", ),
@@ -49,7 +53,7 @@ _CUDA_REGISTRATION_LIBRARY: torch.library.Library | None = None
 _CUDA_REGISTRATION_LOCK = RLock()
 
 
-@lru_cache(maxsize=None)
+@cache
 def _cached_triton_capability(device: str):
     """Avoid repeating CUDA/package discovery in every eager FFN block."""
     return triton_capability(torch.device(device))
@@ -93,6 +97,48 @@ def _validate_bias_gelu(
         raise TypeError("fused_bias_gelu expects floating-point tensors.")
 
 
+def _validate_vits_fused_gate(
+    input_a: torch.Tensor,
+    input_b: torch.Tensor,
+    channels: int,
+) -> None:
+    if not isinstance(input_a, torch.Tensor) or not isinstance(input_b, torch.Tensor):
+        raise TypeError("`input_a` and `input_b` must be torch.Tensor values.")
+    if input_a.ndim != 3 or input_b.ndim != 3:
+        raise ValueError("fused_add_tanh_sigmoid expects [batch, 2 * channels, frames] tensors.")
+    if input_a.device != input_b.device:
+        raise ValueError("fused_add_tanh_sigmoid expects tensors on the same device.")
+    if input_a.dtype != input_b.dtype:
+        raise ValueError("fused_add_tanh_sigmoid expects tensors with the same dtype.")
+    if not input_a.is_floating_point():
+        raise TypeError("fused_add_tanh_sigmoid expects floating-point tensors.")
+    if isinstance(channels, bool) or not isinstance(channels, int):
+        raise TypeError("`channels` must be an integer.")
+    if (channels < 1 or input_a.shape[1] != 2 * channels or input_b.shape[1] != 2 * channels):
+        raise ValueError("fused_add_tanh_sigmoid expects input channel size to equal "
+                         "2 * `channels`.")
+    for dimension, name in ((0, "batch"), (2, "frame")):
+        left = input_a.shape[dimension]
+        right = input_b.shape[dimension]
+        if left != right and left != 1 and right != 1:
+            raise ValueError(
+                "fused_add_tanh_sigmoid input "
+                f"{name} dimensions must be equal or broadcastable.")
+
+
+def _vits_fused_gate_contract_supported(
+    input_a: torch.Tensor,
+    input_b: torch.Tensor,
+    channels: int,
+) -> bool:
+    return bool(
+        isinstance(input_a, torch.Tensor) and isinstance(input_b, torch.Tensor) and input_a.ndim == 3 and
+        input_b.ndim == 3 and not isinstance(channels, bool) and isinstance(channels, int) and
+        channels > 0 and input_a.shape[1] == 2 * channels and input_b.shape[1] == 2 * channels and
+        (input_a.shape[0] == input_b.shape[0] or input_a.shape[0] == 1 or input_b.shape[0] == 1) and
+        (input_a.shape[2] == input_b.shape[2] or input_a.shape[2] == 1 or input_b.shape[2] == 1))
+
+
 def _pair_triton_support(
     left: torch.Tensor,
     right: torch.Tensor,
@@ -124,6 +170,29 @@ def _bias_gelu_triton_support(
     return support
 
 
+def _vits_fused_gate_triton_support(
+    input_a: torch.Tensor,
+    input_b: torch.Tensor,
+    channels: int,
+) -> KernelSupport:
+    if not _vits_fused_gate_contract_supported(input_a, input_b, channels):
+        return KernelSupport(
+            False,
+            "inputs must have broadcastable [batch, 2 * channels, frames] shapes",
+        )
+    if input_a.device.type != "cuda" or input_b.device != input_a.device:
+        return KernelSupport(False, "Triton activation kernels require one CUDA device")
+    if input_a.dtype not in _TRITON_DTYPES or input_b.dtype != input_a.dtype:
+        return KernelSupport(
+            False,
+            "Triton activation kernels require matching float16, bfloat16, or float32 tensors",
+        )
+    if "voicehub.kernels.triton_activations" in sys.modules:
+        return KernelSupport(True)
+    capability = _cached_triton_capability(str(input_a.device))
+    return KernelSupport(capability.available, capability.reason)
+
+
 def _pair_cuda_extension_support(
     left: torch.Tensor,
     right: torch.Tensor,
@@ -152,6 +221,26 @@ def _bias_gelu_cuda_extension_support(
     return support
 
 
+def _vits_fused_gate_cuda_extension_support(
+    input_a: torch.Tensor,
+    input_b: torch.Tensor,
+    channels: int,
+) -> KernelSupport:
+    if not _vits_fused_gate_contract_supported(input_a, input_b, channels):
+        return KernelSupport(
+            False,
+            "inputs must have broadcastable [batch, 2 * channels, frames] shapes",
+        )
+    if input_a.device.type != "cuda" or input_b.device != input_a.device:
+        return KernelSupport(False, "the CUDA extension requires one CUDA device")
+    if input_a.dtype not in _TRITON_DTYPES or input_b.dtype != input_a.dtype:
+        return KernelSupport(
+            False,
+            "the CUDA extension requires matching float16, bfloat16, or float32 tensors",
+        )
+    return KernelSupport(True)
+
+
 def gated_silu_reference(
     gate: torch.Tensor,
     up: torch.Tensor,
@@ -165,6 +254,23 @@ def tanh_sigmoid_gate_reference(
     gate: torch.Tensor,
 ) -> torch.Tensor:
     """PyTorch reference for the VITS/WaveNet gated activation unit."""
+    return torch.tanh(activation) * torch.sigmoid(gate)
+
+
+def fused_add_tanh_sigmoid_reference(
+    input_a: torch.Tensor,
+    input_b: torch.Tensor,
+    channels: int,
+) -> torch.Tensor:
+    """Reference for the complete VITS/WaveNet gated activation.
+
+    Keeping the addition and channel split inside the logical operation
+    lets accelerator implementations avoid two materialized channel
+    views and the intermediate ``input_a + input_b`` tensor.
+    """
+    combined = input_a + input_b
+    activation = combined[:, :channels, :]
+    gate = combined[:, channels:, :]
     return torch.tanh(activation) * torch.sigmoid(gate)
 
 
@@ -192,6 +298,15 @@ def _tanh_sigmoid_gate_triton(
     return module.tanh_sigmoid_gate_triton(activation, gate)
 
 
+def _fused_add_tanh_sigmoid_triton(
+    input_a: torch.Tensor,
+    input_b: torch.Tensor,
+    channels: int,
+) -> torch.Tensor:
+    module = import_module("voicehub.kernels.triton_activations")
+    return module.fused_add_tanh_sigmoid_triton(input_a, input_b, channels)
+
+
 def _fused_bias_gelu_triton(
     inputs: torch.Tensor,
     bias: torch.Tensor,
@@ -212,6 +327,18 @@ def _tanh_sigmoid_gate_cuda(
     gate: torch.Tensor,
 ) -> torch.Tensor:
     return torch.ops.voicehub_kernels.tanh_sigmoid_gate(activation, gate)
+
+
+def _fused_add_tanh_sigmoid_cuda(
+    input_a: torch.Tensor,
+    input_b: torch.Tensor,
+    channels: int,
+) -> torch.Tensor:
+    return torch.ops.voicehub_kernels.fused_add_tanh_sigmoid(
+        input_a,
+        input_b,
+        channels,
+    )
 
 
 def _fused_bias_gelu_cuda(
@@ -258,6 +385,21 @@ def _register_builtin_kernels() -> None:
             support_check=support_check,
             replace=True,
         )
+    register_kernel(
+        VITS_FUSED_ADD_TANH_SIGMOID,
+        KernelBackend.TORCH,
+        fused_add_tanh_sigmoid_reference,
+        priority=0,
+        replace=True,
+    )
+    register_kernel(
+        VITS_FUSED_ADD_TANH_SIGMOID,
+        KernelBackend.TRITON,
+        _fused_add_tanh_sigmoid_triton,
+        priority=200,
+        support_check=_vits_fused_gate_triton_support,
+        replace=True,
+    )
 
 
 def _register_cuda_kernels() -> None:
@@ -271,6 +413,11 @@ def _register_cuda_kernels() -> None:
             VITS_TANH_SIGMOID_GATE,
             _tanh_sigmoid_gate_cuda,
             _pair_cuda_extension_support,
+        ),
+        (
+            VITS_FUSED_ADD_TANH_SIGMOID,
+            _fused_add_tanh_sigmoid_cuda,
+            _vits_fused_gate_cuda_extension_support,
         ),
         (
             DIFFUSION_FUSED_BIAS_GELU,
@@ -343,6 +490,32 @@ def _register_cuda_autograd_locked() -> None:
             gradient * tanh_activation * sigmoid_gate * (1.0 - sigmoid_gate),
         )
 
+    def fused_add_tanh_sigmoid_setup_context(ctx, inputs, output) -> None:
+        del output
+        input_a, input_b, channels = inputs
+        ctx.channels = channels
+        ctx.save_for_backward(input_a, input_b)
+
+    def fused_add_tanh_sigmoid_backward(ctx, gradient):
+        input_a, input_b = ctx.saved_tensors
+        channels = ctx.channels
+        combined = input_a + input_b
+        activation = combined[:, :channels, :]
+        gate = combined[:, channels:, :]
+        tanh_activation = torch.tanh(activation)
+        sigmoid_gate = torch.sigmoid(gate)
+        activation_gradient = (gradient * sigmoid_gate * (1.0 - tanh_activation.square()))
+        gate_gradient = (gradient * tanh_activation * sigmoid_gate * (1.0 - sigmoid_gate))
+        combined_gradient = torch.cat(
+            (activation_gradient, gate_gradient),
+            dim=1,
+        )
+        return (
+            combined_gradient.sum_to_size(input_a.shape),
+            combined_gradient.sum_to_size(input_b.shape),
+            None,
+        )
+
     def fused_bias_gelu_backward(ctx, gradient):
         inputs, bias = ctx.saved_tensors
         value = inputs + bias
@@ -379,6 +552,48 @@ def _register_cuda_autograd_locked() -> None:
         return torch.empty_like(
             activation,
             memory_format=torch.contiguous_format,
+        )
+
+    def fake_fused_add_tanh_sigmoid(input_a, input_b, channels):
+        torch._check(
+            input_a.device == input_b.device,
+            lambda: ("voicehub_kernels::fused_add_tanh_sigmoid expects tensors "
+                     "on the same device"),
+        )
+        torch._check(
+            input_a.dtype == input_b.dtype,
+            lambda: ("voicehub_kernels::fused_add_tanh_sigmoid expects tensors "
+                     "with the same dtype"),
+        )
+        torch._check(
+            input_a.ndim == 3 and input_b.ndim == 3,
+            lambda: ("voicehub_kernels::fused_add_tanh_sigmoid expects "
+                     "[batch, 2 * channels, frames]"),
+        )
+        torch._check(
+            channels > 0 and input_a.shape[1] == 2 * channels and input_b.shape[1] == 2 * channels,
+            lambda:
+            ("voicehub_kernels::fused_add_tanh_sigmoid input channel "
+             "size must equal 2 * channels"),
+        )
+        torch._check(
+            input_a.shape[0] == input_b.shape[0] or input_a.shape[0] == 1 or input_b.shape[0] == 1,
+            lambda: ("voicehub_kernels::fused_add_tanh_sigmoid batch dimensions "
+                     "must be broadcastable"),
+        )
+        torch._check(
+            input_a.shape[2] == input_b.shape[2] or input_a.shape[2] == 1 or input_b.shape[2] == 1,
+            lambda: ("voicehub_kernels::fused_add_tanh_sigmoid frame dimensions "
+                     "must be broadcastable"),
+        )
+        return torch.empty(
+            (
+                (input_b.shape[0] if input_a.shape[0] == 1 else input_a.shape[0]),
+                channels,
+                (input_b.shape[2] if input_a.shape[2] == 1 else input_a.shape[2]),
+            ),
+            device=input_a.device,
+            dtype=input_a.dtype,
         )
 
     def fake_fused_bias_gelu(inputs, bias):
@@ -430,6 +645,11 @@ def _register_cuda_autograd_locked() -> None:
         lib=registration_library,
     )
     torch.library.register_fake(
+        "voicehub_kernels::fused_add_tanh_sigmoid",
+        fake_fused_add_tanh_sigmoid,
+        lib=registration_library,
+    )
+    torch.library.register_fake(
         "voicehub_kernels::fused_bias_gelu",
         fake_fused_bias_gelu,
         lib=registration_library,
@@ -444,6 +664,12 @@ def _register_cuda_autograd_locked() -> None:
         "voicehub_kernels::tanh_sigmoid_gate",
         tanh_sigmoid_backward,
         setup_context=pair_setup_context,
+        lib=registration_library,
+    )
+    torch.library.register_autograd(
+        "voicehub_kernels::fused_add_tanh_sigmoid",
+        fused_add_tanh_sigmoid_backward,
+        setup_context=fused_add_tanh_sigmoid_setup_context,
         lib=registration_library,
     )
     torch.library.register_autograd(
@@ -512,6 +738,24 @@ def tanh_sigmoid_gate(
         VITS_TANH_SIGMOID_GATE,
         activation,
         gate,
+        backend=backend,
+    )
+
+
+def fused_add_tanh_sigmoid(
+    input_a: torch.Tensor,
+    input_b: torch.Tensor,
+    channels: int,
+    *,
+    backend: KernelBackend | str = KernelBackend.AUTO,
+) -> torch.Tensor:
+    """Fuse the complete add/split/tanh/sigmoid VITS WaveNet gate."""
+    _validate_vits_fused_gate(input_a, input_b, channels)
+    return dispatch_kernel(
+        VITS_FUSED_ADD_TANH_SIGMOID,
+        input_a,
+        input_b,
+        channels,
         backend=backend,
     )
 
