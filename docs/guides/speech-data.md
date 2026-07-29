@@ -85,6 +85,221 @@ For translation ASR, store source-language transcription and target-language
 text in separate named fields. Do not overload `text` with two different
 semantics.
 
+### Build a validated `ASRDataset`
+
+`ASRDataset` is the public corpus boundary for fine-tuning. It accepts Python
+mappings directly, or reads JSON, JSON Lines, CSV, and TSV manifests without
+importing a tensor framework:
+
+```python
+from voicehub import ASRDataset
+
+records = ASRDataset.from_manifest(
+    "data/train.jsonl",
+    model_type="asr_wav2vec2",
+    validate_files=True,
+)
+print(records.spec.architecture, records.variant_names)
+```
+
+JSON Lines is a useful default because each line is independently inspectable:
+
+```json
+{"audio": "clips/000001.wav", "text": "A verified transcript.", "speaker_id": "spk-01"}
+{"audio": "clips/000002.wav", "text": "Another transcript.", "speaker_id": "spk-02"}
+```
+
+CSV and TSV use the same column names:
+
+```csv
+audio,text,speaker_id
+clips/000001.wav,A verified transcript.,spk-01
+clips/000002.wav,Another transcript.,spk-02
+```
+
+Relative audio paths resolve against the manifest directory unless `root=` is
+provided. Common upstream names are normalized at the boundary:
+`audio_path`, `audio_filepath`, `wav_path`, `wav`, `waveform`, `speech`,
+`file`, or `path` become `audio`; `transcript`, `transcription`, `sentence`,
+or `target_text` become `text`; `sample_rate` becomes `sampling_rate`; and
+`lang` becomes `language`. Pass `aliases={"recording": "audio"}` for a
+corpus-specific column. A record containing both an alias and its canonical
+field is rejected instead of silently choosing one.
+
+`validate_files=True` checks path existence. Audio decoding, resampling,
+feature extraction, tokenization, decoder prompts, CTC blanks, and transducer
+targets remain the selected model's responsibility.
+
+A model accepts a manifest path directly and applies the same normalization:
+
+```python
+training_dataset = model.create_training_dataset(
+    "data/train.tsv",
+    validate_audio_files=True,
+)
+```
+
+Use `data_root=`, `data_aliases=`, and `validate_records=` on
+`create_training_dataset()` when the manifest needs non-default handling.
+
+### Create data without writing a manifest first
+
+For a small corpus, place a UTF-8 transcript beside every PCM WAV file:
+
+```text
+data/clips/000001.wav
+data/clips/000001.txt
+data/clips/000002.wav
+data/clips/000002.txt
+```
+
+Then pair them by stem:
+
+```python
+from voicehub import ASRDataset
+
+records = ASRDataset.from_audio_folder(
+    "data/clips",
+    model_type="asr_whisper",
+    metadata={"language": "en"},
+)
+records.to_jsonl("data/train.jsonl")
+```
+
+`from_audio_folder()` scans recursively by default, requires every transcript
+sidecar to be non-empty, and intentionally accepts only materialized PCM WAV
+files. Change `transcript_extension=` when sidecars use another suffix.
+
+Kaldi/ESPnet-style directories containing `wav.scp` and `text` can be loaded
+without executing shell commands:
+
+```python
+records = ASRDataset.from_kaldi(
+    "data/kaldi/train",
+    model_type="asr_espnet",
+    validate_files=True,
+)
+```
+
+Utterance IDs must match across both files. `wav.scp` shell pipelines are
+rejected; materialize them as audio files before constructing a portable
+VoiceHub dataset.
+
+### Inspect the model contract
+
+Every ASR training profile exposes its accepted record shapes before a model
+or checkpoint is loaded:
+
+```python
+from voicehub import (
+    ASRDataArchitecture,
+    get_asr_dataset_spec,
+    get_training_spec,
+    list_asr_dataset_specs,
+)
+
+contract = get_asr_dataset_spec("asr_qwen3")
+same_contract = get_training_spec("asr_qwen3").dataset_spec
+
+print(contract.architecture)
+print(contract.sample_rate)
+print([variant.name for variant in contract.raw_variants])
+print([variant.name for variant in contract.preprocessed_variants])
+
+generic_ctc = get_asr_dataset_spec(
+    architecture=ASRDataArchitecture.CTC,
+)
+all_asr_contracts = list_asr_dataset_specs()
+```
+
+After constructing a model,
+`model.validate_training_support().dataset_spec` returns the same
+model-specific contract. `ASRDataReadiness` distinguishes `integrated-raw`,
+`preprocessed`, `custom`, and `unavailable`; `training_support` reports the
+corresponding registered training boundary.
+
+Each `ASRRecordVariant` declares exact required fields, alternative `one_of`
+fields, excluded fields, and whether it is already model-shaped. Validation
+checks the portable record schema. The processor still validates tensor
+shape, dtype, vocabulary, duration, and sample rate.
+
+### Architecture-specific records
+
+The simplest raw record remains `{"audio": ..., "text": ...}`, but metadata
+and cached tensor forms are architecture-specific:
+
+| Family or provider | Integrated source record | Important model-owned preparation |
+| --- | --- | --- |
+| CTC (`asr_wav2vec2`, `asr_hubert`, `asr_wavlm`, `asr_medasr`, `asr_nemo`) | `audio`, `text` | Waveform or log-mel extraction, tokenizer labels, blank ID, input/label lengths |
+| Whisper and speech seq2seq (`asr_whisper`, compatibility keys, Moonshine) | `audio`, `text`; optional `language` and `task` for Whisper | Encoder features or waveform values plus teacher-forced decoder labels |
+| Tiron | `audio`, inline speaker/timestamp target in `text`; optional `language` | Whisper features plus grammar-validated speaker and 20 ms timestamp labels |
+| Qwen3-ASR | `audio`, `text`; optional `context`, `prompt`, `language` | Multimodal prompt tokens, log-mel features, feature mask, completion-only labels |
+| Granite Speech | `audio`, `text`; optional `prompt`; no `language` field | Language or translation guidance belongs in the prompt; the adapter builds prompt/completion tokens and acoustic features |
+| VibeVoice-ASR | `audio`, structured `segments`; or `audio`, serialized segment `text`; optional context | 24 kHz audio, continuous speech encoders, speaker/timestamp/content serialization, completion-only labels |
+| Parakeet TDT | `audio`, `text` | Log-mel inputs, blank-prefixed decoder input, native token-duration objective |
+| Nemotron RNN-T | `audio`, `text`; optional `language` | Acoustic inputs, language prompt IDs, label lengths, blank-prefixed predictor input, native transducer objective |
+| Cohere Transcribe | `audio`, `text`, `language`; optional `punctuation` | Language/punctuation prompt and teacher-forced decoder labels; batches are homogeneous for both controls |
+| SeamlessM4T-v2 | `audio`, `text`, plus `target_language` or `language` unless configured on the model | Target-language-conditioned encoder/decoder labels; batches are homogeneous by target language |
+| SpeechBrain CRDNN | `audio`, `text` | Waveforms, BOS/EOS attention targets, parallel CTC targets, staged joint objective |
+| SenseVoiceSmall (`asr_funasr`) | `audio`, `text`, `language`; optional `emotion`, `event`, `use_itn` | Fbank features and four rich-control query targets plus CTC transcript labels |
+| ESPnet Transformer | `audio`, `text`, or cached `features`, `text` | Joint CTC/attention labels, SpecAugment, and source-shaped hybrid objective |
+| WeNet U2++ | `audio`, `text` | Waveform/frontend lengths and shared CTC/forward/reverse attention targets |
+
+Prepared variants are also available for caching expensive preprocessing.
+Inspect `contract.preprocessed_variants` instead of assuming field names:
+Qwen, Granite, VibeVoice, TDT, RNN-T, SpeechBrain, SenseVoice, ESPnet, and
+WeNet do not share one model-ready tensor layout.
+Compatibility dispatchers can list a union of cached shapes; the selected
+checkpoint delegate determines which one is valid at runtime.
+
+SenseVoice's published JSONL names (`source`, `target`, `text_language`,
+`emo_target`, `event_target`, and `with_or_wo_itn`) are accepted directly.
+Published control spellings such as `<|en|>`, `<|NEUTRAL|>`, and
+`<|woitn|>` are normalized to the canonical fields and values.
+
+SeamlessM4T-v2 also accepts the original repository's nested source/target
+shape and normalizes it to the flat contract:
+
+```json
+{
+  "source": {
+    "audio_local_path": "clips/000001.wav",
+    "lang": "eng"
+  },
+  "target": {
+    "text": "The target-language transcript.",
+    "lang": "eng"
+  }
+}
+```
+
+### Split, export, and resume safely
+
+Create the split before windowing or augmentation, preferably using the
+strongest leakage boundary:
+
+```python
+train_records, validation_records = records.train_test_split(
+    validation_fraction=0.1,
+    seed=42,
+    group_by="speaker_id",
+)
+
+train_records.to_jsonl("data/frozen/train.jsonl")
+print(train_records.resume_fingerprint())
+```
+
+The split is deterministic. A grouped split keeps an entire speaker, session,
+or source recording on one side. `resume_fingerprint()` includes normalized
+record content and order; lazy transforms require an explicit stable
+`transform_fingerprint`.
+
+For Cohere, the Trainer automatically batches records with the same
+`language` and `punctuation` values. For SeamlessM4T-v2, it batches the same
+`target_language` together. The dataset's epoch-aware batch sampler is
+deterministic and checkpointable. Do not bypass it with a custom DataLoader
+unless that loader preserves the same grouping rule.
+
 ## VAD source records
 
 Represent speech annotations in seconds on the original recording timebase:
@@ -143,7 +358,7 @@ padded frames.
 
 | Family | Common fields | Non-negotiable semantics |
 | --- | --- | --- |
-| CTC | `input_values` or `input_features`, `attention_mask`, `labels` | Processor vocabulary, blank index, reduction, input/target lengths, and `-100` padding must match the checkpoint |
+| CTC | `input_values` or `input_features`, `attention_mask`, `labels` | Processor vocabulary, blank index, reduction, input/target lengths, and the checkpoint-specific label padding/ignore value must match |
 | Speech seq2seq | `input_features`, optional encoder mask, decoder `labels` | Decoder start/language/task tokens and label padding belong to the checkpoint processor |
 | RNN-T | acoustic inputs and lengths, prediction-network targets and lengths | Use the backend's transducer loss and blank/alignment conventions |
 | TDT | RNN-T-like inputs plus token/duration targets required by the model | Duration topology and loss weights remain backend-native |
@@ -215,10 +430,18 @@ Split by the strongest leakage boundary before chunking:
 Randomly splitting windows from one recording leaks noise, room acoustics,
 speaker identity, and neighboring content across evaluation boundaries.
 
-ASR evaluation normally uses word or character error rate with a documented
-text-normalization policy. VAD evaluation should include a boundary-aware
-metric or false-alarm/miss duration, not only frame accuracy on heavily
-imbalanced silence.
+ASR evaluation has two separate paths. When the evaluation dataset contains
+raw `text`/`transcript`/`transcription` references, the training adapter
+preprocesses them and the Trainer reports the model's native teacher-forced
+`eval_loss`. That proves the differentiable objective works; it is not WER.
+WER or CER requires decoded hypotheses, a declared generation/beam policy,
+and a documented reference-normalization policy. Supply a model-specific
+decoding metric path or `compute_metrics` that compares generated transcripts.
+The SpeechBrain recipe is a specialized exception that performs its published
+validation decoding and reports corpus WER for its scheduler.
+
+VAD evaluation should include a boundary-aware metric or false-alarm/miss
+duration, not only frame accuracy on heavily imbalanced silence.
 
 ## Validate before training
 

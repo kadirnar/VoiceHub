@@ -498,22 +498,41 @@ class Trainer:
         self._train_dataloader_generator = torch.Generator()
         self._train_dataloader_generator.manual_seed(
             self.args.data_seed if self.args.data_seed is not None else self.args.seed)
-        self._train_sampler = (
-            EpochRandomSampler(
-                self.train_dataset,
-                seed=(self.args.data_seed if self.args.data_seed is not None else self.args.seed),
-            ) if has_length else None)
-        dataloader = torch.utils.data.DataLoader(
+        seed = self.args.data_seed if self.args.data_seed is not None else self.args.seed
+        batch_sampler = self._dataset_batch_sampler(
             self.train_dataset,
             batch_size=self.args.train_batch_size,
-            shuffle=False,
-            sampler=self._train_sampler,
-            collate_fn=self._data_collator_for(self.train_dataset),
+            seed=seed,
+            shuffle=True,
             drop_last=self.args.dataloader_drop_last,
-            num_workers=self.args.dataloader_num_workers,
-            pin_memory=(self.args.dataloader_pin_memory and self.args.device.startswith("cuda")),
-            generator=self._train_dataloader_generator,
         )
+        if batch_sampler is not None:
+            self._train_sampler = batch_sampler
+            dataloader = torch.utils.data.DataLoader(
+                self.train_dataset,
+                batch_sampler=batch_sampler,
+                collate_fn=self._data_collator_for(self.train_dataset),
+                num_workers=self.args.dataloader_num_workers,
+                pin_memory=(self.args.dataloader_pin_memory and self.args.device.startswith("cuda")),
+                generator=self._train_dataloader_generator,
+            )
+        else:
+            self._train_sampler = (
+                EpochRandomSampler(
+                    self.train_dataset,
+                    seed=seed,
+                ) if has_length else None)
+            dataloader = torch.utils.data.DataLoader(
+                self.train_dataset,
+                batch_size=self.args.train_batch_size,
+                shuffle=False,
+                sampler=self._train_sampler,
+                collate_fn=self._data_collator_for(self.train_dataset),
+                drop_last=self.args.dataloader_drop_last,
+                num_workers=self.args.dataloader_num_workers,
+                pin_memory=(self.args.dataloader_pin_memory and self.args.device.startswith("cuda")),
+                generator=self._train_dataloader_generator,
+            )
         return self.training_strategy.prepare_dataloader(
             dataloader,
             training=True,
@@ -527,16 +546,34 @@ class Trainer:
         torch = self._import_torch()
         generator = torch.Generator()
         generator.manual_seed(self.args.data_seed if self.args.data_seed is not None else self.args.seed)
-        dataloader = torch.utils.data.DataLoader(
+        seed = self.args.data_seed if self.args.data_seed is not None else self.args.seed
+        batch_sampler = self._dataset_batch_sampler(
             dataset,
             batch_size=self.args.eval_batch_size,
+            seed=seed,
             shuffle=False,
-            collate_fn=self._data_collator_for(dataset),
             drop_last=self.args.dataloader_drop_last,
-            num_workers=self.args.dataloader_num_workers,
-            pin_memory=(self.args.dataloader_pin_memory and self.args.device.startswith("cuda")),
-            generator=generator,
         )
+        if batch_sampler is not None:
+            dataloader = torch.utils.data.DataLoader(
+                dataset,
+                batch_sampler=batch_sampler,
+                collate_fn=self._data_collator_for(dataset),
+                num_workers=self.args.dataloader_num_workers,
+                pin_memory=(self.args.dataloader_pin_memory and self.args.device.startswith("cuda")),
+                generator=generator,
+            )
+        else:
+            dataloader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=self.args.eval_batch_size,
+                shuffle=False,
+                collate_fn=self._data_collator_for(dataset),
+                drop_last=self.args.dataloader_drop_last,
+                num_workers=self.args.dataloader_num_workers,
+                pin_memory=(self.args.dataloader_pin_memory and self.args.device.startswith("cuda")),
+                generator=generator,
+            )
         return self.training_strategy.prepare_dataloader(
             dataloader,
             training=False,
@@ -563,6 +600,26 @@ class Trainer:
         if self.training_adapter is not None:
             return self.training_adapter.data_collator
         return default_data_collator
+
+    @staticmethod
+    def _dataset_batch_sampler(
+        dataset,
+        *,
+        batch_size: int,
+        seed: int,
+        shuffle: bool,
+        drop_last: bool,
+    ):
+        """Ask a dataset for model-safe batches when it declares a policy."""
+        factory = getattr(dataset, "create_batch_sampler", None)
+        if not callable(factory):
+            return None
+        return factory(
+            batch_size=batch_size,
+            seed=seed,
+            shuffle=shuffle,
+            drop_last=drop_last,
+        )
 
     def create_optimizer(self):
         """Create AdamW parameter groups unless an optimizer was supplied."""

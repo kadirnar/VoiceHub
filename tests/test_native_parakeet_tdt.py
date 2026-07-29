@@ -32,6 +32,7 @@ from voicehub.architectures.parakeet_tdt.tokenization import ParakeetTokenizer, 
 from voicehub.checkpointing.errors import CheckpointCompatibilityError
 from voicehub.models.asr_parakeet_tdt import ParakeetTDTASRConfig, ParakeetTDTForSpeechRecognition
 from voicehub.models.asr_parakeet_tdt.training_asr_parakeet_tdt import NativeParakeetTDTTrainingAdapter
+from voicehub.processing.waveform import save_pcm_wave
 from voicehub.training.auto import AutoTrainingAdapter
 from voicehub.training.specs import get_training_spec
 
@@ -539,6 +540,56 @@ class NativeParakeetTDTTests(unittest.TestCase):
             [[8, 1, 4, 5], [8, 1, 4, 2]],
         )
         self.assertEqual(prepared["input_features"].shape[0], 2)
+
+    def test_wrapper_trims_file_audio_before_training_resample(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime_root = root / "runtime"
+            runtime_root.mkdir()
+            runtime = _tiny_runtime(runtime_root)
+            wrapper = ParakeetTDTForSpeechRecognition(
+                ParakeetTDTASRConfig(name_or_path=runtime_root),
+                device="cpu",
+            )
+            wrapper.runtime = runtime
+            wrapper.artifacts = runtime.artifacts
+            wrapper.native_config = runtime.config
+            wrapper.parakeet_processor = runtime.processor
+            wrapper.model = runtime.model
+            path = save_pcm_wave(
+                root / "padded.wav",
+                torch.cat((torch.zeros(200), torch.ones(200))),
+                8_000,
+            )
+            common = {
+                "sampling_rate": 8_000,
+                "text": "hi",
+            }
+
+            file_batch = wrapper.prepare_training_inputs(
+                {
+                    **common,
+                    "audio": str(path),
+                    "audio_lengths": 200,
+                },
+                phase="speech_recognition",
+            )
+            tensor_batch = wrapper.prepare_training_inputs(
+                {
+                    **common,
+                    "audio": torch.zeros(200),
+                },
+                phase="speech_recognition",
+            )
+
+            torch.testing.assert_close(
+                file_batch["input_features"],
+                tensor_batch["input_features"],
+            )
+            torch.testing.assert_close(
+                file_batch["attention_mask"],
+                tensor_batch["attention_mask"],
+            )
 
     def test_export_validates_before_creating_destination_and_reloads(self):
         with tempfile.TemporaryDirectory() as temporary:

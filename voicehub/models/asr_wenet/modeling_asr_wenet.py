@@ -15,6 +15,32 @@ from voicehub.models.asr_native.configuration import WeNetASRConfig
 from voicehub.models.native_utils import resolve_cpu_cuda_device
 
 
+def _batch_values(
+    value: Any,
+    *,
+    batch_size: int,
+    name: str,
+) -> tuple[Any, ...]:
+    import torch
+
+    if value is None or isinstance(value, (str, bytes)):
+        return (value, ) * batch_size
+    if isinstance(value, torch.Tensor):
+        if value.ndim == 0:
+            return (value.item(), ) * batch_size
+        if value.ndim != 1:
+            raise ValueError(f"`{name}` must be scalar or one-dimensional.")
+        values = tuple(value.detach().cpu().tolist())
+    elif isinstance(value, Sequence):
+        values = tuple(value)
+    else:
+        return (value, ) * batch_size
+    if len(values) != batch_size:
+        raise ValueError(f"`{name}` contains {len(values)} values for batch size "
+                         f"{batch_size}.")
+    return values
+
+
 class WeNetASRForSpeechRecognition(PreTrainedASRModel):
     """Run the exact trainable U2++ graph without importing WeNet."""
 
@@ -375,7 +401,19 @@ class WeNetASRForSpeechRecognition(PreTrainedASRModel):
         from voicehub.processing.waveform import load_native_audio
 
         del phase
-        if "features" in inputs and "labels" in inputs:
+        waveform_ready = {
+            "input_signal",
+            "input_signal_length",
+            "labels",
+            "label_lengths",
+        }
+        feature_ready = {
+            "features",
+            "feature_lengths",
+            "labels",
+            "label_lengths",
+        }
+        if waveform_ready <= set(inputs) or feature_ready <= set(inputs):
             return dict(inputs)
         if self.model is None:
             self.load_for_training()
@@ -403,19 +441,45 @@ class WeNetASRForSpeechRecognition(PreTrainedASRModel):
         )
         if len(audio_values) != len(texts):
             raise ValueError("WeNet requires one transcript per waveform.")
-        rates = inputs.get("sampling_rate", inputs.get("sample_rate"))
-        if isinstance(rates, Sequence) and not isinstance(rates, (str, bytes)):
-            rate_values = tuple(rates)
-        else:
-            rate_values = (rates, ) * len(audio_values)
-        if len(rate_values) != len(audio_values):
-            raise ValueError("WeNet requires one sample rate per waveform.")
-        waveforms = tuple(
-            load_native_audio(
+        rate_values = _batch_values(
+            inputs.get("sampling_rate", inputs.get("sample_rate")),
+            batch_size=len(audio_values),
+            name="sampling_rate",
+        )
+        raw_lengths = _batch_values(
+            inputs.get("audio_lengths"),
+            batch_size=len(audio_values),
+            name="audio_lengths",
+        )
+        from voicehub.processing.waveform import NativeAudio
+
+        waveforms = []
+        for value, rate, raw_length in zip(
+                audio_values,
+                rate_values,
+                raw_lengths,
+        ):
+            materialized = load_native_audio(
                 value,
                 sampling_rate=rate,
+            )
+            waveform = materialized.waveform
+            if raw_length is not None:
+                if (isinstance(raw_length, bool) or not isinstance(raw_length, Integral) or raw_length <= 0):
+                    raise ValueError("`audio_lengths` must contain positive integers.")
+                if int(raw_length) > waveform.numel():
+                    raise ValueError("`audio_lengths` exceeds a waveform's sample count.")
+                waveform = waveform[:int(raw_length)]
+            resampled = load_native_audio(
+                NativeAudio(
+                    waveform=waveform,
+                    sampling_rate=materialized.sampling_rate,
+                    path=materialized.path,
+                ),
                 target_sampling_rate=self.native_config.sampling_rate,
-            ).waveform for value, rate in zip(audio_values, rate_values))
+            )
+            waveforms.append(resampled.waveform)
+        waveforms = tuple(waveforms)
         lengths = torch.tensor(
             [waveform.numel() for waveform in waveforms],
             dtype=torch.long,

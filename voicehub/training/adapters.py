@@ -1225,6 +1225,10 @@ class BaseTrainingAdapter:
         for name in names:
             if name in inputs:
                 return (inputs[name], )
+        if self.spec.task is SpeechTask.AUTOMATIC_SPEECH_RECOGNITION:
+            for name in ("text", "transcription", "transcript"):
+                if name in inputs:
+                    return (inputs[name], )
         return ()
 
     def prepare_evaluation_predictions(

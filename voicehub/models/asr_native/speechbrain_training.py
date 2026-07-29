@@ -10,7 +10,7 @@ from typing import Any
 
 from voicehub.training.adapters import SpeechSeq2SeqTrainingAdapter
 from voicehub.training.contracts import TrainingPhaseSpec
-from voicehub.training.datasets import SpeechDataset
+from voicehub.training.datasets import ASRDataset, SpeechDataset
 
 _RAW_FIELDS = frozenset({
     "audio",
@@ -22,6 +22,15 @@ _RAW_FIELDS = frozenset({
     "text",
     "transcript",
     "transcription",
+})
+_PREPARED_FIELDS = frozenset({
+    "waveforms",
+    "waveform_lengths",
+    "tokens_bos",
+    "tokens_eos",
+    "token_lengths",
+    "ctc_tokens",
+    "ctc_token_lengths",
 })
 
 
@@ -41,6 +50,9 @@ class SpeechBrainASRTrainingDataset(SpeechDataset):
             if not isinstance(record, Mapping):
                 raise TypeError(f"SpeechBrain ASR record {index} must be a mapping.")
             value = dict(record)
+            if _PREPARED_FIELDS <= set(value):
+                normalized.append(value)
+                continue
             if "audio" not in value and "audio_path" in value:
                 value["audio"] = value["audio_path"]
             if "text" not in value:
@@ -194,16 +206,7 @@ def prepare_speechbrain_asr_training_batch(
         raise TypeError("SpeechBrain ASR training inputs must be a mapping.")
     if not isinstance(phase, str) or not phase:
         raise ValueError("SpeechBrain ASR training `phase` must be non-empty.")
-    prepared_keys = {
-        "waveforms",
-        "waveform_lengths",
-        "tokens_bos",
-        "tokens_eos",
-        "token_lengths",
-        "ctc_tokens",
-        "ctc_token_lengths",
-    }
-    if prepared_keys <= set(inputs):
+    if _PREPARED_FIELDS <= set(inputs):
         return dict(inputs)
     if wrapper.native_config is None or wrapper.tokenizer is None:
         raise RuntimeError("SpeechBrain ASR must be loaded before preprocessing.")
@@ -239,14 +242,11 @@ def prepare_speechbrain_asr_training_batch(
         if raw_length is not None:
             if (isinstance(raw_length, bool) or not isinstance(raw_length, Integral) or raw_length <= 0):
                 raise ValueError("`audio_lengths` must contain positive integers.")
-            tensor = (source if isinstance(source, torch.Tensor) else torch.as_tensor(source))
-            if tensor.ndim != 1 or raw_length > tensor.shape[-1]:
-                raise ValueError("`audio_lengths` exceeds a waveform's sample count.")
-            source = tensor[:int(raw_length)]
         materialized = load_native_audio(
             source,
             sampling_rate=rate,
             target_sampling_rate=wrapper.sample_rate,
+            num_samples=(None if raw_length is None else int(raw_length)),
         )
         waveform = materialized.waveform
         if waveform.numel() > maximum_samples:
@@ -426,6 +426,8 @@ class NativeSpeechBrainASRTrainingAdapter(SpeechSeq2SeqTrainingAdapter):
         return self
 
     def create_dataset(self, records, **kwargs):
+        if isinstance(records, ASRDataset) and not kwargs:
+            return records
         return SpeechBrainASRTrainingDataset(records, **kwargs)
 
     def prepare_training_inputs(

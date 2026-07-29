@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from numbers import Real
+from numbers import Integral, Real
 from pathlib import Path
 from typing import Any
 
@@ -425,12 +425,40 @@ class VibeVoiceForSpeechRecognition(PreTrainedASRModel):
             batch_size=len(audio_values),
             name="sampling_rate",
         )
-        materialized = tuple(
-            load_native_audio(
+        raw_lengths = _batch_values(
+            inputs.get("audio_lengths"),
+            batch_size=len(audio_values),
+            name="audio_lengths",
+        )
+        from voicehub.processing.waveform import NativeAudio
+
+        materialized = []
+        for waveform, rate, raw_length in zip(
+                audio_values,
+                rates,
+                raw_lengths,
+        ):
+            source = load_native_audio(
                 waveform,
                 sampling_rate=rate,
-                target_sampling_rate=24_000,
-            ) for waveform, rate in zip(audio_values, rates))
+            )
+            source_waveform = source.waveform
+            if raw_length is not None:
+                if (isinstance(raw_length, bool) or not isinstance(raw_length, Integral) or raw_length <= 0):
+                    raise ValueError("`audio_lengths` must contain positive integers.")
+                if int(raw_length) > source_waveform.numel():
+                    raise ValueError("`audio_lengths` exceeds a waveform's sample count.")
+                source_waveform = source_waveform[:int(raw_length)]
+            materialized.append(
+                load_native_audio(
+                    NativeAudio(
+                        waveform=source_waveform,
+                        sampling_rate=source.sampling_rate,
+                        path=source.path,
+                    ),
+                    target_sampling_rate=24_000,
+                ))
+        materialized = tuple(materialized)
         raw_context = inputs.get(
             "context",
             inputs.get(

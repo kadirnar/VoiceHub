@@ -270,8 +270,6 @@ class SeamlessM4Tv2ForSpeechRecognition(PreTrainedASRModel):
         phase: str,
     ) -> dict[str, Any]:
         """Build stacked features and language-conditioned sequence labels."""
-        import torch
-
         from voicehub.processing.waveform import load_native_audio
 
         del phase
@@ -305,22 +303,15 @@ class SeamlessM4Tv2ForSpeechRecognition(PreTrainedASRModel):
         )
         if len(audio_values) != len(texts):
             raise ValueError("Training requires one transcript per waveform.")
-        raw_lengths = inputs.get("audio_lengths")
-        if raw_lengths is not None:
-            lengths = _batch_values(
-                raw_lengths,
-                batch_size=len(audio_values),
-                name="audio_lengths",
-            )
-            trimmed = []
-            for value, length in zip(audio_values, lengths):
-                if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
-                    raise ValueError("`audio_lengths` must contain positive integers.")
-                tensor = (value if isinstance(value, torch.Tensor) else torch.as_tensor(value))
-                if tensor.ndim != 1 or int(length) > tensor.numel():
-                    raise ValueError("`audio_lengths` exceeds a waveform.")
-                trimmed.append(tensor[:int(length)])
-            audio_values = tuple(trimmed)
+        lengths = _batch_values(
+            inputs.get("audio_lengths"),
+            batch_size=len(audio_values),
+            name="audio_lengths",
+        )
+        if any(length is not None and
+               (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0)
+               for length in lengths):
+            raise ValueError("`audio_lengths` must contain positive integers.")
         rates = _batch_values(
             inputs.get("sampling_rate", inputs.get("sample_rate")),
             batch_size=len(audio_values),
@@ -331,13 +322,27 @@ class SeamlessM4Tv2ForSpeechRecognition(PreTrainedASRModel):
                 value,
                 sampling_rate=rate,
                 target_sampling_rate=16_000,
-            ).waveform for value, rate in zip(audio_values, rates))
-        requested_language = inputs.get(
-            "target_language",
-            inputs.get("language", self.config.target_language),
+                num_samples=(None if length is None else int(length)),
+            ).waveform for value, rate, length in zip(
+                audio_values,
+                rates,
+                lengths,
+            ))
+        requested_languages = _batch_values(
+            inputs.get(
+                "target_language",
+                inputs.get("language", self.config.target_language),
+            ),
+            batch_size=len(audio_values),
+            name="target_language",
         )
-        if not isinstance(requested_language, str):
-            raise TypeError("One training batch requires a scalar `target_language`.")
+        if any(not isinstance(value, str) or not value.strip() for value in requested_languages):
+            raise TypeError("Every training row requires a non-empty `target_language`.")
+        requested_language = requested_languages[0].strip()
+        if any(value.strip() != requested_language for value in requested_languages[1:]):
+            raise ValueError(
+                "One SeamlessM4T-v2 training batch requires a homogeneous "
+                "`target_language`.")
         feature_batch = self.seamless_processor.process_audio(
             waveforms,
             sampling_rate=16_000,

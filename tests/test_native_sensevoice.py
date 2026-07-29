@@ -7,6 +7,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import torch
 from torch.nn import functional
@@ -62,6 +63,50 @@ def _tiny_config() -> SenseVoiceSmallConfig:
     )
 
 
+class _RecordingFrontend(torch.nn.Module):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+        self.waveforms = None
+        self.lengths = None
+        self.training_argument = None
+
+    def forward(self, waveforms, lengths, *, training):
+        self.calls += 1
+        self.waveforms = waveforms.detach().cpu()
+        self.lengths = lengths.detach().cpu()
+        self.training_argument = training
+        return waveforms.unsqueeze(-1), lengths
+
+
+class _TrainingTokenizer:
+
+    @staticmethod
+    def prepare_training_labels(
+        text,
+        *,
+        language,
+        emotion,
+        event,
+        use_itn,
+    ):
+        del language, emotion, event, use_itn
+        return (1, max(2, len(text)))
+
+
+def _training_wrapper():
+    wrapper = FunASRForSpeechRecognition(device="cpu")
+    wrapper.model = torch.nn.Linear(1, 1)
+    wrapper.frontend = _RecordingFrontend()
+    wrapper.tokenizer = _TrainingTokenizer()
+    wrapper.native_config = SimpleNamespace(
+        sampling_rate=16_000,
+        ignore_token_id=-1,
+    )
+    return wrapper
+
+
 class NativeSenseVoiceTests(unittest.TestCase):
 
     def test_training_contract_is_ctc_not_sequence_to_sequence(self):
@@ -73,6 +118,104 @@ class NativeSenseVoiceTests(unittest.TestCase):
             wrapper.get_training_adapter(),
             NativeSenseVoiceTrainingAdapter,
         )
+
+    def test_raw_training_materializes_and_resamples_pcm_path(self):
+        from voicehub.processing.waveform import save_pcm_wave
+
+        wrapper = _training_wrapper()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sample.wav"
+            save_pcm_wave(
+                path,
+                torch.linspace(-0.5, 0.5, 7),
+                8_000,
+            )
+            prepared = wrapper.prepare_training_inputs(
+                {
+                    "audio": str(path),
+                    "text": "hello",
+                    "language": "en",
+                },
+                phase="speech_recognition",
+            )
+
+        self.assertEqual(wrapper.frontend.calls, 1)
+        self.assertTrue(wrapper.frontend.training_argument)
+        self.assertEqual(wrapper.frontend.lengths.tolist(), [14])
+        self.assertEqual(tuple(wrapper.frontend.waveforms.shape), (1, 14))
+        self.assertEqual(tuple(prepared["features"].shape), (1, 14, 1))
+        self.assertEqual(prepared["feature_lengths"].tolist(), [14])
+
+    def test_raw_training_supports_mixed_sources_lengths_and_rates(self):
+        from voicehub.processing.waveform import save_pcm_wave
+
+        wrapper = _training_wrapper()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "path-source.wav"
+            save_pcm_wave(path, torch.linspace(-0.25, 0.25, 6), 8_000)
+            prepared = wrapper.prepare_training_inputs(
+                {
+                    "audio": [
+                        path,
+                        {
+                            "array": torch.linspace(-0.5, 0.5, 9),
+                            "sampling_rate": 8_000,
+                        },
+                        torch.arange(8, dtype=torch.float32),
+                    ],
+                    "audio_lengths": [6, 5, 4],
+                    "sampling_rates": [None, None, 16_000],
+                    "text": ["path", "mapping", "tensor"],
+                    "language": ["en", "en", "en"],
+                },
+                phase="speech_recognition",
+            )
+
+        self.assertEqual(wrapper.frontend.lengths.tolist(), [12, 10, 4])
+        self.assertEqual(tuple(wrapper.frontend.waveforms.shape), (3, 12))
+        self.assertTrue(wrapper.frontend.waveforms[1, 10:].eq(0).all())
+        self.assertTrue(wrapper.frontend.waveforms[2, 4:].eq(0).all())
+        self.assertEqual(prepared["feature_lengths"].tolist(), [12, 10, 4])
+        self.assertEqual(prepared["label_lengths"].tolist(), [2, 2, 2])
+
+    def test_raw_training_splits_collated_audio_mappings(self):
+        wrapper = _training_wrapper()
+        wrapper.prepare_training_inputs(
+            {
+                "audio": {
+                    "array": torch.stack((
+                        torch.linspace(-0.5, 0.5, 8),
+                        torch.linspace(0.5, -0.5, 8),
+                    )),
+                    "sampling_rate": torch.tensor([8_000, 16_000]),
+                },
+                "audio_lengths": torch.tensor([4, 6]),
+                "text": ["first", "second"],
+                "language": ["en", "en"],
+            },
+            phase="speech_recognition",
+        )
+
+        self.assertEqual(wrapper.frontend.lengths.tolist(), [8, 6])
+        self.assertEqual(tuple(wrapper.frontend.waveforms.shape), (2, 8))
+        self.assertTrue(wrapper.frontend.waveforms[1, 6:].eq(0).all())
+
+    def test_precomputed_training_features_bypass_audio_frontend(self):
+        wrapper = _training_wrapper()
+        features = torch.randn(2, 5, 4)
+        prepared = wrapper.prepare_training_inputs(
+            {
+                "features": features,
+                "feature_lengths": torch.tensor([5, 3]),
+                "text": ["first", "second"],
+                "language": ["en", "en"],
+            },
+            phase="speech_recognition",
+        )
+
+        self.assertEqual(wrapper.frontend.calls, 0)
+        torch.testing.assert_close(prepared["features"], features)
+        self.assertEqual(prepared["feature_lengths"].tolist(), [5, 3])
 
     def test_public_path_has_no_external_model_runtime_imports(self):
         root = Path(__file__).resolve().parents[1]

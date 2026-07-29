@@ -341,22 +341,6 @@ class CohereForSpeechRecognition(PreTrainedASRModel):
         )
         if len(audio_values) != len(texts):
             raise ValueError("Cohere ASR training requires one transcript per waveform.")
-        raw_lengths = inputs.get("audio_lengths")
-        if raw_lengths is not None:
-            lengths = _batch_values(
-                raw_lengths,
-                batch_size=len(audio_values),
-                name="audio_lengths",
-            )
-            trimmed = []
-            for waveform, length in zip(audio_values, lengths):
-                if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
-                    raise ValueError("`audio_lengths` must contain positive integers.")
-                tensor = (waveform if isinstance(waveform, torch.Tensor) else torch.as_tensor(waveform))
-                if tensor.ndim != 1 or int(length) > tensor.shape[0]:
-                    raise ValueError("`audio_lengths` exceeds a waveform sample count.")
-                trimmed.append(tensor[:int(length)])
-            audio_values = tuple(trimmed)
         rates = _batch_values(
             inputs.get(
                 "sampling_rate",
@@ -365,12 +349,28 @@ class CohereForSpeechRecognition(PreTrainedASRModel):
             batch_size=len(audio_values),
             name="sampling_rate",
         )
+        lengths = _batch_values(
+            inputs.get("audio_lengths"),
+            batch_size=len(audio_values),
+            name="audio_lengths",
+        )
+        for length in lengths:
+            if length is None:
+                continue
+            if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
+                raise ValueError("`audio_lengths` must contain positive integers.")
+        target_rate = self.cohere_processor.feature_extractor.sampling_rate
         waveforms = tuple(
             load_native_audio(
                 waveform,
                 sampling_rate=rate,
-                target_sampling_rate=16_000,
-            ).waveform for waveform, rate in zip(audio_values, rates))
+                target_sampling_rate=target_rate,
+                num_samples=length,
+            ).waveform for waveform, rate, length in zip(
+                audio_values,
+                rates,
+                lengths,
+            ))
         minimum = self.cohere_processor.feature_extractor.hop_length * 2
         waveforms = tuple(
             torch.nn.functional.pad(
@@ -402,7 +402,7 @@ class CohereForSpeechRecognition(PreTrainedASRModel):
             language=language_values[0],
             text=texts,
             punctuation=punctuation_values[0],
-            sampling_rate=16_000,
+            sampling_rate=target_rate,
             device=next(self.model.parameters()).device,
         )
         for name, value in inputs.items():

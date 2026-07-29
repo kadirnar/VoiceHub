@@ -413,6 +413,44 @@ class TrainingCollatorSchemaTests(unittest.TestCase):
             [[True, True, True], [True, False, False]],
         )
 
+    def test_asr_cached_targets_keep_native_padding_semantics(self):
+        import torch
+
+        from voicehub.training.collators import DataCollatorForAudioTraining
+        from voicehub.training.specs import get_training_spec
+
+        cases = (
+            ("asr_qwen3", "input_ids", 151_643),
+            ("asr_qwen3", "labels", -100),
+            ("asr_granite_speech", "input_ids", 100_256),
+            ("asr_granite_speech", "labels", -100),
+            ("asr_parakeet_tdt", "labels", 2),
+            ("asr_parakeet_tdt", "decoder_input_ids", 2),
+            ("asr_nemotron", "labels", 13_087),
+            ("asr_nemotron", "decoder_input_ids", 13_087),
+            ("asr_cohere", "decoder_input_ids", 2),
+            ("asr_cohere", "labels", -100),
+            ("asr_medasr", "labels", 0),
+            ("asr_nemo", "labels", -1),
+        )
+        for model_type, field_name, padding_value in cases:
+            with self.subTest(model_type=model_type, field=field_name):
+                collator = DataCollatorForAudioTraining(
+                    field_schemas=get_training_spec(model_type).field_schemas, )
+                batch = collator([
+                    {
+                        field_name: torch.tensor([7, 8])
+                    },
+                    {
+                        field_name: torch.tensor([9])
+                    },
+                ])
+
+                self.assertEqual(
+                    batch[field_name].tolist(),
+                    [[7, 8], [9, padding_value]],
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

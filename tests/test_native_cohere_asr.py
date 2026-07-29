@@ -31,6 +31,7 @@ from voicehub.architectures.parakeet_tdt.configuration import ParakeetEncoderCon
 from voicehub.checkpointing.errors import CheckpointCompatibilityError
 from voicehub.models.asr_cohere import CohereASRConfig, CohereForSpeechRecognition, NativeCohereASRTrainingAdapter
 from voicehub.policies.architecture_dependencies import inspect_native_runtime
+from voicehub.processing.waveform import save_pcm_wave
 from voicehub.tasks import SpeechTask
 from voicehub.tokenization.assets import TokenizerAssetError
 from voicehub.training.auto import AutoTrainingAdapter
@@ -614,8 +615,9 @@ class CohereAsrTokenizerAndProcessorTests(unittest.TestCase):
     def test_optional_transformers_frontend_parity(self):
         try:
             import numpy as np
-            from transformers.models.cohere_asr.feature_extraction_cohere_asr import (
-                CohereAsrFeatureExtractor as TransformersFeatureExtractor, )
+            from transformers.models.cohere_asr import feature_extraction_cohere_asr
+
+            TransformersFeatureExtractor = (feature_extraction_cohere_asr.CohereAsrFeatureExtractor)
         except (ImportError, ModuleNotFoundError) as error:
             self.skipTest(f"Optional Transformers frontend unavailable: {error}")
 
@@ -1154,6 +1156,37 @@ class CohereAsrPublicTrainingTests(unittest.TestCase):
             self.assertEqual(prepared["attention_mask"].ndim, 1)
             self.assertEqual(prepared["decoder_input_ids"].ndim, 1)
             self.assertEqual(prepared["labels"].ndim, 1)
+
+            path = save_pcm_wave(
+                root / "padded.wav",
+                torch.cat((torch.zeros(32), torch.ones(32))),
+                8_000,
+            )
+            file_prepared = wrapper.prepare_training_inputs(
+                {
+                    "audio": str(path),
+                    "audio_lengths": 32,
+                    "sampling_rate": 8_000,
+                    "language": "en",
+                    "punctuation": True,
+                    "text": "hi",
+                },
+                phase="speech_recognition",
+            )
+            tensor_prepared = wrapper.prepare_training_inputs(
+                {
+                    "audio": torch.zeros(32),
+                    "sampling_rate": 8_000,
+                    "language": "en",
+                    "punctuation": True,
+                    "text": "hi",
+                },
+                phase="speech_recognition",
+            )
+            torch.testing.assert_close(
+                file_prepared["input_features"],
+                tensor_prepared["input_features"],
+            )
 
             with self.assertRaisesRegex(ValueError, "shared language"):
                 wrapper.prepare_training_inputs(

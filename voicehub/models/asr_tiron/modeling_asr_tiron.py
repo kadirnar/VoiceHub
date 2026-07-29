@@ -489,8 +489,6 @@ class TironForSpeechRecognition(WhisperForSpeechRecognition):
     ) -> dict[str, Any]:
         import torch
 
-        from voicehub.processing.waveform import load_native_audio
-
         del phase
         if "input_features" in inputs and "labels" in inputs:
             return dict(inputs)
@@ -504,47 +502,135 @@ class TironForSpeechRecognition(WhisperForSpeechRecognition):
             "text",
             inputs.get("transcription", inputs.get("transcript")),
         )
-        if audio is None or not isinstance(text, str) or not text.strip():
+        if isinstance(text, str):
+            texts = (text, )
+            was_batched = False
+        elif isinstance(text, Sequence) and not isinstance(text, (str, bytes)):
+            texts = tuple(text)
+            was_batched = True
+        else:
             raise ValueError(
-                "Tiron training records require `audio` and a non-empty "
-                "inline speaker/timestamp target.")
-        language = self._resolved_language(inputs.get("language", self.config.default_language))
-        if language == "auto":
-            raise ValueError("Tiron training records require an explicit language.")
-        task = inputs.get("task", "transcribe")
-        if task != "transcribe":
-            raise ValueError("Tiron fine-tuning supports transcription only.")
+                "Tiron training records require a non-empty inline "
+                "speaker/timestamp target.")
+        if not texts or any(not isinstance(value, str) or not value.strip() for value in texts):
+            raise ValueError("Tiron training targets must contain non-empty strings.")
+        if audio is None:
+            raise ValueError("Tiron training records require `audio`.")
 
-        materialized = load_native_audio(
+        audio_values = self._training_audio_batch(
             audio,
-            sampling_rate=inputs.get(
+            batch_size=len(texts),
+            was_batched=was_batched,
+            model_name="Tiron",
+            target_name="targets",
+        )
+        if len(audio_values) != len(texts):
+            raise ValueError(
+                "Tiron training requires one target per waveform "
+                f"({len(texts)} targets, {len(audio_values)} waveforms).")
+        rates = self._training_batch_values(
+            inputs.get(
                 "sampling_rate",
                 inputs.get("sample_rate"),
             ),
-            target_sampling_rate=16_000,
+            batch_size=len(texts),
+            name="sampling_rate",
         )
-        if materialized.duration > self.maximum_window_seconds:
-            raise ValueError("One Tiron training example cannot exceed 30 seconds.")
-        payload = self.tokenizer.encode(
-            text,
-            allowed_special=self._allowed_training_special_tokens(),
-            disallowed_special="all",
-        ).input_ids
-        self._validate_training_payload(payload)
-        labels = (
-            self.tokenizer.to_language_token(language),
-            self.tokenizer.transcribe,
-            *payload,
-            self.tokenizer.eot,
+        lengths = self._training_batch_values(
+            inputs.get("audio_lengths"),
+            batch_size=len(texts),
+            name="audio_lengths",
         )
-        if len(labels) > self.native_config.max_target_positions:
-            raise ValueError(
-                "Tiron target exceeds the decoder context after tokenization "
-                f"({len(labels)} > "
-                f"{self.native_config.max_target_positions}).")
+        languages = self._training_batch_values(
+            inputs.get("language"),
+            batch_size=len(texts),
+            name="language",
+        )
+        tasks = self._training_batch_values(
+            inputs.get("task"),
+            batch_size=len(texts),
+            name="task",
+        )
+        maximum_samples = min(
+            self.native_config.expected_input_frames * 160,
+            round(self.maximum_window_seconds * 16_000),
+        )
+        allowed_special = self._allowed_training_special_tokens()
+        features: list[Any] = []
+        label_rows: list[tuple[int, ...]] = []
+        for row_index, (
+                audio_value,
+                text_value,
+                rate,
+                length,
+                language,
+                task,
+        ) in enumerate(zip(
+                audio_values,
+                texts,
+                rates,
+                lengths,
+                languages,
+                tasks,
+        )):
+            resolved_language = self._resolved_language(
+                self.config.default_language if language is None else language, )
+            if resolved_language == "auto":
+                raise ValueError(f"Tiron training row {row_index} requires an explicit "
+                                 "language.")
+            resolved_task = "transcribe" if task is None else task
+            if resolved_task != "transcribe":
+                raise ValueError(f"Tiron training row {row_index} supports transcription "
+                                 "only.")
+
+            materialized = self._materialize_training_audio(
+                audio_value,
+                sampling_rate=rate,
+                audio_length=length,
+                row_index=row_index,
+                model_name="Tiron",
+            )
+            if materialized.waveform.numel() > maximum_samples:
+                maximum_seconds = maximum_samples / 16_000
+                raise ValueError(
+                    f"Tiron training row {row_index} exceeds the model's "
+                    f"{maximum_seconds:g}-second audio context.")
+            payload = self.tokenizer.encode(
+                text_value,
+                allowed_special=allowed_special,
+                disallowed_special="all",
+            ).input_ids
+            try:
+                self._validate_training_payload(payload)
+            except ValueError as error:
+                raise ValueError(f"Tiron training row {row_index}: {error}") from error
+            label_ids = (
+                self.tokenizer.to_language_token(resolved_language),
+                self.tokenizer.transcribe,
+                *payload,
+                self.tokenizer.eot,
+            )
+            if len(label_ids) > self.native_config.max_target_positions:
+                raise ValueError(
+                    f"Tiron training row {row_index} target exceeds the "
+                    "decoder context after tokenization "
+                    f"({len(label_ids)} > "
+                    f"{self.native_config.max_target_positions}).")
+            features.append(self._chunk_features(materialized.waveform).squeeze(0), )
+            label_rows.append(label_ids)
+
+        input_features = torch.stack(features)
+        labels = self._pad_training_labels(
+            label_rows,
+            padding_value=-100,
+            device=input_features.device,
+        )
+        if not was_batched:
+            input_features = input_features[0]
+            labels = labels[0]
         return {
-            "input_features": self._chunk_features(materialized.waveform).squeeze(0),
-            "labels": torch.tensor(labels, dtype=torch.long),
+            "input_features": input_features,
+            "labels": labels,
         }
 
     def _validate_training_runtime(self) -> None:

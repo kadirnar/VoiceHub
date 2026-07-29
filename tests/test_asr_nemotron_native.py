@@ -25,6 +25,7 @@ from voicehub.architectures.nemotron_asr.metadata import (
 from voicehub.architectures.nemotron_asr.tokenization import NemotronASRTokenizer
 from voicehub.models.asr_nemotron import NemotronASRConfig, NemotronForSpeechRecognition
 from voicehub.models.asr_nemotron.training_asr_nemotron import NativeNemotronASRTrainingAdapter
+from voicehub.processing.waveform import save_pcm_wave
 from voicehub.training.auto import AutoTrainingAdapter
 from voicehub.training.specs import get_training_spec
 
@@ -448,6 +449,54 @@ class NemotronTokenizerAndProviderTests(unittest.TestCase):
             provider._transcribe([], language=3)
         with self.assertRaisesRegex(ValueError, "non-empty string"):
             provider._transcribe([], language=" \t")
+
+    def test_wrapper_trims_file_audio_before_training_resample(self):
+
+        class CapturingProcessor:
+
+            sampling_rate = 16_000
+
+            def __call__(self, waveforms, **kwargs):
+                self.waveforms = tuple(waveforms)
+                self.kwargs = kwargs
+                return {
+                    "input_features": torch.zeros(1, 2, 8),
+                    "attention_mask": torch.ones(1, 2, dtype=torch.long),
+                    "prompt_ids": torch.zeros(1, dtype=torch.long),
+                    "labels": torch.ones(1, 1, dtype=torch.long),
+                    "label_lengths": torch.ones(1, dtype=torch.long),
+                    "decoder_input_ids": torch.ones(1, 2, dtype=torch.long),
+                }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = save_pcm_wave(
+                root / "padded.wav",
+                torch.cat((torch.zeros(200), torch.ones(200))),
+                8_000,
+            )
+            processor = CapturingProcessor()
+            wrapper = NemotronForSpeechRecognition(device="cpu")
+            wrapper.model = object()
+            wrapper.nemotron_processor = processor
+
+            wrapper.prepare_training_inputs(
+                {
+                    "audio": str(path),
+                    "audio_lengths": 200,
+                    "sampling_rate": 8_000,
+                    "language": "en-US",
+                    "text": "hi",
+                },
+                phase="speech_recognition",
+            )
+
+        self.assertEqual(processor.waveforms[0].numel(), 400)
+        torch.testing.assert_close(
+            processor.waveforms[0],
+            torch.zeros(400),
+        )
+        self.assertEqual(processor.kwargs["sampling_rate"], 16_000)
 
     def test_configuration_fails_closed_on_adjacent_transducer_graphs(self):
         values = NemotronASRArchitectureConfig().to_dict()

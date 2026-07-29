@@ -37,6 +37,7 @@ python -m pip install "voicehub[training]"
 | Training loop | `TrainingArguments`, `Trainer`, callbacks, trainer outputs |
 | Training execution | `TrainingStrategy`, `TorchTrainingStrategy` |
 | TTS datasets | `TTSDataset`, `TTSDatasetSpec`, `TTSDataArchitecture`, `TTSDataReadiness` |
+| ASR datasets | `ASRDataset`, `ASRDatasetSpec`, `ASRDataArchitecture`, `ASRDataReadiness` |
 | TTS objectives | Multi-codebook CE, diffusion/flow pair builders, VITS loss primitives |
 | Collation | `default_data_collator`, `DefaultDataCollator`, `DataCollatorForTTSTraining`, `DataCollatorForAudioTraining` |
 | Extensions | Inference-strategy, training-spec, adapter, and training-strategy registries |
@@ -1315,6 +1316,120 @@ token, or frame time dimensions. It does not infer CTC blanks, transducer
 alignments, decoder prompts, or frame labels. See the
 [ASR and VAD data guide](../guides/speech-data.md#collate-variable-length-audio-fields)
 for a schema-based example.
+
+### `ASRDataset` and ASR data contracts
+
+```python
+ASRDataset(
+    records,
+    *,
+    model_type: str | None = None,
+    architecture: ASRDataArchitecture | str | None = None,
+    root=None,
+    aliases=None,
+    validate=True,
+    validate_files=False,
+    transform=None,
+    transform_fingerprint=None,
+)
+
+ASRDataset.from_manifest(
+    path,
+    *,
+    model_type=None,
+    architecture=None,
+    root=None,
+    aliases=None,
+    validate=True,
+    validate_files=False,
+    delimiter=None,
+    transform=None,
+    transform_fingerprint=None,
+) -> ASRDataset
+
+ASRDataset.from_audio_folder(
+    root,
+    *,
+    model_type=None,
+    architecture=None,
+    transcript_extension=".txt",
+    recursive=True,
+    metadata=None,
+    validate_files=True,
+    transform=None,
+    transform_fingerprint=None,
+) -> ASRDataset
+
+ASRDataset.from_kaldi(
+    root,
+    *,
+    model_type=None,
+    architecture=None,
+    wav_scp="wav.scp",
+    text_file="text",
+    metadata=None,
+    validate_files=False,
+    transform=None,
+    transform_fingerprint=None,
+) -> ASRDataset
+
+get_asr_dataset_spec(
+    model_type: str | None = None,
+    *,
+    architecture: ASRDataArchitecture | str | None = None,
+) -> ASRDatasetSpec
+
+list_asr_dataset_specs() -> tuple[ASRDatasetSpec, ...]
+```
+
+`ASRDataset` reads JSON, JSON Lines, CSV, and TSV, normalizes common audio,
+transcript, language, and sample-rate aliases, resolves relative audio paths,
+and validates model-specific source or cached-tensor variants. It can also
+pair recursively discovered PCM WAV files with same-stem transcript sidecars,
+or import a simple Kaldi/ESPnet `wav.scp` plus `text` directory. Kaldi shell
+pipelines are rejected.
+
+The dataset exposes:
+
+| Member | Contract |
+| --- | --- |
+| `spec` | Resolved `ASRDatasetSpec` |
+| `variant_names` | Matching source/preprocessed variant for each row |
+| `train_test_split(validation_fraction=0.1, seed=42, group_by=None)` | Deterministic optional speaker/session-disjoint split |
+| `to_jsonl(path, relative_to=None)` | Portable normalized manifest export |
+| `resume_fingerprint()` | Stable content/order identity; transformed datasets require `transform_fingerprint` |
+| `create_batch_sampler(...)` | Deterministic homogeneous grouping for models that require it |
+
+`ASRDataArchitecture` values are `native-dispatch`, `ctc`,
+`speech-sequence-to-sequence`, `prompted-multimodal`, `rnnt`, `tdt`, and
+`hybrid-ctc-attention`. `ASRDataReadiness` uses the same
+`integrated-raw`, `preprocessed`, `custom`, and `unavailable` meanings as the
+TTS data layer.
+
+An `ASRDatasetSpec` exposes raw and preprocessed `ASRRecordVariant` values,
+sample rate, training support, readiness, and any
+`homogeneous_batch_fields`. Cohere contracts group by `language` and
+`punctuation`; SeamlessM4T-v2 groups by target language. The Trainer requests
+the dataset's epoch-aware `EpochGroupedBatchSampler` automatically, including
+for evaluation.
+
+`ModelTrainingSpec.dataset_spec` returns a model-specific `ASRDatasetSpec` for
+ASR profiles. Before weights load, use either
+`get_training_spec(model_type).dataset_spec` or
+`get_asr_dataset_spec(model_type)`. After model construction,
+`model.validate_training_support().dataset_spec` provides the same contract.
+Passing a manifest path to `PreTrainedASRModel.create_training_dataset()`
+coerces it through `ASRDataset`; `data_root`, `data_aliases`,
+`validate_records`, and `validate_audio_files` customize that boundary.
+
+Transcript-bearing evaluation records are treated as references for native
+teacher-forced evaluation, so the Trainer can report `eval_loss`. That value
+does not imply generation WER or CER. Those metrics require model-appropriate
+decoding and explicit hypothesis/reference normalization; specialized
+adapters may add them.
+
+See the [ASR and VAD data guide](../guides/speech-data.md) for portable
+manifest examples and the architecture-specific record matrix.
 
 ### `TTSDataset` and TTS data contracts
 

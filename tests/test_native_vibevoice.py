@@ -44,7 +44,7 @@ from voicehub.models.asr_vibevoice import VibeVoiceForSpeechRecognition
 from voicehub.models.asr_vibevoice.training_asr_vibevoice import NativeVibeVoiceASRTrainingAdapter
 from voicehub.models.vibevoice import VibeVoiceForTextToSpeech
 from voicehub.tokenization.assets import encode_gpt2_token
-from voicehub.training import AutoTrainingAdapter
+from voicehub.training import AutoTrainingAdapter, get_training_spec
 
 
 def _text_config(*, layers: int = 1) -> Qwen2Config:
@@ -81,6 +81,32 @@ def _asr_config() -> VibeVoiceASRConfig:
         text_config=_text_config(),
         acoustic_tokenizer_chunk_size=3_200,
     )
+
+
+class VibeVoiceASRTrainingAdapterTests(unittest.TestCase):
+
+    def test_structured_segments_are_raw_evaluation_targets(self):
+        adapter = NativeVibeVoiceASRTrainingAdapter(
+            object(),
+            get_training_spec("asr_vibevoice"),
+        )
+        segments = [[{
+            "start": 0.0,
+            "end": 0.5,
+            "speaker": 0,
+            "text": "hello",
+        }]]
+
+        self.assertEqual(
+            adapter.evaluation_label_values(
+                {
+                    "audio": ["clip.wav"],
+                    "segments": segments
+                },
+                get_training_spec("asr_vibevoice").get_phase(),
+            ),
+            (segments, ),
+        )
 
 
 def _codec_config(*, latent_size: int) -> VibeVoiceLegacyTokenizerConfig:
@@ -336,6 +362,35 @@ class NativeVibeVoiceTests(unittest.TestCase):
             self.assertTrue(
                 torch.all(
                     prepared["labels"][prepared["input_ids"].eq(runtime.config.audio_token_id)].eq(-100)))
+            batched = wrapper.prepare_training_inputs(
+                {
+                    "audio":
+                    torch.zeros(2, 3_200),
+                    "audio_lengths":
+                    torch.tensor([3_200, 1_600]),
+                    "sampling_rate":
+                    torch.tensor([24_000, 24_000]),
+                    "segments": [
+                        [{
+                            "start": 0.0,
+                            "end": 0.1,
+                            "speaker": 0,
+                            "text": "first",
+                        }],
+                        [{
+                            "start": 0.0,
+                            "end": 0.05,
+                            "speaker": 1,
+                            "text": "second",
+                        }],
+                    ],
+                },
+                phase="main",
+            )
+            self.assertEqual(
+                batched["padding_mask"].sum(dim=1).tolist(),
+                [3_200, 1_600],
+            )
 
             output = runtime.model(
                 **prepared,

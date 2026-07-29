@@ -19,6 +19,7 @@ from voicehub.architectures.qwen3_asr.tokenization import (
     qwen2_pretokenize,
 )
 from voicehub.models.asr_qwen3 import Qwen3ASRConfig, Qwen3ASRForSpeechRecognition
+from voicehub.processing.waveform import save_pcm_wave
 from voicehub.tokenization.assets import encode_gpt2_token
 
 
@@ -210,6 +211,55 @@ class NativeQwen3ASRTests(unittest.TestCase):
             output.loss.backward()
             self.assertIsNotNone(runtime.model.thinker.audio_tower.conv2d1.weight.grad)
             self.assertIsNotNone(runtime.model.thinker.model.layers[0].self_attn.q_proj.weight.grad)
+
+    def test_wrapper_trims_file_audio_before_training_resample(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = _runtime(root / "runtime")
+            wrapper = Qwen3ASRForSpeechRecognition(
+                Qwen3ASRConfig(name_or_path=root / "runtime"),
+                device="cpu",
+            )
+            wrapper.runtime = runtime
+            wrapper.artifacts = runtime.artifacts
+            wrapper.native_config = runtime.config
+            wrapper.qwen3_processor = runtime.processor
+            wrapper.model = runtime.model
+            path = save_pcm_wave(
+                root / "padded.wav",
+                torch.cat((torch.zeros(400), torch.ones(400))),
+                8_000,
+            )
+            common = {
+                "sampling_rate": 8_000,
+                "text": "hello",
+                "language": "English",
+            }
+
+            file_batch = wrapper.prepare_training_inputs(
+                {
+                    **common,
+                    "audio": str(path),
+                    "audio_lengths": 400,
+                },
+                phase="speech_recognition",
+            )
+            tensor_batch = wrapper.prepare_training_inputs(
+                {
+                    **common,
+                    "audio": torch.zeros(400),
+                },
+                phase="speech_recognition",
+            )
+
+            torch.testing.assert_close(
+                file_batch["input_features"],
+                tensor_batch["input_features"],
+            )
+            torch.testing.assert_close(
+                file_batch["feature_attention_mask"],
+                tensor_batch["feature_attention_mask"],
+            )
 
     def test_native_lora_export_reloads_as_dense_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:

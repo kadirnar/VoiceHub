@@ -43,6 +43,7 @@ from voicehub.models.asr_granite_speech import (
     GraniteSpeechForSpeechRecognition,
     NativeGraniteSpeechTrainingAdapter,
 )
+from voicehub.processing.waveform import save_pcm_wave
 from voicehub.tasks import SpeechTask
 from voicehub.tokenization.assets import encode_gpt2_token
 from voicehub.training import ModelTrainingSpec, TrainingFamily, TrainingSupport
@@ -389,6 +390,54 @@ class GraniteSpeechNativeRuntimeTests(unittest.TestCase):
             self.assertIsNotNone(runtime.model.encoder.input_linear.weight.grad, )
             self.assertIsNotNone(runtime.model.projector.linear.weight.grad, )
             self.assertIsNotNone(runtime.model.language_model.model.layers[0].self_attn.q_proj.weight.grad, )
+
+    def test_wrapper_trims_file_audio_before_training_resample(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = _tiny_runtime(root / "runtime")
+            wrapper = GraniteSpeechForSpeechRecognition(
+                GraniteSpeechASRConfig(name_or_path=root / "runtime"),
+                device="cpu",
+            )
+            wrapper.runtime = runtime
+            wrapper.artifacts = runtime.artifacts
+            wrapper.native_config = runtime.config
+            wrapper.granite_processor = runtime.processor
+            wrapper.model = runtime.model
+            path = save_pcm_wave(
+                root / "padded.wav",
+                torch.cat((torch.zeros(800), torch.ones(800))),
+                8_000,
+            )
+            common = {
+                "sampling_rate": 8_000,
+                "text": "hello",
+            }
+
+            file_batch = wrapper.prepare_training_inputs(
+                {
+                    **common,
+                    "audio": str(path),
+                    "audio_lengths": 800,
+                },
+                phase="speech_recognition",
+            )
+            tensor_batch = wrapper.prepare_training_inputs(
+                {
+                    **common,
+                    "audio": torch.zeros(800),
+                },
+                phase="speech_recognition",
+            )
+
+            torch.testing.assert_close(
+                file_batch["input_features"],
+                tensor_batch["input_features"],
+            )
+            torch.testing.assert_close(
+                file_batch["input_features_mask"],
+                tensor_batch["input_features_mask"],
+            )
 
     def test_processor_expands_audio_tokens_and_pads_batches(self):
         with tempfile.TemporaryDirectory() as temporary:

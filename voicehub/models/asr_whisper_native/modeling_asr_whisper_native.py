@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Mapping, Sequence
+from numbers import Integral
 from pathlib import Path
 from typing import Any
 
@@ -425,8 +426,6 @@ class WhisperForSpeechRecognition(PreTrainedASRModel):
     ) -> dict[str, Any]:
         import torch
 
-        from voicehub.processing.waveform import load_native_audio
-
         del phase
         if "input_features" in inputs and "labels" in inputs:
             return dict(inputs)
@@ -439,49 +438,263 @@ class WhisperForSpeechRecognition(PreTrainedASRModel):
             "text",
             inputs.get("transcription", inputs.get("transcript")),
         )
-        if audio is None or not isinstance(text, str) or not text.strip():
-            raise ValueError(
-                "Whisper training records require `audio` and non-empty "
-                "`text`/`transcription`.")
-        materialized = load_native_audio(
+        if isinstance(text, str):
+            texts = (text, )
+            was_batched = False
+        elif isinstance(text, Sequence) and not isinstance(text, (str, bytes)):
+            texts = tuple(text)
+            was_batched = True
+        else:
+            raise ValueError("Whisper training records require non-empty "
+                             "`text`/`transcription`.")
+        if not texts or any(not isinstance(value, str) or not value.strip() for value in texts):
+            raise ValueError("Whisper training transcriptions must contain non-empty "
+                             "strings.")
+        if audio is None:
+            raise ValueError("Whisper training records require `audio`.")
+
+        audio_values = self._training_audio_batch(
             audio,
-            sampling_rate=inputs.get(
+            batch_size=len(texts),
+            was_batched=was_batched,
+            model_name="Whisper",
+            target_name="transcripts",
+        )
+        if len(audio_values) != len(texts):
+            raise ValueError(
+                "Whisper training requires one transcript per waveform "
+                f"({len(texts)} transcripts, {len(audio_values)} waveforms).")
+        rates = self._training_batch_values(
+            inputs.get(
                 "sampling_rate",
                 inputs.get("sample_rate"),
             ),
+            batch_size=len(texts),
+            name="sampling_rate",
+        )
+        lengths = self._training_batch_values(
+            inputs.get("audio_lengths"),
+            batch_size=len(texts),
+            name="audio_lengths",
+        )
+        inference_values = self.inference_config.to_dict()
+        languages = self._training_batch_values(
+            inputs.get("language"),
+            batch_size=len(texts),
+            name="language",
+        )
+        tasks = self._training_batch_values(
+            inputs.get("task"),
+            batch_size=len(texts),
+            name="task",
+        )
+        default_language = inference_values.get("language")
+        default_task = inference_values.get("task", "transcribe")
+        maximum_samples = self.native_config.expected_input_frames * 160
+        features: list[Any] = []
+        label_rows: list[tuple[int, ...]] = []
+        for row_index, (
+                audio_value,
+                text_value,
+                rate,
+                length,
+                language,
+                task,
+        ) in enumerate(zip(
+                audio_values,
+                texts,
+                rates,
+                lengths,
+                languages,
+                tasks,
+        )):
+            materialized = self._materialize_training_audio(
+                audio_value,
+                sampling_rate=rate,
+                audio_length=length,
+                row_index=row_index,
+                model_name="Whisper",
+            )
+            if materialized.waveform.numel() > maximum_samples:
+                maximum_seconds = maximum_samples / 16_000
+                raise ValueError(
+                    f"Whisper training row {row_index} exceeds the model's "
+                    f"{maximum_seconds:g}-second audio context.")
+            features.append(self._chunk_features(materialized.waveform).squeeze(0), )
+
+            resolved_language = default_language if language is None else language
+            if (resolved_language is None and self.generation_adapter.token_set.is_multilingual):
+                resolved_language = "en"
+            resolved_task = default_task if task is None else task
+            prefix = self.tokenizer.prompt_tokens(
+                language=resolved_language,
+                task=resolved_task,
+                include_no_timestamps=True,
+            )
+            if not prefix or prefix[0] != self.tokenizer.sot:
+                raise RuntimeError("Whisper tokenizer returned an invalid training prefix.")
+            content = self.tokenizer.encode(text_value).input_ids
+            # WhisperModel shifts labels and inserts ``decoder_start_token_id``
+            # itself. Keeping SOT in labels would train the decoder to emit a
+            # duplicate SOT as its first prediction.
+            label_ids = (*prefix[1:], *content, self.tokenizer.eot)
+            if len(label_ids) > self.native_config.max_target_positions:
+                raise ValueError(
+                    f"Whisper training row {row_index} transcript exceeds the "
+                    "decoder context after tokenization "
+                    f"({len(label_ids)} > "
+                    f"{self.native_config.max_target_positions}).")
+            label_rows.append(label_ids)
+
+        input_features = torch.stack(features)
+        labels = self._pad_training_labels(
+            label_rows,
+            padding_value=-100,
+            device=input_features.device,
+        )
+        if not was_batched:
+            input_features = input_features[0]
+            labels = labels[0]
+        return {
+            "input_features": input_features,
+            "labels": labels,
+        }
+
+    @staticmethod
+    def _training_audio_batch(
+        audio: Any,
+        *,
+        batch_size: int,
+        was_batched: bool,
+        model_name: str,
+        target_name: str,
+    ) -> tuple[Any, ...]:
+        """Resolve collated paths or waveform tensors into row sources."""
+        import torch
+
+        if not was_batched:
+            return (audio, )
+        if isinstance(audio, torch.Tensor):
+            if audio.ndim == 1:
+                if batch_size == 1:
+                    return (audio, )
+                raise ValueError(
+                    f"Batched {model_name} {target_name} require rank-two waveform "
+                    "audio or one audio source per row.")
+            if audio.ndim == 2:
+                return tuple(audio[index] for index in range(audio.shape[0]))
+            raise ValueError(f"{model_name} training audio tensors must be rank one or "
+                             "rank two.")
+        if (isinstance(audio, Sequence) and not isinstance(audio, (str, bytes, bytearray, Path))):
+            values = tuple(audio)
+            if len(values) == batch_size:
+                return values
+            if batch_size == 1:
+                try:
+                    waveform = torch.as_tensor(audio)
+                except (TypeError, ValueError, RuntimeError):
+                    pass
+                else:
+                    if waveform.ndim == 1:
+                        return (audio, )
+            return values
+        if batch_size == 1:
+            return (audio, )
+        raise ValueError(f"Batched {model_name} {target_name} require one audio source "
+                         "per row.")
+
+    @staticmethod
+    def _training_batch_values(
+        value: Any,
+        *,
+        batch_size: int,
+        name: str,
+    ) -> tuple[Any, ...]:
+        """Broadcast one scalar or validate one explicit value per row."""
+        import torch
+
+        if isinstance(value, torch.Tensor):
+            if value.ndim == 0:
+                values = (value.item(), ) * batch_size
+            elif value.ndim == 1:
+                values = tuple(value.tolist())
+            else:
+                raise ValueError(f"`{name}` must be scalar or one-dimensional.")
+        elif value is None or isinstance(value, (str, bytes)):
+            values = (value, ) * batch_size
+        elif isinstance(value, Sequence):
+            values = tuple(value)
+        else:
+            values = (value, ) * batch_size
+        if len(values) != batch_size:
+            raise ValueError(f"`{name}` contains {len(values)} values for a batch of "
+                             f"{batch_size}.")
+        return tuple(
+            item.item() if isinstance(item, torch.Tensor) and item.ndim == 0 else item for item in values)
+
+    @staticmethod
+    def _materialize_training_audio(
+        audio: Any,
+        *,
+        sampling_rate: Any,
+        audio_length: Any,
+        row_index: int,
+        model_name: str,
+    ) -> Any:
+        """Trim collator padding before native 16 kHz resampling."""
+        from voicehub.processing.waveform import load_native_audio
+
+        materialized = load_native_audio(
+            audio,
+            sampling_rate=sampling_rate,
+        )
+        if audio_length is not None:
+            if (isinstance(audio_length, bool) or not isinstance(audio_length, Integral) or
+                    audio_length <= 0):
+                raise ValueError(
+                    f"{model_name} training row {row_index} `audio_lengths` "
+                    "must be a positive integer.")
+            length = int(audio_length)
+            if length > materialized.waveform.numel():
+                raise ValueError(
+                    f"{model_name} training row {row_index} `audio_lengths` "
+                    "exceeds the waveform buffer.")
+            materialized = type(materialized)(
+                waveform=materialized.waveform[:length],
+                sampling_rate=materialized.sampling_rate,
+                path=materialized.path,
+            )
+        return load_native_audio(
+            materialized,
             target_sampling_rate=16_000,
         )
-        maximum_samples = self.native_config.expected_input_frames * 160
-        if materialized.waveform.numel() > maximum_samples:
-            raise ValueError(
-                "One Whisper training example cannot exceed the model's "
-                "30-second audio context.")
-        features = self._chunk_features(materialized.waveform).squeeze(0)
-        language = inputs.get("language")
-        if language is None:
-            language = self.inference_config.to_dict().get("language")
-        if language is None and self.generation_adapter.token_set.is_multilingual:
-            language = "en"
-        task = inputs.get(
-            "task",
-            self.inference_config.to_dict().get("task", "transcribe"),
+
+    @staticmethod
+    def _pad_training_labels(
+        rows: Sequence[Sequence[int]],
+        *,
+        padding_value: int,
+        device: Any = None,
+    ) -> Any:
+        import torch
+
+        maximum = max(len(row) for row in rows)
+        labels = torch.full(
+            (len(rows), maximum),
+            padding_value,
+            dtype=torch.long,
+            device=device,
         )
-        prefix = self.tokenizer.prompt_tokens(
-            language=language,
-            task=task,
-            include_no_timestamps=True,
-        )
-        content = self.tokenizer.encode(text).input_ids
-        label_ids = (*prefix, *content, self.tokenizer.eot)
-        if len(label_ids) > self.native_config.max_target_positions:
-            raise ValueError(
-                "Whisper transcript exceeds the decoder context after "
-                f"tokenization ({len(label_ids)} > "
-                f"{self.native_config.max_target_positions}).")
-        return {
-            "input_features": features,
-            "labels": torch.tensor(label_ids, dtype=torch.long),
-        }
+        for row_index, row in enumerate(rows):
+            labels[
+                row_index,
+                :len(row),
+            ] = torch.tensor(
+                row,
+                dtype=torch.long,
+                device=device,
+            )
+        return labels
 
     def _save_pretrained(self, save_directory: Path) -> None:
         from voicehub.checkpointing import save_safetensors

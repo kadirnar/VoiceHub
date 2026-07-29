@@ -17,6 +17,7 @@ from voicehub.checkpointing import save_safetensors
 from voicehub.models.asr_tiron import TironASRConfig, TironForSpeechRecognition
 from voicehub.models.asr_tiron.metadata import SPEAKER_TOKEN_IDS, TIRON_CHECKPOINT_REVISION, TIRON_HARNESS_REVISION
 from voicehub.models.asr_whisper_native import NativeWhisperTrainingAdapter
+from voicehub.processing.waveform import save_pcm_wave
 from voicehub.tokenization import encode_gpt2_token
 from voicehub.training.auto import AutoTrainingAdapter
 
@@ -267,6 +268,108 @@ class TironNativeRuntimeTests(unittest.TestCase):
                         "text": ("<|speaker2|><|0.00|>"
                                  "hello"
                                  "<|0.04|>"),
+                    },
+                    phase="speech_recognition",
+                )
+
+    def test_training_prepares_collated_rows_and_validates_each_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _tiny_tiron_artifact(root)
+            audio_path = save_pcm_wave(
+                root / "sample.wav",
+                torch.zeros(400),
+                8_000,
+            )
+            wrapper = TironForSpeechRecognition(
+                TironASRConfig(name_or_path=root),
+                device="cpu",
+            )
+            wrapper.load_for_training()
+            first_target = "<|speaker1|><|0.00|>hello<|0.04|>"
+
+            prepared = wrapper.prepare_training_inputs(
+                {
+                    "audio": [
+                        audio_path,
+                        torch.cat((torch.zeros(800), torch.ones(100))),
+                    ],
+                    "audio_lengths": [400, 800],
+                    "sampling_rate": [8_000, 16_000],
+                    "language": ["en", "zh"],
+                    "task": ["transcribe", "transcribe"],
+                    "text": [first_target, "<|nospeech|>"],
+                },
+                phase="speech_recognition",
+            )
+
+            self.assertEqual(tuple(prepared["input_features"].shape), (2, 4, 8))
+            self.assertEqual(tuple(prepared["labels"].shape), (2, 7))
+            self.assertEqual(
+                prepared["labels"][0].tolist(),
+                [
+                    50_259,
+                    50_360,
+                    51_866,
+                    50_365,
+                    259,
+                    50_367,
+                    50_257,
+                ],
+            )
+            self.assertEqual(
+                prepared["labels"][1].tolist(),
+                [
+                    50_260,
+                    50_360,
+                    50_363,
+                    50_257,
+                    -100,
+                    -100,
+                    -100,
+                ],
+            )
+            output = wrapper.model(
+                prepared["input_features"],
+                labels=prepared["labels"],
+            )
+            self.assertTrue(torch.isfinite(output.loss))
+
+            with self.assertRaisesRegex(ValueError, r"row 1.*speaker1"):
+                wrapper.prepare_training_inputs(
+                    {
+                        "audio": torch.zeros(2, 800),
+                        "audio_lengths": [800, 800],
+                        "sampling_rate": 16_000,
+                        "language": ["en", "zh"],
+                        "text": [
+                            first_target,
+                            "<|speaker2|><|0.00|>hello<|0.04|>",
+                        ],
+                    },
+                    phase="speech_recognition",
+                )
+            with self.assertRaisesRegex(ValueError, r"row 1.*audio context"):
+                wrapper.prepare_training_inputs(
+                    {
+                        "audio": torch.zeros(2, 1_281),
+                        "audio_lengths": [800, 1_281],
+                        "sampling_rate": 16_000,
+                        "language": ["en", "zh"],
+                        "text": [first_target, first_target],
+                    },
+                    phase="speech_recognition",
+                )
+            with self.assertRaisesRegex(ValueError, r"row 1.*decoder context"):
+                wrapper.prepare_training_inputs(
+                    {
+                        "audio": torch.zeros(2, 800),
+                        "sampling_rate": 16_000,
+                        "language": ["en", "zh"],
+                        "text": [
+                            first_target,
+                            ("<|speaker1|><|0.00|>" + "hello" * 30 + "<|0.04|>"),
+                        ],
                     },
                     phase="speech_recognition",
                 )

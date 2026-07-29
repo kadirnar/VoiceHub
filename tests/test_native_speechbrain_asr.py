@@ -41,7 +41,7 @@ from voicehub.models.asr_native.speechbrain_training import NativeSpeechBrainASR
 from voicehub.registry import get_model_spec
 from voicehub.tokenization import SentencePieceUnigramTokenizer
 from voicehub.trainer import Trainer
-from voicehub.training import get_training_spec
+from voicehub.training import ASRDataset, get_training_spec
 from voicehub.training.adapters import BaseTrainingAdapter
 from voicehub.training.specs import TrainingFamily, TrainingSupport
 from voicehub.training_args import TrainingArguments
@@ -397,6 +397,38 @@ class NativeSpeechBrainCheckpointTests(unittest.TestCase):
 
 
 class NativeSpeechBrainProviderTests(unittest.TestCase):
+
+    def test_prebuilt_asr_dataset_preserves_lazy_transform_fingerprint(self):
+        transform_calls = []
+
+        def transform(record):
+            transform_calls.append(record["text"])
+            return record
+
+        dataset = ASRDataset(
+            [{
+                "audio": "clip.wav",
+                "text": "Lazy transcript.",
+            }],
+            model_type="asr_speechbrain",
+            transform=transform,
+            transform_fingerprint="speechbrain-normalization-v1",
+        )
+        adapter = NativeSpeechBrainASRTrainingAdapter(
+            object(),
+            get_training_spec("asr_speechbrain"),
+        )
+
+        prepared = adapter.create_dataset(dataset)
+
+        self.assertIs(prepared, dataset)
+        self.assertEqual(transform_calls, [])
+        self.assertEqual(
+            prepared.resume_fingerprint()["transform_fingerprint"],
+            "speechbrain-normalization-v1",
+        )
+        self.assertEqual(prepared[0]["text"], "Lazy transcript.")
+        self.assertEqual(transform_calls, ["Lazy transcript."])
 
     def test_registry_training_profile_and_adapter_are_native(self):
         provider = get_model_spec("asr_speechbrain")

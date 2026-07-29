@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from voicehub.training.adapters import SpeechSeq2SeqTrainingAdapter
-from voicehub.training.datasets import SpeechDataset
+from voicehub.training.datasets import ASRDataset, SpeechDataset
 
 _RAW_FIELDS = frozenset({
     "audio",
@@ -19,6 +19,18 @@ _RAW_FIELDS = frozenset({
     "text",
     "transcript",
     "transcription",
+})
+_PREPARED_WAVEFORM_FIELDS = frozenset({
+    "waveforms",
+    "waveform_lengths",
+    "labels",
+    "label_lengths",
+})
+_PREPARED_FEATURE_FIELDS = frozenset({
+    "features",
+    "feature_lengths",
+    "labels",
+    "label_lengths",
 })
 
 
@@ -38,6 +50,9 @@ class ESPnetASRTrainingDataset(SpeechDataset):
             if not isinstance(record, Mapping):
                 raise TypeError(f"ESPnet ASR record {index} must be a mapping.")
             value = dict(record)
+            if (_PREPARED_WAVEFORM_FIELDS <= set(value) or _PREPARED_FEATURE_FIELDS <= set(value)):
+                normalized.append(value)
+                continue
             if "audio" not in value and "audio_path" in value:
                 value["audio"] = value["audio_path"]
             if "text" not in value:
@@ -45,8 +60,10 @@ class ESPnetASRTrainingDataset(SpeechDataset):
                     if alias in value:
                         value["text"] = value[alias]
                         break
-            if "audio" not in value:
-                raise ValueError(f"ESPnet ASR record {index} requires `audio` or `audio_path`.")
+            if "audio" not in value and "features" not in value:
+                raise ValueError(
+                    f"ESPnet ASR record {index} requires `audio`, `audio_path`, "
+                    "or precomputed `features`.")
             text = value.get("text")
             if not isinstance(text, str) or not text.strip():
                 raise ValueError(f"ESPnet ASR record {index} requires a non-empty transcript.")
@@ -157,8 +174,7 @@ def prepare_espnet_training_batch(
         raise ValueError("ESPnet training `phase` must be non-empty.")
     if wrapper.native_config is None or wrapper.tokenizer is None:
         raise RuntimeError("ESPnet must be loaded before preprocessing.")
-    if {"labels", "label_lengths"} <= set(inputs) and ({"waveforms", "waveform_lengths"} <= set(inputs) or
-                                                       {"features", "feature_lengths"} <= set(inputs)):
+    if (_PREPARED_WAVEFORM_FIELDS <= set(inputs) or _PREPARED_FEATURE_FIELDS <= set(inputs)):
         return dict(inputs)
 
     texts = _transcripts(inputs)
@@ -224,14 +240,11 @@ def prepare_espnet_training_batch(
             if length is not None:
                 if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
                     raise ValueError("`audio_lengths` must contain positive integers.")
-                tensor = (source if isinstance(source, torch.Tensor) else torch.as_tensor(source))
-                if tensor.ndim != 1 or length > tensor.shape[-1]:
-                    raise ValueError("`audio_lengths` exceeds a waveform's sample count.")
-                source = tensor[:int(length)]
             materialized = load_native_audio(
                 source,
                 sampling_rate=sampling_rate,
                 target_sampling_rate=wrapper.sample_rate,
+                num_samples=(None if length is None else int(length)),
             )
             waveform = materialized.waveform
             if waveform.numel() > maximum_samples:
@@ -281,6 +294,8 @@ class NativeESPnetASRTrainingAdapter(SpeechSeq2SeqTrainingAdapter):
         return self
 
     def create_dataset(self, records, **kwargs):
+        if isinstance(records, ASRDataset) and not kwargs:
+            return records
         return ESPnetASRTrainingDataset(
             records,
             transform=kwargs.get("transform"),

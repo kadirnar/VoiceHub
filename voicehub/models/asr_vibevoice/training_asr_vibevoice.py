@@ -85,6 +85,19 @@ class NativeVibeVoiceASRTrainingAdapter(SpeechSeq2SeqTrainingAdapter):
         }
         return {name: value for name, value in prepared.items() if name in accepted}
 
+    def evaluation_label_values(
+        self,
+        inputs: Mapping[str, Any],
+        phase: Any,
+    ) -> tuple[Any, ...]:
+        """Expose official structured segments as raw evaluation targets."""
+        references = super().evaluation_label_values(inputs, phase)
+        if references:
+            return references
+        if "segments" in inputs:
+            return (inputs["segments"], )
+        return ()
+
     def recipe_resume_configuration(self) -> Mapping[str, Any]:
         configuration = dict(super().recipe_resume_configuration())
         configuration.update({

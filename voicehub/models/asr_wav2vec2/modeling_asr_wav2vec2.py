@@ -514,25 +514,15 @@ class Wav2Vec2ForSpeechRecognition(PreTrainedASRModel):
             raise ValueError(f"{self.runtime_name} training requires one transcript per "
                              "waveform.")
 
-        raw_lengths = inputs.get("audio_lengths")
-        if raw_lengths is not None:
-            lengths = _batch_scalar_values(
-                raw_lengths,
-                batch_size=len(audio_values),
-                name="audio_lengths",
-            )
-            trimmed: list[Any] = []
-            for value, length in zip(audio_values, lengths):
-                if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
-                    raise ValueError("`audio_lengths` must contain positive integers.")
-                length = int(length)
-                if not isinstance(value, torch.Tensor):
-                    value = torch.as_tensor(value)
-                if value.ndim != 1 or length > value.shape[-1]:
-                    raise ValueError("`audio_lengths` exceeds a waveform's sample count.")
-                trimmed.append(value[:length])
-            audio_values = tuple(trimmed)
-
+        lengths = _batch_scalar_values(
+            inputs.get("audio_lengths"),
+            batch_size=len(audio_values),
+            name="audio_lengths",
+        )
+        if any(length is not None and
+               (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0)
+               for length in lengths):
+            raise ValueError("`audio_lengths` must contain positive integers.")
         rates = _batch_scalar_values(
             inputs.get("sampling_rate", inputs.get("sample_rate")),
             batch_size=len(audio_values),
@@ -543,7 +533,12 @@ class Wav2Vec2ForSpeechRecognition(PreTrainedASRModel):
                 value,
                 sampling_rate=rate,
                 target_sampling_rate=self.native_config.sampling_rate,
-            ).waveform for value, rate in zip(audio_values, rates))
+                num_samples=(None if length is None else int(length)),
+            ).waveform for value, rate, length in zip(
+                audio_values,
+                rates,
+                lengths,
+            ))
         minimum = self.native_config.minimum_input_samples
         padded_waveforms = tuple((
             torch.nn.functional.pad(

@@ -351,21 +351,24 @@ class ModelTrainingSpec:
 
     @property
     def dataset_spec(self):
-        """Return a built-in TTS profile's architecture-level data contract.
+        """Return this training profile's architecture-level data contract.
 
         Dataset contracts are imported lazily to keep the framework-free
-        training registry free of import cycles. ASR and VAD use
-        :class:`SpeechDataset` and their task-specific processor contracts.
-        Custom family strings can select a generic contract explicitly with
-        ``get_tts_dataset_spec(architecture=...)``.
+        training registry free of import cycles. TTS and ASR expose
+        task-specific contracts; VAD continues to use
+        :class:`SpeechDataset`.
         """
-        if self.task is not SpeechTask.TEXT_TO_SPEECH:
-            raise AttributeError(
-                f"{self.model_type!r} is a {self.task.value} profile and has "
-                "no TTS dataset spec.")
-        from voicehub.training.datasets import get_tts_dataset_spec
+        if self.task is SpeechTask.TEXT_TO_SPEECH:
+            from voicehub.training.datasets import get_tts_dataset_spec
 
-        return get_tts_dataset_spec(self.model_type)
+            return get_tts_dataset_spec(self.model_type)
+        if self.task is SpeechTask.AUTOMATIC_SPEECH_RECOGNITION:
+            from voicehub.training.datasets import get_asr_dataset_spec
+
+            return get_asr_dataset_spec(self.model_type)
+        raise AttributeError(
+            f"{self.model_type!r} is a {self.task.value} profile and has "
+            "no architecture dataset spec.")
 
 
 _COMMON_LM_PATHS = (
@@ -2199,6 +2202,11 @@ _NEMO_CTC_FIELD_SCHEMAS = {
         "padding_value": 0.0,
         "length_field": "processed_signal_length",
     },
+    "labels": {
+        "sequence_dim": -1,
+        "padding_value": -1,
+        "length_field": "label_lengths",
+    },
 }
 
 _WENET_U2PP_FIELD_SCHEMAS = {
@@ -2255,11 +2263,28 @@ _CHANNEL_FIRST_ASR_FIELD_SCHEMAS = {
 
 _QWEN3_ASR_FIELD_SCHEMAS = {
     **_WAVEFORM_ASR_FIELD_SCHEMAS,
+    "input_ids": {
+        "sequence_dim": -1,
+        "padding_value": 151_643,
+        "mask_field": "attention_mask",
+    },
+    "attention_mask": {
+        "sequence_dim": -1,
+        "padding_value": 0,
+    },
     "input_features": {
         "sequence_dim": -1,
         "padding_value": 0.0,
         "length_field": "feature_lengths",
         "mask_field": "feature_attention_mask",
+    },
+    "feature_attention_mask": {
+        "sequence_dim": -1,
+        "padding_value": 0,
+    },
+    "labels": {
+        "sequence_dim": -1,
+        "padding_value": -100,
     },
 }
 
@@ -2270,6 +2295,57 @@ _TIME_MAJOR_ASR_FIELD_SCHEMAS = {
         "padding_value": 0.0,
         "length_field": "feature_lengths",
         "mask_field": "attention_mask",
+    },
+}
+
+_PARAKEET_TDT_FIELD_SCHEMAS = {
+    **_TIME_MAJOR_ASR_FIELD_SCHEMAS,
+    "labels": {
+        "sequence_dim": -1,
+        "padding_value": 2,
+    },
+    "decoder_input_ids": {
+        "sequence_dim": -1,
+        "padding_value": 2,
+    },
+}
+
+_NEMOTRON_RNNT_FIELD_SCHEMAS = {
+    **_TIME_MAJOR_ASR_FIELD_SCHEMAS,
+    "labels": {
+        "sequence_dim": -1,
+        "padding_value": 13_087,
+        "length_field": "label_lengths",
+    },
+    "decoder_input_ids": {
+        "sequence_dim": -1,
+        "padding_value": 13_087,
+    },
+}
+
+_COHERE_ASR_FIELD_SCHEMAS = {
+    **_TIME_MAJOR_ASR_FIELD_SCHEMAS,
+    "decoder_input_ids": {
+        "sequence_dim": -1,
+        "padding_value": 2,
+        "mask_field": "decoder_attention_mask",
+    },
+    "decoder_attention_mask": {
+        "sequence_dim": -1,
+        "padding_value": 0,
+    },
+    "labels": {
+        "sequence_dim": -1,
+        "padding_value": -100,
+    },
+}
+
+_MEDASR_FIELD_SCHEMAS = {
+    **_TIME_MAJOR_ASR_FIELD_SCHEMAS,
+    # LASR masks tokenizer pad ID 0 and also uses it as the CTC blank.
+    "labels": {
+        "sequence_dim": -1,
+        "padding_value": 0,
     },
 }
 
@@ -2302,6 +2378,15 @@ _VIBEVOICE_ASR_FIELD_SCHEMAS = {
 
 _GRANITE_SPEECH_ASR_FIELD_SCHEMAS = {
     **_WAVEFORM_ASR_FIELD_SCHEMAS,
+    "input_ids": {
+        "sequence_dim": -1,
+        "padding_value": 100_256,
+        "mask_field": "attention_mask",
+    },
+    "attention_mask": {
+        "sequence_dim": -1,
+        "padding_value": 0,
+    },
     "input_features": {
         "sequence_dim": -2,
         "padding_value": 0.0,
@@ -2313,6 +2398,10 @@ _GRANITE_SPEECH_ASR_FIELD_SCHEMAS = {
     "input_features_mask": {
         "sequence_dim": -1,
         "padding_value": False,
+    },
+    "labels": {
+        "sequence_dim": -1,
+        "padding_value": -100,
     },
 }
 
@@ -2532,7 +2621,7 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
                 ),
             ), ),
         default_phase="speech_recognition",
-        field_schemas=_TIME_MAJOR_ASR_FIELD_SCHEMAS,
+        field_schemas=_PARAKEET_TDT_FIELD_SCHEMAS,
     ),
     _profile(
         "asr_nemotron",
@@ -2580,7 +2669,7 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
                 ),
             ), ),
         default_phase="speech_recognition",
-        field_schemas=_TIME_MAJOR_ASR_FIELD_SCHEMAS,
+        field_schemas=_NEMOTRON_RNNT_FIELD_SCHEMAS,
     ),
     _profile(
         "asr_cohere",
@@ -2625,7 +2714,7 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
                 ),
             ), ),
         default_phase="speech_recognition",
-        field_schemas=_TIME_MAJOR_ASR_FIELD_SCHEMAS,
+        field_schemas=_COHERE_ASR_FIELD_SCHEMAS,
     ),
     _profile(
         "asr_medasr",
@@ -2663,7 +2752,7 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
                 ),
             ), ),
         default_phase="speech_recognition",
-        field_schemas=_TIME_MAJOR_ASR_FIELD_SCHEMAS,
+        field_schemas=_MEDASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
         "asr_wav2vec2",
@@ -2915,12 +3004,9 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
                 label_names=("labels", ),
                 prediction_keys=("log_probabilities", ),
                 loss_keys=("loss", "attention_loss", "ctc_loss"),
-                required_inputs=(
-                    "input_signal",
-                    "input_signal_length",
-                    "labels",
-                    "label_lengths",
-                ),
+                # The native wrapper accepts either waveform inputs or cached
+                # frontend features and validates that modality-specific pair.
+                required_inputs=("labels", "label_lengths"),
             ), ),
         default_phase="speech_recognition",
         field_schemas=_WENET_U2PP_FIELD_SCHEMAS,

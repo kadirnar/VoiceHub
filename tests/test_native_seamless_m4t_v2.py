@@ -404,10 +404,35 @@ class NativeSeamlessM4Tv2Tests(unittest.TestCase):
             adapter = AutoTrainingAdapter.from_model(wrapper)
             output = wrapper.model(**prepared)
             output.loss.backward()
+            batched = wrapper.prepare_training_inputs(
+                {
+                    "audio": torch.stack((audio, audio)),
+                    "audio_lengths": torch.tensor([48, 40]),
+                    "sampling_rate": torch.tensor([16_000, 16_000]),
+                    "target_language": ["eng", "eng"],
+                    "text": ["hello", "hello"],
+                },
+                phase="full",
+            )
+            with self.assertRaisesRegex(ValueError, "homogeneous"):
+                wrapper.prepare_training_inputs(
+                    {
+                        "audio": torch.stack((audio, audio)),
+                        "sampling_rate": torch.tensor([16_000, 16_000]),
+                        "target_language": ["eng", "deu"],
+                        "text": ["hello", "hello"],
+                    },
+                    phase="full",
+                )
 
         self.assertEqual(
             prepared["labels"][0, :2].tolist(),
             [3, SEAMLESS_M4T_V2_LANGUAGE_TO_ID["eng"]],
+        )
+        self.assertEqual(batched["labels"].shape[0], 2)
+        self.assertEqual(
+            batched["labels"][:, 1].tolist(),
+            [SEAMLESS_M4T_V2_LANGUAGE_TO_ID["eng"]] * 2,
         )
         self.assertTrue(torch.isfinite(output.loss))
         self.assertIsInstance(

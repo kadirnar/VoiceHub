@@ -342,8 +342,6 @@ class MedASRForSpeechRecognition(PreTrainedASRModel):
         phase: str,
     ) -> dict[str, Any]:
         """Create differentiable LASR inputs and padded CTC labels."""
-        import torch
-
         from voicehub.processing.waveform import load_native_audio
 
         del phase
@@ -380,22 +378,6 @@ class MedASRForSpeechRecognition(PreTrainedASRModel):
         )
         if len(audio_values) != len(texts):
             raise ValueError("MedASR training requires one transcript per waveform.")
-        raw_lengths = inputs.get("audio_lengths")
-        if raw_lengths is not None:
-            lengths = _batch_values(
-                raw_lengths,
-                batch_size=len(audio_values),
-                name="audio_lengths",
-            )
-            trimmed = []
-            for value, length in zip(audio_values, lengths):
-                if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
-                    raise ValueError("`audio_lengths` must contain positive integers.")
-                tensor = (value if isinstance(value, torch.Tensor) else torch.as_tensor(value))
-                if tensor.ndim != 1 or int(length) > tensor.numel():
-                    raise ValueError("`audio_lengths` exceeds a waveform buffer.")
-                trimmed.append(tensor[:int(length)])
-            audio_values = tuple(trimmed)
         rates = _batch_values(
             inputs.get(
                 "sampling_rate",
@@ -404,12 +386,27 @@ class MedASRForSpeechRecognition(PreTrainedASRModel):
             batch_size=len(audio_values),
             name="sampling_rate",
         )
+        lengths = _batch_values(
+            inputs.get("audio_lengths"),
+            batch_size=len(audio_values),
+            name="audio_lengths",
+        )
+        for length in lengths:
+            if length is None:
+                continue
+            if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
+                raise ValueError("`audio_lengths` must contain positive integers.")
         waveforms = tuple(
             load_native_audio(
                 value,
                 sampling_rate=rate,
                 target_sampling_rate=self.native_config.sampling_rate,
-            ).waveform for value, rate in zip(audio_values, rates))
+                num_samples=length,
+            ).waveform for value, rate, length in zip(
+                audio_values,
+                rates,
+                lengths,
+            ))
         prepared = self.medasr_processor(
             waveforms,
             text=texts,

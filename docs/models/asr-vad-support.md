@@ -114,6 +114,35 @@ trainable parameters can be reconstructed. GGUF, ONNX, CTranslate2, JIT,
 fixed-point, quantized, and other serving artifacts are not generic
 fine-tuning checkpoints.
 
+### ASR dataset boundary
+
+Every registered ASR training profile now has an inspectable
+`ASRDatasetSpec`. Query it with `get_asr_dataset_spec(model_type)`,
+`get_training_spec(model_type).dataset_spec`, or
+`model.validate_training_support().dataset_spec`; enumerate every ASR contract
+with `list_asr_dataset_specs()`.
+
+`ASRDataset` accepts mappings and JSON/JSONL/CSV/TSV manifests, normalizes
+common audio and transcript aliases, resolves relative files, and validates
+either an integrated source record or the profile's exact prepared-tensor
+variant. `from_audio_folder()` pairs PCM WAV files with transcript sidecars,
+while `from_kaldi()` imports materialized `wav.scp` plus `text` directories.
+The [speech data guide](../guides/speech-data.md) lists the distinct CTC,
+Whisper/sequence-to-sequence, prompted Qwen/Granite/VibeVoice, RNN-T/TDT,
+SpeechBrain, SenseVoice, ESPnet, and WeNet records.
+
+Cohere records require `language` and are automatically grouped by language
+and punctuation mode. SeamlessM4T-v2 records are grouped by target language.
+The Trainer uses the dataset's deterministic epoch-aware batch sampler so a
+mixed multilingual corpus does not create an invalid model batch.
+
+Transcript-bearing evaluation records activate the model's native
+teacher-forced objective and produce `eval_loss`. WER/CER is a separate
+generation-and-decoding evaluation; it is reported only when a specialized
+adapter or caller-supplied metric implements the necessary decoding and text
+normalization. This distinction prevents a finite loss from being presented
+as recognition accuracy.
+
 ### Native ASR dispatch
 
 The historical `asr_transformers` key is a compatibility name for a closed

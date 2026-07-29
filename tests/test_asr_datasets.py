@@ -1,0 +1,1301 @@
+import json
+import pickle
+import tempfile
+import unittest
+from pathlib import Path
+
+from voicehub import (
+    ASRDataArchitecture,
+    ASRDataReadiness,
+    ASRDataset,
+    ASRDatasetSpec,
+    ASROutput,
+    ASRRecordVariant,
+    EpochGroupedBatchSampler,
+    PreTrainedASRModel,
+    SpeechTask,
+    VoiceHubConfig,
+    get_asr_dataset_spec,
+    get_training_spec,
+    list_asr_dataset_specs,
+    list_training_specs,
+)
+
+
+class ASRDatasetContractTests(unittest.TestCase):
+
+    def test_every_asr_profile_has_a_raw_finetuning_contract(self):
+        training_specs = list_training_specs(task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION, )
+        dataset_specs = list_asr_dataset_specs()
+
+        self.assertEqual(len(training_specs), 23)
+        self.assertEqual(
+            [spec.model_type for spec in dataset_specs],
+            [spec.model_type for spec in training_specs],
+        )
+        for training_spec in training_specs:
+            with self.subTest(model_type=training_spec.model_type):
+                dataset_spec = get_asr_dataset_spec(training_spec.model_type)
+                self.assertEqual(
+                    training_spec.dataset_spec,
+                    dataset_spec,
+                )
+                self.assertIs(dataset_spec.readiness, ASRDataReadiness.INTEGRATED)
+                self.assertTrue(dataset_spec.accepts_raw_records)
+                self.assertTrue(dataset_spec.preprocessed_variants)
+
+                record = {
+                    "audio": "sample.wav",
+                    "text": "A fine-tuning transcript.",
+                }
+                if training_spec.model_type in {"asr_cohere", "asr_funasr"}:
+                    record["language"] = "en"
+                dataset = ASRDataset(
+                    [record],
+                    model_type=training_spec.model_type,
+                )
+                self.assertEqual(dataset.model_type, training_spec.model_type)
+                self.assertNotEqual(dataset.variant_names, ("unchecked", ))
+
+    def test_contract_primitives_are_public_and_validate_dependencies(self):
+        variant = ASRRecordVariant(
+            name="conditioned",
+            required_fields=("audio", "text"),
+            requires=(("prompt", ("language", )), ),
+        )
+        spec = ASRDatasetSpec(
+            architecture=ASRDataArchitecture.SPEECH_SEQUENCE_TO_SEQUENCE,
+            variants=(variant, ),
+            sample_rate=16_000,
+        )
+
+        self.assertTrue(variant.matches({
+            "audio": "sample.wav",
+            "text": "Hello.",
+        }))
+        self.assertEqual(
+            variant.missing({
+                "audio": "sample.wav",
+                "text": "Hello.",
+                "prompt": "Transcribe",
+            }),
+            ("prompt requires language", ),
+        )
+        self.assertEqual(
+            spec.match_variant({
+                "audio": "sample.wav",
+                "text": "Hello.",
+            }),
+            "conditioned",
+        )
+        self.assertIs(
+            ASRDataArchitecture.coerce("seq2seq"),
+            ASRDataArchitecture.SPEECH_SEQUENCE_TO_SEQUENCE,
+        )
+
+    def test_preprocessed_variant_wins_when_source_fields_are_retained(self):
+        spec = ASRDatasetSpec(
+            architecture="seq2seq",
+            variants=(
+                ASRRecordVariant(
+                    name="raw",
+                    required_fields=("audio", "text"),
+                ),
+                ASRRecordVariant(
+                    name="model-ready",
+                    required_fields=("input_features", "labels"),
+                    preprocessed=True,
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            spec.match_variant({
+                "audio": "trace.wav",
+                "text": "Trace transcript.",
+                "input_features": [[0.0]],
+                "labels": [1],
+            }),
+            "model-ready",
+        )
+
+    def test_qwen_vibe_and_granite_have_exact_multimodal_variants(self):
+        cases = (
+            (
+                "asr_qwen3",
+                {
+                    "audio": "qwen.wav",
+                    "text": "Qwen transcript.",
+                    "context": "Meeting notes",
+                },
+                "raw-audio",
+            ),
+            (
+                "asr_qwen3",
+                {
+                    "input_ids": [1, 2],
+                    "attention_mask": [1, 1],
+                    "input_features": [[0.1]],
+                    "feature_attention_mask": [1],
+                    "labels": [-100, 2],
+                },
+                "qwen3-model-ready",
+            ),
+            (
+                "asr_vibevoice",
+                {
+                    "audio":
+                    "vibe.wav",
+                    "segments": [{
+                        "speaker": "Speaker 1",
+                        "start": 0.0,
+                        "end": 1.0,
+                        "text": "Structured transcript.",
+                    }],
+                },
+                "segmented-audio",
+            ),
+            (
+                "asr_vibevoice",
+                {
+                    "audio":
+                    "vibe.wav",
+                    "text":
+                    ('[{"speaker":"Speaker 1","start":0.0,'
+                     '"end":1.0,"text":"Serialized transcript."}]'),
+                },
+                "serialized-audio",
+            ),
+            (
+                "asr_vibevoice",
+                {
+                    "input_ids": [1],
+                    "attention_mask": [1],
+                    "input_values": [0.0, 0.1],
+                    "padding_mask": [1, 1],
+                    "labels": [1],
+                },
+                "vibevoice-model-ready",
+            ),
+            (
+                "asr_granite_speech",
+                {
+                    "audio": "granite.wav",
+                    "text": "Granite transcript.",
+                    "prompt": "Transcribe in English.",
+                },
+                "raw-audio",
+            ),
+            (
+                "asr_granite_speech",
+                {
+                    "input_ids": [1],
+                    "attention_mask": [1],
+                    "input_features": [[0.1]],
+                    "input_features_mask": [1],
+                    "labels": [1],
+                },
+                "granite-model-ready",
+            ),
+        )
+        for model_type, record, expected_variant in cases:
+            with self.subTest(
+                    model_type=model_type,
+                    expected_variant=expected_variant,
+            ):
+                dataset = ASRDataset([record], model_type=model_type)
+                self.assertEqual(dataset.variant_names, (expected_variant, ))
+                self.assertIs(
+                    dataset.architecture,
+                    ASRDataArchitecture.PROMPTED_MULTIMODAL,
+                )
+
+        self.assertEqual(get_asr_dataset_spec("asr_vibevoice").sample_rate, 24_000)
+        with self.assertRaisesRegex(ValueError, "forbidden field language"):
+            ASRDataset(
+                [{
+                    "audio": "granite.wav",
+                    "text": "Put language guidance in the prompt.",
+                    "language": "en",
+                }],
+                model_type="asr_granite_speech",
+            )
+        with self.assertRaisesRegex(ValueError, "forbidden field"):
+            ASRDataset(
+                [{
+                    "audio": "vibe.wav",
+                    "segments": [{
+                        "text": "Structured",
+                    }],
+                    "text": "Ambiguous serialized target.",
+                }],
+                model_type="asr_vibevoice",
+            )
+
+    def test_rnnt_tdt_and_native_framework_variants_are_exact(self):
+        cases = (
+            (
+                "asr_nemotron",
+                ASRDataArchitecture.RNNT,
+                {
+                    "input_features": [[0.1]],
+                    "attention_mask": [1],
+                    "prompt_ids": [1],
+                    "labels": [2],
+                    "label_lengths": 1,
+                    "decoder_input_ids": [0, 2],
+                },
+                "nemotron-rnnt-model-ready",
+            ),
+            (
+                "asr_parakeet_tdt",
+                ASRDataArchitecture.TDT,
+                {
+                    "input_features": [[0.1]],
+                    "attention_mask": [1],
+                    "labels": [2],
+                    "decoder_input_ids": [0, 2],
+                },
+                "parakeet-tdt-model-ready",
+            ),
+            (
+                "asr_nemo",
+                ASRDataArchitecture.CTC,
+                {
+                    "input_signal": [[0.0, 0.1]],
+                    "input_signal_length": [2],
+                    "labels": [[1]],
+                    "label_lengths": [1],
+                },
+                "nemo-ctc-waveform-model-ready",
+            ),
+            (
+                "asr_nemo",
+                ASRDataArchitecture.CTC,
+                {
+                    "processed_signal": [[[0.1]]],
+                    "processed_signal_length": [1],
+                    "labels": [[1]],
+                    "label_lengths": [1],
+                },
+                "nemo-ctc-feature-model-ready",
+            ),
+            (
+                "asr_speechbrain",
+                ASRDataArchitecture.HYBRID_CTC_ATTENTION,
+                {
+                    "waveforms": [[0.0, 0.1]],
+                    "waveform_lengths": [2],
+                    "tokens_bos": [[1, 2]],
+                    "tokens_eos": [[2, 3]],
+                    "token_lengths": [2],
+                    "ctc_tokens": [[2]],
+                    "ctc_token_lengths": [1],
+                },
+                "speechbrain-model-ready",
+            ),
+            (
+                "asr_funasr",
+                ASRDataArchitecture.CTC,
+                {
+                    "audio_values": [0.0, 0.1],
+                    "text": "SenseVoice transcript.",
+                    "language": "en",
+                    "emotion": "neutral",
+                    "event": "speech",
+                    "use_itn": True,
+                },
+                "raw-audio",
+            ),
+            (
+                "asr_funasr",
+                ASRDataArchitecture.CTC,
+                {
+                    "features": [[0.1]],
+                    "transcript": "Feature transcript.",
+                    "language": "en",
+                },
+                "sensevoice-feature-transcript",
+            ),
+            (
+                "asr_funasr",
+                ASRDataArchitecture.CTC,
+                {
+                    "features": [[0.1]],
+                    "feature_lengths": [1],
+                    "labels": [[1]],
+                    "label_lengths": [1],
+                },
+                "sensevoice-model-ready",
+            ),
+            (
+                "asr_espnet",
+                ASRDataArchitecture.HYBRID_CTC_ATTENTION,
+                {
+                    "features": [[0.1]],
+                    "text": "ESPnet feature transcript.",
+                },
+                "espnet-feature-transcript",
+            ),
+            (
+                "asr_espnet",
+                ASRDataArchitecture.HYBRID_CTC_ATTENTION,
+                {
+                    "waveforms": [[0.0, 0.1]],
+                    "waveform_lengths": [2],
+                    "labels": [[1]],
+                    "label_lengths": [1],
+                },
+                "espnet-waveform-model-ready",
+            ),
+            (
+                "asr_espnet",
+                ASRDataArchitecture.HYBRID_CTC_ATTENTION,
+                {
+                    "features": [[0.1]],
+                    "feature_lengths": [1],
+                    "labels": [[1]],
+                    "label_lengths": [1],
+                },
+                "espnet-feature-model-ready",
+            ),
+            (
+                "asr_wenet",
+                ASRDataArchitecture.HYBRID_CTC_ATTENTION,
+                {
+                    "input_signal": [[0.0, 0.1]],
+                    "input_signal_length": [2],
+                    "labels": [[1]],
+                    "label_lengths": [1],
+                },
+                "wenet-waveform-model-ready",
+            ),
+            (
+                "asr_wenet",
+                ASRDataArchitecture.HYBRID_CTC_ATTENTION,
+                {
+                    "features": [[[0.1]]],
+                    "feature_lengths": [1],
+                    "labels": [[1]],
+                    "label_lengths": [1],
+                },
+                "wenet-feature-model-ready",
+            ),
+        )
+        for model_type, architecture, record, expected_variant in cases:
+            with self.subTest(
+                    model_type=model_type,
+                    expected_variant=expected_variant,
+            ):
+                dataset = ASRDataset([record], model_type=model_type)
+                self.assertIs(dataset.architecture, architecture)
+                self.assertEqual(dataset.variant_names, (expected_variant, ))
+
+    def test_special_contracts_reject_incomplete_model_ready_records(self):
+        invalid_records = (
+            (
+                "asr_qwen3",
+                {
+                    "input_ids": [1],
+                    "attention_mask": [1],
+                    "input_features": [[0.1]],
+                    "labels": [1],
+                },
+            ),
+            (
+                "asr_nemotron",
+                {
+                    "input_features": [[0.1]],
+                    "attention_mask": [1],
+                    "labels": [1],
+                    "decoder_input_ids": [0, 1],
+                },
+            ),
+            (
+                "asr_parakeet_tdt",
+                {
+                    "input_features": [[0.1]],
+                    "labels": [1],
+                    "decoder_input_ids": [0, 1],
+                },
+            ),
+            (
+                "asr_speechbrain",
+                {
+                    "waveforms": [[0.0]],
+                    "labels": [[1]],
+                },
+            ),
+            (
+                "asr_wenet",
+                {
+                    "input_signal": [[0.0]],
+                    "labels": [[1]],
+                },
+            ),
+        )
+        for model_type, record in invalid_records:
+            with self.subTest(model_type=model_type):
+                with self.assertRaisesRegex(ValueError, "does not match"):
+                    ASRDataset([record], model_type=model_type)
+
+
+class ASRDatasetManifestTests(unittest.TestCase):
+
+    def test_empty_audio_path_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "audio.*non-empty"):
+            ASRDataset(
+                [{
+                    "audio": " ",
+                    "text": "No source audio.",
+                }],
+                architecture="ctc",
+            )
+
+    def test_jsonl_aliases_and_relative_paths_are_normalized(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audio = root / "clips" / "sample.wav"
+            audio.parent.mkdir()
+            audio.touch()
+            manifest = root / "records.jsonl"
+            manifest.write_text(
+                json.dumps({
+                    "id": "sample",
+                    "audio_filepath": "clips/sample.wav",
+                    "transcription": "Hello from JSON Lines.",
+                    "lang": "en",
+                    "sample_rate": 16_000,
+                }) + "\n",
+                encoding="utf-8",
+            )
+
+            dataset = ASRDataset.from_manifest(
+                manifest,
+                model_type="asr_cohere",
+                validate_files=True,
+            )
+
+        self.assertEqual(dataset.variant_names, ("raw-audio", ))
+        self.assertEqual(dataset[0]["audio"], str(audio.resolve()))
+        self.assertEqual(dataset[0]["text"], "Hello from JSON Lines.")
+        self.assertEqual(dataset[0]["language"], "en")
+        self.assertEqual(dataset[0]["sampling_rate"], 16_000)
+        self.assertNotIn("audio_filepath", dataset[0])
+        self.assertNotIn("transcription", dataset[0])
+
+    def test_json_objects_lists_and_nemo_json_lines_are_supported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            object_manifest = root / "object.json"
+            object_manifest.write_text(
+                json.dumps({
+                    "audio": "one.wav",
+                    "text": "One.",
+                }),
+                encoding="utf-8",
+            )
+            list_manifest = root / "list.json"
+            list_manifest.write_text(
+                json.dumps([
+                    {
+                        "audio": "one.wav",
+                        "text": "One.",
+                    },
+                    {
+                        "audio": "two.wav",
+                        "text": "Two.",
+                    },
+                ]),
+                encoding="utf-8",
+            )
+            nemo_manifest = root / "manifest.json"
+            nemo_manifest.write_text(
+                "\n".join(
+                    json.dumps(record) for record in (
+                        {
+                            "audio_filepath": "one.wav",
+                            "text": "One.",
+                            "duration": 1.0,
+                        },
+                        {
+                            "audio_filepath": "two.wav",
+                            "text": "Two.",
+                            "duration": 2.0,
+                        },
+                    )) + "\n",
+                encoding="utf-8",
+            )
+
+            object_dataset = ASRDataset.from_manifest(
+                object_manifest,
+                model_type="asr_nemo",
+            )
+            list_dataset = ASRDataset.from_manifest(
+                list_manifest,
+                model_type="asr_nemo",
+            )
+            nemo_dataset = ASRDataset.from_manifest(
+                nemo_manifest,
+                model_type="asr_nemo",
+            )
+
+        self.assertEqual(len(object_dataset), 1)
+        self.assertEqual(len(list_dataset), 2)
+        self.assertEqual(len(nemo_dataset), 2)
+        self.assertEqual(nemo_dataset[1]["duration"], 2.0)
+        self.assertEqual(
+            nemo_dataset[0]["audio"],
+            str((root / "one.wav").resolve()),
+        )
+
+    def test_csv_and_tsv_aliases_resolve_paths_and_parse_json_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            csv_manifest = root / "records.csv"
+            csv_manifest.write_text(
+                "wav_path,sentence,lang,punctuation\n"
+                'english.wav,English sentence.,en,false\n',
+                encoding="utf-8",
+            )
+            tsv_manifest = root / "records.tsv"
+            tsv_manifest.write_text(
+                "file\ttarget_text\ttarget_lang\n"
+                "german.wav\tDeutscher Satz.\tdeu\n",
+                encoding="utf-8",
+            )
+
+            cohere = ASRDataset.from_manifest(
+                csv_manifest,
+                model_type="asr_cohere",
+            )
+            seamless = ASRDataset.from_manifest(
+                tsv_manifest,
+                model_type="asr_seamless_m4t_v2",
+            )
+
+        self.assertEqual(cohere[0]["audio"], str((root / "english.wav").resolve()))
+        self.assertEqual(cohere[0]["text"], "English sentence.")
+        self.assertEqual(cohere[0]["punctuation"], False)
+        self.assertEqual(
+            seamless[0]["audio"],
+            str((root / "german.wav").resolve()),
+        )
+        self.assertEqual(seamless[0]["target_language"], "deu")
+
+    def test_sensevoice_and_seamless_upstream_records_are_accepted_directly(self):
+        sensevoice = ASRDataset(
+            [{
+                "source": "sense.wav",
+                "target": "SenseVoice transcript.",
+                "text_language": "<|en|>",
+                "emo_target": "<|NEUTRAL|>",
+                "event_target": "<|Speech|>",
+                "with_or_wo_itn": "<|woitn|>",
+            }],
+            model_type="asr_funasr",
+        )
+        seamless = ASRDataset(
+            [{
+                "source": {
+                    "id": "source-1",
+                    "audio_local_path": "seamless.wav",
+                    "sampling_rate": 16_000,
+                    "lang": "eng",
+                },
+                "target": {
+                    "id": "target-1",
+                    "text": "Seamless transcript.",
+                    "lang": "deu",
+                },
+            }],
+            model_type="asr_seamless_m4t_v2",
+        )
+
+        self.assertEqual(sensevoice.variant_names, ("raw-audio", ))
+        self.assertEqual(sensevoice[0]["audio"], "sense.wav")
+        self.assertEqual(sensevoice[0]["text"], "SenseVoice transcript.")
+        self.assertEqual(sensevoice[0]["language"], "en")
+        self.assertEqual(sensevoice[0]["emotion"], "neutral")
+        self.assertEqual(sensevoice[0]["event"], "speech")
+        self.assertIs(sensevoice[0]["use_itn"], False)
+        self.assertEqual(seamless.variant_names, ("raw-audio", ))
+        self.assertEqual(seamless[0]["audio"], "seamless.wav")
+        self.assertEqual(seamless[0]["text"], "Seamless transcript.")
+        self.assertEqual(seamless[0]["source_language"], "eng")
+        self.assertEqual(seamless[0]["target_language"], "deu")
+        self.assertEqual(seamless[0]["sampling_rate"], 16_000)
+
+    def test_tabular_numeric_sampling_rate_and_duration_are_coerced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "records.csv"
+            manifest.write_text(
+                "audio,text,sampling_rate,duration\n"
+                "sample.wav,Transcript.,16000,1.25\n",
+                encoding="utf-8",
+            )
+
+            dataset = ASRDataset.from_manifest(
+                manifest,
+                model_type="asr_whisper",
+            )
+
+        self.assertEqual(dataset[0]["sampling_rate"], 16_000)
+        self.assertEqual(dataset[0]["duration"], 1.25)
+
+    def test_from_audio_folder_pairs_sidecars_and_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nested = root / "speaker-a"
+            nested.mkdir()
+            audio = nested / "utterance.wav"
+            audio.touch()
+            audio.with_suffix(".txt").write_text(
+                "  A sidecar transcript.  \n",
+                encoding="utf-8",
+            )
+
+            dataset = ASRDataset.from_audio_folder(
+                root,
+                model_type="asr_whisper",
+                metadata={
+                    "speaker_id": "speaker-a",
+                    "language": "en",
+                },
+            )
+
+        self.assertEqual(len(dataset), 1)
+        self.assertEqual(dataset[0]["audio"], str(audio.resolve()))
+        self.assertEqual(dataset[0]["text"], "A sidecar transcript.")
+        self.assertEqual(dataset[0]["speaker_id"], "speaker-a")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "missing.wav").touch()
+            with self.assertRaisesRegex(FileNotFoundError, "sidecar"):
+                ASRDataset.from_audio_folder(
+                    root,
+                    model_type="asr_whisper",
+                )
+
+    def test_from_kaldi_supports_plain_files_and_rejects_shell_commands(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audio = root / "wav" / "utterance.wav"
+            audio.parent.mkdir()
+            audio.touch()
+            (root / "wav.scp").write_text(
+                "utt-1 wav/utterance.wav\n",
+                encoding="utf-8",
+            )
+            (root / "text").write_text(
+                "utt-1 Kaldi transcript.\n",
+                encoding="utf-8",
+            )
+
+            dataset = ASRDataset.from_kaldi(
+                root,
+                model_type="asr_espnet",
+                validate_files=True,
+            )
+            self.assertEqual(dataset[0]["id"], "utt-1")
+            self.assertEqual(dataset[0]["text"], "Kaldi transcript.")
+            self.assertEqual(dataset[0]["audio"], str(audio.resolve()))
+
+            (root / "wav.scp").write_text(
+                "utt-1 sox source.flac -t wav - |\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "shell pipeline"):
+                ASRDataset.from_kaldi(
+                    root,
+                    model_type="asr_espnet",
+                )
+
+    def test_validate_files_checks_flat_and_nested_audio_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audio = root / "present.wav"
+            audio.touch()
+            flat = ASRDataset(
+                [{
+                    "audio": "present.wav",
+                    "text": "Present.",
+                }],
+                model_type="asr_whisper",
+                root=root,
+                validate_files=True,
+            )
+            nested = ASRDataset(
+                [{
+                    "audio": {
+                        "path": "present.wav",
+                        "sampling_rate": 16_000,
+                    },
+                    "text": "Nested.",
+                }],
+                model_type="asr_whisper",
+                root=root,
+                validate_files=True,
+            )
+
+            self.assertEqual(flat[0]["audio"], str(audio.resolve()))
+            self.assertEqual(nested[0]["audio"]["path"], str(audio.resolve()))
+            with self.assertRaises(FileNotFoundError):
+                ASRDataset(
+                    [{
+                        "audio": "missing.wav",
+                        "text": "Missing.",
+                    }],
+                    model_type="asr_whisper",
+                    root=root,
+                    validate_files=True,
+                )
+
+    def test_custom_aliases_normalize_and_collisions_are_rejected(self):
+        dataset = ASRDataset(
+            [{
+                "recording": "sample.wav",
+                "orthography": "Custom fields.",
+            }],
+            model_type="asr_whisper",
+            aliases={
+                "recording": "audio",
+                "orthography": "text",
+            },
+        )
+
+        self.assertEqual(dataset[0]["audio"], "sample.wav")
+        self.assertEqual(dataset[0]["text"], "Custom fields.")
+        with self.assertRaisesRegex(ValueError, "both alias"):
+            ASRDataset(
+                [{
+                    "audio": "canonical.wav",
+                    "audio_path": "alias.wav",
+                    "text": "Collision.",
+                }],
+                model_type="asr_whisper",
+            )
+        with self.assertRaisesRegex(ValueError, "both alias"):
+            ASRDataset(
+                [{
+                    "audio": "canonical.wav",
+                    "recording": "alias.wav",
+                    "text": "Collision.",
+                }],
+                model_type="asr_whisper",
+                aliases={"recording": "audio"},
+            )
+
+    def test_grouped_split_is_deterministic_and_leakage_safe(self):
+        records = [{
+            "id": f"record-{index}",
+            "audio": f"{index}.wav",
+            "text": f"Transcript {index}.",
+            "speaker_id": f"speaker-{index // 2}",
+        } for index in range(8)]
+        dataset = ASRDataset(
+            records,
+            architecture=ASRDataArchitecture.CTC,
+        )
+
+        train, validation = dataset.train_test_split(
+            validation_fraction=0.25,
+            seed=7,
+            group_by="speaker_id",
+        )
+        repeated_train, repeated_validation = dataset.train_test_split(
+            validation_fraction=0.25,
+            seed=7,
+            group_by="speaker_id",
+        )
+
+        train_speakers = {record["speaker_id"] for record in train}
+        validation_speakers = {record["speaker_id"] for record in validation}
+        self.assertFalse(train_speakers.intersection(validation_speakers))
+        self.assertEqual(
+            [record["id"] for record in train],
+            [record["id"] for record in repeated_train],
+        )
+        self.assertEqual(
+            [record["id"] for record in validation],
+            [record["id"] for record in repeated_validation],
+        )
+
+    def test_jsonl_round_trip_writes_portable_relative_audio_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audio = root / "clips" / "sample.wav"
+            audio.parent.mkdir()
+            audio.touch()
+            dataset = ASRDataset(
+                [{
+                    "audio": str(audio),
+                    "text": "Portable transcript.",
+                }],
+                model_type="asr_whisper",
+            )
+
+            manifest = dataset.to_jsonl(root / "prepared.jsonl")
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            restored = ASRDataset.from_manifest(
+                manifest,
+                model_type="asr_whisper",
+                validate_files=True,
+            )
+
+        self.assertEqual(payload["audio"], "clips/sample.wav")
+        self.assertEqual(restored[0]["audio"], str(audio.resolve()))
+        self.assertEqual(restored[0]["text"], "Portable transcript.")
+
+    def test_jsonl_serialization_failure_does_not_truncate_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "records.jsonl"
+            destination.write_text("keep-me\n", encoding="utf-8")
+            dataset = ASRDataset(
+                [
+                    {
+                        "audio": "one.wav",
+                        "text": "Serializable.",
+                    },
+                    {
+                        "audio": "two.wav",
+                        "metadata": object(),
+                        "text": "Not serializable.",
+                    },
+                ],
+                architecture="ctc",
+                validate=False,
+            )
+
+            with self.assertRaisesRegex(TypeError, "record 1"):
+                dataset.to_jsonl(destination)
+
+            self.assertEqual(
+                destination.read_text(encoding="utf-8"),
+                "keep-me\n",
+            )
+
+    def test_fingerprint_covers_content_order_and_transform_version(self):
+        records = [
+            {
+                "audio": "one.wav",
+                "text": "One.",
+            },
+            {
+                "audio": "two.wav",
+                "text": "Two.",
+            },
+        ]
+        original = ASRDataset(records, architecture="ctc")
+        reordered = ASRDataset(list(reversed(records)), architecture="ctc")
+        changed = ASRDataset(
+            [
+                records[0],
+                {
+                    **records[1],
+                    "text": "Changed.",
+                },
+            ],
+            architecture="ctc",
+        )
+
+        self.assertNotEqual(
+            original.resume_fingerprint()["content_sha256"],
+            reordered.resume_fingerprint()["content_sha256"],
+        )
+        self.assertNotEqual(
+            original.resume_fingerprint()["content_sha256"],
+            changed.resume_fingerprint()["content_sha256"],
+        )
+
+        def annotate(record):
+            return {
+                **record,
+                "revision": 1,
+            }
+
+        unversioned = ASRDataset(
+            records,
+            architecture="ctc",
+            transform=annotate,
+        )
+        version_one = ASRDataset(
+            records,
+            architecture="ctc",
+            transform=annotate,
+            transform_fingerprint="annotate-v1",
+        )
+        version_two = ASRDataset(
+            records,
+            architecture="ctc",
+            transform=annotate,
+            transform_fingerprint="annotate-v2",
+        )
+        with self.assertRaisesRegex(ValueError, "transform_fingerprint"):
+            unversioned.resume_fingerprint()
+        self.assertNotEqual(
+            version_one.resume_fingerprint()["content_sha256"],
+            version_two.resume_fingerprint()["content_sha256"],
+        )
+
+    def test_dataset_is_pickle_safe_for_worker_processes(self):
+        dataset = ASRDataset(
+            [{
+                "audio": "worker.wav",
+                "text": "Worker-safe.",
+                "metadata": {
+                    "source": "unit-test",
+                },
+            }],
+            model_type="asr_whisper",
+        )
+
+        restored = pickle.loads(pickle.dumps(dataset))
+
+        self.assertEqual(restored[0], dataset[0])
+        self.assertEqual(restored.variant_names, dataset.variant_names)
+        self.assertEqual(
+            restored.resume_fingerprint(),
+            dataset.resume_fingerprint(),
+        )
+
+
+class ASRPreparedRuntimeContractTests(unittest.TestCase):
+
+    def test_wenet_phase_accepts_cached_frontend_modality(self):
+        phase = get_training_spec("asr_wenet").get_phase()
+
+        self.assertEqual(
+            phase.required_inputs,
+            ("labels", "label_lengths"),
+        )
+
+    def test_nemo_and_wenet_cached_variants_bypass_raw_preprocessing(self):
+        import torch
+
+        from voicehub.models.asr_nemo import NeMoASRConfig, NeMoASRForSpeechRecognition
+        from voicehub.models.asr_wenet import WeNetASRConfig, WeNetASRForSpeechRecognition
+
+        nemo = NeMoASRForSpeechRecognition(
+            NeMoASRConfig(),
+            device="cpu",
+            lazy_load=True,
+        )
+        nemo_waveform = {
+            "input_signal": torch.zeros(1, 16),
+            "input_signal_length": torch.tensor([16]),
+            "labels": torch.tensor([[1, 2]]),
+            "label_lengths": torch.tensor([2]),
+        }
+        nemo_features = {
+            "processed_signal": torch.zeros(1, 64, 4),
+            "processed_signal_length": torch.tensor([4]),
+            "labels": torch.tensor([[1, 2]]),
+            "label_lengths": torch.tensor([2]),
+        }
+        self.assertEqual(
+            set(nemo.prepare_training_inputs(nemo_waveform, phase="ctc")),
+            set(nemo_waveform),
+        )
+        self.assertEqual(
+            set(nemo.prepare_training_inputs(nemo_features, phase="ctc")),
+            set(nemo_features),
+        )
+        self.assertFalse(nemo.is_loaded)
+
+        wenet = WeNetASRForSpeechRecognition(
+            WeNetASRConfig(),
+            device="cpu",
+            lazy_load=True,
+        )
+        wenet_waveform = {
+            "input_signal": torch.zeros(1, 16),
+            "input_signal_length": torch.tensor([16]),
+            "labels": torch.tensor([[1, 2]]),
+            "label_lengths": torch.tensor([2]),
+        }
+        wenet_features = {
+            "features": torch.zeros(1, 4, 80),
+            "feature_lengths": torch.tensor([4]),
+            "labels": torch.tensor([[1, 2]]),
+            "label_lengths": torch.tensor([2]),
+        }
+        self.assertEqual(
+            set(wenet.prepare_training_inputs(wenet_waveform, phase="hybrid")),
+            set(wenet_waveform),
+        )
+        self.assertEqual(
+            set(wenet.prepare_training_inputs(wenet_features, phase="hybrid")),
+            set(wenet_features),
+        )
+        self.assertFalse(wenet.is_loaded)
+
+    def test_specialized_datasets_preserve_cached_records(self):
+        from voicehub.architectures.espnet_transformer.training import ESPnetASRTrainingDataset
+        from voicehub.models.asr_native.speechbrain_training import SpeechBrainASRTrainingDataset
+
+        speechbrain_record = {
+            "waveforms": [[0.0, 0.1]],
+            "waveform_lengths": [2],
+            "tokens_bos": [[1, 2]],
+            "tokens_eos": [[2, 3]],
+            "token_lengths": [2],
+            "ctc_tokens": [[2]],
+            "ctc_token_lengths": [1],
+        }
+        self.assertEqual(
+            SpeechBrainASRTrainingDataset([speechbrain_record])[0],
+            speechbrain_record,
+        )
+
+        espnet_records = (
+            {
+                "features": [[0.1]],
+                "text": "FEATURE TRANSCRIPT",
+            },
+            {
+                "waveforms": [[0.0, 0.1]],
+                "waveform_lengths": [2],
+                "labels": [[1]],
+                "label_lengths": [1],
+            },
+            {
+                "features": [[[0.1]]],
+                "feature_lengths": [1],
+                "labels": [[1]],
+                "label_lengths": [1],
+            },
+        )
+        dataset = ESPnetASRTrainingDataset(espnet_records)
+        self.assertEqual(len(dataset), 3)
+        for index, record in enumerate(espnet_records):
+            self.assertEqual(dataset[index], record)
+
+
+class ASRGroupedBatchSamplerTests(unittest.TestCase):
+
+    def test_cohere_batches_are_language_and_punctuation_homogeneous(self):
+        records = []
+        for language, punctuation in (
+            ("en", True),
+            ("en", False),
+            ("tr", True),
+        ):
+            for index in range(2):
+                records.append({
+                    "id": f"{language}-{punctuation}-{index}",
+                    "audio": f"{language}-{punctuation}-{index}.wav",
+                    "text": "Transcript.",
+                    "language": language,
+                    "punctuation": punctuation,
+                })
+        dataset = ASRDataset(records, model_type="asr_cohere")
+        sampler = dataset.create_batch_sampler(
+            batch_size=2,
+            seed=19,
+            shuffle=True,
+            drop_last=False,
+        )
+
+        self.assertIsInstance(sampler, EpochGroupedBatchSampler)
+        self.assertTrue(dataset.requires_homogeneous_batches)
+        self.assertEqual(len(sampler), 3)
+        for batch in sampler:
+            keys = {dataset.batch_group_key(dataset._records[index]) for index in batch}
+            self.assertEqual(len(keys), 1)
+
+    def test_seamless_batches_use_target_language_aliases(self):
+        dataset = ASRDataset(
+            [
+                {
+                    "audio": "english-1.wav",
+                    "text": "One.",
+                    "target_lang": "eng",
+                },
+                {
+                    "audio": "english-2.wav",
+                    "text": "Two.",
+                    "target_language": "eng",
+                },
+                {
+                    "audio": "turkish-1.wav",
+                    "text": "Bir.",
+                    "language": "tur",
+                },
+                {
+                    "audio": "turkish-2.wav",
+                    "text": "İki.",
+                    "lang": "tur",
+                },
+            ],
+            model_type="asr_seamless_m4t_v2",
+        )
+        sampler = dataset.create_batch_sampler(
+            batch_size=2,
+            seed=3,
+            shuffle=False,
+            drop_last=False,
+        )
+
+        self.assertIsInstance(sampler, EpochGroupedBatchSampler)
+        self.assertEqual(len(sampler), 2)
+        for batch in sampler:
+            keys = {dataset.batch_group_key(dataset._records[index]) for index in batch}
+            self.assertEqual(len(keys), 1)
+
+    def test_sampler_state_restores_exact_epoch_order(self):
+        dataset = ASRDataset(
+            [{
+                "audio": f"{index}.wav",
+                "text": f"Transcript {index}.",
+                "language": "en" if index < 4 else "tr",
+                "punctuation": index % 2 == 0,
+            } for index in range(8)],
+            model_type="asr_cohere",
+        )
+        original = dataset.create_batch_sampler(
+            batch_size=2,
+            seed=13,
+            shuffle=True,
+            drop_last=False,
+        )
+        restored = dataset.create_batch_sampler(
+            batch_size=2,
+            seed=13,
+            shuffle=True,
+            drop_last=False,
+        )
+        original.set_epoch(4)
+        state = original.state_dict()
+        restored.load_state_dict(state)
+
+        self.assertEqual(restored.state_dict(), state)
+        self.assertEqual(list(restored), list(original))
+
+        incompatible = dataset.create_batch_sampler(
+            batch_size=1,
+            seed=13,
+            shuffle=True,
+            drop_last=False,
+        )
+        with self.assertRaisesRegex(ValueError, "batch_size differs"):
+            incompatible.load_state_dict(state)
+
+        ordinary = ASRDataset(
+            [{
+                "audio": "ordinary.wav",
+                "text": "No grouping required.",
+            }],
+            model_type="asr_whisper",
+        )
+        self.assertIsNone(
+            ordinary.create_batch_sampler(
+                batch_size=1,
+                seed=0,
+                shuffle=True,
+                drop_last=False,
+            ), )
+
+
+class ASRModelManifestIntegrationTests(unittest.TestCase):
+
+    class _CapturingAdapter:
+
+        def __init__(self):
+            self.records = None
+            self.kwargs = None
+
+        def create_dataset(self, records, **kwargs):
+            self.records = records
+            self.kwargs = kwargs
+            return records
+
+    class _Model(PreTrainedASRModel):
+
+        def __init__(self, config):
+            super().__init__(config, device="cpu")
+            self.adapter = (ASRModelManifestIntegrationTests._CapturingAdapter())
+
+        def get_training_adapter(self):
+            return self.adapter
+
+        def _load_pretrained_model(self):
+            raise AssertionError("Dataset creation must not load model weights.")
+
+        def _transcribe(self, audio, **kwargs):
+            return ASROutput(text="dummy")
+
+    def test_model_accepts_manifest_path_without_loading_weights(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "records.jsonl"
+            manifest.write_text(
+                json.dumps({
+                    "audio_filepath": "hello.wav",
+                    "transcript": "Hello.",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            config = VoiceHubConfig(name_or_path="dummy")
+            config.model_type = "asr_whisper"
+            model = self._Model(config)
+
+            dataset = model.create_training_dataset(
+                manifest,
+                cache_features=True,
+            )
+
+        self.assertIsInstance(dataset, ASRDataset)
+        self.assertFalse(model.is_loaded)
+        self.assertEqual(model.adapter.kwargs, {"cache_features": True})
+        self.assertEqual(dataset[0]["text"], "Hello.")
+        self.assertEqual(
+            dataset[0]["audio"],
+            str((manifest.parent / "hello.wav").resolve()),
+        )
+
+    def test_model_data_options_normalize_in_memory_records(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = VoiceHubConfig(name_or_path="dummy")
+            config.model_type = "asr_whisper"
+            model = self._Model(config)
+
+            dataset = model.create_training_dataset(
+                [{
+                    "recording": "hello.wav",
+                    "orthography": "Hello.",
+                }],
+                data_root=root,
+                data_aliases={
+                    "recording": "audio",
+                    "orthography": "text",
+                },
+            )
+
+        self.assertIsInstance(dataset, ASRDataset)
+        self.assertFalse(model.is_loaded)
+        self.assertEqual(model.adapter.kwargs, {})
+        self.assertEqual(dataset[0]["text"], "Hello.")
+        self.assertEqual(
+            dataset[0]["audio"],
+            str((root / "hello.wav").resolve()),
+        )
+
+    def test_model_normalizes_common_in_memory_aliases_by_default(self):
+        config = VoiceHubConfig(name_or_path="dummy")
+        config.model_type = "asr_whisper"
+        model = self._Model(config)
+
+        dataset = model.create_training_dataset([{
+            "audio_path": "hello.wav",
+            "sentence": "Hello.",
+        }])
+
+        self.assertIsInstance(dataset, ASRDataset)
+        self.assertEqual(dataset[0]["audio"], "hello.wav")
+        self.assertEqual(dataset[0]["text"], "Hello.")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -371,6 +371,31 @@ train_records, validation_records = records.train_test_split(
 )
 ```
 
+ASR uses the parallel `ASRDataset` layer:
+
+```python
+from voicehub import ASRDataset, get_asr_dataset_spec
+
+contract = get_asr_dataset_spec("asr_whisper")
+records = ASRDataset.from_manifest(
+    "data/asr.jsonl",  # JSON, JSONL, CSV, and TSV are supported.
+    model_type="asr_whisper",
+    validate_files=True,
+)
+train_records, validation_records = records.train_test_split(
+    group_by="speaker_id",
+    seed=42,
+)
+```
+
+Common fields such as `audio_filepath`, `wav`, `transcription`, `sentence`,
+and `lang` are normalized to the canonical `audio`, `text`, and `language`
+contract. `ASRDataset.from_audio_folder()` pairs PCM WAV/transcript sidecars;
+`ASRDataset.from_kaldi()` imports materialized `wav.scp` plus `text`
+directories. Contracts cover CTC, speech seq2seq, prompted multimodal,
+RNN-T, TDT, and hybrid CTC/attention records. Cohere and Seamless datasets
+automatically create homogeneous language/control batches through the Trainer.
+
 Contracts distinguish `integrated-raw`, `preprocessed`, `custom`, and
 `unavailable` data readiness. Strict public helpers also cover multi-codebook
 cross-entropy, diffusion/flow target construction, masked regression, and
@@ -406,6 +431,9 @@ raw-audio inference and training graphs. SpeechBrain CRDNN, FSMN, and MarbleNet 
 also have VoiceHub-owned raw-audio and aligned-frame trainers; WebRTC and
 serving-only runtimes remain inference-only. The exact boundary is in the
 [ASR/VAD support matrix](https://kadirnar.github.io/voicehub/models/asr-vad-support/#fine-tuning-boundaries).
+Transcript-bearing ASR evaluation reports native teacher-forced `eval_loss`;
+WER/CER additionally requires model-appropriate decoding and an explicit text
+normalization policy.
 
 The common loop includes gradient accumulation and clipping, AdamW schedules,
 mixed precision, callbacks, evaluation/prediction, best-model selection,

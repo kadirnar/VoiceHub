@@ -335,7 +335,7 @@ class Qwen3ASRForSpeechRecognition(PreTrainedASRModel):
         phase: str,
     ) -> dict[str, Any]:
         """Build log-mel inputs and completion-only causal labels."""
-        import torch
+        from voicehub.processing.waveform import load_native_audio
 
         del phase
         if "input_ids" in inputs:
@@ -369,25 +369,34 @@ class Qwen3ASRForSpeechRecognition(PreTrainedASRModel):
         if audio is None:
             raise ValueError("Qwen3-ASR training records require `audio`.")
         audios = list(self._training_audio_rows(audio, batch_size=len(texts)))
-        lengths = inputs.get("audio_lengths")
-        if lengths is not None:
-            length_values = _batch_values(
-                lengths,
-                batch_size=len(audios),
-                name="audio_lengths",
-            )
-            for index, (value, length) in enumerate(zip(audios, length_values)):
-                if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
-                    raise ValueError("`audio_lengths` must contain positive integers.")
-                tensor = (value if isinstance(value, torch.Tensor) else torch.as_tensor(value))
-                if tensor.ndim != 1 or int(length) > tensor.shape[-1]:
-                    raise ValueError("`audio_lengths` exceeds a waveform's sample count.")
-                audios[index] = tensor[:int(length)]
         rates = _batch_values(
             inputs.get("sampling_rate", inputs.get("sample_rate")),
             batch_size=len(audios),
             name="sampling_rate",
         )
+        length_values = _batch_values(
+            inputs.get("audio_lengths"),
+            batch_size=len(audios),
+            name="audio_lengths",
+        )
+        for length in length_values:
+            if length is None:
+                continue
+            if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
+                raise ValueError("`audio_lengths` must contain positive integers.")
+        target_rate = processor.feature_extractor.sample_rate
+        audios = [
+            load_native_audio(
+                value,
+                sampling_rate=rate,
+                target_sampling_rate=target_rate,
+                num_samples=length,
+            ).waveform for value, rate, length in zip(
+                audios,
+                rates,
+                length_values,
+            )
+        ]
         contexts = _batch_values(
             inputs.get("context", inputs.get("prompt")),
             batch_size=len(audios),
@@ -403,7 +412,7 @@ class Qwen3ASRForSpeechRecognition(PreTrainedASRModel):
         prepared = processor.prepare_training_batch(
             tuple(audios),
             tuple(value.strip() for value in texts),
-            sampling_rates=rates,
+            sampling_rates=(target_rate, ) * len(audios),
             contexts=contexts,
             languages=languages,
         )

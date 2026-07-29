@@ -1,8 +1,8 @@
 """PyTorch-native waveform loading, normalization, and resampling.
 
 Native VoiceHub architectures use this module instead of delegating
-their input boundary to NumPy, SoundFile, librosa, or torchaudio.
-Tensor and Python sequence inputs are accepted directly.  File input
+their input boundary to NumPy, SoundFile, librosa, or torchaudio. Tensor
+and Python sequence inputs are accepted directly.  File input
 intentionally starts with the portable PCM WAVE format; additional
 codecs can be introduced as explicit VoiceHub decoders without changing
 the processor contract.
@@ -419,8 +419,14 @@ def load_native_audio(
     *,
     sampling_rate: int | None = None,
     target_sampling_rate: int | None = None,
+    num_samples: int | None = None,
 ) -> NativeAudio:
-    """Materialize audio using only the standard library and PyTorch."""
+    """Materialize audio using only the standard library and PyTorch.
+
+    ``num_samples`` trims valid samples in the source-rate domain before
+    optional resampling. This is the safe boundary for padded training
+    batches and file-backed rows carrying an explicit valid length.
+    """
     source_path: Path | None = None
     if isinstance(audio, NativeAudio):
         if (sampling_rate is not None and int(sampling_rate) != audio.sampling_rate):
@@ -458,6 +464,15 @@ def load_native_audio(
             name="target_sampling_rate",
         ))
     normalized = normalize_waveform(waveform)
+    if num_samples is not None:
+        if (isinstance(num_samples, bool) or not isinstance(num_samples, Integral)):
+            raise TypeError("`num_samples` must be an integer.")
+        valid_samples = int(num_samples)
+        if valid_samples <= 0:
+            raise ValueError("`num_samples` must be positive.")
+        if valid_samples > normalized.numel():
+            raise ValueError("`num_samples` exceeds the waveform's source sample count.")
+        normalized = normalized[:valid_samples]
     normalized = resample_waveform(
         normalized,
         source_rate,

@@ -31,6 +31,7 @@ from voicehub.checkpointing.errors import CheckpointCompatibilityError
 from voicehub.models.asr_medasr.configuration_asr_medasr import MedASRASRConfig
 from voicehub.models.asr_medasr.modeling_asr_medasr import MedASRForSpeechRecognition
 from voicehub.models.asr_medasr.training_asr_medasr import NativeMedASRTrainingAdapter
+from voicehub.processing.waveform import save_pcm_wave
 from voicehub.training.auto import AutoTrainingAdapter
 from voicehub.training.specs import get_training_spec
 
@@ -460,6 +461,33 @@ class MedASRProviderTests(unittest.TestCase):
             self.assertTrue(torch.isfinite(training_output.loss))
             training_output.loss.backward()
             self.assertIsNotNone(wrapper.model.encoder.layers[0].conv.depthwise_conv.weight.grad)
+
+            path = save_pcm_wave(
+                root / "padded.wav",
+                torch.cat((torch.zeros(160), torch.ones(160))),
+                8_000,
+            )
+            file_prepared = wrapper.prepare_training_inputs(
+                {
+                    "audio": str(path),
+                    "audio_lengths": 160,
+                    "sampling_rate": 8_000,
+                    "text": "a",
+                },
+                phase="train",
+            )
+            tensor_prepared = wrapper.prepare_training_inputs(
+                {
+                    "audio": torch.zeros(160),
+                    "sampling_rate": 8_000,
+                    "text": "a",
+                },
+                phase="train",
+            )
+            torch.testing.assert_close(
+                file_prepared["input_features"],
+                tensor_prepared["input_features"],
+            )
 
             export = root / "export"
             wrapper.export_native_pretrained(export)

@@ -210,7 +210,7 @@ and HuBERT language adapters are rejected instead of approximated.
 
 Qwen3-ASR, VibeVoice-ASR, and Granite Speech are audio-language models, not
 ordinary `automatic-speech-recognition` pipelines. All three have dedicated
-VoiceHub-native graphs rather than a generic pipeline. Qwen3-ASR owns
+VoiceHub-native graphs rather than a generic pipeline. For Qwen3-ASR,
 VoiceHub owns the three-stage convolutional audio tower, bounded-window audio
 Transformer, dense Qwen3 decoder, Qwen2 byte-BPE tokenizer, Whisper-compatible
 log-mel processor, cached generation, completion-only loss, and Safetensors
@@ -590,12 +590,79 @@ integration exists.
 
 ## Fine-tuning
 
-Transformers ASR checkpoints use the common VoiceHub training lifecycle when
-their native model exposes a differentiable loss. The supported objective
-families are CTC, speech sequence-to-sequence, prompted multimodal
-sequence-to-sequence, RNN-T, and TDT. CTC, RNN-T, and TDT keep their
-backend-native blank, alignment, and duration semantics; the generic trainer
-does not reconstruct those objectives from arbitrary logits.
+All registered trainable ASR graphs use the common VoiceHub training
+lifecycle. The public `ASRDataset` layer accepts mappings, JSON/JSONL/CSV/TSV
+manifests, WAV/transcript sidecars, and portable Kaldi `wav.scp` plus `text`
+directories. It validates the record against the selected architecture before
+the model owns audio decoding, feature extraction, tokenization, prompts, and
+the native objective.
+
+This is a complete CTC fine-tuning example:
+
+```python
+from voicehub import (
+    ASRDataset,
+    AutoModelForSpeechRecognition,
+    Trainer,
+    TrainingArguments,
+)
+
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "facebook/wav2vec2-base-960h",
+    model_type="asr_wav2vec2",
+    device="cuda",
+    lazy_load=True,
+)
+training_spec = model.validate_training_support()
+print(training_spec.family_name, training_spec.dataset_spec.architecture)
+
+corpus = ASRDataset.from_manifest(
+    "data/asr.jsonl",
+    model_type="asr_wav2vec2",
+    validate_files=True,
+)
+source_train, source_validation = corpus.train_test_split(
+    validation_fraction=0.1,
+    seed=42,
+    group_by="speaker_id",
+)
+
+trainer = Trainer(
+    model=model,
+    args=TrainingArguments(
+        output_dir="runs/wav2vec2-domain",
+        num_train_epochs=10,
+        per_device_train_batch_size=8,
+        per_device_eval_batch_size=8,
+        gradient_accumulation_steps=2,
+        learning_rate=3e-5,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+    ),
+    train_dataset=model.create_training_dataset(source_train),
+    eval_dataset=model.create_training_dataset(source_validation),
+)
+trainer.train()
+trainer.save_model("runs/wav2vec2-domain/final")
+```
+
+The same `Trainer` surface covers speech sequence-to-sequence, prompted
+multimodal sequence-to-sequence, RNN-T, TDT, and hybrid CTC/attention
+profiles. CTC, RNN-T, and TDT keep their backend-native blank, alignment, and
+duration semantics; the generic trainer does not reconstruct those objectives
+from arbitrary logits. Inspect the exact raw and prepared variants with
+`model.validate_training_support().dataset_spec` or
+`get_asr_dataset_spec(model_type)`. See the
+[ASR dataset guide](speech-data.md#build-a-validated-asrdataset) for manifest
+aliases, folder/Kaldi import, safe multilingual batching, and cached tensor
+contracts.
+
+Evaluation with transcript-bearing records reports the model's native
+teacher-forced `eval_loss`. It does not automatically claim WER: WER/CER
+requires generation or beam decoding, decoded hypotheses, and an explicit
+text-normalization policy. SpeechBrain's specialized adapter performs its
+published validation decoding and exposes corpus WER; other profiles need an
+appropriate model-specific metric/generation path when WER is required.
 
 NeMo QuartzNet, SpeechBrain CRDNN, and WeNet GigaSpeech U2++ now use complete
 VoiceHub-owned training graphs. SpeechBrain accepts raw 16 kHz audio plus
@@ -733,10 +800,51 @@ explicit training arguments above reproduce the released learning rate,
 warmup, batch size, epoch count, and gradient clipping. Change those values
 deliberately when adapting the recipe to a smaller dataset.
 
-ESPnet retains its upstream-owned training boundary. Other SenseVoice,
-SpeechBrain, or WeNet checkpoints are rejected unless their vocabulary,
-frontend, encoder, decoder, objective, and tensor contracts match a separately
-verified native graph.
+The audited ESPnet LibriSpeech Transformer-e18 profile also accepts raw audio
+or cached features through a VoiceHub-owned graph and hybrid objective. It
+preserves the published frontend, global CMVN, SpecAugment, CTC/attention
+weighting, scheduler, and decoding semantics without importing the ESPnet
+runtime. Other ESPnet, SenseVoice, SpeechBrain, or WeNet checkpoints are
+rejected unless their vocabulary, frontend, encoder, decoder, objective, and
+tensor contracts match a separately verified native graph.
+
+### Fidelity to original fine-tuning sources
+
+VoiceHub uses upstream repositories to pin record semantics, objectives, and
+recipe-specific controls, but a compatible native objective is not a claim
+that every data mixture, augmentation, optimizer step, or distributed training
+detail reproduces an unpublished author run.
+
+- The official
+  [Hugging Face Transformers speech-recognition examples](https://github.com/huggingface/transformers/tree/main/examples/pytorch/speech-recognition)
+  cover CTC and speech sequence-to-sequence fine-tuning patterns used to audit
+  the corresponding adapter boundaries. OpenAI's Whisper repository does not
+  publish an owner fine-tuning recipe, so VoiceHub's teacher-forced Whisper
+  support is an architecture-compatible native objective, not a claimed
+  reproduction of an OpenAI training program.
+- [Qwen3-ASR's official fine-tuning directory](https://github.com/QwenLM/Qwen3-ASR/tree/main/finetuning),
+  [VibeVoice-ASR's official fine-tuning directory](https://github.com/microsoft/VibeVoice/tree/main/finetuning-asr),
+  and IBM's
+  [Granite Speech fine-tuning notebook](https://github.com/ibm-granite/granite-speech-models/blob/main/notebooks/fine_tuning_granite_speech.ipynb)
+  anchor the prompted multimodal data and completion-only supervision
+  contracts.
+- NVIDIA's
+  [NeMo ASR fine-tuning guide](https://docs.nvidia.com/nemo/speech/nightly/asr/fine_tuning.html)
+  and [ASR dataset manifest guide](https://docs.nvidia.com/nemo-framework/user-guide/latest/nemotoolkit/asr/datasets.html)
+  define the source manifest and model-native ASR training boundary used when
+  auditing QuartzNet, Parakeet TDT, and related NeMo families. The
+  [Nemotron 3.5 ASR fine-tuning notebook](https://github.com/nvidia-riva/tutorials/blob/main/asr-finetune-nemotron-3.5-asr-streaming-prompt.ipynb)
+  provides the prompt-conditioned Nemotron reference.
+- The archived
+  [SeamlessM4T fine-tuning guide](https://github.com/facebookresearch/seamless_communication/blob/main/src/seamless_communication/cli/m4t/finetune/README.md)
+  anchors target-language conditioning and batching semantics.
+- SpeechBrain's
+  [LibriSpeech sequence-to-sequence recipe](https://github.com/speechbrain/speechbrain/blob/develop/recipes/LibriSpeech/ASR/seq2seq/train.py),
+  SenseVoice's
+  [fine-tuning launcher](https://github.com/QwenAudio/SenseVoice/blob/main/finetune.sh),
+  the [ESPnet repository](https://github.com/espnet/espnet), and the
+  [WeNet repository](https://github.com/wenet-e2e/wenet) are the primary
+  sources for the specialized hybrid, rich-control CTC, and U2++ adapters.
 
 See [speech data contracts](speech-data.md) and the exact
 [provider fine-tuning matrix](../models/asr-vad-support.md#fine-tuning-boundaries).

@@ -383,6 +383,32 @@ class NativeWeNetProviderTests(unittest.TestCase):
         self.assertTrue(torch.isfinite(output.loss))
         self.assertIsNotNone(wrapper.model.ctc.ctc_lo.weight.grad)
 
+    def test_collated_raw_batch_uses_per_row_rates_and_audio_lengths(self):
+        wrapper = WeNetASRForSpeechRecognition(
+            WeNetASRConfig(),
+            device="cpu",
+        )
+        wrapper.native_config = _tiny_config()
+        wrapper.model = WeNetU2PPForASR(wrapper.native_config).train()
+        wrapper.tokenizer = SimpleNamespace(encode_as_ids=lambda text: [5, 6], )
+
+        prepared = wrapper.prepare_training_inputs(
+            {
+                "audio": torch.zeros(2, 8_000),
+                "audio_lengths": torch.tensor([8_000, 4_000]),
+                "sampling_rate": torch.tensor([16_000, 16_000]),
+                "text": ["FIRST", "SECOND"],
+            },
+            phase="speech_recognition",
+        )
+
+        self.assertEqual(
+            prepared["input_signal_length"].tolist(),
+            [8_000, 4_000],
+        )
+        self.assertEqual(tuple(prepared["input_signal"].shape), (2, 8_000))
+        self.assertEqual(tuple(prepared["labels"].shape), (2, 2))
+
     def test_configuration_rejects_upstream_loader_controls(self):
         with self.assertRaisesRegex(ValueError, "model_kwargs"):
             WeNetASRConfig(model_kwargs={"gpu": 0})

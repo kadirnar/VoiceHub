@@ -1,5 +1,5 @@
 ---
-description: Fine-tune supported TTS families with native objectives, exact resume, and portable exports.
+description: Fine-tune supported TTS and ASR families with native objectives, exact resume, and portable exports.
 ---
 
 # Training
@@ -28,7 +28,13 @@ choosing a checkpoint or dataset format.
 This page's counts and examples describe TTS integrations. ASR and VAD use the
 same trainer orchestration with additional CTC, speech-seq2seq, RNN-T, TDT,
 audio-classification, frame-classification, native-ASR-dispatch, and
-upstream-native adapters. See
+upstream-native adapters. ASR fine-tuning records use `ASRDataset`, which
+loads mappings or JSON/JSONL/CSV/TSV manifests, imports WAV/transcript
+sidecars or portable Kaldi directories, validates each model's raw/prepared
+contract, and supplies safe homogeneous batches for Cohere and Seamless.
+Inspect a profile before loading weights through
+`get_training_spec(model_type).dataset_spec` or
+`get_asr_dataset_spec(model_type)`. See
 the [ASR/VAD matrix](../models/asr-vad-support.md) and
 [speech data guide](speech-data.md).
 

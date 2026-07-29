@@ -7,16 +7,25 @@ import unittest
 from pathlib import Path
 
 from voicehub import (
+    ASRDataset,
     DefaultDataCollator,
     EarlyStoppingCallback,
     IntervalStrategy,
+    ModelTrainingSpec,
+    SpeechTask,
+    SpeechTrainingOutput,
     Trainer,
     TrainerCallback,
     TrainerControl,
     TrainerState,
     TrainingArguments,
+    TrainingFamily,
+    TrainingSupport,
     TTSTrainingOutput,
 )
+from voicehub.trainer_utils import EpochRandomSampler
+from voicehub.training.adapters import BaseTrainingAdapter
+from voicehub.training.asr_datasets import EpochGroupedBatchSampler
 
 TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 
@@ -508,6 +517,195 @@ class TrainerLoopTests(unittest.TestCase):
             output = trainer.predict(dataset)
 
         self.assertEqual(output.predictions.tolist(), [[3.0], [6.0]])
+
+    def test_raw_transcripts_are_labels_only_for_asr_adapter_evaluation(self):
+        import torch
+
+        class NativeLossModel(torch.nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.scale = torch.nn.Parameter(torch.tensor(0.5))
+
+            def forward(self, input_values, labels=None):
+                logits = input_values * self.scale
+                loss = (None if labels is None else torch.nn.functional.mse_loss(logits, labels))
+                return SpeechTrainingOutput(loss=loss, logits=logits)
+
+        class RawSpeechWrapper:
+
+            def __init__(self):
+                self.model = NativeLossModel()
+
+            def load_for_training(self):
+                return self
+
+            @staticmethod
+            def prepare_training_inputs(inputs, phase=None):
+                del phase
+                transcripts = inputs["text"]
+                batch_size = (len(transcripts) if isinstance(transcripts, list) else 1)
+                return {
+                    "input_values": torch.ones(batch_size, 1),
+                    "labels": torch.zeros(batch_size, 1),
+                }
+
+        class RecordingAdapter(BaseTrainingAdapter):
+
+            def __init__(self, model, spec):
+                super().__init__(model, spec)
+                self.supervised_calls = 0
+                self.prediction_calls = 0
+
+            def execute_training_phase(self, context):
+                self.supervised_calls += 1
+                return super().execute_training_phase(context)
+
+            def execute_prediction_phase(self, context):
+                self.prediction_calls += 1
+                return super().execute_prediction_phase(context)
+
+        records = [
+            {
+                "audio": "first.wav",
+                "text": "first transcript",
+            },
+            {
+                "audio": "second.wav",
+                "text": "second transcript",
+            },
+        ]
+
+        def predict_for(task):
+            wrapper = RawSpeechWrapper()
+            spec = ModelTrainingSpec(
+                model_type=f"dummy-{task.value}",
+                family=TrainingFamily.SPEECH_SEQ2SEQ,
+                module_paths=("model", ),
+                support=TrainingSupport.NATIVE,
+                task=task,
+            )
+            adapter = RecordingAdapter(wrapper, spec)
+            trainer = Trainer(
+                model=wrapper,
+                args=TrainingArguments(
+                    per_device_eval_batch_size=2,
+                    use_cpu=True,
+                ),
+                data_collator=DefaultDataCollator(),
+                training_adapter=adapter,
+            )
+            return trainer.predict(records), adapter
+
+        asr_output, asr_adapter = predict_for(SpeechTask.AUTOMATIC_SPEECH_RECOGNITION, )
+        self.assertEqual(asr_adapter.supervised_calls, 1)
+        self.assertEqual(asr_adapter.prediction_calls, 0)
+        self.assertAlmostEqual(asr_output.metrics["test_loss"], 0.25)
+        self.assertEqual(
+            asr_output.label_ids,
+            ["first transcript", "second transcript"],
+        )
+
+        tts_output, tts_adapter = predict_for(SpeechTask.TEXT_TO_SPEECH)
+        self.assertEqual(tts_adapter.supervised_calls, 0)
+        self.assertEqual(tts_adapter.prediction_calls, 1)
+        self.assertIsNone(tts_output.label_ids)
+
+    def test_trainer_uses_resume_safe_homogeneous_asr_batch_samplers(self):
+        import torch
+
+        def cohere_records():
+            return [{
+                "id": f"{language}-{punctuation}-{index}",
+                "audio": f"{language}-{punctuation}-{index}.wav",
+                "text": "Cohere transcript.",
+                "language": language,
+                "punctuation": punctuation,
+            } for language, punctuation in (
+                ("en", True),
+                ("en", False),
+                ("tr", True),
+            ) for index in range(4)]
+
+        def seamless_records():
+            return [{
+                "id": f"{language}-{index}",
+                "audio": f"{language}-{index}.wav",
+                "text": "Seamless transcript.",
+                "target_language": language,
+            } for language in ("eng", "tur") for index in range(4)]
+
+        def trainer_for(dataset):
+            return Trainer(
+                model=torch.nn.Linear(1, 1),
+                args=TrainingArguments(
+                    per_device_train_batch_size=3,
+                    per_device_eval_batch_size=3,
+                    seed=17,
+                    data_seed=29,
+                    use_cpu=True,
+                ),
+                train_dataset=dataset,
+                eval_dataset=dataset,
+            )
+
+        def batch_ids(dataloader):
+            return [tuple(batch["id"]) for batch in dataloader]
+
+        for model_type, records in (
+            ("asr_cohere", cohere_records()),
+            ("asr_seamless_m4t_v2", seamless_records()),
+        ):
+            with self.subTest(model_type=model_type):
+                dataset = ASRDataset(records, model_type=model_type)
+                expected_groups = {
+                    record["id"]: dataset.batch_group_key(record)
+                    for record in dataset._records
+                }
+                trainer = trainer_for(dataset)
+                train_dataloader = trainer.get_train_dataloader()
+
+                self.assertIsInstance(
+                    trainer._train_sampler,
+                    EpochGroupedBatchSampler,
+                )
+                trainer._train_sampler.set_epoch(5)
+                epoch_five_batches = batch_ids(train_dataloader)
+                for ids in epoch_five_batches:
+                    self.assertEqual(
+                        len({expected_groups[item]
+                             for item in ids}),
+                        1,
+                    )
+
+                checkpoint_state = trainer._runtime_checkpoint_state()
+                self.assertEqual(checkpoint_state["sampler"]["epoch"], 5)
+
+                resumed = trainer_for(dataset)
+                resumed_dataloader = resumed.get_train_dataloader()
+                resumed._load_runtime_checkpoint_state({
+                    "sampler": checkpoint_state["sampler"],
+                })
+                self.assertEqual(
+                    batch_ids(resumed_dataloader),
+                    epoch_five_batches,
+                )
+
+                first_eval_batches = batch_ids(trainer.get_eval_dataloader(), )
+                second_eval_batches = batch_ids(trainer.get_eval_dataloader(), )
+                self.assertEqual(first_eval_batches, second_eval_batches)
+                for ids in first_eval_batches:
+                    self.assertEqual(
+                        len({expected_groups[item]
+                             for item in ids}),
+                        1,
+                    )
+
+        ordinary = trainer_for([{
+            "id": f"ordinary-{index}",
+        } for index in range(4)])
+        ordinary.get_train_dataloader()
+        self.assertIsInstance(ordinary._train_sampler, EpochRandomSampler)
 
 
 if __name__ == "__main__":

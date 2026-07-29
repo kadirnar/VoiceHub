@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Mapping, Sequence
-from numbers import Integral
+from numbers import Integral, Real
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +56,122 @@ def _batch_strings(
     if len(values) != batch_size:
         raise ValueError(f"`{name}` must contain {batch_size} values, found {len(values)}.")
     return values
+
+
+def _numeric_waveform(value: Any) -> bool:
+    return (
+        isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)) and bool(value) and
+        all(isinstance(item, Real) and not isinstance(item, bool) for item in value))
+
+
+def _batch_values(
+    value: Any,
+    *,
+    batch_size: int,
+    name: str,
+) -> tuple[Any, ...]:
+    import torch
+
+    if isinstance(value, torch.Tensor):
+        if value.ndim == 0:
+            return (value.item(), ) * batch_size
+        if value.ndim != 1:
+            raise ValueError(f"`{name}` must be scalar or one-dimensional.")
+        values = tuple(value.tolist())
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        values = tuple(value)
+    else:
+        return (value, ) * batch_size
+    if len(values) != batch_size:
+        raise ValueError(f"`{name}` must contain {batch_size} values, found {len(values)}.")
+    return values
+
+
+def _training_batch_size_hint(values: Mapping[str, Any]) -> int | None:
+    import torch
+
+    transcript = values.get("text", values.get("transcript"))
+    if isinstance(transcript, str):
+        return 1
+    if isinstance(transcript, Sequence) and not isinstance(transcript, (str, bytes, bytearray)):
+        return len(transcript)
+    labels = values.get("labels")
+    if labels is None:
+        return None
+    label_tensor = labels if isinstance(labels, torch.Tensor) else torch.as_tensor(labels)
+    if label_tensor.ndim == 1:
+        return 1
+    if label_tensor.ndim == 2:
+        return int(label_tensor.shape[0])
+    return None
+
+
+def _audio_batch(
+    value: Any,
+    *,
+    expected_batch_size: int | None = None,
+) -> tuple[Any, ...]:
+    import torch
+
+    if isinstance(value, torch.Tensor):
+        if value.ndim == 1:
+            return (value, )
+        if value.ndim == 2:
+            return tuple(value[index] for index in range(value.shape[0]))
+        raise ValueError("SenseVoice raw audio must have shape [samples] or [batch, samples].")
+    if isinstance(value, Mapping):
+        payload_name = next(
+            (name for name in ("array", "waveform", "audio", "input_values") if name in value),
+            None,
+        )
+        if payload_name is None:
+            return (value, )
+        payloads = _audio_batch(value[payload_name])
+        if expected_batch_size not in (None, 1) and len(payloads) == expected_batch_size:
+            rates = _batch_values(
+                value.get("sampling_rate", value.get("sample_rate")),
+                batch_size=expected_batch_size,
+                name="sampling_rate",
+            )
+            rows = []
+            for payload, rate in zip(payloads, rates):
+                row = dict(value)
+                row[payload_name] = payload
+                row.pop("sample_rate", None)
+                if rate is None:
+                    row.pop("sampling_rate", None)
+                else:
+                    row["sampling_rate"] = rate
+                rows.append(row)
+            return tuple(rows)
+        return (value, )
+    if _numeric_waveform(value):
+        return (value, )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        if not value:
+            raise ValueError("SenseVoice raw audio batches cannot be empty.")
+        return tuple(value)
+    if isinstance(value, (str, Path)):
+        return (value, )
+    try:
+        tensor = torch.as_tensor(value)
+    except (TypeError, ValueError, RuntimeError):
+        return (value, )
+    if tensor.ndim == 1:
+        return (value, )
+    if tensor.ndim == 2:
+        return tuple(tensor[index] for index in range(tensor.shape[0]))
+    return (value, )
+
+
+def _source_declares_sampling_rate(value: Any) -> bool:
+    from voicehub.processing.waveform import NativeAudio
+
+    if isinstance(value, (NativeAudio, str, Path)):
+        return True
+    if isinstance(value, Mapping):
+        return value.get("sampling_rate", value.get("sample_rate")) is not None
+    return False
 
 
 class FunASRForSpeechRecognition(PreTrainedASRModel):
@@ -447,6 +563,8 @@ class FunASRForSpeechRecognition(PreTrainedASRModel):
         import torch
         from torch.nn.utils.rnn import pad_sequence
 
+        from voicehub.processing.waveform import NativeAudio, load_native_audio
+
         if self.model is None:
             self.load_for_training()
         if (self.model is None or self.frontend is None or self.tokenizer is None or
@@ -475,49 +593,83 @@ class FunASRForSpeechRecognition(PreTrainedASRModel):
                         "audio_values",
                         "input_signal",
                         "audio",
+                        "audio_path",
                     ) if values.get(name) is not None),
                 None,
             )
             if audio is None:
                 raise ValueError("SenseVoice training requires `features` or raw "
-                                 "`audio_values`.")
-            audio = torch.as_tensor(audio, dtype=torch.float32)
-            if audio.ndim == 1:
-                audio = audio.unsqueeze(0)
-            if audio.ndim != 2:
-                raise ValueError("SenseVoice raw audio must have shape [batch, samples].")
-            audio_lengths = values.get(
-                "audio_lengths",
-                values.get("input_signal_length"),
+                                 "`audio`/`audio_values`.")
+            sources = _audio_batch(
+                audio,
+                expected_batch_size=_training_batch_size_hint(values),
             )
-            if audio_lengths is None:
-                audio_lengths = torch.full(
-                    (audio.shape[0], ),
-                    audio.shape[1],
-                    dtype=torch.long,
-                )
-            sampling_rates = values.get(
-                "sampling_rates",
-                values.get("sampling_rate"),
+            raw_lengths = _batch_values(
+                values.get(
+                    "audio_lengths",
+                    values.get("input_signal_length"),
+                ),
+                batch_size=len(sources),
+                name="audio_lengths",
             )
-            rates = _batch_strings(
-                sampling_rates,
-                batch_size=audio.shape[0],
+            rates = _batch_values(
+                values.get(
+                    "sampling_rates",
+                    values.get(
+                        "sampling_rate",
+                        values.get("sample_rate"),
+                    ),
+                ),
+                batch_size=len(sources),
                 name="sampling_rate",
-                default=self.native_config.sampling_rate,
             )
-            if any(isinstance(rate, bool) or not isinstance(rate, Integral) or
-                   int(rate) != self.native_config.sampling_rate for rate in rates):
-                raise ValueError(
-                    "SenseVoice raw training batches must be resampled to "
-                    f"{self.native_config.sampling_rate} Hz before collation.")
-            device = next(self.model.parameters()).device
-            audio = audio.to(device=device)
-            audio_lengths = torch.as_tensor(
-                audio_lengths,
+            waveforms = []
+            for source, raw_length, rate in zip(sources, raw_lengths, rates):
+                source_rate = rate
+                if source_rate is None and not _source_declares_sampling_rate(source):
+                    source_rate = self.native_config.sampling_rate
+                materialized = load_native_audio(
+                    source,
+                    sampling_rate=source_rate,
+                )
+                waveform = materialized.waveform
+                if raw_length is not None:
+                    if (isinstance(raw_length, bool) or not isinstance(raw_length, Integral) or
+                            raw_length <= 0):
+                        raise ValueError("`audio_lengths` must contain positive integers.")
+                    if int(raw_length) > waveform.numel():
+                        raise ValueError("`audio_lengths` exceeds a waveform's sample count.")
+                    waveform = waveform[:int(raw_length)]
+                materialized = load_native_audio(
+                    NativeAudio(
+                        waveform=waveform,
+                        sampling_rate=materialized.sampling_rate,
+                        path=materialized.path,
+                    ),
+                    target_sampling_rate=self.native_config.sampling_rate,
+                )
+                waveforms.append(materialized.waveform)
+            audio_lengths = torch.tensor(
+                [waveform.numel() for waveform in waveforms],
                 dtype=torch.long,
-                device=device,
             )
+            audio = pad_sequence(
+                waveforms,
+                batch_first=True,
+                padding_value=0.0,
+            )
+            expected_batch_size = _training_batch_size_hint(values)
+            if (expected_batch_size is not None and expected_batch_size != audio.shape[0]):
+                raise ValueError(
+                    "SenseVoice raw training requires one waveform per transcript "
+                    f"or label row; found {audio.shape[0]} waveforms for "
+                    f"{expected_batch_size} targets.")
+            device = next(self.model.parameters()).device
+            audio = audio.to(
+                device=device,
+                dtype=torch.float32,
+            )
+            audio_lengths = audio_lengths.to(device=device)
             self.frontend.train()
             features, feature_lengths = self.frontend(
                 audio,

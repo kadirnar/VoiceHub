@@ -43,10 +43,12 @@ from voicehub.architectures.espnet_transformer.modeling import (
 )
 from voicehub.architectures.espnet_transformer.registration import create_espnet_architecture_spec
 from voicehub.architectures.espnet_transformer.tokenization import ESPnetLibriSpeechTokenizer
+from voicehub.architectures.espnet_transformer.training import NativeESPnetASRTrainingAdapter
 from voicehub.checkpointing import SafeTensorReader, save_safetensors
 from voicehub.hub import write_json_file
 from voicehub.models.asr_native.configuration import ESPnetASRConfig
 from voicehub.models.asr_native.espnet import ESPnetASRForSpeechRecognition
+from voicehub.training import ASRDataset, get_training_spec
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -512,6 +514,38 @@ class NativeESPnetArtifactTests(unittest.TestCase):
 
 
 class NativeESPnetWrapperTests(unittest.TestCase):
+
+    def test_prebuilt_asr_dataset_preserves_lazy_transform_fingerprint(self):
+        transform_calls = []
+
+        def transform(record):
+            transform_calls.append(record["text"])
+            return record
+
+        dataset = ASRDataset(
+            [{
+                "audio": "clip.wav",
+                "text": "Lazy transcript.",
+            }],
+            model_type="asr_espnet",
+            transform=transform,
+            transform_fingerprint="espnet-normalization-v1",
+        )
+        adapter = NativeESPnetASRTrainingAdapter(
+            object(),
+            get_training_spec("asr_espnet"),
+        )
+
+        prepared = adapter.create_dataset(dataset)
+
+        self.assertIs(prepared, dataset)
+        self.assertEqual(transform_calls, [])
+        self.assertEqual(
+            prepared.resume_fingerprint()["transform_fingerprint"],
+            "espnet-normalization-v1",
+        )
+        self.assertEqual(prepared[0]["text"], "Lazy transcript.")
+        self.assertEqual(transform_calls, ["Lazy transcript."])
 
     def test_inference_contract_rejects_unverified_features(self):
         validator = ESPnetASRForSpeechRecognition._validate_inference_request

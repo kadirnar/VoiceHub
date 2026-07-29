@@ -116,6 +116,29 @@ class NativeWaveformTests(unittest.TestCase):
                 sampling_rate=16_000,
             )
 
+    def test_valid_sample_prefix_is_trimmed_before_resampling_for_files(self):
+        source = torch.linspace(-0.5, 0.5, 80)
+        with tempfile.TemporaryDirectory() as directory:
+            path = save_pcm_wave(
+                Path(directory) / "trimmed.wav",
+                source,
+                8_000,
+            )
+            restored = load_native_audio(
+                path,
+                num_samples=40,
+                target_sampling_rate=16_000,
+            )
+            with self.assertRaisesRegex(ValueError, "exceeds"):
+                load_native_audio(
+                    path,
+                    num_samples=81,
+                    target_sampling_rate=16_000,
+                )
+
+        self.assertEqual(restored.sampling_rate, 16_000)
+        self.assertEqual(restored.waveform.numel(), 80)
+
     def test_unsupported_file_formats_fail_explicitly(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "audio.mp3"

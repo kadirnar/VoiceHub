@@ -391,7 +391,19 @@ class NeMoASRForSpeechRecognition(PreTrainedASRModel):
         from voicehub.processing.waveform import load_native_audio
 
         del phase
-        if "processed_signal" in inputs and "labels" in inputs:
+        raw_ready = {
+            "input_signal",
+            "input_signal_length",
+            "labels",
+            "label_lengths",
+        }
+        feature_ready = {
+            "processed_signal",
+            "processed_signal_length",
+            "labels",
+            "label_lengths",
+        }
+        if raw_ready <= set(inputs) or feature_ready <= set(inputs):
             return dict(inputs)
         if self.model is None:
             self.load_for_training()
@@ -423,23 +435,15 @@ class NeMoASRForSpeechRecognition(PreTrainedASRModel):
         if len(audio_values) != len(texts):
             raise ValueError("NeMo training requires one transcript per waveform.")
 
-        raw_lengths = inputs.get("audio_lengths")
-        if raw_lengths is not None:
-            lengths = _batch_values(
-                raw_lengths,
-                batch_size=len(audio_values),
-                name="audio_lengths",
-            )
-            trimmed = []
-            for value, length in zip(audio_values, lengths):
-                if (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0):
-                    raise ValueError("`audio_lengths` must contain positive integers.")
-                tensor = value if isinstance(value, torch.Tensor) else torch.as_tensor(value)
-                if tensor.ndim != 1 or int(length) > tensor.shape[-1]:
-                    raise ValueError("`audio_lengths` exceeds a waveform's sample count.")
-                trimmed.append(tensor[:int(length)])
-            audio_values = tuple(trimmed)
-
+        lengths = _batch_values(
+            inputs.get("audio_lengths"),
+            batch_size=len(audio_values),
+            name="audio_lengths",
+        )
+        if any(length is not None and
+               (isinstance(length, bool) or not isinstance(length, Integral) or length <= 0)
+               for length in lengths):
+            raise ValueError("`audio_lengths` must contain positive integers.")
         rates = _batch_values(
             inputs.get("sampling_rate", inputs.get("sample_rate")),
             batch_size=len(audio_values),
@@ -450,7 +454,12 @@ class NeMoASRForSpeechRecognition(PreTrainedASRModel):
                 value,
                 sampling_rate=rate,
                 target_sampling_rate=self.native_config.sampling_rate,
-            ).waveform for value, rate in zip(audio_values, rates))
+                num_samples=(None if length is None else int(length)),
+            ).waveform for value, rate, length in zip(
+                audio_values,
+                rates,
+                lengths,
+            ))
         minimum = self.native_config.minimum_input_samples
         waveforms = tuple(
             torch.nn.functional.pad(

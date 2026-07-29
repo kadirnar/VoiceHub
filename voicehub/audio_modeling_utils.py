@@ -539,6 +539,39 @@ class PreTrainedASRModel(PreTrainedAudioModel, ABC):
 
     inference_config_class = ASRInferenceConfig
     output_type = ASROutput
+
+    def create_training_dataset(self, records, **kwargs):
+        """Build a model-aware ASR fine-tuning dataset.
+
+        ``records`` may be mappings, an :class:`ASRDataset`, or a
+        JSON/JSONL/CSV/TSV manifest path. Common upstream fields such as
+        ``audio_filepath``, ``wav``, ``transcription``, and ``sentence``
+        are normalized before the model-specific adapter constructs
+        features and targets.
+        """
+        from voicehub.training.datasets import ASRDataset, SpeechDataset
+
+        data_root = kwargs.pop("data_root", None)
+        data_aliases = kwargs.pop("data_aliases", None)
+        validate_records = kwargs.pop("validate_records", None)
+        validate_audio_files = kwargs.pop("validate_audio_files", False)
+        should_coerce = not isinstance(records, SpeechDataset)
+        should_coerce = should_coerce or isinstance(records, ASRDataset)
+        should_coerce = should_coerce or validate_records is not None
+        should_coerce = should_coerce or data_root is not None
+        should_coerce = should_coerce or data_aliases is not None
+        should_coerce = should_coerce or bool(validate_audio_files)
+        if should_coerce:
+            records = ASRDataset.coerce(
+                records,
+                model_type=self.config.model_type,
+                root=data_root,
+                aliases=data_aliases,
+                validate=(True if validate_records is None else bool(validate_records)),
+                validate_files=bool(validate_audio_files),
+            )
+        return self.get_training_adapter().create_dataset(records, **kwargs)
+
     base_model_prefix = "asr_model"
 
     @abstractmethod

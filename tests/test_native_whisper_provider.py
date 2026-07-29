@@ -23,6 +23,7 @@ from voicehub.models.asr_whisper_native import (
     WhisperASRConfig,
     WhisperForSpeechRecognition,
 )
+from voicehub.processing.waveform import save_pcm_wave
 from voicehub.tokenization import encode_gpt2_token
 from voicehub.training.auto import AutoTrainingAdapter
 
@@ -260,6 +261,85 @@ print(json.dumps({name: name in sys.modules for name in names}))
         self.assertEqual(result.segments[0].end, 0.04)
         self.assertEqual(tuple(fake.features.shape), (1, 4, 8))
         self.assertTrue(fake.config.return_timestamps)
+
+    def test_training_prepares_collated_paths_waveforms_and_row_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _tiny_artifact(root)
+            audio_path = save_pcm_wave(
+                root / "sample.wav",
+                torch.zeros(400),
+                8_000,
+            )
+            wrapper = WhisperForSpeechRecognition(
+                WhisperASRConfig(name_or_path=root),
+                device="cpu",
+            )
+            wrapper.load_for_training()
+
+            prepared = wrapper.prepare_training_inputs(
+                {
+                    "audio": [
+                        audio_path,
+                        torch.cat((torch.zeros(400), torch.ones(300))),
+                    ],
+                    "audio_lengths": torch.tensor([400, 400]),
+                    "sampling_rate": torch.tensor([8_000, 16_000]),
+                    "text": ["hello", "hello hello"],
+                    "language": ["en", "de"],
+                    "task": ["transcribe", "translate"],
+                },
+                phase="speech_recognition",
+            )
+
+            self.assertEqual(tuple(prepared["input_features"].shape), (2, 4, 8))
+            self.assertEqual(tuple(prepared["labels"].shape), (2, 7))
+            self.assertEqual(
+                prepared["labels"][0].tolist(),
+                [263, 267, 271, 259, 261, -100, -100],
+            )
+            self.assertEqual(
+                prepared["labels"][1].tolist(),
+                [265, 266, 271, 259, 32, 259, 261],
+            )
+            output = wrapper.model(
+                prepared["input_features"],
+                labels=prepared["labels"],
+            )
+            self.assertTrue(torch.isfinite(output.loss))
+
+            with self.assertRaisesRegex(
+                    ValueError,
+                    r"row 1.*audio_lengths.*exceeds",
+            ):
+                wrapper.prepare_training_inputs(
+                    {
+                        "audio": torch.zeros(2, 800),
+                        "audio_lengths": [800, 801],
+                        "sampling_rate": 16_000,
+                        "text": ["hello", "hello"],
+                    },
+                    phase="speech_recognition",
+                )
+            with self.assertRaisesRegex(ValueError, r"row 1.*audio context"):
+                wrapper.prepare_training_inputs(
+                    {
+                        "audio": torch.zeros(2, 1_281),
+                        "audio_lengths": [800, 1_281],
+                        "sampling_rate": 16_000,
+                        "text": ["hello", "hello"],
+                    },
+                    phase="speech_recognition",
+                )
+            with self.assertRaisesRegex(ValueError, r"row 1.*decoder context"):
+                wrapper.prepare_training_inputs(
+                    {
+                        "audio": torch.zeros(2, 800),
+                        "sampling_rate": 16_000,
+                        "text": ["hello", "hello " * 20],
+                    },
+                    phase="speech_recognition",
+                )
 
     def test_training_adapter_exports_reloadable_native_artifact(self):
         with tempfile.TemporaryDirectory() as directory:
