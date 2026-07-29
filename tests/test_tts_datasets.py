@@ -836,11 +836,13 @@ class TTSDatasetManifestTests(unittest.TestCase):
                 architecture="vits",
             )
             manifest = dataset.to_jsonl(root / "prepared.jsonl")
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
             restored = TTSDataset.from_manifest(
                 manifest,
                 architecture="vits",
             )
 
+        self.assertEqual(payload["audio"], "audio.wav")
         self.assertEqual(restored[0]["audio"], str(audio.resolve()))
         self.assertEqual(restored[0]["text"], "Hello")
 

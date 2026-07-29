@@ -3,6 +3,8 @@
 FISH_SPEECH_SOURCE = "https://github.com/fishaudio/fish-speech"
 FISH_SPEECH_SOURCE_REVISION = ("e5e292632cb11e7a27b2b7487f58f612bc101e13")
 FISH_SPEECH_SOURCE_LICENSE = "Fish-Audio-Research-License"
+# SHA-256 of the UTF-8 license bytes with CRLF normalized to LF. This keeps
+# provenance stable across Git checkouts without ignoring textual changes.
 FISH_SPEECH_SOURCE_LICENSE_SHA256 = ("aa7d9206e9d710590987a3636934f643529c00cd490323594e6206aaa0c32d80")
 
 FISH_S2_CHECKPOINT = "fishaudio/s2-pro"

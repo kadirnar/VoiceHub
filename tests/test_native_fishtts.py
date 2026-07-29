@@ -310,7 +310,9 @@ class NativeFishDependencyTests(unittest.TestCase):
             source["license_obligations"]["attribution"],
             FISH_ATTRIBUTION,
         )
-        digest = hashlib.sha256((directory / "THIRD_PARTY_LICENSE").read_bytes()).hexdigest()
+        license_bytes = (directory / "THIRD_PARTY_LICENSE").read_bytes()
+        canonical_license_bytes = license_bytes.replace(b"\r\n", b"\n")
+        digest = hashlib.sha256(canonical_license_bytes).hexdigest()
         self.assertEqual(digest, FISH_SPEECH_SOURCE_LICENSE_SHA256)
 
 

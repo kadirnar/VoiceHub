@@ -398,7 +398,10 @@ def load_styletts2_config(path: str | Path | None, ) -> StyleTTS2ArchitectureCon
         return StyleTTS2ArchitectureConfig.from_dict(values)
     if source.suffix.lower() not in {".yaml", ".yml"}:
         raise ValueError("StyleTTS 2 config must be JSON or pinned YAML.")
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    # Git may materialize tracked text files with CRLF on Windows. Pin the
+    # configuration content rather than the checkout's newline convention.
+    canonical_bytes = source.read_bytes().replace(b"\r\n", b"\n")
+    digest = hashlib.sha256(canonical_bytes).hexdigest()
     if digest not in STYLETTS2_LEGACY_CONFIG_SHA256:
         raise ValueError(
             "Unpinned YAML cannot be interpreted without a YAML runtime. "

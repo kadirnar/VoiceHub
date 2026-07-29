@@ -407,6 +407,18 @@ class NativeToolkitInferenceTests(unittest.TestCase):
             model.load()
         self.assertNotIn("nemo", sys.modules)
 
+    def test_speechbrain_cache_path_round_trip_stays_portable(self):
+        config = SpeechBrainASRConfig(savedir=Path("cache") / "speechbrain", )
+
+        serialized = config.to_dict()
+        restored = SpeechBrainASRConfig.from_dict(serialized)
+
+        self.assertEqual(config.cache_dir, "cache/speechbrain")
+        self.assertEqual(config.savedir, "cache/speechbrain")
+        self.assertEqual(restored.cache_dir, "cache/speechbrain")
+        self.assertEqual(restored.savedir, "cache/speechbrain")
+        self.assertEqual(restored.to_dict(), serialized)
+
     def test_speechbrain_uses_native_beam_search_and_training_boundaries(self):
         model = SpeechBrainASRForSpeechRecognition(
             SpeechBrainASRConfig(savedir="cache/speechbrain"),

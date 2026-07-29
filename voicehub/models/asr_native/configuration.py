@@ -469,14 +469,14 @@ class SpeechBrainASRConfig(_NativeASRConfig):
         if savedir is not None and not isinstance(savedir, (str, Path)):
             raise TypeError("`savedir` must be a string, Path, or None.")
         if savedir is not None:
-            normalized_savedir = str(Path(savedir).expanduser())
-            if (cache_dir is not None and str(Path(cache_dir).expanduser()) != normalized_savedir):
+            normalized_savedir = Path(savedir).expanduser().as_posix()
+            if (cache_dir is not None and Path(cache_dir).expanduser().as_posix() != normalized_savedir):
                 raise ValueError(
                     "`savedir` is a deprecated alias for `cache_dir`; pass "
                     "only one cache location.")
             cache_dir = normalized_savedir
         if cache_dir is not None:
-            cache_dir = str(Path(cache_dir).expanduser())
+            cache_dir = Path(cache_dir).expanduser().as_posix()
         if not isinstance(local_files_only, bool):
             raise TypeError("`local_files_only` must be a boolean.")
         if sample_rate != 16_000:
@@ -502,7 +502,7 @@ class SpeechBrainASRConfig(_NativeASRConfig):
             training_max_duration_s=float(training_max_duration_s),
             training_uppercase_transcripts=True,
             hparams_file="hyperparams.yaml",
-            savedir=None if savedir is None else str(Path(savedir).expanduser()),
+            savedir=None if savedir is None else Path(savedir).expanduser().as_posix(),
             overrides={},
             model_kwargs={},
             sample_rate=sample_rate,

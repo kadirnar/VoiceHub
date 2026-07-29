@@ -234,6 +234,18 @@ class NativeStyleTTS2Tests(unittest.TestCase):
             config,
         )
 
+    def test_pinned_yaml_digest_is_independent_of_checkout_newlines(self):
+        config_path = (
+            ROOT / "voicehub" / "models" / "styletts2" / "source" / "styletts2" / "Configs" /
+            "config_libritts.yml")
+        with tempfile.TemporaryDirectory() as directory:
+            windows_copy = Path(directory) / "config.yml"
+            source = config_path.read_bytes().replace(b"\r\n", b"\n")
+            windows_copy.write_bytes(source.replace(b"\n", b"\r\n"))
+            config = load_styletts2_config(windows_copy)
+        self.assertTrue(config.multispeaker)
+        self.assertEqual(config.decoder.type, "hifigan")
+
     def test_frontend_requires_explicit_phonemes(self):
         frontend = NativeStyleTTS2Frontend()
         self.assertEqual(len(STYLETTS2_SYMBOLS), 178)

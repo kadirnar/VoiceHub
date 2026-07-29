@@ -322,7 +322,7 @@ class NativeSpeechT5ProcessorTests(unittest.TestCase):
         TRANSFORMERS_AVAILABLE,
         "Transformers is an optional audit oracle",
     )
-    def test_log_mel_frontend_matches_the_pinned_reference_equation(self):
+    def test_log_mel_frontend_matches_the_pinned_reference_within_float32_roundoff(self):
         from transformers import SpeechT5FeatureExtractor as ReferenceExtractor
 
         waveform = torch.linspace(-0.2, 0.3, 16_000).sin()
@@ -331,7 +331,12 @@ class NativeSpeechT5ProcessorTests(unittest.TestCase):
             sampling_rate=16_000,
         )
         reference = torch.from_numpy(ReferenceExtractor()._extract_mel_features(waveform.numpy()))
-        torch.testing.assert_close(actual, reference, rtol=0.0, atol=0.0)
+        # Windows and Unix numerical backends can round a handful of log-mel
+        # values differently by one float32 ULP at this output magnitude.
+        # Keep relative tolerance disabled so the absolute roundoff boundary
+        # remains explicit and still catches meaningful frontend drift.
+        roundoff = 4 * torch.finfo(torch.float32).eps
+        torch.testing.assert_close(actual, reference, rtol=0.0, atol=roundoff)
 
 
 @unittest.skipUnless(

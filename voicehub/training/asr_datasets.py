@@ -832,9 +832,9 @@ class ASRDataset(SpeechDataset):
             return field_value
         path = Path(field_value).expanduser()
         if not path.is_absolute():
-            return str(path)
+            return path.as_posix()
         try:
-            return str(path.relative_to(relative_to))
+            return path.relative_to(relative_to).as_posix()
         except ValueError:
             return str(path)
 
