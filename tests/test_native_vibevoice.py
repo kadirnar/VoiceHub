@@ -19,7 +19,7 @@ from voicehub.architectures.vibevoice.configuration import (
     VibeVoiceLegacyTokenizerConfig,
     VibeVoiceTTSConfig,
 )
-from voicehub.architectures.vibevoice.diffusion import VibeVoiceDPMSolver
+from voicehub.architectures.vibevoice.diffusion import VibeVoiceDiffusionHead, VibeVoiceDPMSolver
 from voicehub.architectures.vibevoice.metadata import (
     VIBEVOICE_ASR_REPOSITORY,
     VIBEVOICE_CHECKPOINTS,
@@ -43,6 +43,7 @@ from voicehub.models.asr_vibevoice import VibeVoiceASRConfig as ProviderConfig
 from voicehub.models.asr_vibevoice import VibeVoiceForSpeechRecognition
 from voicehub.models.asr_vibevoice.training_asr_vibevoice import NativeVibeVoiceASRTrainingAdapter
 from voicehub.models.vibevoice import VibeVoiceForTextToSpeech
+from voicehub.optimization.diffusion_sampling import DiffusionSamplingConfig, DiffusionSamplingMixin
 from voicehub.tokenization.assets import encode_gpt2_token
 from voicehub.training import AutoTrainingAdapter, get_training_spec
 
@@ -440,6 +441,14 @@ class NativeVibeVoiceTests(unittest.TestCase):
         self.assertTrue(tts.capabilities.training)
         self.assertFalse(tts.capabilities.streaming)
         self.assertIn(
+            "diffusion-sampling",
+            tts.capabilities.optimization_passes,
+        )
+        self.assertIn(
+            "diffusion-sampling-prediction-cache",
+            tts.capabilities.features,
+        )
+        self.assertIn(
             "high-level-realtime-generation-fails-closed",
             tts.capabilities.features,
         )
@@ -518,6 +527,114 @@ class NativeVibeVoiceTests(unittest.TestCase):
             atol=1e-6,
             rtol=1e-6,
         )
+
+    def test_realtime_diffusion_sampling_rebuilds_dpm_history_and_narrows_cfg(self, ):
+        model = VibeVoiceRealtimeForConditionalGeneration(_realtime_config()).eval()
+        head = model.model.prediction_head
+        self.assertIsInstance(head, DiffusionSamplingMixin)
+        head.enable_diffusion_sampling(
+            DiffusionSamplingConfig(
+                target_steps=2,
+                guidance="limited_interval",
+                guidance_start=0.0,
+                guidance_end=0.0,
+            ))
+        batch_sizes: list[int] = []
+        hook = head.register_forward_hook(
+            lambda _module, arguments, _output: batch_sizes.append(arguments[0].shape[0]))
+        condition = torch.randn(1, 8)
+        negative_condition = torch.randn(1, 8)
+        try:
+            first = model.sample_speech_latents(
+                condition,
+                negative_condition,
+                inference_steps=4,
+                generator=torch.Generator().manual_seed(17),
+            )
+            self.assertEqual(batch_sizes, [2, 1])
+            self.assertEqual(
+                model.model.noise_scheduler.timesteps.tolist(),
+                [9, 4],
+            )
+            self.assertEqual(model.model.noise_scheduler._step_index, 2)
+            stats = head.diffusion_sampling_stats()
+            self.assertEqual(stats["native_steps"], 4)
+            self.assertEqual(stats["prepared_steps"], 2)
+            self.assertEqual(stats["model_calls"], 2)
+            self.assertEqual(stats["guidance_calls"], 1)
+            self.assertEqual(stats["guidance_skips"], 1)
+
+            batch_sizes.clear()
+            second = model.sample_speech_latents(
+                condition,
+                negative_condition,
+                inference_steps=4,
+                generator=torch.Generator().manual_seed(17),
+            )
+        finally:
+            hook.remove()
+        torch.testing.assert_close(first, second)
+        self.assertEqual(batch_sizes, [2, 1])
+        self.assertEqual(model.model.noise_scheduler._step_index, 2)
+
+    def test_realtime_prediction_cache_preserves_every_dpm_step(self):
+        model = VibeVoiceRealtimeForConditionalGeneration(_realtime_config()).eval()
+        head = model.model.prediction_head
+        head.enable_diffusion_sampling(
+            DiffusionSamplingConfig(
+                prediction_cache="fora",
+                cache_interval=2,
+                cache_warmup_steps=0,
+            ))
+        batch_sizes: list[int] = []
+        hook = head.register_forward_hook(
+            lambda _module, arguments, _output: batch_sizes.append(arguments[0].shape[0]))
+        try:
+            sampled = model.sample_speech_latents(
+                torch.randn(1, 8),
+                torch.randn(1, 8),
+                guidance_scale=1.0,
+                inference_steps=4,
+                generator=torch.Generator().manual_seed(23),
+            )
+        finally:
+            hook.remove()
+        self.assertEqual(sampled.shape, (1, 2))
+        self.assertEqual(batch_sizes, [1, 1])
+        self.assertEqual(model.model.noise_scheduler._step_index, 4)
+        stats = head.diffusion_sampling_stats()
+        self.assertEqual(stats["model_calls"], 2)
+        self.assertEqual(stats["predicted_calls"], 2)
+
+    def test_realtime_nonuniform_schedule_rebuilds_dpm_sigma_grid(self):
+        model = VibeVoiceRealtimeForConditionalGeneration(_realtime_config()).eval()
+        model.model.prediction_head.enable_diffusion_sampling(
+            DiffusionSamplingConfig(
+                target_steps=2,
+                schedule="quadratic",
+            ))
+        model.sample_speech_latents(
+            torch.randn(1, 8),
+            torch.randn(1, 8),
+            guidance_scale=1.0,
+            inference_steps=4,
+            generator=torch.Generator().manual_seed(29),
+        )
+        solver = model.model.noise_scheduler
+        self.assertEqual(solver.timesteps.tolist(), [9, 6])
+        torch.testing.assert_close(
+            solver.sigmas[:-1],
+            solver.training_sigmas[torch.tensor([9, 6])],
+        )
+        self.assertEqual(solver._step_index, 2)
+
+    def test_vibevoice_rejects_direct_velocity_stork_solver(self):
+        head = VibeVoiceDiffusionHead(_diffusion_config())
+        with self.assertRaisesRegex(
+                ValueError,
+                "stork2",
+        ):
+            head.enable_diffusion_sampling(DiffusionSamplingConfig(solver="stork2"))
 
     def test_realtime_graph_exposes_stages_but_rejects_training_forward(self):
         model = VibeVoiceRealtimeForConditionalGeneration(_realtime_config())

@@ -45,7 +45,7 @@ such as flow matching plus HiFT, rather than a single `decode()` method.
 | Native codec family | LLM-TTS model types | Representation | Encoder / bottleneck / decoder | Available optimization surfaces |
 | --- | --- | --- | --- | --- |
 | SNAC 24 kHz | `orpheustts` | Hierarchical discrete | Native / native / native | Compile, CUDA Graph, Snake |
-| DAC | `dia`, `outetts`, `parlertts`, `zonos`, `zonos2` | Dense discrete | Native / native / native | Compile, CUDA Graph, Snake |
+| DAC | `dia`, `outetts`, `parlertts`, `zonos`, `zonos2` | Dense discrete | Native / native / native | Compile, CUDA Graph, Snake, CuTe VQ search |
 | EnCodec | `bark` | Dense discrete | Native / native / native | Compile, decoder-only CUDA Graph |
 | Mimi | `csm`, `conversationtts` | Dense discrete | Native / native / native | Compile, CUDA Graph |
 | XCodec2 | `llasa` | Dense discrete | Native / native / native | Compile, CUDA Graph, SnakeBeta |
@@ -317,27 +317,66 @@ autograd support. PyTorch documents the required operator surface in its
 
 An architecture-owned codec block can expose:
 
-- `set_kernel_backend(backend)`;
-- a current `kernel_backend` value;
-- optional `resolve_kernel_backend(backend, device, dtype)` capability
+- `set_codec_kernel_backend(backend)`;
+- a current `codec_kernel_backend` value;
+- optional `resolve_codec_kernel_backend(backend, device, dtype)` capability
   resolution; and
-- `supported_kernel_operations`.
+- `supported_kernel_operations` plus `supported_codec_kernel_backends`.
 
-When this protocol is present, the plan places `CustomKernelPass` before
+When this protocol is present, the plan places `CodecKernelPass` before
 `TorchCompilePass`. The compiler therefore captures the already resolved
-operation. Current codec Snake and independent-frequency/magnitude SnakeBeta
+operation. The pass is codec-scoped and cannot configure a diffusion or
+language-model block that happens to expose the older generic selector.
+Routing is operation-specific: a single DAC plan may select CuTe for vector
+quantization while retaining Torch for Snake.
+
+Current codec Snake and independent-frequency/magnitude SnakeBeta
 implementations preserve the native periodic formulas and gradients with
-Torch, Triton, and CUDA-extension routes.
+Torch, Triton, and CUDA-extension routes. DAC vector quantizers additionally
+implement `audio.codec.euclidean_vq_search`. Its CuTe route sends the
+similarity GEMM through NVIDIA's CUTLASS Operator API, caches the compiled CuTe
+DSL artifact per shape/layout/SM, and performs the norm correction and
+nearest-index reduction in PyTorch. Only the discrete lookup is replaced;
+embedding lookup, commitment/codebook losses, and the straight-through
+gradient path remain native.
+
+CuTe is an explicit optional backend:
+
+```bash
+python -m pip install "nvidia-cutlass-operators[torch]"
+```
+
+```python
+config = CodecOptimizationConfig(
+    policy="relaxed",
+    kernel_backend="cute",
+    compile=False,
+)
+plan = config.resolve(codec, context=cuda_context)
+optimized = plan.apply(codec)
+```
+
+VoiceHub validates Linux, CUDA, the CuTe DSL, the Operator API GEMM interfaces,
+and the active tensor contract. If CUTLASS exposes no compatible operator for
+the GPU architecture, dtype, shape, or layout, the explicit request fails;
+there is no silent Torch fallback for the VQ operation. Importing VoiceHub
+does not import CUTLASS or compile a kernel. NVIDIA documents the
+[`GemmArguments` discovery and compile/run contract](https://docs.nvidia.com/cutlass/latest/media/docs/operators/tutorials/000_gemm.html).
+CUDA Graph capture must retain at least one warmup call so the CuTe artifact is
+compiled before capture; the default `warmup_steps=3` already satisfies this
+constraint.
 
 The exact policy pins these periodic activations to the PyTorch reference.
 Triton `tl.sin` and CUDA fast-math can differ numerically, so selecting either
 accelerator requires `policy="relaxed"` or `policy="approximate"`. With a
 relaxed automatic policy, capability resolution still retains Torch when an
-accelerator implementation is unavailable.
+accelerator implementation is unavailable. Explicit CuTe also requires a
+relaxed or approximate policy because GEMM rounding can change the selected
+code only for vectors at a nearest-neighbor boundary.
 
 If a codec has no selector protocol, `kernel_backend="auto"` leaves the native
-graph untouched. An explicit unsupported Triton or CUDA-extension request
-fails instead of pretending an optimization was applied. PyTorch's official
+graph untouched. An explicit backend with no supported codec operation fails
+instead of pretending an optimization was applied. PyTorch's official
 [user-defined Triton kernel guide](https://docs.pytorch.org/tutorials/recipes/torch_compile_user_defined_triton_kernel_tutorial.html)
 explains how custom kernels participate in `torch.compile`.
 

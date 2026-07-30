@@ -19,12 +19,9 @@ from voicehub.architectures.styletts2.frontend import (
     load_style_reference,
 )
 from voicehub.architectures.styletts2.modeling import DEPLOYABLE_STYLETTS2_COMPONENTS, build_styletts2_model
-from voicehub.models.styletts2.source.styletts2.Modules.diffusion.sampler import (
-    ADPM2Sampler,
-    DiffusionSampler,
-    KarrasSchedule,
-)
-from voicehub.optimization.protocols import OptimizationCompileTarget
+from voicehub.architectures.styletts2.sampling import StyleTTS2DiffusionSampler
+from voicehub.models.styletts2.source.styletts2.Modules.diffusion.sampler import ADPM2Sampler, KarrasSchedule
+from voicehub.optimization.protocols import OptimizationCompileTarget, OptimizationModuleRoot
 
 
 class StyleTTS2Runtime:
@@ -95,7 +92,7 @@ class StyleTTS2Runtime:
                 self.model.to(device=self.device, dtype=dtype)
         self.to_mel.to(device=self.device)
         self.eval()
-        self.sampler = DiffusionSampler(
+        self.sampler = StyleTTS2DiffusionSampler(
             self.model.diffusion.diffusion,
             sampler=ADPM2Sampler(),
             sigma_schedule=KarrasSchedule(
@@ -104,6 +101,13 @@ class StyleTTS2Runtime:
                 rho=9.0,
             ),
             clamp=False,
+        )
+
+    def optimization_module_roots(self, ) -> tuple[OptimizationModuleRoot, ...]:
+        """Expose the model and the separate sampler policy module."""
+        return (
+            OptimizationModuleRoot("model", self.model),
+            OptimizationModuleRoot("sampler", self.sampler),
         )
 
     def optimization_compile_targets(

@@ -20,7 +20,7 @@ from voicehub.components.audio.codecs.base import (
     separate_audio_codec,
 )
 from voicehub.components.audio.codecs.dac.model.dac import DAC
-from voicehub.kernels import KernelBackend
+from voicehub.kernels import KernelBackend, cute_dsl_capability
 from voicehub.models.chatterbox.models.s3gen.s3gen import S3Token2Wav
 from voicehub.models.chatterbox.models.s3tokenizer.model_v2 import S3TokenizerV2
 from voicehub.models.csm.source.moshi.models.compression import MimiModel
@@ -29,6 +29,9 @@ from voicehub.optimization.capabilities import OptimizationContext
 from voicehub.optimization.codecs import (
     CodecCompileComponent,
     CodecCUDAGraphCaptureError,
+    CodecKernelBackend,
+    CodecKernelPass,
+    CodecOptimizationCompatibilityError,
     CodecOptimizationConfig,
     CodecOptimizationPolicy,
     capture_codec_cuda_graph,
@@ -57,7 +60,12 @@ class _TinyCodec(nn.Module):
 
 class _KernelBlock(nn.Module):
 
-    supported_kernel_operations = ("codec.test", )
+    supported_kernel_operations = ("audio.codec.test", )
+    supported_codec_kernel_backends = (
+        CodecKernelBackend.TORCH,
+        CodecKernelBackend.TRITON,
+        CodecKernelBackend.CUDA_EXTENSION,
+    )
 
     def __init__(self) -> None:
         super().__init__()
@@ -72,6 +80,23 @@ class _KernelBlock(nn.Module):
         backend = KernelBackend.coerce(backend)
         return KernelBackend.TORCH if backend is KernelBackend.AUTO else backend
 
+    @property
+    def codec_kernel_backend(self):
+        return CodecKernelBackend.coerce(self.kernel_backend)
+
+    def set_codec_kernel_backend(self, backend):
+        backend = CodecKernelBackend.coerce(backend)
+        self.set_kernel_backend(backend.generic_backend())
+
+    def resolve_codec_kernel_backend(self, backend, *, device, dtype):
+        backend = CodecKernelBackend.coerce(backend)
+        return CodecKernelBackend.coerce(
+            self.resolve_kernel_backend(
+                backend.generic_backend(),
+                device=device,
+                dtype=dtype,
+            ))
+
     def forward(self, value):
         return value * self.weight
 
@@ -81,6 +106,30 @@ class _KernelCodec(_TinyCodec):
     def __init__(self) -> None:
         super().__init__()
         self.kernel_block = _KernelBlock()
+
+
+class _NonCodecKernelBlock(nn.Module):
+
+    supported_kernel_operations = ("tts.diffusion.test", )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.kernel_backend = KernelBackend.AUTO
+
+    def set_kernel_backend(self, backend):
+        self.kernel_backend = KernelBackend.coerce(backend)
+
+    def resolve_kernel_backend(self, backend, *, device, dtype):
+        del device, dtype
+        backend = KernelBackend.coerce(backend)
+        return KernelBackend.TORCH if backend is KernelBackend.AUTO else backend
+
+
+class _MixedKernelCodec(_KernelCodec):
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.diffusion_block = _NonCodecKernelBlock()
 
 
 class _StochasticVAE(nn.Module):
@@ -423,7 +472,7 @@ class CodecOptimizationPlanTests(unittest.TestCase):
             ["relaxed", "native", "eager"],
         )
 
-    def test_custom_kernel_selector_is_applied_before_compile_and_reversible(self):
+    def test_codec_kernel_selector_is_applied_before_compile_and_reversible(self):
         codec = _KernelCodec()
         keys = tuple(codec.state_dict())
         plan = resolve_codec_optimization(
@@ -436,13 +485,43 @@ class CodecOptimizationPlanTests(unittest.TestCase):
 
         self.assertEqual(
             [optimization_pass.pass_id for optimization_pass in plan],
-            ["custom-kernels"],
+            ["codec-kernels"],
         )
+        self.assertIsInstance(plan.passes[0], CodecKernelPass)
         result = plan.apply(codec)
         self.assertIs(codec.kernel_block.kernel_backend, KernelBackend.TORCH)
         self.assertEqual(tuple(codec.state_dict()), keys)
         self.assertIs(result.restore(), codec)
         self.assertEqual(tuple(codec.state_dict()), keys)
+
+    def test_codec_kernel_pass_does_not_mutate_non_codec_selectors(self):
+        codec = _MixedKernelCodec()
+        codec.kernel_block.set_codec_kernel_backend("auto")
+        before_diffusion = codec.diffusion_block.kernel_backend
+
+        plan = resolve_codec_optimization(
+            codec,
+            CodecOptimizationConfig(
+                kernel_backend="auto",
+                compile=False,
+            ),
+        )
+        result = plan.apply(codec)
+
+        self.assertIs(
+            codec.kernel_block.codec_kernel_backend,
+            CodecKernelBackend.TORCH,
+        )
+        self.assertIs(codec.diffusion_block.kernel_backend, before_diffusion)
+        metadata = result.manifest_metadata()[0]["metadata"]
+        self.assertEqual(metadata["domain"], "codec")
+        self.assertEqual(metadata["targets"], ["model.kernel_block"])
+        result.restore()
+        self.assertIs(
+            codec.kernel_block.codec_kernel_backend,
+            CodecKernelBackend.AUTO,
+        )
+        self.assertIs(codec.diffusion_block.kernel_backend, before_diffusion)
 
     def test_exact_policy_pins_auto_kernels_and_rejects_accelerator_math(self):
         codec = _KernelCodec()
@@ -455,7 +534,7 @@ class CodecOptimizationPlanTests(unittest.TestCase):
             ),
         )
 
-        self.assertIs(plan.passes[0].backend, KernelBackend.TORCH)
+        self.assertIs(plan.passes[0].backend, CodecKernelBackend.TORCH)
         self.assertEqual(plan.decisions[1].selected, "torch")
         with self.assertRaisesRegex(
                 ValueError,
@@ -502,8 +581,38 @@ class CodecOptimizationPlanTests(unittest.TestCase):
                 context=context,
             )
 
-        self.assertIs(plan.passes[0].backend, KernelBackend.TRITON)
+        self.assertIs(plan.passes[0].backend, CodecKernelBackend.TRITON)
         self.assertEqual(plan.decisions[1].selected, "triton")
+
+    def test_cute_is_codec_scoped_and_fails_closed_without_an_operation(self):
+        codec = _KernelCodec()
+        config = CodecOptimizationConfig(
+            policy="relaxed",
+            kernel_backend="cutlass",
+            compile=False,
+        )
+
+        self.assertIs(config.kernel_backend, CodecKernelBackend.CUTE)
+        self.assertEqual(config.to_dict()["kernel_backend"], "cute")
+        with self.assertRaisesRegex(
+                CodecOptimizationCompatibilityError,
+                "exposes no operation with a registered 'cute' implementation",
+        ):
+            resolve_codec_optimization(codec, config)
+
+    def test_cute_capability_probe_is_lazy_and_fails_closed_off_linux(self):
+        with (
+                mock.patch(
+                    "voicehub.kernels.capabilities.sys.platform",
+                    "darwin",
+                ),
+                mock.patch("voicehub.kernels.capabilities.import_module", ) as import_module,
+        ):
+            capability = cute_dsl_capability("cuda")
+
+        self.assertFalse(capability.available)
+        self.assertIn("only on Linux", capability.reason)
+        import_module.assert_not_called()
 
     def test_required_compile_uses_the_discovered_decoder_boundary(self):
         codec = _TinyCodec()

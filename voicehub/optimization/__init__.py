@@ -63,6 +63,7 @@ _CODEC_EXPORTS = frozenset({
     "CodecCompilePolicy",
     "CodecCompileTargetKind",
     "CodecKernelBackend",
+    "CodecKernelPass",
     "CodecNumericalPolicy",
     "CodecOptimizationCompatibilityError",
     "CodecOptimizationConfig",
@@ -84,6 +85,7 @@ _DIFFUSION_EXPORTS = frozenset({
     "DIFFUSION_FAMILY_FEATURE",
     "DIFFUSION_KIND_FEATURE_PREFIX",
     "DIFFUSION_OPERATION_FEATURE_PREFIX",
+    "DIFFUSION_SAMPLING_FEATURE_PREFIX",
     "DiffusionArchitectureKind",
     "DiffusionModelOptimizationSupport",
     "DiffusionOperation",
@@ -97,11 +99,31 @@ _DIFFUSION_CACHE_EXPORTS = frozenset({
     "DiffusionCacheCompatibilityError",
     "DiffusionCacheConfig",
     "DiffusionCacheError",
+    "DiffusionCacheMethod",
     "DiffusionCacheMixin",
     "DiffusionCachePass",
     "DiffusionCachePolicy",
     "DiffusionCachePredictor",
     "coerce_diffusion_cache_config",
+})
+_DIFFUSION_SAMPLING_EXPORTS = frozenset({
+    "DiffusionGuidanceStrategy",
+    "DiffusionPredictionCacheMethod",
+    "DiffusionSamplingCompatibilityError",
+    "DiffusionSamplingConfig",
+    "DiffusionSamplingController",
+    "DiffusionSamplingError",
+    "DiffusionSamplingMixin",
+    "DiffusionSamplingPass",
+    "DiffusionSamplingPolicy",
+    "DiffusionScheduleStrategy",
+    "DiffusionSolverStrategy",
+    "DiffusionStepContext",
+    "coerce_diffusion_sampling_config",
+})
+_DIFFUSION_SOLVER_EXPORTS = frozenset({
+    "STORK2FlowSolver",
+    "STORKFlowConfig",
 })
 _TTS_EXPORTS = frozenset({
     "TTSAttentionImplementation",
@@ -140,6 +162,11 @@ def _create_custom_kernel_pass():
     return module.CustomKernelPass()
 
 
+def _create_codec_kernel_pass():
+    module = import_module("voicehub.optimization.codec_accelerators")
+    return module.CodecKernelPass()
+
+
 def _create_torch_compile_pass():
     module = import_module("voicehub.optimization.torch_compile")
     return module.TorchCompilePass()
@@ -148,6 +175,11 @@ def _create_torch_compile_pass():
 def _create_diffusion_cache_pass():
     module = import_module("voicehub.optimization.diffusion_cache")
     return module.DiffusionCachePass()
+
+
+def _create_diffusion_sampling_pass():
+    module = import_module("voicehub.optimization.diffusion_sampling")
+    return module.DiffusionSamplingPass()
 
 
 OPTIMIZATION_PASSES.register(
@@ -166,8 +198,18 @@ OPTIMIZATION_PASSES.register(
     exist_ok=True,
 )
 OPTIMIZATION_PASSES.register(
+    "codec-kernels",
+    _create_codec_kernel_pass,
+    exist_ok=True,
+)
+OPTIMIZATION_PASSES.register(
     "diffusion-cache",
     _create_diffusion_cache_pass,
+    exist_ok=True,
+)
+OPTIMIZATION_PASSES.register(
+    "diffusion-sampling",
+    _create_diffusion_sampling_pass,
     exist_ok=True,
 )
 
@@ -203,6 +245,16 @@ def __getattr__(name: str):
         value = getattr(module, name)
         globals()[name] = value
         return value
+    if name in _DIFFUSION_SAMPLING_EXPORTS:
+        module = import_module("voicehub.optimization.diffusion_sampling")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    if name in _DIFFUSION_SOLVER_EXPORTS:
+        module = import_module("voicehub.optimization.diffusion_solvers")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
     if name in _TTS_EXPORTS:
         module = import_module("voicehub.optimization.tts")
         value = getattr(module, name)
@@ -223,6 +275,8 @@ def __dir__() -> list[str]:
         | _CODEC_EXPORTS
         | _DIFFUSION_EXPORTS
         | _DIFFUSION_CACHE_EXPORTS
+        | _DIFFUSION_SAMPLING_EXPORTS
+        | _DIFFUSION_SOLVER_EXPORTS
         | _LORA_EXPORTS
         | _TORCH_COMPILE_EXPORTS
         | _TTS_EXPORTS
@@ -241,6 +295,7 @@ __all__ = [
     "CodecCompilePolicy",
     "CodecCompileTargetKind",
     "CodecKernelBackend",
+    "CodecKernelPass",
     "CodecNumericalPolicy",
     "CodecOptimizationCompatibilityError",
     "CodecOptimizationConfig",
@@ -254,17 +309,31 @@ __all__ = [
     "DIFFUSION_FAMILY_FEATURE",
     "DIFFUSION_KIND_FEATURE_PREFIX",
     "DIFFUSION_OPERATION_FEATURE_PREFIX",
+    "DIFFUSION_SAMPLING_FEATURE_PREFIX",
     "DiffusionArchitectureKind",
     "DiffusionBlockResidualCache",
     "DiffusionCacheCompatibilityError",
     "DiffusionCacheConfig",
     "DiffusionCacheError",
+    "DiffusionCacheMethod",
     "DiffusionCacheMixin",
     "DiffusionCachePass",
     "DiffusionCachePolicy",
     "DiffusionCachePredictor",
     "DiffusionModelOptimizationSupport",
     "DiffusionOperation",
+    "DiffusionGuidanceStrategy",
+    "DiffusionPredictionCacheMethod",
+    "DiffusionSamplingCompatibilityError",
+    "DiffusionSamplingConfig",
+    "DiffusionSamplingController",
+    "DiffusionSamplingError",
+    "DiffusionSamplingMixin",
+    "DiffusionSamplingPass",
+    "DiffusionSamplingPolicy",
+    "DiffusionScheduleStrategy",
+    "DiffusionSolverStrategy",
+    "DiffusionStepContext",
     "FlashAttention4Pass",
     "FixedShapeCodecCUDAGraph",
     "LoRAConfig",
@@ -286,6 +355,8 @@ __all__ = [
     "OptimizationResult",
     "OptimizationRuntimeProtocol",
     "PassResult",
+    "STORK2FlowSolver",
+    "STORKFlowConfig",
     "TorchCompileCapabilityReport",
     "TorchCompileConfig",
     "TorchCompileError",
@@ -312,6 +383,7 @@ __all__ = [
     "codec_component_view",
     "coerce_codec_optimization_config",
     "coerce_diffusion_cache_config",
+    "coerce_diffusion_sampling_config",
     "coerce_tts_optimization_config",
     "diffusion_kind_feature",
     "diffusion_operation_feature",

@@ -175,6 +175,14 @@ class ChatterboxTTS:
             ),
         )
 
+    def optimization_module_roots(self):
+        """Expose the native module graph to reversible optimization passes."""
+        return (
+            ("t3", self.t3),
+            ("s3gen", self.s3gen),
+            ("voice_encoder", self.ve),
+        )
+
     @classmethod
     def from_local(cls, ckpt_dir, device) -> 'ChatterboxTTS':
         """Load all sub-models from a local checkpoint directory."""

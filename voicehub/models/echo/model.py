@@ -7,6 +7,7 @@ import torch.optim as optim
 
 from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
 from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
+from voicehub.optimization.diffusion_sampling import DiffusionSamplingMixin
 
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> torch.Tensor:
@@ -445,7 +446,7 @@ class SpeakerEncoder(nn.Module):
         return x
 
 
-class EchoDiT(DiffusionCacheMixin, nn.Module):
+class EchoDiT(DiffusionCacheMixin, DiffusionSamplingMixin, nn.Module):
 
     def __init__(
         self,
@@ -536,6 +537,7 @@ class EchoDiT(DiffusionCacheMixin, nn.Module):
 
         self.head_dim = model_size // num_heads
         self._initialize_diffusion_cache()
+        self._initialize_diffusion_sampling()
 
     def forward(
         self,

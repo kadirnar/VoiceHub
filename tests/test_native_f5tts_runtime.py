@@ -209,6 +209,35 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
         self.assertTrue(torch.equal(first[:, :7], reference))
         self.assertEqual(tuple(first_path.shape), (4, 1, 12, 8))
 
+    def test_sampler_controller_compacts_steps_and_runs_stork2(self):
+        model = F5ConditionalFlowMatcher(_tiny_config()).eval()
+        reference = torch.randn(1, 7, 8)
+        text = torch.tensor([[2, 3, 4, 5]])
+        model.transformer.enable_diffusion_sampling({
+            "target_steps": 2,
+            "solver": "stork2",
+            "stork_stages": 5,
+        })
+
+        sampled, trajectory = model.sample(
+            reference,
+            text,
+            12,
+            lengths=torch.tensor((7, )),
+            steps=5,
+            seed=31,
+            use_epss=False,
+        )
+        stats = model.transformer.diffusion_sampling_stats()
+
+        self.assertEqual(sampled.shape, (1, 12, 8))
+        self.assertEqual(trajectory.shape[0], 3)
+        self.assertEqual(stats["native_steps"], 5)
+        self.assertEqual(stats["prepared_steps"], 2)
+        self.assertEqual(stats["solver_steps"], 2)
+        self.assertEqual(stats["solver_startup_steps"], 1)
+        self.assertEqual(stats["solver_stabilized_steps"], 1)
+
     def test_checkpoint_round_trip_is_strict_and_prefix_compatible(self):
         source = F5ConditionalFlowMatcher(_tiny_config())
         target = F5ConditionalFlowMatcher(_tiny_config())

@@ -6,9 +6,10 @@ import torch.nn.functional as F
 from torch.nn.utils import weight_norm
 
 from voicehub.components.audio.codecs.dac.nn.layers import WNConv1d
+from voicehub.kernels.codecs import CodecEuclideanVQKernelOptimizable
 
 
-class VectorQuantize(nn.Module):
+class VectorQuantize(CodecEuclideanVQKernelOptimizable, nn.Module):
     """
     Implementation of VQ similar to Karpathy's repo:
     https://github.com/karpathy/deep-vector-quantization
@@ -28,6 +29,7 @@ class VectorQuantize(nn.Module):
         self.in_proj = WNConv1d(input_dim, codebook_dim, kernel_size=1)
         self.out_proj = WNConv1d(codebook_dim, input_dim, kernel_size=1)
         self.codebook = nn.Embedding(codebook_size, codebook_dim)
+        self._initialize_codec_kernel_backend()
 
     def forward(self, z):
         """Quantized the input tensor using a fixed codebook and returns
@@ -85,13 +87,13 @@ class VectorQuantize(nn.Module):
         encodings = F.normalize(encodings)
         codebook = F.normalize(codebook)
 
-        # Compute euclidean distance with codebook
-        dist = (
-            encodings.pow(2).sum(1, keepdim=True)
-            - 2 * encodings @ codebook.t()
-            + codebook.pow(2).sum(1, keepdim=True).t()
-        )
-        indices = (-dist).max(1)[1].reshape(batch_size, time_steps)
+        # The selected backend accelerates only this discrete nearest-code
+        # search. Embedding lookup and the straight-through gradient path
+        # remain native PyTorch.
+        indices = self._codec_euclidean_vq_search(
+            encodings,
+            codebook,
+        ).reshape(batch_size, time_steps)
         z_q = self.decode_code(indices)
         return z_q, indices
 

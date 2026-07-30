@@ -20,15 +20,15 @@ The current public inventory contains exactly nine model types:
 
 | Model type | Active diffusion/flow boundary | Registered formulation | Sampling operations | Declared execution surface |
 | --- | --- | --- | --- | --- |
-| `chatterbox` | S3Gen speech-token-to-mel subgraph after the T3 token model | Conditional flow matching | Classifier-free guidance (CFG), Euler | Compile, built-in SDPA |
-| `cosyvoice` | Flow estimator between the speech-token LM and HiFT vocoder | Conditional flow matching | CFG, Euler | Compile, fused modulation/codec kernels |
-| `echo` | EchoDiT continuous Fish-codec latent generator | Rectified flow | Independent text/speaker CFG, Euler, optional blockwise generation | Compile, fused modulation/codec kernels |
-| `f5tts` | F5 DiT mel generator | Conditional flow matching | CFG, Euler or midpoint | Compile, selectable attention backend, custom kernels |
-| `irodoritts` | RF-DiT continuous DACVAE-latent generator | Rectified flow | Multi-condition CFG, Euler | Compile, built-in SDPA, fused modulation kernels |
-| `styletts2` | Style-vector generator inside a larger adversarial TTS graph | Style diffusion | CFG, ADPM2 with a Karras schedule | Compile |
-| `supertonic` | Iterative text-to-latent vector-estimator graph | Flow matching | Released iterative estimator | Compile |
-| `vibevoice` | Acoustic diffusion head driven by the causal language model | Denoising diffusion | CFG, DPM-Solver++(2M) | Training compile, built-in SDPA, fused modulation kernels; high-level inference fails closed |
-| `voxcpm` | Local DiT inside the outer autoregressive acoustic-frame loop | Conditional flow matching | CFG/CFG-Zero*, Euler | Compile, built-in SDPA |
+| `chatterbox` | S3Gen speech-token-to-mel subgraph after the T3 token model | Conditional flow matching | Classifier-free guidance (CFG), Euler | Compile, SDPA, schedule reduction, prediction cache |
+| `cosyvoice` | Flow estimator between the speech-token LM and HiFT vocoder | Conditional flow matching | CFG, Euler | Compile, fused kernels, schedule/guidance/cache, STORK-2 |
+| `echo` | EchoDiT continuous Fish-codec latent generator | Rectified flow | Independent text/speaker CFG, Euler, optional blockwise generation | Compile, fused kernels, schedule/guidance/cache |
+| `f5tts` | F5 DiT mel generator | Conditional flow matching | CFG, Euler or midpoint | Compile, attention/kernels, schedule/guidance/cache, STORK-2 for Euler |
+| `irodoritts` | RF-DiT continuous DACVAE-latent generator | Rectified flow | Multi-condition CFG, Euler | Compile, SDPA/kernels, schedule/guidance/cache |
+| `styletts2` | Style-vector generator inside a larger adversarial TTS graph | Style diffusion | CFG, ADPM2 with a Karras schedule | Compile, schedule reduction with ADPM2 stages preserved |
+| `supertonic` | Iterative text-to-latent vector-estimator graph | Flow matching | Released iterative estimator | Compile, discrete total-step reduction |
+| `vibevoice` | Acoustic diffusion head driven by the causal language model | Denoising diffusion | CFG, DPM-Solver++(2M) | Compile, SDPA/kernels, rebuilt DPM schedule, guidance/cache |
+| `voxcpm` | Local DiT inside the outer autoregressive acoustic-frame loop | Conditional flow matching | CFG/CFG-Zero*, Euler | Compile, SDPA, schedule/guidance/cache |
 
 The formulation and solver assignments follow the active VoiceHub graph and
 the primary projects: [Chatterbox](https://github.com/resemble-ai/chatterbox),
@@ -133,6 +133,224 @@ The shared policy does not replace a model's loss, noise path, timestep
 distribution, EMA policy, codec boundary, or optimizer recipe. Training
 profiles remain source-specific even when the execution machinery is shared.
 
+## Reduce a 50-step sampler before optimizing its kernels
+
+`diffusion_sampling` is a second, independent optimization layer. It acts at
+the solver boundary and can reduce neural-network evaluations (NFE);
+`diffusion_cache` acts inside a repeated DiT block list. Neither setting
+changes codec kernels.
+
+```python
+from voicehub import TTSOptimizationConfig
+
+optimization = TTSOptimizationConfig(
+    diffusion_sampling="required",
+    diffusion_sampling_config={
+        # Rebuild a native 50-step grid into 20 signed integration steps.
+        "target_steps": 20,
+        "schedule": "native",
+        # Direct velocity-field adapters may replace Euler with STORK-2.
+        "solver": "stork2",
+        "stork_stages": 9,
+    },
+    diffusion_cache="disabled",
+)
+
+plan = optimization.resolve("f5tts", mode="inference")
+```
+
+Schedule reduction happens **before** the loop starts. VoiceHub reconstructs
+the grid, preserves both endpoints and strict monotonicity, and then runs the
+solver over the larger signed deltas. It never implements “50 to 20” by
+continuing past 30 already-created Euler or DPM steps. For multistep schedulers,
+the model adapter must also rebuild scheduler history.
+
+The supported schedule shapes are:
+
+| `schedule` | Meaning |
+| --- | --- |
+| `native` | Select a monotone subsequence of the architecture's native grid |
+| `uniform` | Rebuild linearly between the native endpoints |
+| `quadratic` | Concentrate points near the starting/noise endpoint |
+| `trailing` | Concentrate points near the terminal/data endpoint |
+
+The most important latency number is the number of actual model evaluations,
+not the nominal solver-stage count. The
+[STORK paper](https://arxiv.org/abs/2505.24210) uses stabilized virtual stages
+whose velocities are predicted from trajectory history. VoiceHub's initial
+adapter implements the dimension-agnostic STORK-2 recurrence with a
+first-order Taylor history and FP32 accumulation. Every outer step still
+performs exactly one real velocity-model evaluation. Therefore, STORK at 50
+outer steps does not reduce NFE; a 50-step baseline is accelerated by running
+and validating STORK at a smaller count such as 30 or 20.
+
+STORK-2 is initially declared only by direct deterministic velocity-field
+adapters such as F5-TTS and CosyVoice. It fails closed for stochastic
+samplers, epsilon/x0 prediction, learned absolute-latent estimators,
+step-size-conditioned mean-flow heads, midpoint/ADPM2 stages, and DPM-Solver
+history. VoiceHub does not expose the upstream STORK-4 path yet: the reviewed
+official scheduler has a first-stage recurrence inconsistency, so copying it
+unchanged would be less safe than retaining Euler.
+
+### Guidance reduction
+
+Classifier-free guidance can cost two or more logical denoiser evaluations.
+The controller can narrow a model's native guidance decision but can never
+enable guidance that the sampler did not request.
+
+```python
+limited_cfg = TTSOptimizationConfig(
+    diffusion_sampling=True,
+    diffusion_sampling_config={
+        "target_steps": 24,
+        "guidance": "limited_interval",
+        "guidance_start": 0.10,
+        "guidance_end": 0.70,
+    },
+)
+
+adaptive_cfg = TTSOptimizationConfig(
+    diffusion_sampling=True,
+    diffusion_sampling_config={
+        "guidance": "adaptive",
+        "adaptive_guidance_threshold": 0.015,
+        "adaptive_guidance_warmup_steps": 4,
+        "adaptive_guidance_patience": 2,
+    },
+)
+```
+
+Limited-interval guidance adapts the image-side observation that CFG is not
+equally useful over the entire trajectory; see
+[Limited Interval Guidance](https://arxiv.org/abs/2404.07724).
+Adaptive mode observes conditional/unconditional convergence and stops only
+after the configured patience. Packed CFG, conditional-only, joint, and
+alternate-unconditional paths use independent lanes.
+
+### Whole-prediction cache policies
+
+The sampler controller also exposes four explicitly approximate policies.
+They are adaptations of image/video diffusion ideas to a final guided
+speech-velocity or denoiser output; they are not presented as checkpoint-free
+quality guarantees.
+
+| `prediction_cache` | VoiceHub adaptation | Required calibration |
+| --- | --- | --- |
+| `fora` | Periodically compute, otherwise reuse the last complete output | Interval and maximum consecutive reuse |
+| `teacache` | Accumulate a polynomial-rescaled relative input change | Model-specific `teacache_coefficients` |
+| `smoothcache` | Follow an explicit full-compute/reuse step mask | `smoothcache_compute_step_mask` matching the prepared grid |
+| `taylor` | First- or second-order polynomial extrapolation from real computed outputs | Order, compute interval, and quality validation |
+
+The source techniques are
+[FORA](https://arxiv.org/abs/2407.01425),
+[TeaCache](https://arxiv.org/abs/2411.19108),
+[SmoothCache](https://arxiv.org/abs/2411.10510), and
+[TaylorSeer](https://arxiv.org/abs/2503.06923). TeaCache and SmoothCache are
+calibration-dependent in their original forms. VoiceHub therefore refuses an
+empty TeaCache polynomial or SmoothCache mask instead of silently substituting
+a generic threshold.
+
+Example calibrated TeaCache-style configuration:
+
+```python
+teacache = TTSOptimizationConfig(
+    diffusion_sampling="required",
+    diffusion_sampling_config={
+        "target_steps": 24,
+        "prediction_cache": "teacache",
+        # Obtain these for the exact checkpoint and probe boundary.
+        "teacache_coefficients": [0.0, 1.0],
+        "cache_rel_l1_threshold": 0.08,
+        "cache_error_budget": 0.20,
+        "cache_warmup_steps": 2,
+        "cache_max_consecutive_steps": 2,
+    },
+)
+```
+
+STORK and whole-prediction caching cannot be selected together: both infer
+unobserved velocities and would invalidate each other's history. STORK also
+rejects adaptive or limited guidance until an adapter declares the exact
+history-reset boundary. Block-residual caching is configured separately and
+must be evaluated as a composed approximation.
+
+Run the included NFE plumbing benchmark before a checkpoint benchmark:
+
+```bash
+python scripts/benchmark_diffusion_sampling.py \
+  --method stork2 \
+  --native-steps 50 \
+  --target-steps 20 \
+  --device cuda
+```
+
+The script reports synthetic latency and real model-call counts with
+`quality_validated: false`. Production acceptance still requires matched
+audio A/B evaluation: real-time factor and p50/p95 latency, WER/CER, speaker
+similarity, F0/duration error, mel distance, and representative languages and
+utterance lengths.
+
+### Model-specific, fail-closed adapter matrix
+
+A sampler-level output may be velocity, denoised x0, or the next absolute
+latent. Query the registered techniques instead of checking model names:
+
+```python
+from voicehub import get_diffusion_model_optimization_support
+
+support = get_diffusion_model_optimization_support("vibevoice")
+print(support.sampling_techniques)
+# ('schedule', 'guidance', 'prediction-cache')
+```
+
+| Model | Step reduction | Guidance policy | Prediction cache | STORK-2 |
+| --- | --- | --- | --- | --- |
+| Chatterbox | Native Euler grid | Fixed native two-branch CFG only | Yes | No |
+| CosyVoice | Native/uniform/quadratic/trailing | Limited/adaptive | Yes | Yes |
+| Echo | Native/uniform/quadratic/trailing | Limited/adaptive; resets at KV/block boundaries | Yes | No |
+| F5-TTS | Native/uniform/quadratic/trailing | Limited/adaptive | Yes | Euler only |
+| Irodori-TTS | Native/uniform/quadratic/trailing | Limited/adaptive; semantic multi-CFG lanes | Yes | No |
+| StyleTTS 2 | Active Karras sigma-grid compaction | Native hidden CFG | No; ADPM2 main/midpoint stay distinct | No |
+| Supertonic | Discrete total-step reduction | Not applicable | No; output is the next absolute latent | No |
+| VibeVoice | Rebuilt DPM timestep/sigma grid and history | Limited/adaptive | Yes; every DPM transition still executes | No |
+| VoxCPM | Local native grid | Limited/adaptive | Yes | No; mean/delta conditioning and CFG-Zero boundaries |
+
+StyleTTS 2 and Supertonic accept only `target_steps`. StyleTTS 2 counts active
+ADPM2 transitions without replacing ADPM2. Supertonic rebuilds
+`current_step/total_step` from zero instead of skipping an existing
+recurrence. Required unsupported choices fail during resolution; automatic
+choices retain the native sampler.
+
+### Research-to-runtime gates
+
+The controller deliberately exposes techniques, not paper names without a
+compatible execution boundary. The image, video, and audio diffusion
+literature was mapped to VoiceHub as follows:
+
+| Research family | VoiceHub implementation | Compatibility gate |
+| --- | --- | --- |
+| Fewer model evaluations | `target_steps` plus native, uniform, quadratic, or trailing schedule reconstruction | The architecture must rebuild its complete grid and solver history |
+| Stiff flow integration | STORK-2 with Taylor-1 velocity history | Direct deterministic velocity fields and one real evaluation per outer step only |
+| Guidance pruning | Limited-interval and adaptive CFG | The sampler must expose separable native conditional/unconditional branches |
+| Whole-prediction reuse | FORA-style periodic reuse, calibrated TeaCache, SmoothCache masks, and Taylor prediction | Final output semantics and request/CFG lanes must be architecture-owned |
+| Internal DiT reuse | DBCache and first-block cache, with optional Taylor residual prediction | A reviewed repeated-block boundary plus sampler invalidation is required |
+| Kernel execution | SDPA/FlashAttention selectors, fused Triton/CUDA operations, `torch.compile`, and fixed-shape CUDA Graphs | Exact mask, dtype, device, shape, and graph-capture contracts remain mandatory |
+
+[DPM-Solver](https://arxiv.org/abs/2206.00927) and
+[UniPC](https://arxiv.org/abs/2302.04867) demonstrate that formulation-aware
+high-order methods can reach low NFE, but their diffusion parameterization and
+history equations are not interchangeable with every flow-matching or
+absolute-latent TTS head. VoiceHub therefore preserves VibeVoice's native
+DPM-Solver++(2M) implementation and does not relabel a generic Euler
+replacement as DPM-Solver or UniPC.
+
+Likewise, [progressive distillation](https://arxiv.org/abs/2202.00512),
+[Consistency Models](https://arxiv.org/abs/2303.01469), and
+[Latent Consistency Models](https://arxiv.org/abs/2310.04378) require a
+different trained model or a checkpoint-specific distillation/fine-tuning
+stage. They are valid future training architectures, but not inference flags
+that can safely transform an arbitrary released 50-step speech checkpoint.
+
 ## Recommended optimization boundaries
 
 Diffusion TTS repeatedly calls a comparatively regular denoiser or velocity
@@ -168,7 +386,7 @@ can be copied into a speech graph unchanged.
 
 ### Approximate block-residual caching
 
-VoiceHub includes an opt-in, native adaptation of Cache-DiT's DBCache idea.
+VoiceHub includes opt-in, native DBCache and first-block-cache layouts.
 Image DiTs often produce similar intermediate states at neighboring denoising
 steps, and the same property can occur in repeated speech DiT or flow blocks.
 The implementation does not import Diffusers or Cache-DiT and does not replace
@@ -205,6 +423,8 @@ optimization = TTSOptimizationConfig(
     kernel_backend="auto",
     diffusion_cache="required",
     diffusion_cache_config=DiffusionCacheConfig(
+        # "dbcache" or the constrained first-block preset "fbcache".
+        method="dbcache",
         front_blocks=1,
         back_blocks=1,
         residual_diff_threshold=0.05,
@@ -258,7 +478,8 @@ CFG-lane coverage, exact cold-path parity, approximate quality evaluation,
 and restoration/state-dict tests.
 
 Optimization passes are ordered as architecture kernel selection, attention
-selection, diffusion-cache enablement, and then `torch.compile`. This lets the
+selection, sampler acceleration, diffusion-cache enablement, and then
+`torch.compile`. This lets the
 compiler see the final block implementation. The cache decision itself is
 request- and step-dependent Python control flow, so prefer regional
 compilation of the repeated tensor blocks and `fullgraph=False`. Do not assume

@@ -6,6 +6,7 @@ concrete tensor arguments, and CUDA source compilation requires an
 explicit loader call.
 """
 
+from voicehub.kernel_operations import AUDIO_CODEC_EUCLIDEAN_VQ
 from voicehub.kernels.activations import (
     ACTIVATION_CUDA_EXTENSION_NAME,
     AUDIO_CODEC_SNAKE,
@@ -33,13 +34,25 @@ from voicehub.kernels.activations import (
 )
 from voicehub.kernels.capabilities import (
     CapabilityStatus,
+    CodecKernelCapabilities,
     KernelCapabilities,
     cuda_extension_capability,
     cuda_runtime_capability,
+    cute_dsl_capability,
+    cute_operator_capability,
+    get_codec_kernel_capabilities,
     get_kernel_capabilities,
     triton_capability,
 )
-from voicehub.kernels.codecs import CodecSnakeBetaKernelOptimizable, CodecSnakeKernelOptimizable
+from voicehub.kernels.codecs import (
+    CodecEuclideanVQKernelOptimizable,
+    CodecKernelBackend,
+    CodecKernelBackendUnavailableError,
+    CodecSnakeBetaKernelOptimizable,
+    CodecSnakeKernelOptimizable,
+    codec_euclidean_vq_search,
+    codec_euclidean_vq_search_reference,
+)
 from voicehub.kernels.cuda_extensions import (
     CUDA_EXTENSIONS,
     CudaExtensionBuildError,
@@ -69,6 +82,7 @@ from voicehub.kernels.vits import VITSKernelOptimizable
 
 __all__ = [
     "ACTIVATION_CUDA_EXTENSION_NAME",
+    "AUDIO_CODEC_EUCLIDEAN_VQ",
     "AUDIO_CODEC_SNAKE",
     "AUDIO_CODEC_SNAKE_BETA",
     "CUDA_EXTENSIONS",
@@ -78,6 +92,10 @@ __all__ = [
     "CudaExtensionRegistry",
     "CudaExtensionSpec",
     "CudaExtensionUnavailableError",
+    "CodecKernelBackend",
+    "CodecKernelBackendUnavailableError",
+    "CodecKernelCapabilities",
+    "CodecEuclideanVQKernelOptimizable",
     "DIFFUSION_FUSED_BIAS_GELU",
     "DIFFUSION_FUSED_MODULATE",
     "DiffusionModulationKernelOptimizable",
@@ -97,6 +115,8 @@ __all__ = [
     "VITS_FUSED_ADD_TANH_SIGMOID",
     "VITS_TANH_SIGMOID_GATE",
     "VITSKernelOptimizable",
+    "cute_dsl_capability",
+    "cute_operator_capability",
     "cuda_extension_capability",
     "cuda_runtime_capability",
     "dispatch_kernel",
@@ -104,6 +124,8 @@ __all__ = [
     "codec_snake_beta",
     "codec_snake_beta_reference",
     "codec_snake_reference",
+    "codec_euclidean_vq_search",
+    "codec_euclidean_vq_search_reference",
     "fused_add_tanh_sigmoid",
     "fused_add_tanh_sigmoid_reference",
     "fused_bias_gelu",
@@ -112,6 +134,7 @@ __all__ = [
     "fused_modulate_reference",
     "gated_silu",
     "gated_silu_reference",
+    "get_codec_kernel_capabilities",
     "get_kernel_capabilities",
     "load_cuda_extension",
     "load_tts_activation_cuda_extension",

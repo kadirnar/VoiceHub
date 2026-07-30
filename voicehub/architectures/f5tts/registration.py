@@ -63,6 +63,7 @@ def create_f5tts_architecture_spec() -> ArchitectureSpec:
                 "attention-backend",
                 "custom-kernels",
                 "diffusion-cache",
+                "diffusion-sampling",
             ),
             features=(
                 "diffusion-family",
@@ -71,6 +72,10 @@ def create_f5tts_architecture_spec() -> ArchitectureSpec:
                 "diffusion-operation-classifier-free-guidance",
                 "diffusion-operation-euler-solver",
                 "diffusion-operation-midpoint-solver",
+                "diffusion-sampling-schedule",
+                "diffusion-sampling-guidance",
+                "diffusion-sampling-prediction-cache",
+                "diffusion-sampling-stork2",
                 "voice-cloning",
                 "conditional-flow-matching",
                 "classifier-free-guidance",
@@ -95,6 +100,12 @@ def create_f5tts_architecture_spec() -> ArchitectureSpec:
                 "classifier-free-guidance",
                 "euler-solver",
                 "midpoint-solver",
+            ),
+            "diffusion_sampling_capabilities": (
+                "schedule",
+                "guidance",
+                "prediction-cache",
+                "stork2",
             ),
             "implementation":
             "voicehub-native",

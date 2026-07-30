@@ -10,6 +10,7 @@ from torch.utils.checkpoint import checkpoint as _torch_checkpoint
 
 from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
 from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
+from voicehub.optimization.diffusion_sampling import DiffusionSamplingMixin
 
 from .conditioning import SPEAKER_INVERSION_UNCOND_MODES, SpeakerInversionEmbedding
 from .configuration import IrodoriModelConfig as ModelConfig
@@ -1153,7 +1154,11 @@ class DurationPredictor(nn.Module):
         return self.out_proj(self.out_norm(h)).squeeze(-1)
 
 
-class TextToLatentRFDiT(DiffusionCacheMixin, nn.Module):
+class TextToLatentRFDiT(
+        DiffusionCacheMixin,
+        DiffusionSamplingMixin,
+        nn.Module,
+):
     """Text + reference-latent conditioned RF diffusion model over patched
     DACVAE latent sequences.
 
@@ -1241,6 +1246,7 @@ class TextToLatentRFDiT(DiffusionCacheMixin, nn.Module):
             raise ValueError("model head_dim must be even for RoPE")
         self.register_buffer("_freqs_cis_cache", torch.empty(0, 0, dtype=torch.complex64), persistent=False)
         self._initialize_diffusion_cache()
+        self._initialize_diffusion_sampling()
 
     def set_gradient_checkpointing(self, enabled: bool) -> None:
         self.gradient_checkpointing = bool(enabled)

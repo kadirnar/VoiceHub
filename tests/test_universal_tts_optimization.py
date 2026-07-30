@@ -1158,6 +1158,57 @@ print(json.dumps({
         )
         self.assertEqual(pending.compile.value, "disabled")
 
+    def test_from_pretrained_schedules_direct_diffusion_sampling_options(self):
+        model = _TinyPretrainedTTS.from_pretrained(
+            "",
+            diffusion_sampling="auto",
+            diffusion_sampling_config={
+                "target_steps": 20,
+                "prediction_cache": "fora",
+            },
+            lazy_load=True,
+        )
+
+        self.assertFalse(model.is_loaded)
+        self.assertNotIn("diffusion_sampling", model.config.__dict__)
+        self.assertNotIn("diffusion_sampling_config", model.config.__dict__)
+        pending = model._pending_tts_optimization_config
+        self.assertEqual(pending.diffusion_sampling.value, "auto")
+        self.assertEqual(
+            pending.diffusion_sampling_config.target_steps,
+            20,
+        )
+        self.assertEqual(
+            pending.diffusion_sampling_config.prediction_cache.value,
+            "fora",
+        )
+        self.assertEqual(pending.compile.value, "disabled")
+
+    def test_auto_factory_forwards_direct_diffusion_sampling_options(self):
+        config = AutoConfig.for_model("f5tts")
+
+        model = AutoModelForTextToSpeech.from_config(
+            config,
+            diffusion_sampling=True,
+            diffusion_sampling_config={
+                "target_steps": 16,
+                "solver": "stork2",
+            },
+        )
+
+        self.assertFalse(model.is_loaded)
+        pending = model._pending_tts_optimization_config
+        self.assertEqual(pending.diffusion_sampling.value, "required")
+        self.assertEqual(
+            pending.diffusion_sampling_config.target_steps,
+            16,
+        )
+        self.assertEqual(
+            pending.diffusion_sampling_config.solver.value,
+            "stork2",
+        )
+        self.assertEqual(pending.compile.value, "disabled")
+
     def test_scheduled_compile_discovers_and_runs_loaded_runtime_boundary(self):
         report = TorchCompileCapabilityReport(
             available=True,

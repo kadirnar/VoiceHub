@@ -5,15 +5,22 @@ import sys
 
 def test_optimization_facade_exports_complete_diffusion_and_codec_apis():
     import voicehub.optimization as optimization
-    from voicehub.optimization import codecs, diffusion
+    from voicehub.optimization import codecs, diffusion, diffusion_cache, diffusion_sampling, diffusion_solvers
 
-    expected = set(codecs.__all__) | set(diffusion.__all__)
+    modules = (
+        codecs,
+        diffusion,
+        diffusion_cache,
+        diffusion_sampling,
+        diffusion_solvers,
+    )
+    expected = set().union(*(set(module.__all__) for module in modules))
     assert expected <= set(optimization.__all__)
     assert set(optimization.__all__) <= set(dir(optimization))
     assert len(optimization.__all__) == len(set(optimization.__all__))
-    for name in expected:
-        source = codecs if name in codecs.__all__ else diffusion
-        assert getattr(optimization, name) is getattr(source, name)
+    for module in modules:
+        for name in module.__all__:
+            assert getattr(optimization, name) is getattr(module, name)
 
 
 def test_codec_package_exports_complete_structural_api():
@@ -31,7 +38,7 @@ def test_codec_package_exports_complete_structural_api():
 def test_root_facade_exports_practical_diffusion_and_codec_apis():
     import voicehub
     from voicehub.components.audio.codecs import base, catalog
-    from voicehub.optimization import codecs, diffusion
+    from voicehub.optimization import codecs, diffusion, diffusion_cache, diffusion_sampling, diffusion_solvers
 
     expected = {
         "AudioAutoencoderView": base.AudioAutoencoderView,
@@ -57,6 +64,7 @@ def test_root_facade_exports_practical_diffusion_and_codec_apis():
         "CodecCompileComponent": codecs.CodecCompileComponent,
         "CodecCompilePolicy": codecs.CodecCompilePolicy,
         "CodecKernelBackend": codecs.CodecKernelBackend,
+        "CodecKernelPass": codecs.CodecKernelPass,
         "CodecOptimizationCompatibilityError": codecs.CodecOptimizationCompatibilityError,
         "CodecOptimizationConfig": codecs.CodecOptimizationConfig,
         "CodecOptimizationPlan": codecs.CodecOptimizationPlan,
@@ -67,8 +75,20 @@ def test_root_facade_exports_practical_diffusion_and_codec_apis():
         "optimize_codec": codecs.optimize_codec,
         "resolve_codec_optimization": codecs.resolve_codec_optimization,
         "DiffusionArchitectureKind": diffusion.DiffusionArchitectureKind,
+        "DiffusionCacheMethod": diffusion_cache.DiffusionCacheMethod,
+        "DiffusionGuidanceStrategy": diffusion_sampling.DiffusionGuidanceStrategy,
         "DiffusionModelOptimizationSupport": diffusion.DiffusionModelOptimizationSupport,
         "DiffusionOperation": diffusion.DiffusionOperation,
+        "DiffusionPredictionCacheMethod": diffusion_sampling.DiffusionPredictionCacheMethod,
+        "DiffusionSamplingConfig": diffusion_sampling.DiffusionSamplingConfig,
+        "DiffusionSamplingController": diffusion_sampling.DiffusionSamplingController,
+        "DiffusionSamplingPass": diffusion_sampling.DiffusionSamplingPass,
+        "DiffusionSamplingPolicy": diffusion_sampling.DiffusionSamplingPolicy,
+        "DiffusionScheduleStrategy": diffusion_sampling.DiffusionScheduleStrategy,
+        "DiffusionSolverStrategy": diffusion_sampling.DiffusionSolverStrategy,
+        "DiffusionStepContext": diffusion_sampling.DiffusionStepContext,
+        "STORK2FlowSolver": diffusion_solvers.STORK2FlowSolver,
+        "STORKFlowConfig": diffusion_solvers.STORKFlowConfig,
         "get_diffusion_model_optimization_support": diffusion.get_diffusion_model_optimization_support,
         "list_diffusion_model_optimization_support": diffusion.list_diffusion_model_optimization_support,
     }

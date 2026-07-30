@@ -24,9 +24,9 @@ from voicehub.components.audio.codecs.base import (
     codec_target_is_stochastic,
     separate_audio_codec,
 )
-from voicehub.kernels.registry import KernelBackend
-from voicehub.optimization.accelerators import CustomKernelPass
+from voicehub.kernels.codecs import CodecKernelBackend
 from voicehub.optimization.capabilities import OptimizationContext, OptimizationMode
+from voicehub.optimization.codec_accelerators import CodecKernelPass
 from voicehub.optimization.passes import (
     OptimizationPass,
     OptimizationPassManager,
@@ -165,37 +165,6 @@ class CodecCompileComponent(str, Enum):
 CodecCompileTargetKind = CodecCompileComponent
 
 
-class CodecKernelBackend(str, Enum):
-    """Kernel selection policy, including an untouched native path."""
-
-    AUTO = "auto"
-    NATIVE = "native"
-    TORCH = "torch"
-    TRITON = "triton"
-    CUDA_EXTENSION = "cuda_extension"
-
-    @classmethod
-    def coerce(
-        cls,
-        value: CodecKernelBackend | KernelBackend | str,
-    ) -> CodecKernelBackend:
-        if isinstance(value, cls):
-            return value
-        if isinstance(value, KernelBackend):
-            value = value.value
-        if not isinstance(value, str):
-            raise TypeError("Codec kernel backend must be a string or backend enum.")
-        normalized = value.strip().lower().replace("-", "_")
-        aliases = {"disabled": cls.NATIVE.value}
-        try:
-            return cls(aliases.get(normalized, normalized))
-        except ValueError as error:
-            choices = ", ".join(item.value for item in cls)
-            raise ValueError(
-                f"Unknown codec kernel backend {value!r}; expected "
-                f"one of: {choices}.") from error
-
-
 def _compile_components(
     values: (CodecCompileComponent | str
              | Iterable[CodecCompileComponent | str]),
@@ -250,7 +219,7 @@ class CodecOptimizationConfig:
     """
 
     policy: CodecOptimizationPolicy | str = CodecOptimizationPolicy.EXACT
-    kernel_backend: (CodecKernelBackend | KernelBackend | str) = CodecKernelBackend.AUTO
+    kernel_backend: CodecKernelBackend | str = CodecKernelBackend.AUTO
     compile: CodecCompilePolicy | str | bool = CodecCompilePolicy.AUTO
     compile_components: (tuple[CodecCompileComponent | str, ...]
                          | CodecCompileComponent
@@ -659,14 +628,36 @@ def _module_roots(codec: Any) -> tuple[nn.Module, ...]:
     return tuple(output)
 
 
-def _has_custom_kernel_surface(codec: Any) -> bool:
+def _has_codec_kernel_surface(codec: Any) -> bool:
     seen: set[int] = set()
     for root in _module_roots(codec):
         for module in root.modules():
             if id(module) in seen:
                 continue
             seen.add(id(module))
-            if (callable(getattr(module, "set_kernel_backend", None)) and hasattr(module, "kernel_backend")):
+            if (callable(getattr(module, "set_codec_kernel_backend", None)) and
+                    hasattr(module, "codec_kernel_backend")):
+                return True
+    return False
+
+
+def _has_codec_kernel_backend(
+    codec: Any,
+    backend: CodecKernelBackend,
+) -> bool:
+    """Return whether at least one codec operation implements ``backend``."""
+    seen: set[int] = set()
+    for root in _module_roots(codec):
+        for module in root.modules():
+            if id(module) in seen:
+                continue
+            seen.add(id(module))
+            values = getattr(module, "supported_codec_kernel_backends", ())
+            try:
+                supported = tuple(CodecKernelBackend.coerce(value) for value in values)
+            except (TypeError, ValueError):
+                continue
+            if backend in supported:
                 return True
     return False
 
@@ -727,18 +718,20 @@ def _compile_pass_from_config(
     )
 
 
-def _relaxed_auto_kernel_backend(context: OptimizationContext, ) -> KernelBackend:
+def _relaxed_auto_kernel_backend(context: OptimizationContext, ) -> CodecKernelBackend:
     """Resolve codec-specific relaxed AUTO without weakening universal AUTO."""
     if context.device.partition(":")[0] != "cuda":
-        return KernelBackend.TORCH
+        return CodecKernelBackend.TORCH
     from voicehub.kernels.activations import ACTIVATION_CUDA_EXTENSION_NAME
     from voicehub.kernels.cuda_extensions import CUDA_EXTENSIONS
 
     if CUDA_EXTENSIONS.is_loaded(ACTIVATION_CUDA_EXTENSION_NAME):
-        return KernelBackend.CUDA_EXTENSION
+        return CodecKernelBackend.CUDA_EXTENSION
     from voicehub.kernels.capabilities import triton_capability
 
-    return (KernelBackend.TRITON if triton_capability(context.device).available else KernelBackend.TORCH)
+    return (
+        CodecKernelBackend.TRITON
+        if triton_capability(context.device).available else CodecKernelBackend.TORCH)
 
 
 @dataclass(frozen=True, slots=True)
@@ -908,8 +901,25 @@ def resolve_codec_optimization(
         ),
     ]
 
-    kernel_surface = _has_custom_kernel_surface(codec)
+    kernel_surface = _has_codec_kernel_surface(codec)
     kernels = resolved_config.kernel_backend
+    explicit_accelerators = {
+        CodecKernelBackend.TRITON,
+        CodecKernelBackend.CUTE,
+        CodecKernelBackend.CUDA_EXTENSION,
+    }
+    if (kernels in explicit_accelerators and not _has_codec_kernel_backend(codec, kernels)):
+        availability = ""
+        if kernels is CodecKernelBackend.CUTE:
+            from voicehub.kernels.capabilities import cute_operator_capability
+
+            capability = cute_operator_capability(resolved_context.device)
+            availability = (
+                " "
+                f"Provider status: {'available' if capability.available else capability.reason}.")
+        raise CodecOptimizationCompatibilityError(
+            f"Codec {type(codec).__name__} exposes no operation with a "
+            f"registered {kernels.value!r} implementation.{availability}")
     if kernels is CodecKernelBackend.NATIVE:
         decisions.append(
             CodecOptimizationDecision(
@@ -925,8 +935,8 @@ def resolve_codec_optimization(
         }:
             raise CodecOptimizationCompatibilityError(
                 f"Codec {type(codec).__name__} exposes no reversible "
-                "set_kernel_backend()/kernel_backend protocol for required "
-                f"{kernels.value!r} kernels.")
+                "set_codec_kernel_backend()/codec_kernel_backend protocol "
+                f"for required {kernels.value!r} kernels.")
         decisions.append(
             CodecOptimizationDecision(
                 feature="kernels",
@@ -939,32 +949,35 @@ def resolve_codec_optimization(
     else:
         if (resolved_config.policy is CodecOptimizationPolicy.EXACT and kernels in {
                 CodecKernelBackend.TRITON,
+                CodecKernelBackend.CUTE,
                 CodecKernelBackend.CUDA_EXTENSION,
         }):
             raise CodecOptimizationCompatibilityError(
                 f"Codec kernel backend {kernels.value!r} uses accelerator "
-                "transcendental math and requires policy='relaxed' or "
-                "policy='approximate'. Use kernel_backend='torch' for the "
-                "exact policy.")
+                "math and requires policy='relaxed' or "
+                "policy='approximate'. Use kernel_backend='torch' for exact "
+                "backend parity.")
         if (resolved_config.policy is CodecOptimizationPolicy.EXACT and kernels is CodecKernelBackend.AUTO):
-            selected_backend = KernelBackend.TORCH
+            selected_backend = CodecKernelBackend.TORCH
             kernel_reason = (
                 "The exact policy pins periodic codec activations to the "
                 "PyTorch reference; accelerator transcendental math is "
                 "available through an explicit relaxed or approximate policy.")
         elif kernels is CodecKernelBackend.AUTO:
             selected_backend = _relaxed_auto_kernel_backend(resolved_context, )
+            if not _has_codec_kernel_backend(codec, selected_backend):
+                selected_backend = CodecKernelBackend.TORCH
             kernel_reason = (
                 f"The {resolved_config.policy.value} codec policy allows "
                 "accelerator transcendental math; AUTO resolved the available "
                 f"backend to {selected_backend.value!r} before compilation.")
         else:
-            selected_backend = KernelBackend.coerce(kernels.value)
+            selected_backend = kernels
             kernel_reason = (
                 "The codec exposes the reversible custom-kernel selector "
                 "protocol; capability resolution occurs before graph "
                 "compilation.")
-        passes.append(CustomKernelPass(backend=selected_backend))
+        passes.append(CodecKernelPass(backend=selected_backend))
         decisions.append(
             CodecOptimizationDecision(
                 feature="kernels",
@@ -1396,6 +1409,7 @@ __all__ = [
     "CodecCompilePolicy",
     "CodecCompileTargetKind",
     "CodecKernelBackend",
+    "CodecKernelPass",
     "CodecNumericalPolicy",
     "CodecOptimizationCompatibilityError",
     "CodecOptimizationConfig",

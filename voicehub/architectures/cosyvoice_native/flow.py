@@ -18,6 +18,7 @@ from torch.nn import functional
 from voicehub.architectures.cosyvoice_native.configuration import CosyVoiceFlowConfig
 from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
 from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
+from voicehub.optimization.diffusion_sampling import DiffusionSamplingMixin, DiffusionStepContext
 from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
@@ -357,7 +358,14 @@ def _chunk_attention_mask(
     return allowed[None].expand(batch_size, -1, -1) & valid[:, None, :]
 
 
-class DiTEstimator(DiffusionCacheMixin, nn.Module):
+class DiTEstimator(DiffusionCacheMixin, DiffusionSamplingMixin, nn.Module):
+
+    diffusion_sampling_capabilities = frozenset({
+        "schedule",
+        "guidance",
+        "prediction-cache",
+        "stork2",
+    })
 
     def __init__(self, config: CosyVoiceFlowConfig) -> None:
         super().__init__()
@@ -380,6 +388,7 @@ class DiTEstimator(DiffusionCacheMixin, nn.Module):
         self.norm_out = AdaLayerNormZeroFinal(config.model_dim)
         self.proj_out = nn.Linear(config.model_dim, config.mel_channels)
         self._initialize_diffusion_cache()
+        self._initialize_diffusion_sampling()
 
     def forward(
         self,
@@ -503,6 +512,7 @@ class CausalConditionalFlowMatcher(nn.Module):
         if steps <= 0 or temperature <= 0:
             raise ValueError("Flow steps and temperature must be positive.")
         self.estimator.reset_diffusion_cache()
+        self.estimator.reset_diffusion_sampling()
         values = torch.randn(
             means.shape,
             device=means.device,
@@ -517,31 +527,78 @@ class CausalConditionalFlowMatcher(nn.Module):
                 device=means.device,
                 dtype=means.dtype,
             ) * (math.pi / 2))
-        for start, end in zip(times[:-1], times[1:]):
+        controller = self.estimator.diffusion_sampling_controller
+        if controller is not None:
+            times = controller.prepare_schedule(times)
+        total_steps = times.numel() - 1
+        for index, (start, end) in enumerate(zip(times[:-1], times[1:])):
             timestep = start.expand(means.shape[0])
-            conditioned = self.estimator(
-                values,
-                mask,
-                means,
-                timestep,
-                speakers,
-                conditioning,
-                streaming=streaming,
-                diffusion_cache_lane="conditional",
+            guidance_context = DiffusionStepContext(
+                index=index,
+                total_steps=total_steps,
+                timestep=start,
+                next_timestep=end,
+                lane="guidance",
+                solver="euler",
             )
-            unconditioned = self.estimator(
-                values,
-                mask,
-                torch.zeros_like(means),
-                timestep,
-                torch.zeros_like(speakers),
-                torch.zeros_like(conditioning),
-                streaming=streaming,
-                diffusion_cache_lane="unconditional",
+            use_guidance = (
+                True if controller is None else controller.should_use_guidance(
+                    guidance_context,
+                    native=True,
+                ))
+            evaluation_context = DiffusionStepContext(
+                index=index,
+                total_steps=total_steps,
+                timestep=start,
+                next_timestep=end,
+                lane="guided" if use_guidance else "conditional",
+                solver="euler",
             )
-            velocity = ((1 + self.config.inference_cfg_rate) * conditioned -
+
+            def evaluate_velocity() -> Tensor:
+                conditioned = self.estimator(
+                    values,
+                    mask,
+                    means,
+                    timestep,
+                    speakers,
+                    conditioning,
+                    streaming=streaming,
+                    diffusion_cache_lane="conditional",
+                )
+                if not use_guidance:
+                    return conditioned
+                unconditioned = self.estimator(
+                    values,
+                    mask,
+                    torch.zeros_like(means),
+                    timestep,
+                    torch.zeros_like(speakers),
+                    torch.zeros_like(conditioning),
+                    streaming=streaming,
+                    diffusion_cache_lane="unconditional",
+                )
+                if controller is not None:
+                    controller.observe_guidance(
+                        guidance_context,
+                        conditioned,
+                        unconditioned,
+                    )
+                return ((1 + self.config.inference_cfg_rate) * conditioned -
                         self.config.inference_cfg_rate * unconditioned)
-            values = values + (end - start) * velocity
+
+            velocity = (
+                evaluate_velocity() if controller is None else controller.evaluate(
+                    evaluation_context,
+                    values,
+                    evaluate_velocity,
+                ))
+            values = (
+                values + (end - start) * velocity if controller is None else controller.advance(
+                    evaluation_context,
+                    values,
+                    velocity,
+                ))
         return values.float()
 
 

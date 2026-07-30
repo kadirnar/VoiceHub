@@ -4,6 +4,8 @@ import math
 
 import torch
 
+from voicehub.optimization.diffusion_sampling import DiffusionStepContext
+
 from .conditioning import SPEAKER_INVERSION_UNCOND_MODES
 from .modeling import TextToLatentRFDiT
 
@@ -152,6 +154,9 @@ def sample_euler_rf_cfg(
     device = model.device
     dtype = model.dtype
     model.reset_diffusion_cache()
+    sampling_controller = model.diffusion_sampling_controller
+    if sampling_controller is not None:
+        sampling_controller.reset()
     batch_size = text_input_ids.shape[0]
     latent_dim = model.cfg.patched_latent_dim
 
@@ -203,6 +208,10 @@ def sample_euler_rf_cfg(
     t_schedule = (1.0 - u) * init_scale
     if not bool(torch.all(t_schedule[:-1] > t_schedule[1:]).item()):
         raise ValueError("t_schedule must be strictly decreasing; adjust num_steps or sway_coeff.")
+    if sampling_controller is not None:
+        t_schedule = sampling_controller.prepare_schedule(t_schedule)
+    if not bool(torch.all(t_schedule[:-1] > t_schedule[1:]).item()):
+        raise ValueError("Prepared t_schedule must be strictly decreasing.")
     use_independent_cfg = cfg_guidance_mode == "independent"
     use_joint_cfg = cfg_guidance_mode == "joint"
     use_alternating_cfg = cfg_guidance_mode == "alternating"
@@ -439,13 +448,60 @@ def sample_euler_rf_cfg(
             )
     speaker_kv_active = speaker_kv_scale is not None
 
-    for i in range(num_steps):
+    prepared_steps = len(t_schedule) - 1
+    for i in range(prepared_steps):
         t = t_schedule[i]
         t_next = t_schedule[i + 1]
         tt = torch.full((batch_size, ), t, device=device, dtype=dtype)
 
-        use_cfg = bool(enabled_cfg_names) and (cfg_min_t <= t.item() <= cfg_max_t)
-        if use_cfg:
+        native_cfg = bool(enabled_cfg_names) and (cfg_min_t <= t.item() <= cfg_max_t)
+        alternating_name = (
+            enabled_cfg_names[i % len(enabled_cfg_names)] if native_cfg and use_alternating_cfg else None)
+        if use_independent_cfg:
+            guidance_lane = "packed-cfg:independent"
+        elif use_joint_cfg:
+            guidance_lane = "guided:joint"
+        elif use_alternating_cfg and alternating_name is not None:
+            guidance_lane = f"guided:alternating:{alternating_name}"
+        else:
+            guidance_lane = "guided"
+        guidance_context = DiffusionStepContext(
+            index=i,
+            total_steps=prepared_steps,
+            timestep=t,
+            next_timestep=t_next,
+            lane=guidance_lane,
+            solver="euler",
+        )
+        use_cfg = (
+            native_cfg if sampling_controller is None else sampling_controller.should_use_guidance(
+                guidance_context,
+                native=native_cfg,
+            ))
+        context = (
+            guidance_context if use_cfg else DiffusionStepContext(
+                index=i,
+                total_steps=prepared_steps,
+                timestep=t,
+                next_timestep=t_next,
+                lane="conditional",
+                solver="euler",
+            ))
+
+        def compute_velocity() -> torch.Tensor:
+            if not use_cfg:
+                return model.forward_with_encoded_conditions(
+                    x_t=x_t.to(dtype),
+                    t=tt,
+                    text_state=text_state_cond,
+                    text_mask=text_mask_cond,
+                    speaker_state=speaker_state_cond,
+                    speaker_mask=speaker_mask_cond,
+                    caption_state=caption_state_cond,
+                    caption_mask=caption_mask_cond,
+                    context_kv_cache=context_kv_cond,
+                    diffusion_cache_lane="conditional",
+                )
             if use_independent_cfg:
                 x_t_cfg = torch.cat([x_t] * cfg_batch_mult, dim=0).to(dtype)
                 tt_cfg = tt.repeat(cfg_batch_mult)
@@ -462,63 +518,18 @@ def sample_euler_rf_cfg(
                     diffusion_cache_lane="packed-cfg",
                 )
                 chunks = v_out.chunk(cfg_batch_mult, dim=0)
-                v = chunks[0]
+                if sampling_controller is not None and len(chunks) > 1:
+                    sampling_controller.observe_guidance(
+                        context,
+                        torch.cat([chunks[0]] * (len(chunks) - 1), dim=0),
+                        torch.cat(chunks[1:], dim=0),
+                    )
+                velocity = chunks[0]
                 for name, chunk in zip(independent_names[1:], chunks[1:], strict=True):
-                    v = v + cfg_scales[name] * (chunks[0] - chunk)
-            else:
-                v_cond = model.forward_with_encoded_conditions(
-                    x_t=x_t.to(dtype),
-                    t=tt,
-                    text_state=text_state_cond,
-                    text_mask=text_mask_cond,
-                    speaker_state=speaker_state_cond,
-                    speaker_mask=speaker_mask_cond,
-                    caption_state=caption_state_cond,
-                    caption_mask=caption_mask_cond,
-                    context_kv_cache=context_kv_cond,
-                    diffusion_cache_lane="conditional",
-                )
-                if use_joint_cfg:
-                    if len(enabled_cfg_names) > 1:
-                        joint_scales = [cfg_scales[name] for name in enabled_cfg_names]
-                        if max(joint_scales) - min(joint_scales) > 1e-6:
-                            raise ValueError(
-                                "cfg_guidance_mode='joint' expects equal enabled guidance scales; "
-                                "set matching text/speaker/caption scales or use --cfg-scale.")
-                    joint_scale = cfg_scales[enabled_cfg_names[0]]
-                    v_uncond_joint = model.forward_with_encoded_conditions(
-                        x_t=x_t.to(dtype),
-                        t=tt,
-                        text_state=joint_uncond_bundle[0],
-                        text_mask=joint_uncond_bundle[1],
-                        speaker_state=joint_uncond_bundle[2],
-                        speaker_mask=joint_uncond_bundle[3],
-                        caption_state=joint_uncond_bundle[4],
-                        caption_mask=joint_uncond_bundle[5],
-                        context_kv_cache=context_kv_joint_uncond,
-                        diffusion_cache_lane="unconditional:joint",
-                    )
-                    v = v_cond + joint_scale * (v_cond - v_uncond_joint)
-                elif use_alternating_cfg:
-                    alt_name = enabled_cfg_names[i % len(enabled_cfg_names)]
-                    alt_bundle = alternating_bundles[alt_name]
-                    v_uncond_alt = model.forward_with_encoded_conditions(
-                        x_t=x_t.to(dtype),
-                        t=tt,
-                        text_state=alt_bundle[0],
-                        text_mask=alt_bundle[1],
-                        speaker_state=alt_bundle[2],
-                        speaker_mask=alt_bundle[3],
-                        caption_state=alt_bundle[4],
-                        caption_mask=alt_bundle[5],
-                        context_kv_cache=context_kv_alternating.get(alt_name),
-                        diffusion_cache_lane=f"unconditional:{alt_name}",
-                    )
-                    v = v_cond + cfg_scales[alt_name] * (v_cond - v_uncond_alt)
-                else:
-                    raise RuntimeError(f"Unexpected cfg_guidance_mode: {cfg_guidance_mode}")
-        else:
-            v = model.forward_with_encoded_conditions(
+                    velocity = velocity + cfg_scales[name] * (chunks[0] - chunk)
+                return velocity
+
+            v_cond = model.forward_with_encoded_conditions(
                 x_t=x_t.to(dtype),
                 t=tt,
                 text_state=text_state_cond,
@@ -530,6 +541,62 @@ def sample_euler_rf_cfg(
                 context_kv_cache=context_kv_cond,
                 diffusion_cache_lane="conditional",
             )
+            if use_joint_cfg:
+                if len(enabled_cfg_names) > 1:
+                    joint_scales = [cfg_scales[name] for name in enabled_cfg_names]
+                    if max(joint_scales) - min(joint_scales) > 1e-6:
+                        raise ValueError(
+                            "cfg_guidance_mode='joint' expects equal enabled guidance scales; "
+                            "set matching text/speaker/caption scales or use --cfg-scale.")
+                joint_scale = cfg_scales[enabled_cfg_names[0]]
+                v_uncond_joint = model.forward_with_encoded_conditions(
+                    x_t=x_t.to(dtype),
+                    t=tt,
+                    text_state=joint_uncond_bundle[0],
+                    text_mask=joint_uncond_bundle[1],
+                    speaker_state=joint_uncond_bundle[2],
+                    speaker_mask=joint_uncond_bundle[3],
+                    caption_state=joint_uncond_bundle[4],
+                    caption_mask=joint_uncond_bundle[5],
+                    context_kv_cache=context_kv_joint_uncond,
+                    diffusion_cache_lane="unconditional:joint",
+                )
+                if sampling_controller is not None:
+                    sampling_controller.observe_guidance(
+                        context,
+                        v_cond,
+                        v_uncond_joint,
+                    )
+                return v_cond + joint_scale * (v_cond - v_uncond_joint)
+            if use_alternating_cfg and alternating_name is not None:
+                alt_bundle = alternating_bundles[alternating_name]
+                v_uncond_alt = model.forward_with_encoded_conditions(
+                    x_t=x_t.to(dtype),
+                    t=tt,
+                    text_state=alt_bundle[0],
+                    text_mask=alt_bundle[1],
+                    speaker_state=alt_bundle[2],
+                    speaker_mask=alt_bundle[3],
+                    caption_state=alt_bundle[4],
+                    caption_mask=alt_bundle[5],
+                    context_kv_cache=context_kv_alternating.get(alternating_name),
+                    diffusion_cache_lane=f"unconditional:{alternating_name}",
+                )
+                if sampling_controller is not None:
+                    sampling_controller.observe_guidance(
+                        context,
+                        v_cond,
+                        v_uncond_alt,
+                    )
+                return v_cond + cfg_scales[alternating_name] * (v_cond - v_uncond_alt)
+            raise RuntimeError(f"Unexpected cfg_guidance_mode: {cfg_guidance_mode}")
+
+        v = (
+            compute_velocity() if sampling_controller is None else sampling_controller.evaluate(
+                context,
+                x_t,
+                compute_velocity,
+            ))
 
         if rescale_k is not None and rescale_sigma is not None:
             v = temporal_score_rescale(
@@ -562,6 +629,8 @@ def sample_euler_rf_cfg(
                     max_layers=speaker_kv_max_layers,
                 )
             model.reset_diffusion_cache()
+            if sampling_controller is not None:
+                sampling_controller.reset()
             speaker_kv_active = False
 
         x_t = x_t + v * (t_next - t)

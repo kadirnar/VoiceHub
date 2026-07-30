@@ -7,6 +7,7 @@ from voicehub.optimization import (
     DIFFUSION_FAMILY_FEATURE,
     DIFFUSION_KIND_FEATURE_PREFIX,
     DIFFUSION_OPERATION_FEATURE_PREFIX,
+    DIFFUSION_SAMPLING_FEATURE_PREFIX,
     DiffusionArchitectureKind,
     DiffusionOperation,
     diffusion_kind_feature,
@@ -29,7 +30,15 @@ _EXPECTED = {
             DiffusionOperation.CLASSIFIER_FREE_GUIDANCE,
             DiffusionOperation.EULER_SOLVER,
         ),
-        "passes": ("compile", "sdpa"),
+        "passes": (
+            "compile",
+            "sdpa",
+            "diffusion-sampling",
+        ),
+        "sampling": (
+            "schedule",
+            "prediction-cache",
+        ),
     },
     "cosyvoice": {
         "architecture":
@@ -41,7 +50,18 @@ _EXPECTED = {
             DiffusionOperation.CLASSIFIER_FREE_GUIDANCE,
             DiffusionOperation.EULER_SOLVER,
         ),
-        "passes": ("compile", "custom-kernels", "diffusion-cache"),
+        "passes": (
+            "compile",
+            "custom-kernels",
+            "diffusion-cache",
+            "diffusion-sampling",
+        ),
+        "sampling": (
+            "schedule",
+            "guidance",
+            "prediction-cache",
+            "stork2",
+        ),
     },
     "echo": {
         "architecture":
@@ -53,7 +73,17 @@ _EXPECTED = {
             DiffusionOperation.CLASSIFIER_FREE_GUIDANCE,
             DiffusionOperation.EULER_SOLVER,
         ),
-        "passes": ("compile", "custom-kernels", "diffusion-cache"),
+        "passes": (
+            "compile",
+            "custom-kernels",
+            "diffusion-cache",
+            "diffusion-sampling",
+        ),
+        "sampling": (
+            "schedule",
+            "guidance",
+            "prediction-cache",
+        ),
     },
     "f5tts": {
         "architecture":
@@ -71,6 +101,13 @@ _EXPECTED = {
             "attention-backend",
             "custom-kernels",
             "diffusion-cache",
+            "diffusion-sampling",
+        ),
+        "sampling": (
+            "schedule",
+            "guidance",
+            "prediction-cache",
+            "stork2",
         ),
     },
     "irodoritts": {
@@ -88,6 +125,12 @@ _EXPECTED = {
             "sdpa",
             "custom-kernels",
             "diffusion-cache",
+            "diffusion-sampling",
+        ),
+        "sampling": (
+            "schedule",
+            "guidance",
+            "prediction-cache",
         ),
     },
     "styletts2": {
@@ -100,7 +143,11 @@ _EXPECTED = {
             DiffusionOperation.CLASSIFIER_FREE_GUIDANCE,
             DiffusionOperation.ADPM2_SOLVER,
         ),
-        "passes": ("compile", ),
+        "passes": (
+            "compile",
+            "diffusion-sampling",
+        ),
+        "sampling": ("schedule", ),
     },
     "supertonic": {
         "architecture": "supertonic",
@@ -109,7 +156,11 @@ _EXPECTED = {
             DiffusionOperation.DENOISER,
             DiffusionOperation.ITERATIVE_ESTIMATOR,
         ),
-        "passes": ("compile", ),
+        "passes": (
+            "compile",
+            "diffusion-sampling",
+        ),
+        "sampling": ("discrete-step-count", ),
     },
     "vibevoice": {
         "architecture":
@@ -126,6 +177,12 @@ _EXPECTED = {
             "sdpa",
             "custom-kernels",
             "diffusion-cache",
+            "diffusion-sampling",
+        ),
+        "sampling": (
+            "schedule",
+            "guidance",
+            "prediction-cache",
         ),
     },
     "voxcpm": {
@@ -138,7 +195,17 @@ _EXPECTED = {
             DiffusionOperation.CLASSIFIER_FREE_GUIDANCE,
             DiffusionOperation.EULER_SOLVER,
         ),
-        "passes": ("compile", "sdpa", "diffusion-cache"),
+        "passes": (
+            "compile",
+            "sdpa",
+            "diffusion-cache",
+            "diffusion-sampling",
+        ),
+        "sampling": (
+            "schedule",
+            "guidance",
+            "prediction-cache",
+        ),
     },
 }
 
@@ -162,6 +229,10 @@ class DiffusionFamilyInventoryTests(unittest.TestCase):
                     item.optimization_passes,
                     expected["passes"],
                 )
+                self.assertEqual(
+                    item.sampling_techniques,
+                    expected.get("sampling", ()),
+                )
                 self.assertTrue(item.training)
                 self.assertTrue(item.distributed_training)
                 self.assertTrue(item.compile_supported)
@@ -169,6 +240,10 @@ class DiffusionFamilyInventoryTests(unittest.TestCase):
                 self.assertEqual(
                     item.diffusion_cache_supported,
                     "diffusion-cache" in expected["passes"],
+                )
+                self.assertEqual(
+                    item.diffusion_sampling_supported,
+                    "diffusion-sampling" in expected["passes"],
                 )
 
     def test_normalized_features_and_metadata_are_kept_in_lockstep(self):
@@ -191,12 +266,24 @@ class DiffusionFamilyInventoryTests(unittest.TestCase):
                     tuple(diffusion_operation_feature(item) for item in expected["operations"]),
                 )
                 self.assertEqual(
+                    tuple(
+                        item for item in capabilities.features
+                        if item.startswith(DIFFUSION_SAMPLING_FEATURE_PREFIX)),
+                    tuple(
+                        f"{DIFFUSION_SAMPLING_FEATURE_PREFIX}{item}"
+                        for item in expected.get("sampling", ())),
+                )
+                self.assertEqual(
                     metadata["diffusion_architecture_kind"],
                     expected["kind"].value,
                 )
                 self.assertEqual(
                     metadata["diffusion_operations"],
                     tuple(item.value for item in expected["operations"]),
+                )
+                self.assertEqual(
+                    metadata.get("diffusion_sampling_capabilities", ()),
+                    expected.get("sampling", ()),
                 )
 
     def test_pass_inventory_matches_the_universal_tts_resolver(self):
@@ -289,6 +376,16 @@ class DiffusionFamilyInventoryTests(unittest.TestCase):
         )
         self.assertTrue(manifest["compile_supported"])
         self.assertTrue(manifest["diffusion_cache_supported"])
+        self.assertTrue(manifest["diffusion_sampling_supported"])
+        self.assertEqual(
+            manifest["sampling_techniques"],
+            [
+                "schedule",
+                "guidance",
+                "prediction-cache",
+                "stork2",
+            ],
+        )
         self.assertEqual(
             manifest["optimization_passes"],
             [
@@ -296,6 +393,7 @@ class DiffusionFamilyInventoryTests(unittest.TestCase):
                 "attention-backend",
                 "custom-kernels",
                 "diffusion-cache",
+                "diffusion-sampling",
             ],
         )
 
