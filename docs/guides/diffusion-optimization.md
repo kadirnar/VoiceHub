@@ -166,6 +166,107 @@ and a more aggressive
 Treat those as optimization patterns, not evidence that image-model kernels
 can be copied into a speech graph unchanged.
 
+### Approximate block-residual caching
+
+VoiceHub includes an opt-in, native adaptation of Cache-DiT's DBCache idea.
+Image DiTs often produce similar intermediate states at neighboring denoising
+steps, and the same property can occur in repeated speech DiT or flow blocks.
+The implementation does not import Diffusers or Cache-DiT and does not replace
+a model's sampler. It applies the block-boundary algorithm described by the
+official [Cache-DiT repository](https://github.com/vipshop/cache-dit),
+[unified cache API](https://cache-dit.readthedocs.io/en/latest/user_guide/CACHE_API/),
+and
+[DBCache design](https://cache-dit.readthedocs.io/en/latest/user_guide/DBCACHE_DESIGN/)
+to architecture-owned VoiceHub block lists:
+
+1. Always run the first `front_blocks` (`Fn`) blocks and compare their output
+   with the previous probe using a normalized relative-L1 score.
+2. On a required compute step, run the middle blocks and save their aggregate
+   residual.
+3. On a cache hit, skip those middle blocks and add either the latest residual
+   (`predictor="reuse"`) or a first-order extrapolation from the two latest
+   fully computed residuals (`predictor="taylor"`).
+4. Always run the last `back_blocks` (`Bn`) blocks so the approximate state is
+   refined before the model's output projection.
+
+The Taylor predictor never chains predictions. A threshold miss always
+refreshes it from an actual middle-block evaluation.
+
+Caching is approximate and disabled by default. Setting `diffusion_cache` to
+`"auto"` is an explicit request: it enables caching on declared adapters and
+retains exact execution when the architecture cannot provide one.
+`"required"` fails resolution instead of falling back.
+
+```python
+from voicehub import DiffusionCacheConfig, TTSOptimizationConfig
+
+optimization = TTSOptimizationConfig(
+    attn_implementation="auto",
+    kernel_backend="auto",
+    diffusion_cache="required",
+    diffusion_cache_config=DiffusionCacheConfig(
+        front_blocks=1,
+        back_blocks=1,
+        residual_diff_threshold=0.05,
+        warmup_steps=3,
+        max_cached_steps=-1,
+        max_consecutive_cached_steps=2,
+        max_accumulated_relative_error=0.12,
+        predictor="reuse",
+        # True means "force a full middle-block evaluation" at that step.
+        compute_step_mask=(True, True, False, False, True),
+    ),
+    compile="auto",
+)
+plan = optimization.resolve("f5tts", mode="inference")
+```
+
+`warmup_steps` forces early full evaluations. `max_cached_steps` limits cache
+hits across one lane (`-1` means unlimited), while
+`max_consecutive_cached_steps` prevents long runs of predictions.
+`max_accumulated_relative_error` forces refresh after the accepted probe
+scores accumulate beyond its budget. `compute_step_mask` is an SCM-like
+explicit full-compute schedule: `True` forces computation, while `False`
+still permits the threshold and safety limits to reject a hit. Distributed
+execution takes the maximum probe score across ranks by default so every rank
+makes the same decision.
+
+Each sampler invalidates its state at request boundaries and when a
+conditioning cache changes. Packed CFG uses its own lane; separate
+conditional, unconditional, and alternate-unconditional calls use independent
+lanes. A shape, dtype, device, or middle-block output mismatch invalidates or
+bypasses the entry. Training mode, gradient-enabled calls, and unsupported
+block layouts always execute every block. The cache owns no parameters,
+buffers, or child modules, so enabling and restoring it does not change
+checkpoint keys.
+
+The currently declared block adapters are:
+
+| Model type | Cache boundary | Status |
+| --- | --- | --- |
+| `cosyvoice` | Native `DiTEstimator` blocks with separate CFG lanes | Supported |
+| `f5tts` | `F5DiT.transformer_blocks` | Supported |
+| `echo` | `EchoDiT.blocks`, including sampler invalidation | Supported |
+| `irodoritts` | RF-DiT blocks with packed and independent CFG lanes | Supported |
+| `voxcpm` | Local DiT decoder layers inside the outer acoustic loop | Supported |
+| `vibevoice` | Low-level `VibeVoiceDiffusionHead.layers` only | Experimental; the public high-level inference path still fails closed |
+| `chatterbox`, `styletts2`, `supertonic` | No reviewed architecture-owned repeated-block adapter | Unsupported; `auto` stays exact and `required` raises |
+
+Architecture registration, not a model-name allowlist, declares
+`diffusion-cache`. Adding another adapter requires sampler-level invalidation,
+CFG-lane coverage, exact cold-path parity, approximate quality evaluation,
+and restoration/state-dict tests.
+
+Optimization passes are ordered as architecture kernel selection, attention
+selection, diffusion-cache enablement, and then `torch.compile`. This lets the
+compiler see the final block implementation. The cache decision itself is
+request- and step-dependent Python control flow, so prefer regional
+compilation of the repeated tensor blocks and `fullgraph=False`. Do not assume
+that a CUDA graph can capture threshold decisions or changing cache lanes.
+Cache-DiT likewise documents its
+[compile integration](https://cache-dit.readthedocs.io/en/latest/user_guide/COMPILE/)
+as a separate concern from cache policy.
+
 ### Attention
 
 Prefer an architecture's verified
@@ -224,6 +325,70 @@ The official
 documents the mode tradeoffs. Always report compilation/warm-up latency
 separately from steady-state latency.
 
+## External diffusion serving
+
+An engine that accelerates image or video diffusion is not automatically a
+TTS server. VoiceHub exposes dependency-free capability records and resolves
+only complete pipelines that own text/speaker conditioning, the denoising or
+flow loop, and waveform or codec/vocoder output:
+
+```python
+from voicehub import (
+    LLMBackendConfig,
+    bridge_vllm_omni_tts_config,
+    list_diffusion_serving_capabilities,
+    resolve_diffusion_tts_backend,
+)
+
+for capability in list_diffusion_serving_capabilities():
+    print(
+        capability.backend.value,
+        capability.diffusion_modalities,
+        capability.supports_tts_diffusion,
+        capability.verified_tts_models,
+    )
+
+plan = resolve_diffusion_tts_backend("cosyvoice", "vllm-omni")
+plan, speech_config = bridge_vllm_omni_tts_config(
+    "cosyvoice",
+    LLMBackendConfig(
+        backend="vllm",
+        endpoint="http://127.0.0.1:8000",
+        model="FunAudioLLM/Fun-CosyVoice3-0.5B-2512",
+    ),
+)
+assert speech_config.transport.value == "speech"
+```
+
+[vLLM-Omni](https://github.com/vllm-project/vllm-omni) is a multimodal engine
+with heterogeneous stages and a documented
+[diffusion runtime](https://docs.vllm.ai/projects/vllm-omni/en/latest/).
+VoiceHub verifies its complete speech bridge only for `cosyvoice` and
+`voxcpm`; the bridge reuses the existing `/v1/audio/speech` client rather than
+pretending that a DiT-only endpoint returns audio.
+
+The native serving capability similarly excludes `vibevoice`: VoiceHub
+exposes and optimizes its low-level diffusion head, but the public high-level
+TTS generation path intentionally still fails closed pending parity.
+
+Other models may use the experimental `VLLMOmniDiffusionPlugin` contract only
+when an installed engine exposes its public out-of-tree
+`register_diffusion_model` hook and the plugin explicitly declares a complete
+TTS pipeline with post-processing. `detect_vllm_omni_features()` probes that
+optional API lazily. Merely importing `voicehub.diffusion_serving` imports
+neither vLLM-Omni nor SGLang.
+
+[SGLang Diffusion](https://github.com/sgl-project/sglang) applies image-side
+techniques such as dynamic batching, distributed sequence parallelism,
+specialized attention, and Cache-DiT integration, as described in the
+official
+[SGLang Diffusion announcement](https://www.lmsys.org/blog/2026-01-16-sglang-diffusion/).
+Its public diffusion request/output contract is for image and video, not
+audio, so `resolve_diffusion_tts_backend(..., "sglang-diffusion")` fails
+closed. SGLang-Omni is represented separately: its verified LLM-TTS support
+belongs to `voicehub.llm_serving` and must not be relabeled as SGLang
+Diffusion support.
+
 ## Semantic-preserving and approximate changes
 
 VoiceHub's automatic system is conservative. “Exact” below means the same
@@ -239,6 +404,7 @@ GPU results.
 | Cache fixed conditioning, RoPE, masks, or key/value projections | Semantic-preserving | Cache invalidation and parity when any conditioning input changes |
 | Pad into static buckets | Semantic-preserving | Padded values are fully masked and output is trimmed to the original length |
 | Pack CFG branches into the batch dimension | Semantic-preserving | Branch ordering, guidance equation, masks, and random inputs match the separate calls |
+| Reuse or extrapolate a middle-block residual across denoising steps | Approximate | Per-model latency/quality curve, request and CFG invalidation, forced-compute parity, and cache-hit statistics |
 | Use float16/bfloat16, TF32, or fast-math kernels | Numerically relaxed | Per-model audio/latent metrics, overflow tests, and quality evaluation |
 | Reduce function evaluations or change timestep spacing | Approximate | Latency-quality curve for the exact checkpoint and conditioning modes |
 | Replace Euler, midpoint, ADPM2, or DPM-Solver++ with another solver | Approximate | Source-backed conversion and model-level perceptual/regression evaluation |

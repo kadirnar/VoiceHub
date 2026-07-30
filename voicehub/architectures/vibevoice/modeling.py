@@ -1015,6 +1015,7 @@ class VibeVoiceRealtimeForConditionalGeneration(nn.Module):
         if (isinstance(guidance_scale, bool) or not isinstance(guidance_scale, (int, float)) or
                 not math.isfinite(guidance_scale) or guidance_scale <= 0):
             raise ValueError("Guidance scale must be finite and positive.")
+        self.model.prediction_head.reset_diffusion_cache()
         if condition.shape != negative_condition.shape or condition.ndim != 2:
             raise ValueError("Positive and negative TTS conditions must align.")
         combined_condition = torch.cat(

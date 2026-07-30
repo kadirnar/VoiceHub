@@ -35,6 +35,7 @@ from voicehub.tasks import SpeechTask
 
 if TYPE_CHECKING:
     from voicehub.architectures.specifications import ArchitectureSpec
+    from voicehub.optimization.diffusion_cache import DiffusionCacheConfig, DiffusionCachePolicy
     from voicehub.optimization.passes import OptimizationResult
     from voicehub.registry import ModelSpec
 
@@ -203,6 +204,8 @@ class TTSOptimizationConfig:
     kernel_backend: TTSKernelBackend | str = TTSKernelBackend.AUTO
     compile: TTSCompilePolicy | str | bool = TTSCompilePolicy.AUTO
     compile_config: TorchCompileConfig | Mapping[str, Any] | None = None
+    diffusion_cache: DiffusionCachePolicy | str | bool = "disabled"
+    diffusion_cache_config: DiffusionCacheConfig | Mapping[str, Any] | None = None
     optimization_passes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -213,11 +216,21 @@ class TTSOptimizationConfig:
             self.compile_config,
             policy=compile_policy,
         )
+        diffusion_module = import_module("voicehub.optimization.diffusion_cache", )
+        diffusion_cache = diffusion_module.DiffusionCachePolicy.coerce(self.diffusion_cache, )
+        diffusion_cache_config = (
+            diffusion_module.coerce_diffusion_cache_config(self.diffusion_cache_config, ))
         extra_passes = _optimization_pass_names(self.optimization_passes)
         object.__setattr__(self, "attn_implementation", attention)
         object.__setattr__(self, "kernel_backend", kernels)
         object.__setattr__(self, "compile", compile_policy)
         object.__setattr__(self, "compile_config", compile_config)
+        object.__setattr__(self, "diffusion_cache", diffusion_cache)
+        object.__setattr__(
+            self,
+            "diffusion_cache_config",
+            diffusion_cache_config,
+        )
         object.__setattr__(
             self,
             "optimization_passes",
@@ -253,6 +266,8 @@ class TTSOptimizationConfig:
             "kernel_backend": self.kernel_backend.value,
             "compile": self.compile.value,
             "compile_config": self.compile_config.manifest(),
+            "diffusion_cache": self.diffusion_cache.value,
+            "diffusion_cache_config": self.diffusion_cache_config.to_dict(),
             "optimization_passes": list(self.optimization_passes),
         }
 
@@ -304,6 +319,8 @@ def tts_optimization_config_from_options(
     kernel_backend: str | None = None,
     torch_compile: bool | str | None = None,
     compile_config: TorchCompileConfig | Mapping[str, Any] | None = None,
+    diffusion_cache: bool | str | None = None,
+    diffusion_cache_config: DiffusionCacheConfig | Mapping[str, Any] | None = None,
 ) -> TTSOptimizationConfig | None:
     """Merge ``from_pretrained``-style optimization keyword arguments.
 
@@ -318,6 +335,8 @@ def tts_optimization_config_from_options(
             kernel_backend,
             torch_compile,
             compile_config,
+            diffusion_cache,
+            diffusion_cache_config,
         ))
     if optimization_config is None and not direct:
         return None
@@ -329,6 +348,8 @@ def tts_optimization_config_from_options(
                 "auto" if torch_compile is None and compile_config is not None else
                 ("disabled" if torch_compile is None else torch_compile)),
             compile_config=compile_config,
+            diffusion_cache=("disabled" if diffusion_cache is None else diffusion_cache),
+            diffusion_cache_config=diffusion_cache_config,
         )
 
     resolved = coerce_tts_optimization_config(optimization_config)
@@ -343,6 +364,10 @@ def tts_optimization_config_from_options(
         values["compile"] = torch_compile
     if compile_config is not None:
         values["compile_config"] = compile_config
+    if diffusion_cache is not None:
+        values["diffusion_cache"] = diffusion_cache
+    if diffusion_cache_config is not None:
+        values["diffusion_cache_config"] = diffusion_cache_config
     return TTSOptimizationConfig(**values)
 
 
@@ -384,6 +409,7 @@ class TTSOptimizationSupport:
     attention_implementations: tuple[str, ...]
     kernel_backends: tuple[str, ...]
     compile: bool
+    diffusion_cache: bool
     optimization_kinds: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -393,6 +419,7 @@ class TTSOptimizationSupport:
             "attention_implementations": list(self.attention_implementations),
             "kernel_backends": list(self.kernel_backends),
             "compile": self.compile,
+            "diffusion_cache": self.diffusion_cache,
             "optimization_kinds": list(self.optimization_kinds),
         }
 
@@ -663,6 +690,7 @@ def get_tts_optimization_support(target: str | Any, ) -> TTSOptimizationSupport:
         attention_implementations=tuple(attention),
         kernel_backends=tuple(kernels),
         compile=architecture is None or "compile" in kinds,
+        diffusion_cache="diffusion-cache" in kinds,
         optimization_kinds=tuple(kinds),
     )
 
@@ -697,6 +725,12 @@ def validate_tts_optimization_config(
         raise TTSOptimizationCompatibilityError(
             f"Architecture {support.architecture!r} does not declare "
             "torch.compile compatibility.")
+    diffusion_module = import_module("voicehub.optimization.diffusion_cache", )
+    if (resolved.diffusion_cache is diffusion_module.DiffusionCachePolicy.REQUIRED and
+            not support.diffusion_cache):
+        raise TTSOptimizationCompatibilityError(
+            f"Architecture {support.architecture!r} does not declare an "
+            "architecture-owned diffusion-cache block surface.")
     return resolved
 
 
@@ -933,6 +967,73 @@ def _resolve_compile(
     )
 
 
+def _resolve_diffusion_cache(
+    config: TTSOptimizationConfig,
+    support: TTSOptimizationSupport,
+    context: OptimizationContext,
+) -> tuple[OptimizationPass | None, TTSOptimizationDecision]:
+    module = import_module("voicehub.optimization.diffusion_cache")
+    policy = config.diffusion_cache
+    if policy is module.DiffusionCachePolicy.DISABLED:
+        return None, _pass_decision(
+            "diffusion_cache",
+            policy.value,
+            "disabled",
+            None,
+            "Approximate diffusion block caching is disabled by default.",
+        )
+    if context.mode is not OptimizationMode.INFERENCE:
+        reason = (
+            "Diffusion residual caching is inference-only because training "
+            "timesteps and parameters change between calls.")
+        if policy is module.DiffusionCachePolicy.REQUIRED:
+            raise TTSOptimizationCompatibilityError(reason)
+        return None, _pass_decision(
+            "diffusion_cache",
+            policy.value,
+            "disabled",
+            None,
+            reason,
+        )
+    if not support.diffusion_cache:
+        reason = (
+            f"Architecture {support.architecture!r} does not declare an "
+            "architecture-owned repeated-block cache surface.")
+        if policy is module.DiffusionCachePolicy.REQUIRED:
+            raise TTSOptimizationCompatibilityError(reason)
+        return None, _pass_decision(
+            "diffusion_cache",
+            policy.value,
+            "unsupported",
+            None,
+            reason,
+        )
+    optimization_pass = module.DiffusionCachePass(config.diffusion_cache_config, )
+    incompatibilities = optimization_pass.capabilities.incompatibilities(context, )
+    if incompatibilities:
+        reason = ("Diffusion residual caching does not support " + ", ".join(incompatibilities))
+        if policy is module.DiffusionCachePolicy.REQUIRED:
+            raise TTSOptimizationCompatibilityError(reason + ".")
+        return None, _pass_decision(
+            "diffusion_cache",
+            policy.value,
+            "disabled",
+            None,
+            reason + "; automatic policy retained exact execution.",
+        )
+    return optimization_pass, _pass_decision(
+        "diffusion_cache",
+        policy.value,
+        ("block-residual-cache:"
+         f"{config.diffusion_cache_config.predictor.value}"),
+        optimization_pass,
+        (
+            "Approximate first/middle/last block caching was explicitly "
+            "enabled. Samplers reset request state, CFG lanes remain separate, and "
+            "training or gradient-enabled calls bypass the cache."),
+    )
+
+
 def _resolve_extra_passes(
     config: TTSOptimizationConfig,
     support: TTSOptimizationSupport,
@@ -1009,6 +1110,11 @@ def resolve_tts_optimization(
         support,
         resolved_context,
     )
+    cache_pass, cache_decision = _resolve_diffusion_cache(
+        resolved_config,
+        support,
+        resolved_context,
+    )
     extra_passes, extra_decisions = _resolve_extra_passes(
         resolved_config,
         support,
@@ -1025,6 +1131,7 @@ def resolve_tts_optimization(
         item for item in (
             kernel_pass,
             attention_pass,
+            cache_pass,
             *extra_passes,
             compile_pass,
         ) if item is not None)
@@ -1043,6 +1150,7 @@ def resolve_tts_optimization(
             kernel_decision,
             attention_decision,
             *extra_decisions,
+            cache_decision,
             compile_decision,
         ),
     )

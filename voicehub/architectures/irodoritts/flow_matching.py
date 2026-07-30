@@ -151,6 +151,7 @@ def sample_euler_rf_cfg(
     """
     device = model.device
     dtype = model.dtype
+    model.reset_diffusion_cache()
     batch_size = text_input_ids.shape[0]
     latent_dim = model.cfg.patched_latent_dim
 
@@ -458,6 +459,7 @@ def sample_euler_rf_cfg(
                     caption_state=independent_caption_state,
                     caption_mask=independent_caption_mask,
                     context_kv_cache=context_kv_cfg,
+                    diffusion_cache_lane="packed-cfg",
                 )
                 chunks = v_out.chunk(cfg_batch_mult, dim=0)
                 v = chunks[0]
@@ -474,6 +476,7 @@ def sample_euler_rf_cfg(
                     caption_state=caption_state_cond,
                     caption_mask=caption_mask_cond,
                     context_kv_cache=context_kv_cond,
+                    diffusion_cache_lane="conditional",
                 )
                 if use_joint_cfg:
                     if len(enabled_cfg_names) > 1:
@@ -493,6 +496,7 @@ def sample_euler_rf_cfg(
                         caption_state=joint_uncond_bundle[4],
                         caption_mask=joint_uncond_bundle[5],
                         context_kv_cache=context_kv_joint_uncond,
+                        diffusion_cache_lane="unconditional:joint",
                     )
                     v = v_cond + joint_scale * (v_cond - v_uncond_joint)
                 elif use_alternating_cfg:
@@ -508,6 +512,7 @@ def sample_euler_rf_cfg(
                         caption_state=alt_bundle[4],
                         caption_mask=alt_bundle[5],
                         context_kv_cache=context_kv_alternating.get(alt_name),
+                        diffusion_cache_lane=f"unconditional:{alt_name}",
                     )
                     v = v_cond + cfg_scales[alt_name] * (v_cond - v_uncond_alt)
                 else:
@@ -523,6 +528,7 @@ def sample_euler_rf_cfg(
                 caption_state=caption_state_cond,
                 caption_mask=caption_mask_cond,
                 context_kv_cache=context_kv_cond,
+                diffusion_cache_lane="conditional",
             )
 
         if rescale_k is not None and rescale_sigma is not None:
@@ -555,6 +561,7 @@ def sample_euler_rf_cfg(
                     scale=inv_scale,
                     max_layers=speaker_kv_max_layers,
                 )
+            model.reset_diffusion_cache()
             speaker_kv_active = False
 
         x_t = x_t + v * (t_next - t)

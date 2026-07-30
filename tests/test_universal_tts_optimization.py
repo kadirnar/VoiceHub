@@ -12,6 +12,7 @@ from unittest import mock
 import torch
 from torch import nn
 
+from voicehub.auto import AutoConfig, AutoModelForTextToSpeech
 from voicehub.base_model import BaseTTSModel
 from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.modeling_outputs import TTSOutput
@@ -1109,6 +1110,53 @@ print(json.dumps({
         self.assertIsNotNone(result)
         self.assertFalse(result.optimized)
         self.assertEqual(result.plan.passes, ())
+
+    def test_from_pretrained_schedules_direct_diffusion_cache_options(self):
+        model = _TinyPretrainedTTS.from_pretrained(
+            "",
+            diffusion_cache="auto",
+            diffusion_cache_config={
+                "front_blocks": 2,
+                "back_blocks": 1,
+                "predictor": "taylorseer",
+            },
+            lazy_load=True,
+        )
+
+        self.assertFalse(model.is_loaded)
+        self.assertNotIn("diffusion_cache", model.config.__dict__)
+        self.assertNotIn("diffusion_cache_config", model.config.__dict__)
+        pending = model._pending_tts_optimization_config
+        self.assertEqual(pending.diffusion_cache.value, "auto")
+        self.assertEqual(pending.diffusion_cache_config.front_blocks, 2)
+        self.assertEqual(pending.diffusion_cache_config.back_blocks, 1)
+        self.assertEqual(
+            pending.diffusion_cache_config.predictor.value,
+            "taylor",
+        )
+        self.assertEqual(pending.compile.value, "disabled")
+
+    def test_auto_factory_forwards_direct_diffusion_cache_options(self):
+        config = AutoConfig.for_model("f5tts")
+
+        model = AutoModelForTextToSpeech.from_config(
+            config,
+            diffusion_cache=True,
+            diffusion_cache_config={
+                "front_blocks": 3,
+                "residual_diff_threshold": 0.05,
+            },
+        )
+
+        self.assertFalse(model.is_loaded)
+        pending = model._pending_tts_optimization_config
+        self.assertEqual(pending.diffusion_cache.value, "required")
+        self.assertEqual(pending.diffusion_cache_config.front_blocks, 3)
+        self.assertEqual(
+            pending.diffusion_cache_config.residual_diff_threshold,
+            0.05,
+        )
+        self.assertEqual(pending.compile.value, "disabled")
 
     def test_scheduled_compile_discovers_and_runs_loaded_runtime_boundary(self):
         report = TorchCompileCapabilityReport(

@@ -487,9 +487,7 @@ def _declared_compile_targets(
     return tuple(output)
 
 
-def _declared_target_component(
-    target: OptimizationCompileTarget,
-) -> CodecCompileComponent | None:
+def _declared_target_component(target: OptimizationCompileTarget, ) -> CodecCompileComponent | None:
     if target.component is not None:
         try:
             return CodecCompileComponent.coerce(target.component)
@@ -497,10 +495,7 @@ def _declared_target_component(
             raise ValueError(
                 f"Codec compile target {target.label!r} declares unknown "
                 f"component {target.component!r}.") from error
-    segments = {
-        segment.strip().lower().replace("-", "_")
-        for segment in target.label.split(".")
-    }
+    segments = {segment.strip().lower().replace("-", "_") for segment in target.label.split(".")}
     for component in (
             CodecCompileComponent.ENCODE,
             CodecCompileComponent.QUANTIZER,
@@ -560,16 +555,19 @@ def discover_codec_compile_targets(
         requested = tuple(requested)
 
     method_groups = {
-        CodecCompileComponent.ENCODE: _ENCODE_METHODS,
+        CodecCompileComponent.ENCODE:
+        _ENCODE_METHODS,
         CodecCompileComponent.QUANTIZER: (
             _TRAINING_QUANTIZER_METHODS
-            if resolved_mode is OptimizationMode.TRAINING
-            else _INFERENCE_QUANTIZER_METHODS
-        ),
-        CodecCompileComponent.FLOW: _FLOW_METHODS,
-        CodecCompileComponent.VOCODER: _VOCODER_METHODS,
-        CodecCompileComponent.DECODE: _DECODE_METHODS,
-        CodecCompileComponent.FORWARD: _FORWARD_METHODS,
+            if resolved_mode is OptimizationMode.TRAINING else _INFERENCE_QUANTIZER_METHODS),
+        CodecCompileComponent.FLOW:
+        _FLOW_METHODS,
+        CodecCompileComponent.VOCODER:
+        _VOCODER_METHODS,
+        CodecCompileComponent.DECODE:
+        _DECODE_METHODS,
+        CodecCompileComponent.FORWARD:
+        _FORWARD_METHODS,
     }
     output = []
     seen: set[tuple[int, str]] = set()
@@ -586,10 +584,8 @@ def discover_codec_compile_targets(
                 seen.add(identity)
                 output.append(target)
     for component in requested:
-        if any(
-                _component_matches(component, declared_component)
-                for declared_component in declared_components
-        ):
+        if any(_component_matches(component, declared_component)
+               for declared_component in declared_components):
             continue
         owner = codec
         if component is CodecCompileComponent.QUANTIZER:
@@ -731,9 +727,7 @@ def _compile_pass_from_config(
     )
 
 
-def _relaxed_auto_kernel_backend(
-    context: OptimizationContext,
-) -> KernelBackend:
+def _relaxed_auto_kernel_backend(context: OptimizationContext, ) -> KernelBackend:
     """Resolve codec-specific relaxed AUTO without weakening universal AUTO."""
     if context.device.partition(":")[0] != "cuda":
         return KernelBackend.TORCH
@@ -744,11 +738,7 @@ def _relaxed_auto_kernel_backend(
         return KernelBackend.CUDA_EXTENSION
     from voicehub.kernels.capabilities import triton_capability
 
-    return (
-        KernelBackend.TRITON
-        if triton_capability(context.device).available
-        else KernelBackend.TORCH
-    )
+    return (KernelBackend.TRITON if triton_capability(context.device).available else KernelBackend.TORCH)
 
 
 @dataclass(frozen=True, slots=True)
@@ -963,9 +953,7 @@ def resolve_codec_optimization(
                 "PyTorch reference; accelerator transcendental math is "
                 "available through an explicit relaxed or approximate policy.")
         elif kernels is CodecKernelBackend.AUTO:
-            selected_backend = _relaxed_auto_kernel_backend(
-                resolved_context,
-            )
+            selected_backend = _relaxed_auto_kernel_backend(resolved_context, )
             kernel_reason = (
                 f"The {resolved_config.policy.value} codec policy allows "
                 "accelerator transcendental math; AUTO resolved the available "
@@ -1105,8 +1093,7 @@ def _capture_target(
             raise CodecCUDAGraphCaptureError(
                 "CUDA-graph target is ambiguous; select one declared stage "
                 f"by label or method name: {labels}.")
-        raise CodecCUDAGraphCaptureError(
-            f"{type(codec).__name__}.{name} is not a callable codec target.")
+        raise CodecCUDAGraphCaptureError(f"{type(codec).__name__}.{name} is not a callable codec target.")
     if not callable(target):
         raise TypeError("CUDA-graph `target` must be a method name or callable.")
     return target, getattr(target, "__name__", type(target).__name__)
@@ -1160,23 +1147,13 @@ def _collect_generators(value: Any) -> tuple[torch.Generator, ...]:
     if isinstance(value, torch.Generator):
         return (value, )
     if isinstance(value, (tuple, list)):
-        return tuple(
-            generator
-            for item in value
-            for generator in _collect_generators(item)
-        )
+        return tuple(generator for item in value for generator in _collect_generators(item))
     if isinstance(value, Mapping):
-        return tuple(
-            generator
-            for item in value.values()
-            for generator in _collect_generators(item)
-        )
+        return tuple(generator for item in value.values() for generator in _collect_generators(item))
     if is_dataclass(value) and not isinstance(value, type):
         return tuple(
-            generator
-            for item in fields(value)
-            for generator in _collect_generators(getattr(value, item.name))
-        )
+            generator for item in fields(value)
+            for generator in _collect_generators(getattr(value, item.name)))
     return ()
 
 
@@ -1292,10 +1269,10 @@ def capture_codec_cuda_graph(
 ) -> CodecCUDAGraphRunner:
     """Capture one fixed-shape codec call with graph-aware VAE randomness.
 
-    PyTorch's default CUDA generator advances correctly during graph replay.
-    Explicit epsilon remains optional for callers that need direct sample
-    control. A codec may mark deterministic posterior-parameter boundaries
-    through ``deterministic_codec_targets``.
+    PyTorch's default CUDA generator advances correctly during graph
+    replay. Explicit epsilon remains optional for callers that need
+    direct sample control. A codec may mark deterministic posterior-
+    parameter boundaries through ``deterministic_codec_targets``.
     """
     if isinstance(warmup_steps, bool) or not isinstance(warmup_steps, int) or warmup_steps < 0:
         raise ValueError("`warmup_steps` must be a non-negative integer.")
@@ -1373,13 +1350,10 @@ def capture_codec_cuda_graph(
 
     graph = torch.cuda.CUDAGraph()
     generators = tuple(
-        dict.fromkeys(
-            (
-                *_collect_generators(static_args),
-                *_collect_generators(static_kwargs),
-            )
-        )
-    )
+        dict.fromkeys((
+            *_collect_generators(static_args),
+            *_collect_generators(static_kwargs),
+        )))
     if generators:
         register_generator = getattr(
             graph,
@@ -1389,14 +1363,12 @@ def capture_codec_cuda_graph(
         if not callable(register_generator):
             raise CodecCUDAGraphCaptureError(
                 "This PyTorch CUDA Graph runtime cannot register explicit "
-                "torch.Generator inputs."
-            )
+                "torch.Generator inputs.")
         for generator in generators:
             if torch.device(generator.device) != device:
                 raise CodecCUDAGraphCaptureError(
                     "Explicit CUDA Graph generators must use the capture "
-                    "device."
-                )
+                    "device.")
             register_generator(generator)
     with torch.cuda.graph(graph, stream=capture_stream), torch.no_grad():
         static_output = call(*static_args, **static_kwargs)

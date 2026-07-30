@@ -20,6 +20,7 @@ from voicehub.architectures.f5tts.modules import (
     TextEmbedding,
     TimestepEmbedding,
 )
+from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
 
 
 def lengths_to_mask(
@@ -65,7 +66,7 @@ def epss_timesteps(
     return torch.tensor(schedule, device=device, dtype=dtype) / 32
 
 
-class F5DiT(nn.Module):
+class F5DiT(DiffusionCacheMixin, nn.Module):
     """State-compatible F5-TTS diffusion transformer."""
 
     def __init__(
@@ -109,6 +110,7 @@ class F5DiT(nn.Module):
         self.checkpoint_activations = config.checkpoint_activations
         self._text_cond: torch.Tensor | None = None
         self._text_uncond: torch.Tensor | None = None
+        self._initialize_diffusion_cache()
         self.initialize_weights()
 
     def initialize_weights(self) -> None:
@@ -215,23 +217,34 @@ class F5DiT(nn.Module):
             )
         rope = self.rotary_embed.forward_from_seq_len(sequence_length)
         residual = hidden_states
-        for block in self.transformer_blocks:
+
+        def apply_block(block: nn.Module, value: torch.Tensor) -> torch.Tensor:
             if self.checkpoint_activations and self.training:
-                hidden_states = activation_checkpoint(
+                return activation_checkpoint(
                     block,
-                    hidden_states,
+                    value,
                     time_embedding,
                     mask,
                     rope,
                     use_reentrant=False,
                 )
-            else:
-                hidden_states = block(
-                    hidden_states,
-                    time_embedding,
-                    mask=mask,
-                    rope=rope,
-                )
+            return block(
+                value,
+                time_embedding,
+                mask=mask,
+                rope=rope,
+            )
+
+        cache_lane = (
+            "packed-cfg" if cfg_infer else
+            ("unconditional" if drop_text or drop_audio_cond else "conditional"))
+        hidden_states = self._run_diffusion_blocks(
+            self.transformer_blocks,
+            hidden_states,
+            apply_block,
+            cache_lane=cache_lane,
+            valid_mask=mask,
+        )
         if self.long_skip_connection is not None:
             hidden_states = self.long_skip_connection(torch.cat((hidden_states, residual), dim=-1))
         return self.proj_out(self.norm_out(hidden_states, time_embedding))
@@ -337,6 +350,7 @@ class F5ConditionalFlowMatcher(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if steps <= 0:
             raise ValueError("`steps` must be positive.")
+        self.transformer.reset_diffusion_cache()
         if conditioning.ndim == 2:
             conditioning = self.mel_spec(conditioning).transpose(1, 2)
         if conditioning.ndim != 3 or conditioning.shape[-1] != self.num_channels:

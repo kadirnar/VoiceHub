@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint as _torch_checkpoint
 
 from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
+from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
 
 from .conditioning import SPEAKER_INVERSION_UNCOND_MODES, SpeakerInversionEmbedding
 from .configuration import IrodoriModelConfig as ModelConfig
@@ -1152,7 +1153,7 @@ class DurationPredictor(nn.Module):
         return self.out_proj(self.out_norm(h)).squeeze(-1)
 
 
-class TextToLatentRFDiT(nn.Module):
+class TextToLatentRFDiT(DiffusionCacheMixin, nn.Module):
     """Text + reference-latent conditioned RF diffusion model over patched
     DACVAE latent sequences.
 
@@ -1239,6 +1240,7 @@ class TextToLatentRFDiT(nn.Module):
         if self.head_dim % 2 != 0:
             raise ValueError("model head_dim must be even for RoPE")
         self.register_buffer("_freqs_cis_cache", torch.empty(0, 0, dtype=torch.complex64), persistent=False)
+        self._initialize_diffusion_cache()
 
     def set_gradient_checkpointing(self, enabled: bool) -> None:
         self.gradient_checkpointing = bool(enabled)
@@ -1467,6 +1469,7 @@ class TextToLatentRFDiT(nn.Module):
         caption_mask: torch.Tensor | None = None,
         latent_mask: torch.Tensor | None = None,
         context_kv_cache: list[tuple[torch.Tensor, ...]] | None = None,
+        diffusion_cache_lane: str = "default",
     ) -> torch.Tensor:
         t_embed = get_timestep_embedding(t, self.cfg.timestep_embed_dim).to(dtype=x_t.dtype)
         cond_embed = self.cond_module(t_embed)
@@ -1475,12 +1478,15 @@ class TextToLatentRFDiT(nn.Module):
         x = self.in_proj(x_t)
         freqs = self._rope_freqs(x.shape[1], x.device)
         use_checkpoint = self.gradient_checkpointing and self.training and context_kv_cache is None
-        for i, block in enumerate(self.blocks):
-            context_kv = context_kv_cache[i] if context_kv_cache is not None else None
+        block_indices = {id(block): index for index, block in enumerate(self.blocks)}
+
+        def apply_block(block: nn.Module, value: torch.Tensor) -> torch.Tensor:
+            index = block_indices[id(block)]
+            context_kv = (context_kv_cache[index] if context_kv_cache is not None else None)
             if use_checkpoint:
-                x = _torch_checkpoint(
+                return _torch_checkpoint(
                     block,
-                    x,
+                    value,
                     cond_embed,
                     text_state,
                     text_mask,
@@ -1492,21 +1498,27 @@ class TextToLatentRFDiT(nn.Module):
                     latent_mask,
                     use_reentrant=False,
                 )
-            else:
-                x = block(
-                    x=x,
-                    cond_embed=cond_embed,
-                    text_state=text_state,
-                    text_mask=text_mask,
-                    speaker_state=speaker_state,
-                    speaker_mask=speaker_mask,
-                    caption_state=caption_state,
-                    caption_mask=caption_mask,
-                    freqs_cis=freqs,
-                    self_mask=latent_mask,
-                    context_kv=context_kv,
-                )
+            return block(
+                x=value,
+                cond_embed=cond_embed,
+                text_state=text_state,
+                text_mask=text_mask,
+                speaker_state=speaker_state,
+                speaker_mask=speaker_mask,
+                caption_state=caption_state,
+                caption_mask=caption_mask,
+                freqs_cis=freqs,
+                self_mask=latent_mask,
+                context_kv=context_kv,
+            )
 
+        x = self._run_diffusion_blocks(
+            self.blocks,
+            x,
+            apply_block,
+            cache_lane=diffusion_cache_lane,
+            valid_mask=latent_mask,
+        )
         x = self.out_norm(x)
         x = self.out_proj(x)
         return x.to(dtype=x_t.dtype)

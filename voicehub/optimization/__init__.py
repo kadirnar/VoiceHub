@@ -92,6 +92,17 @@ _DIFFUSION_EXPORTS = frozenset({
     "get_diffusion_model_optimization_support",
     "list_diffusion_model_optimization_support",
 })
+_DIFFUSION_CACHE_EXPORTS = frozenset({
+    "DiffusionBlockResidualCache",
+    "DiffusionCacheCompatibilityError",
+    "DiffusionCacheConfig",
+    "DiffusionCacheError",
+    "DiffusionCacheMixin",
+    "DiffusionCachePass",
+    "DiffusionCachePolicy",
+    "DiffusionCachePredictor",
+    "coerce_diffusion_cache_config",
+})
 _TTS_EXPORTS = frozenset({
     "TTSAttentionImplementation",
     "TTSCompilePolicy",
@@ -134,6 +145,11 @@ def _create_torch_compile_pass():
     return module.TorchCompilePass()
 
 
+def _create_diffusion_cache_pass():
+    module = import_module("voicehub.optimization.diffusion_cache")
+    return module.DiffusionCachePass()
+
+
 OPTIMIZATION_PASSES.register(
     "compile",
     _create_torch_compile_pass,
@@ -147,6 +163,11 @@ OPTIMIZATION_PASSES.register(
 OPTIMIZATION_PASSES.register(
     "custom-kernels",
     _create_custom_kernel_pass,
+    exist_ok=True,
+)
+OPTIMIZATION_PASSES.register(
+    "diffusion-cache",
+    _create_diffusion_cache_pass,
     exist_ok=True,
 )
 
@@ -177,6 +198,11 @@ def __getattr__(name: str):
         value = getattr(module, name)
         globals()[name] = value
         return value
+    if name in _DIFFUSION_CACHE_EXPORTS:
+        module = import_module("voicehub.optimization.diffusion_cache")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
     if name in _TTS_EXPORTS:
         module = import_module("voicehub.optimization.tts")
         value = getattr(module, name)
@@ -196,6 +222,7 @@ def __dir__() -> list[str]:
         | _ACCELERATOR_EXPORTS
         | _CODEC_EXPORTS
         | _DIFFUSION_EXPORTS
+        | _DIFFUSION_CACHE_EXPORTS
         | _LORA_EXPORTS
         | _TORCH_COMPILE_EXPORTS
         | _TTS_EXPORTS
@@ -228,6 +255,14 @@ __all__ = [
     "DIFFUSION_KIND_FEATURE_PREFIX",
     "DIFFUSION_OPERATION_FEATURE_PREFIX",
     "DiffusionArchitectureKind",
+    "DiffusionBlockResidualCache",
+    "DiffusionCacheCompatibilityError",
+    "DiffusionCacheConfig",
+    "DiffusionCacheError",
+    "DiffusionCacheMixin",
+    "DiffusionCachePass",
+    "DiffusionCachePolicy",
+    "DiffusionCachePredictor",
     "DiffusionModelOptimizationSupport",
     "DiffusionOperation",
     "FlashAttention4Pass",
@@ -276,6 +311,7 @@ __all__ = [
     "capture_codec_cuda_graph",
     "codec_component_view",
     "coerce_codec_optimization_config",
+    "coerce_diffusion_cache_config",
     "coerce_tts_optimization_config",
     "diffusion_kind_feature",
     "diffusion_operation_feature",

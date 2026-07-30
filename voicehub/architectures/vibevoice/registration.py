@@ -156,7 +156,12 @@ def create_vibevoice_tts_architecture_spec() -> ArchitectureSpec:
             batched_inference=False,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", "sdpa", "custom-kernels"),
+            optimization_passes=(
+                "compile",
+                "sdpa",
+                "custom-kernels",
+                "diffusion-cache",
+            ),
             features=(
                 "llm-tts-codec",
                 "diffusion-family",

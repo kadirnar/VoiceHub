@@ -11,6 +11,7 @@ from torch.nn import functional
 
 from voicehub.architectures.voxcpm2.configuration import VoxCPM2ArchitectureConfig, VoxCPMCFMConfig
 from voicehub.architectures.voxcpm2.minicpm import MiniCPMModel, local_transformer_config
+from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
 from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
@@ -142,7 +143,7 @@ class _TimeMLP(nn.Module):
         return self.linear_2(self.act(self.linear_1(inputs)))
 
 
-class VoxCPMLocalDiT(nn.Module):
+class VoxCPMLocalDiT(DiffusionCacheMixin, nn.Module):
     """Source-compatible local diffusion transformer."""
 
     def __init__(
@@ -186,6 +187,7 @@ class VoxCPMLocalDiT(nn.Module):
             dtype=dtype,
         )
         self.decoder = MiniCPMModel(config, device=device, dtype=dtype)
+        self._initialize_diffusion_cache()
 
     def forward(
         self,
@@ -215,7 +217,25 @@ class VoxCPMLocalDiT(nn.Module):
             ),
             dim=1,
         )
-        hidden, _ = self.decoder(sequence, is_causal=False)
+        position_embedding = None
+        if self.decoder.rope_emb is not None:
+            positions = torch.arange(
+                sequence.shape[1],
+                dtype=torch.long,
+                device=sequence.device,
+            )
+            position_embedding = self.decoder.rope_emb(positions)
+        hidden = self._run_diffusion_blocks(
+            self.decoder.layers,
+            sequence,
+            lambda layer, value: layer(
+                value,
+                position_embedding,
+                is_causal=False,
+            )[0],
+            cache_lane="packed-cfg",
+        )
+        hidden = self.decoder.norm(hidden)
         hidden = hidden[
             :,
             prefix_length + conditioning_embedding.shape[1] + 1:,
@@ -263,6 +283,9 @@ class VoxCPMConditionalFlowMatcher(nn.Module):
     ) -> Tensor:
         if steps <= 0:
             raise ValueError("VoxCPM diffusion steps must be positive.")
+        # The outer autoregressive frame changes prefix conditioning.  Every
+        # local solve starts a new cache history.
+        self.estimator.reset_diffusion_cache()
         batch = conditioning_embedding.shape[0]
         state = torch.randn(
             (batch, self.in_channels, patch_size),

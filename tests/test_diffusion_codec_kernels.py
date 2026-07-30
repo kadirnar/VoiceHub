@@ -9,8 +9,8 @@ from voicehub.architectures.cosyvoice_native.flow import AdaLayerNormZeroFinal a
 from voicehub.architectures.cosyvoice_native.vocoder import Snake as CosyVoiceSnake
 from voicehub.architectures.f5tts.modules import AdaLayerNormFinal as F5AdaLayerNormFinal
 from voicehub.architectures.higgs_audio_v2.tokenizer import Snake1d as HiggsSnake
-from voicehub.architectures.irodoritts.codec_layers import Snake1d as IrodoriSnake
 from voicehub.architectures.irodoritts.codec import IrodoriDACVAECodec
+from voicehub.architectures.irodoritts.codec_layers import Snake1d as IrodoriSnake
 from voicehub.architectures.irodoritts.modeling import LowRankAdaLN as IrodoriLowRankAdaLN
 from voicehub.architectures.irodoritts.runtime import InferenceRuntime as IrodoriRuntime
 from voicehub.architectures.omnivoice.codec import Snake1d as OmniVoiceSnake
@@ -500,9 +500,7 @@ class StructuralKernelSelectorTests(unittest.TestCase):
 
     def test_universal_auto_keeps_periodic_codec_math_on_torch(self):
         for snake in (*_codec_snakes(), *_codec_snake_betas()):
-            with self.subTest(
-                snake=f"{type(snake).__module__}.{type(snake).__name__}",
-            ):
+            with self.subTest(snake=f"{type(snake).__module__}.{type(snake).__name__}", ):
                 self.assertIs(
                     snake.resolve_kernel_backend(
                         "auto",

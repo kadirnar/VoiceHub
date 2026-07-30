@@ -67,7 +67,7 @@ def create_voxcpm2_architecture_spec() -> ArchitectureSpec:
             batched_inference=False,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", "sdpa"),
+            optimization_passes=("compile", "sdpa", "diffusion-cache"),
             features=(
                 "llm-tts-codec",
                 "diffusion-family",

@@ -17,6 +17,7 @@ from torch.nn import functional
 
 from voicehub.architectures.cosyvoice_native.configuration import CosyVoiceFlowConfig
 from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
+from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
 from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
@@ -356,7 +357,7 @@ def _chunk_attention_mask(
     return allowed[None].expand(batch_size, -1, -1) & valid[:, None, :]
 
 
-class DiTEstimator(nn.Module):
+class DiTEstimator(DiffusionCacheMixin, nn.Module):
 
     def __init__(self, config: CosyVoiceFlowConfig) -> None:
         super().__init__()
@@ -378,6 +379,7 @@ class DiTEstimator(nn.Module):
             ) for _ in range(config.depth))
         self.norm_out = AdaLayerNormZeroFinal(config.model_dim)
         self.proj_out = nn.Linear(config.model_dim, config.mel_channels)
+        self._initialize_diffusion_cache()
 
     def forward(
         self,
@@ -389,6 +391,7 @@ class DiTEstimator(nn.Module):
         conditioning: Tensor,
         *,
         streaming: bool = False,
+        diffusion_cache_lane: str = "default",
     ) -> Tensor:
         values = values.transpose(1, 2)
         means = means.transpose(1, 2)
@@ -412,13 +415,18 @@ class DiTEstimator(nn.Module):
             device=values.device,
             dtype=values.dtype,
         )
-        for block in self.transformer_blocks:
-            values = block(
-                values,
+        values = self._run_diffusion_blocks(
+            self.transformer_blocks,
+            values,
+            lambda block, hidden_states: block(
+                hidden_states,
                 time_embedding,
                 mask=attention_mask,
                 rotary=rotary,
-            )
+            ),
+            cache_lane=diffusion_cache_lane,
+            valid_mask=valid,
+        )
         values = self.norm_out(values, time_embedding)
         return self.proj_out(values).transpose(1, 2)
 
@@ -494,6 +502,7 @@ class CausalConditionalFlowMatcher(nn.Module):
     ) -> Tensor:
         if steps <= 0 or temperature <= 0:
             raise ValueError("Flow steps and temperature must be positive.")
+        self.estimator.reset_diffusion_cache()
         values = torch.randn(
             means.shape,
             device=means.device,
@@ -518,6 +527,7 @@ class CausalConditionalFlowMatcher(nn.Module):
                 speakers,
                 conditioning,
                 streaming=streaming,
+                diffusion_cache_lane="conditional",
             )
             unconditioned = self.estimator(
                 values,
@@ -527,6 +537,7 @@ class CausalConditionalFlowMatcher(nn.Module):
                 torch.zeros_like(speakers),
                 torch.zeros_like(conditioning),
                 streaming=streaming,
+                diffusion_cache_lane="unconditional",
             )
             velocity = ((1 + self.config.inference_cfg_rate) * conditioned -
                         self.config.inference_cfg_rate * unconditioned)

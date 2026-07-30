@@ -44,7 +44,11 @@ def create_echo_architecture_spec() -> ArchitectureSpec:
             streaming=False,
             batched_inference=False,
             distributed_training=True,
-            optimization_passes=("compile", "custom-kernels"),
+            optimization_passes=(
+                "compile",
+                "custom-kernels",
+                "diffusion-cache",
+            ),
             features=(
                 "diffusion-family",
                 "diffusion-kind-rectified-flow",

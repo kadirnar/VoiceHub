@@ -33,12 +33,13 @@ python -m pip install "voicehub[training]"
 | VAD inference | `AutoModelForVoiceActivityDetection`, `VADInferenceConfig`, `VADOutput` |
 | Inference execution | `InferenceStrategy`, `EagerInferenceStrategy` |
 | LLM TTS serving | `LLMBackendConfig`, `list_llm_backend_support()`, token and Omni speech transports |
+| Diffusion serving | `list_diffusion_serving_capabilities()`, fail-closed vLLM-Omni and SGLang modality resolution |
 | Training discovery | `get_training_spec()`, `list_training_specs()`, `ModelTrainingSpec` |
 | Training adaptation | `AutoTrainingAdapter`, `BaseTrainingAdapter`, family adapters |
 | Training loop | `TrainingArguments`, `Trainer`, callbacks, trainer outputs |
 | Training execution | `TrainingStrategy`, `TorchTrainingStrategy` |
 | TTS datasets | `TTSDataset`, `TTSDatasetSpec`, `TTSDataArchitecture`, `TTSDataReadiness`, length-aware batching |
-| TTS optimization | Universal `TTSOptimizationConfig`, capability discovery/resolution, plus separate source-specific training profiles |
+| TTS optimization | Universal `TTSOptimizationConfig`, approximate diffusion caching, capability discovery/resolution, plus source-specific training profiles |
 | ASR datasets | `ASRDataset`, `ASRDatasetSpec`, `ASRDataArchitecture`, `ASRDataReadiness` |
 | TTS objectives | Multi-codebook CE, diffusion/flow pair builders, VITS loss primitives |
 | Collation | `default_data_collator`, `DefaultDataCollator`, `DataCollatorForTTSTraining`, `DataCollatorForAudioTraining` |
@@ -377,6 +378,8 @@ PreTrainedTTSModel.from_pretrained(
     kernel_backend=None,
     torch_compile=None,
     compile_config=None,
+    diffusion_cache=None,
+    diffusion_cache_config=None,
     config_kwargs=None,
     **kwargs,
 )
@@ -602,6 +605,8 @@ TTSOptimizationConfig(
     kernel_backend="auto",
     compile="auto",
     compile_config=None,
+    diffusion_cache="disabled",
+    diffusion_cache_config=None,
     optimization_passes=(),
 )
 ```
@@ -623,6 +628,12 @@ TorchCompileConfig(
     requirement="auto",
 )
 ```
+
+Diffusion-cache values are `disabled`, `auto`, and `required`; the boolean
+aliases `False` and `True` mean `disabled` and `required`. This is a separate,
+approximate inference policy and therefore defaults to `disabled`.
+`diffusion_cache_config` accepts a `DiffusionCacheConfig`, a mapping with the
+same fields, or `None`.
 
 The enclosing compile policy controls `requirement`, so
 `TTSOptimizationConfig(compile="required")` always produces a required
@@ -678,6 +689,131 @@ execution. Explicit `flash_attention_4`, `triton`, `cuda_extension`, and
 required compile choices fail rather than silently selecting another
 implementation. CUDA-extension compilation/loading remains an explicit
 `load_tts_activation_cuda_extension()` operation.
+
+### Diffusion block-residual cache
+
+`DiffusionCacheConfig` configures the architecture-owned, Cache-DiT-style
+middle-block residual cache:
+
+```python
+DiffusionCacheConfig(
+    front_blocks=1,
+    back_blocks=0,
+    residual_diff_threshold=0.08,
+    warmup_steps=2,
+    max_cached_steps=-1,
+    max_consecutive_cached_steps=3,
+    max_accumulated_relative_error=None,
+    predictor="reuse",
+    compute_step_mask=(),
+    synchronize_distributed=True,
+    epsilon=1e-6,
+)
+
+DiffusionCacheConfig.from_dict(values, **overrides)
+config.to_dict()
+DiffusionCachePass(config=None)
+```
+
+`front_blocks` and `back_blocks` are the DBCache `Fn` and `Bn` boundaries.
+Predictors are `reuse` and `taylor`; the latter performs first-order
+extrapolation from two fully computed residuals and never chains predicted
+residuals. `compute_step_mask[index] is True` forces a full middle-block
+evaluation at that step. Warm-up, total/consecutive cache-hit limits, and the
+optional accumulated-error budget also force refreshes.
+
+`TTSOptimizationConfig(diffusion_cache="auto", ...)` is an explicit,
+non-strict request. It retains exact inference when the architecture does not
+declare `diffusion-cache`; `"required"` raises instead. Both policies are
+rejected or disabled in training, streaming, and unsupported contexts.
+Gradient-enabled model calls bypass the cache even if a pass was already
+applied.
+
+The resolved pass is reversible and runs after architecture kernel/attention
+selection but before `torch.compile`. Its application manifest records
+`fidelity="approximate"`, the adapted module labels, and live hit/miss and
+invalidation statistics. Supported block surfaces are CosyVoice, F5-TTS,
+Echo, Irodori-TTS, and VoxCPM. VibeVoice exposes only its low-level diffusion
+head experimentally; its public high-level inference remains unsupported.
+Chatterbox, StyleTTS 2, and Supertonic fail closed for this cache.
+
+Adapted modules expose the following request-control surface:
+
+```python
+module.enable_diffusion_cache(config=None) -> DiffusionCacheConfig
+module.disable_diffusion_cache() -> DiffusionCacheConfig | None
+module.reset_diffusion_cache(*, lane=None)
+module.diffusion_cache_session()
+module.diffusion_cache_stats() -> dict[str, int | float | None]
+```
+
+Use `diffusion_cache_session()` or the architecture sampler's built-in reset
+to isolate requests. Separate CFG modes use distinct lane names. Shape,
+dtype, device, and block-layout mismatches bypass or invalidate cached
+tensors.
+
+### Diffusion serving capabilities
+
+The serving API records engine modality separately from TTS compatibility and
+does not import optional engines during normal package import:
+
+```python
+list_diffusion_serving_capabilities(
+    *,
+    supports_tts=None,
+    supports_visual_diffusion=None,
+) -> tuple[DiffusionServingCapability, ...]
+
+get_diffusion_serving_capability(backend) -> DiffusionServingCapability
+resolve_diffusion_tts_backend(
+    model_type,
+    backend,
+    *,
+    plugin=None,
+) -> DiffusionTTSServingPlan
+
+detect_vllm_omni_features(
+    *,
+    probe_registry=True,
+) -> VLLMOmniFeatureStatus
+
+bridge_vllm_omni_tts_config(
+    model_type,
+    config,
+) -> tuple[DiffusionTTSServingPlan, LLMBackendConfig]
+```
+
+`DiffusionServingBackend` values are `native`, `vllm-omni`,
+`sglang-diffusion`, and `sglang-omni`. vLLM-Omni is verified for complete
+CosyVoice and VoxCPM speech pipelines; the bridge validates an
+`LLMBackendConfig(backend="vllm")` and forces its existing speech transport.
+Other vLLM-Omni pairings require an explicit, experimental
+`VLLMOmniDiffusionPlugin` that declares a complete pipeline and audio
+post-processing:
+
+```python
+VLLMOmniDiffusionPlugin(
+    model_type,
+    model_arch,
+    module_name,
+    class_name,
+    complete_tts_pipeline=False,
+    pre_process_func_name=None,
+    post_process_func_name=None,
+    action_post_process_func_name=None,
+    ir_op_priority_func_name=None,
+)
+
+plugin.registration_kwargs()
+plugin.register()
+```
+
+`plugin.register()` lazily calls the installed vLLM-Omni
+`register_diffusion_model` API. `detect_vllm_omni_features()` reports whether
+that hook exists before registration. SGLang Diffusion is recorded as an
+image/video runtime and always fails TTS resolution. SGLang-Omni is a
+separate LLM-TTS backend served through `voicehub.llm_serving`, not a visual
+diffusion TTS adapter.
 
 Every `BaseTTSModel` exposes:
 

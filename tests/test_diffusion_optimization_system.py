@@ -41,7 +41,7 @@ _EXPECTED = {
             DiffusionOperation.CLASSIFIER_FREE_GUIDANCE,
             DiffusionOperation.EULER_SOLVER,
         ),
-        "passes": ("compile", "custom-kernels"),
+        "passes": ("compile", "custom-kernels", "diffusion-cache"),
     },
     "echo": {
         "architecture":
@@ -53,7 +53,7 @@ _EXPECTED = {
             DiffusionOperation.CLASSIFIER_FREE_GUIDANCE,
             DiffusionOperation.EULER_SOLVER,
         ),
-        "passes": ("compile", "custom-kernels"),
+        "passes": ("compile", "custom-kernels", "diffusion-cache"),
     },
     "f5tts": {
         "architecture":
@@ -70,6 +70,7 @@ _EXPECTED = {
             "compile",
             "attention-backend",
             "custom-kernels",
+            "diffusion-cache",
         ),
     },
     "irodoritts": {
@@ -82,7 +83,12 @@ _EXPECTED = {
             DiffusionOperation.CLASSIFIER_FREE_GUIDANCE,
             DiffusionOperation.EULER_SOLVER,
         ),
-        "passes": ("compile", "sdpa", "custom-kernels"),
+        "passes": (
+            "compile",
+            "sdpa",
+            "custom-kernels",
+            "diffusion-cache",
+        ),
     },
     "styletts2": {
         "architecture":
@@ -115,7 +121,12 @@ _EXPECTED = {
             DiffusionOperation.CLASSIFIER_FREE_GUIDANCE,
             DiffusionOperation.DPM_SOLVER_PLUS_PLUS,
         ),
-        "passes": ("compile", "sdpa", "custom-kernels"),
+        "passes": (
+            "compile",
+            "sdpa",
+            "custom-kernels",
+            "diffusion-cache",
+        ),
     },
     "voxcpm": {
         "architecture":
@@ -127,7 +138,7 @@ _EXPECTED = {
             DiffusionOperation.CLASSIFIER_FREE_GUIDANCE,
             DiffusionOperation.EULER_SOLVER,
         ),
-        "passes": ("compile", "sdpa"),
+        "passes": ("compile", "sdpa", "diffusion-cache"),
     },
 }
 
@@ -155,6 +166,10 @@ class DiffusionFamilyInventoryTests(unittest.TestCase):
                 self.assertTrue(item.distributed_training)
                 self.assertTrue(item.compile_supported)
                 self.assertTrue(item.supports_optimization_pass("compile"))
+                self.assertEqual(
+                    item.diffusion_cache_supported,
+                    "diffusion-cache" in expected["passes"],
+                )
 
     def test_normalized_features_and_metadata_are_kept_in_lockstep(self):
         for model_type, expected in _EXPECTED.items():
@@ -273,9 +288,15 @@ class DiffusionFamilyInventoryTests(unittest.TestCase):
             ],
         )
         self.assertTrue(manifest["compile_supported"])
+        self.assertTrue(manifest["diffusion_cache_supported"])
         self.assertEqual(
             manifest["optimization_passes"],
-            ["compile", "attention-backend", "custom-kernels"],
+            [
+                "compile",
+                "attention-backend",
+                "custom-kernels",
+                "diffusion-cache",
+            ],
         )
 
 
