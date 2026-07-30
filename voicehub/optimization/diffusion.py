@@ -103,6 +103,11 @@ class DiffusionModelOptimizationSupport:
         """Whether the architecture declares ``torch.compile`` support."""
         return "compile" in self.optimization_passes
 
+    @property
+    def diffusion_cache_supported(self) -> bool:
+        """Whether an architecture-owned approximate block cache is exposed."""
+        return "diffusion-cache" in self.optimization_passes
+
     def supports_optimization_pass(self, optimization_pass: str) -> bool:
         """Return whether an optimization pass is declared compatible."""
         if not isinstance(optimization_pass, str):
@@ -121,6 +126,7 @@ class DiffusionModelOptimizationSupport:
             "training": self.training,
             "distributed_training": self.distributed_training,
             "compile_supported": self.compile_supported,
+            "diffusion_cache_supported": self.diffusion_cache_supported,
             "optimization_passes": list(self.optimization_passes),
         }
 

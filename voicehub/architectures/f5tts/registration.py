@@ -62,6 +62,7 @@ def create_f5tts_architecture_spec() -> ArchitectureSpec:
                 "compile",
                 "attention-backend",
                 "custom-kernels",
+                "diffusion-cache",
             ),
             features=(
                 "diffusion-family",

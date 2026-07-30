@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
+from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
 
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> torch.Tensor:
@@ -444,7 +445,7 @@ class SpeakerEncoder(nn.Module):
         return x
 
 
-class EchoDiT(nn.Module):
+class EchoDiT(DiffusionCacheMixin, nn.Module):
 
     def __init__(
         self,
@@ -534,6 +535,7 @@ class EchoDiT(nn.Module):
         self.out_proj = nn.Linear(model_size, latent_size, bias=True)
 
         self.head_dim = model_size // num_heads
+        self._initialize_diffusion_cache()
 
     def forward(
         self,
@@ -545,6 +547,7 @@ class EchoDiT(nn.Module):
         kv_cache_speaker: List[Tuple[torch.Tensor, torch.Tensor]],
         start_pos: int | None = None,
         kv_cache_latent: List[Tuple[torch.Tensor, torch.Tensor]] | None = None,
+        diffusion_cache_lane: str = "default",
     ) -> torch.Tensor:
 
         if start_pos is None:
@@ -560,19 +563,28 @@ class EchoDiT(nn.Module):
 
         x = self.in_proj(x)
 
-        for i, block in enumerate(self.blocks):
-            x = block(
-                x=x,
+        block_indices = {id(block): index for index, block in enumerate(self.blocks)}
+
+        def apply_block(block: nn.Module, value: torch.Tensor) -> torch.Tensor:
+            index = block_indices[id(block)]
+            return block(
+                x=value,
                 cond_embed=cond_embed,
                 text_mask=text_mask,
                 speaker_mask=speaker_mask,
                 freqs_cis=freqs_cis,
-                kv_cache_text=kv_cache_text[i],
-                kv_cache_speaker=kv_cache_speaker[i],
+                kv_cache_text=kv_cache_text[index],
+                kv_cache_speaker=kv_cache_speaker[index],
                 start_pos=start_pos,
-                kv_cache_latent=kv_cache_latent[i] if kv_cache_latent is not None else None,
+                kv_cache_latent=(kv_cache_latent[index] if kv_cache_latent is not None else None),
             )
 
+        x = self._run_diffusion_blocks(
+            self.blocks,
+            x,
+            apply_block,
+            cache_lane=diffusion_cache_lane,
+        )
         x = self.out_norm(x)
         x = self.out_proj(x)
 

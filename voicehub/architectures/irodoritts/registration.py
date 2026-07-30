@@ -65,7 +65,12 @@ def create_irodori_architecture_spec() -> ArchitectureSpec:
             batched_inference=True,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", "sdpa", "custom-kernels"),
+            optimization_passes=(
+                "compile",
+                "sdpa",
+                "custom-kernels",
+                "diffusion-cache",
+            ),
             features=(
                 "diffusion-family",
                 "diffusion-kind-rectified-flow",

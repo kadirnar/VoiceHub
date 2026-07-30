@@ -30,6 +30,7 @@ def sample_blockwise_euler_cfg_independent_guidances(
 ) -> torch.Tensor:
 
     INIT_SCALE = 0.999  # so that we can apply rescale to first step
+    model.reset_diffusion_cache()
 
     device, dtype = model.device, model.dtype
     batch_size = text_input_ids.shape[0]
@@ -60,6 +61,9 @@ def sample_blockwise_euler_cfg_independent_guidances(
         start_pos = continuation_len
 
     for block_size in block_sizes:
+        # Prefix K/V, start position, and latent length change at every outer
+        # block; residuals from the previous block are therefore invalid.
+        model.reset_diffusion_cache()
         if speaker_kv_scale is not None:
             _multiply_kv_cache(kv_speaker_cond, speaker_kv_scale, speaker_kv_max_layers)
             kv_speaker_full = _concat_kv_caches(kv_speaker_cond, kv_speaker_cond, kv_speaker_cond)
@@ -111,6 +115,7 @@ def sample_blockwise_euler_cfg_independent_guidances(
             if speaker_kv_scale is not None and t_next < speaker_kv_min_t and t >= speaker_kv_min_t:
                 _multiply_kv_cache(kv_speaker_cond, 1. / speaker_kv_scale, speaker_kv_max_layers)
                 kv_speaker_full = _concat_kv_caches(kv_speaker_cond, kv_speaker_cond, kv_speaker_cond)
+                model.reset_diffusion_cache()
 
             x_t = x_t + v_pred * (t_next - t)
 

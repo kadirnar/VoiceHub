@@ -13,6 +13,7 @@ from torch.nn import functional
 from voicehub.architectures.vibevoice.configuration import VibeVoiceDiffusionConfig
 from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
 from voicehub.neural.normalization import RMSNorm
+from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
 
 
 class _RMSNormNoAffine(nn.Module):
@@ -221,7 +222,7 @@ class VibeVoiceDiffusionFinalLayer(DiffusionModulationKernelOptimizable, nn.Modu
         return self.linear(hidden_states)
 
 
-class VibeVoiceDiffusionHead(nn.Module):
+class VibeVoiceDiffusionHead(DiffusionCacheMixin, nn.Module):
     """Checkpoint-compatible latent velocity predictor."""
 
     def __init__(
@@ -275,6 +276,7 @@ class VibeVoiceDiffusionHead(nn.Module):
         )
         if initialize:
             self.initialize_weights()
+        self._initialize_diffusion_cache()
 
     def initialize_weights(self) -> None:
         nn.init.normal_(self.t_embedder.mlp[0].weight, std=0.02)
@@ -303,8 +305,12 @@ class VibeVoiceDiffusionHead(nn.Module):
             raise ValueError("Diffusion timesteps must contain one value per latent.")
         hidden_states = self.noisy_images_proj(noisy_latents)
         modulation = self.cond_proj(condition) + self.t_embedder(timesteps)
-        for layer in self.layers:
-            hidden_states = layer(hidden_states, modulation)
+        hidden_states = self._run_diffusion_blocks(
+            self.layers,
+            hidden_states,
+            lambda layer, value: layer(value, modulation),
+            cache_lane="packed-cfg",
+        )
         return self.final_layer(hidden_states, modulation)
 
 

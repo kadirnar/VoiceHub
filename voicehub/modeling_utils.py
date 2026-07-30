@@ -479,6 +479,8 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         kernel_backend: str | None = None,
         torch_compile: bool | str | None = None,
         compile_config=None,
+        diffusion_cache: bool | str | None = None,
+        diffusion_cache_config=None,
         config_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ):
@@ -526,6 +528,8 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
                 kernel_backend=kernel_backend,
                 torch_compile=torch_compile,
                 compile_config=compile_config,
+                diffusion_cache=diffusion_cache,
+                diffusion_cache_config=diffusion_cache_config,
             ))
 
         external_backend_requested = (llm_backend is not None or llm_backend_config is not None)

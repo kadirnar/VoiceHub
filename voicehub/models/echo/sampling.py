@@ -528,6 +528,7 @@ def sample_euler_cfg_independent_guidances(
 
     if sequence_length is None:
         sequence_length = 640  # max sequence length during training
+    model.reset_diffusion_cache()
 
     INIT_SCALE = 0.999  # so that we can apply rescale to first step
 
@@ -593,6 +594,7 @@ def sample_euler_cfg_independent_guidances(
         if speaker_kv_scale is not None and t_next < speaker_kv_min_t and t >= speaker_kv_min_t:
             _multiply_kv_cache(kv_speaker_cond, 1. / speaker_kv_scale, speaker_kv_max_layers)
             kv_speaker_full = _concat_kv_caches(kv_speaker_cond, kv_speaker_cond, kv_speaker_cond)
+            model.reset_diffusion_cache()
 
         x_t = x_t + v_pred * (t_next - t)
 

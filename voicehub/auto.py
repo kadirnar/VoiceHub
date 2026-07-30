@@ -146,6 +146,8 @@ class _BaseAutoModel:
         kernel_backend: str | None = None,
         torch_compile: bool | str | None = None,
         compile_config=None,
+        diffusion_cache: bool | str | None = None,
+        diffusion_cache_config=None,
         **kwargs,
     ):
         spec = cls._get_spec(config.model_type)
@@ -159,6 +161,8 @@ class _BaseAutoModel:
                 kernel_backend=kernel_backend,
                 torch_compile=torch_compile,
                 compile_config=compile_config,
+                diffusion_cache=diffusion_cache,
+                diffusion_cache_config=diffusion_cache_config,
             ) if cls.task is SpeechTask.TEXT_TO_SPEECH else None)
         if cls.task is not SpeechTask.TEXT_TO_SPEECH and any(value is not None for value in (
                 optimization_config,
@@ -166,6 +170,8 @@ class _BaseAutoModel:
                 kernel_backend,
                 torch_compile,
                 compile_config,
+                diffusion_cache,
+                diffusion_cache_config,
                 llm_backend,
                 llm_backend_config,
         )):
