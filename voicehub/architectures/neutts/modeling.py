@@ -374,30 +374,12 @@ class NeuTTSRuntime(nn.Module):
         top_k: int,
         seed: int | None,
     ) -> Tensor:
-        prompt_mask = torch.ones_like(input_ids, dtype=torch.bool)
         speech_end_id = self.tokenizer.convert_tokens_to_ids(SPEECH_GENERATION_END)
 
         def decoder_step(step: GenerationStepInput) -> GenerationStepOutput:
-            past_length = (step.cache.sequence_length() if step.cache is not None else 0)
-            key_length = past_length + step.token_ids.shape[1]
-            generated = key_length - prompt_mask.shape[1]
-            attention_mask = prompt_mask
-            if generated > 0:
-                attention_mask = torch.cat(
-                    (
-                        prompt_mask,
-                        torch.ones(
-                            prompt_mask.shape[0],
-                            generated,
-                            dtype=prompt_mask.dtype,
-                            device=prompt_mask.device,
-                        ),
-                    ),
-                    dim=-1,
-                )
             output = self.backbone(
                 step.token_ids,
-                attention_mask=attention_mask,
+                attention_mask=None,
                 past_key_values=step.cache,
                 use_cache=step.use_cache,
             )

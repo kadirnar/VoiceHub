@@ -4,6 +4,10 @@ This page covers text-to-speech backends. For automatic speech recognition
 and voice activity detection, see the
 [ASR and VAD support matrix](asr-vad-support.md).
 
+For a compact comparison of model families, languages, voice controls, and
+adaptation limits, see the
+[TTS capabilities and adaptation boundaries](tts-capabilities.md).
+
 VoiceHub ships model implementation source and every built-in inference
 runtime dependency in its default installation. It never installs a separate
 TTS implementation package. Model checkpoints are still downloaded lazily or

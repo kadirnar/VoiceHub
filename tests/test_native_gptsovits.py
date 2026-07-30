@@ -372,6 +372,12 @@ class NativeGPTSoVITSTests(unittest.TestCase):
             GPTSoVITSSemanticModel().eval(),
             generator,
         )
+        self.assertIsNotNone(runtime._weight_norm_cache)
+        self.assertGreater(runtime._weight_norm_cache.module_count, 0)
+        runtime.train()
+        self.assertIsNone(runtime._weight_norm_cache)
+        runtime.eval()
+        self.assertIsNotNone(runtime._weight_norm_cache)
         sample_rate, waveform = runtime.synthesize_prepared(
             s1_phoneme_ids=[1, 2],
             s1_bert_features=torch.zeros(1, 1_024, 2),

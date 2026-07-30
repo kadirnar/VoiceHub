@@ -222,6 +222,8 @@ NATIVE_RUNTIME_DIRECTORIES = (
     "models/qwen3tts/configuration_qwen3tts.py",
     "models/qwen3tts/modeling_qwen3tts.py",
     "models/qwen3tts/inference.py",
+    "models/qwen3tts/lora.py",
+    "models/qwen3tts/lora_config.py",
     "models/qwen3tts/training.py",
     "models/speecht5",
     "models/supertonic/__init__.py",

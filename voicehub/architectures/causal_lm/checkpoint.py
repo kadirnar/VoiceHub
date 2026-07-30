@@ -201,11 +201,15 @@ class HuggingFaceCausalLMCheckpointAdapter(CheckpointAdapter):
 
 def open_causal_lm_tensor_source(path: str | Path, ) -> AbstractContextManager[CausalLMTensorSource]:
     """Open an unambiguous single-file or sharded local checkpoint."""
-    resolved = Path(path).expanduser().resolve()
-    if resolved.is_file():
-        if resolved.name.endswith(".safetensors.index.json"):
-            return ShardedSafeTensorReader(resolved)
-        if resolved.suffix == ".safetensors":
+    logical = Path(path).expanduser()
+    resolved = logical.resolve()
+    if logical.is_file():
+        # Standard Hugging Face snapshots expose model filenames as
+        # symlinks to extensionless content-addressed blobs. Classify the
+        # logical artifact name before resolving that symlink.
+        if logical.name.endswith(".safetensors.index.json"):
+            return ShardedSafeTensorReader(logical)
+        if logical.suffix == ".safetensors":
             return SafeTensorReader(resolved)
         raise ValueError("Causal-LM checkpoint files must be Safetensors or an index JSON.")
     if not resolved.is_dir():

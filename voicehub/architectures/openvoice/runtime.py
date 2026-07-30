@@ -13,6 +13,10 @@ from voicehub.architectures.openvoice.artifacts import OpenVoiceArtifacts, resol
 from voicehub.architectures.openvoice.checkpoint import load_openvoice_checkpoint, save_openvoice_checkpoint
 from voicehub.architectures.openvoice.modeling import OpenVoiceConverterOutput, OpenVoiceToneColorConverter
 from voicehub.architectures.openvoice.processing import OpenVoiceAudioProcessor
+from voicehub.architectures.vits.weight_norm import (
+    LegacyWeightNormInferenceCache,
+    enable_legacy_weight_norm_inference_cache,
+)
 from voicehub.hub import write_json_file
 from voicehub.optimization.protocols import OptimizationCompileTarget, OptimizationModuleRoot
 
@@ -35,6 +39,22 @@ class OpenVoiceRuntime:
         self.processor = processor
         self.artifacts = artifacts
         self.config = model.config
+        self._weight_norm_cache: LegacyWeightNormInferenceCache | None = None
+        if not model.training:
+            self._weight_norm_cache = (enable_legacy_weight_norm_inference_cache(model))
+
+    def train(self, mode: bool = True) -> OpenVoiceRuntime:
+        self.model.train(mode)
+        if mode:
+            if self._weight_norm_cache is not None:
+                self._weight_norm_cache.restore()
+                self._weight_norm_cache = None
+        elif self._weight_norm_cache is None:
+            self._weight_norm_cache = (enable_legacy_weight_norm_inference_cache(self.model))
+        return self
+
+    def eval(self) -> OpenVoiceRuntime:
+        return self.train(False)
 
     def optimization_compile_targets(
         self,
@@ -63,6 +83,7 @@ class OpenVoiceRuntime:
     def dtype(self) -> torch.dtype:
         return next(self.model.parameters()).dtype
 
+    @torch.inference_mode()
     def extract_speaker_embedding(
         self,
         reference_waveform: Any,
@@ -106,9 +127,9 @@ class OpenVoiceRuntime:
         )
         if batch.values.shape[0] != 1:
             raise ValueError("One OpenVoice conversion request accepts one source waveform.")
-        if source_embedding is None:
-            source_embedding = self.model.extract_speaker_embedding(batch.values)
         with torch.inference_mode():
+            if source_embedding is None:
+                source_embedding = self.model.extract_speaker_embedding(batch.values)
             output = self.model(
                 batch.values,
                 batch.lengths,

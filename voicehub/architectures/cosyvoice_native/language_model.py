@@ -296,17 +296,12 @@ class CosyVoiceLanguageModel(nn.Module):
         if prompt_speech_tokens is not None and prompt_speech_tokens.numel():
             pieces.append(self.speech_embedding(prompt_speech_tokens))
         step_input = torch.cat(pieces, dim=1)
-        attention_mask = torch.ones(
-            (1, step_input.shape[1]),
-            dtype=torch.bool,
-            device=step_input.device,
-        )
         cache: DynamicKVCache | None = None
         generated: list[Tensor] = []
         for step in range(max_new_tokens):
             hidden_output = self.llm.model.model(
                 inputs_embeds=step_input,
-                attention_mask=attention_mask,
+                attention_mask=None,
                 past_key_values=cache,
                 use_cache=True,
             )
@@ -344,13 +339,6 @@ class CosyVoiceLanguageModel(nn.Module):
                 break
             generated.append(sampled.squeeze(0))
             step_input = self.speech_embedding(sampled)
-            attention_mask = torch.cat(
-                (
-                    attention_mask,
-                    torch.ones((1, 1), dtype=torch.bool, device=attention_mask.device),
-                ),
-                dim=-1,
-            )
         if not generated:
             return text_tokens.new_empty((1, 0))
         return torch.stack(generated, dim=1)

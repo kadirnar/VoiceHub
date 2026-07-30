@@ -483,6 +483,7 @@ class VitsForTextToSpeech(PreTrainedTTSModel):
 
     def _prepare_for_inference(self) -> None:
         self.model.eval()
+        self.model.cache_weight_norm_for_inference()
         if self.training_model is not None:
             self.training_model.eval()
 

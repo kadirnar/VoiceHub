@@ -480,7 +480,12 @@ class SafeTensorIndex:
 
     @classmethod
     def from_file(cls, path: str | Path) -> SafeTensorIndex:
-        index_path = Path(path).expanduser().resolve()
+        # Preserve the logical index location. Hugging Face snapshots expose
+        # the index and its shards as sibling symlinks into an extensionless
+        # content-addressed blob store. Resolving the index first would make
+        # relative shard names resolve beside the blob instead of beside the
+        # snapshot links.
+        index_path = Path(path).expanduser().absolute()
         if not index_path.is_file():
             raise FileNotFoundError(f"Safetensors index file was not found: {index_path}")
         try:
@@ -507,13 +512,11 @@ class SafeTensorIndex:
             raise CheckpointFormatError("Safetensors index `metadata` must be a JSON object.")
         for shard in set(weight_map.values()):
             shard_path = Path(shard)
-            if shard_path.is_absolute() or ".." in shard_path.parts:
+            if (shard_path.is_absolute() or ".." in shard_path.parts or len(shard_path.parts) != 1):
                 raise CheckpointFormatError(f"Unsafe Safetensors shard path {shard!r}.")
-            resolved = (index_path.parent / shard_path).resolve()
-            if resolved.parent != index_path.parent:
-                raise CheckpointFormatError(f"Safetensors shard must be beside its index: {shard!r}.")
-            if not resolved.is_file():
-                raise FileNotFoundError(f"Safetensors shard was not found: {resolved}")
+            logical_shard = index_path.parent / shard_path
+            if not logical_shard.is_file():
+                raise FileNotFoundError(f"Safetensors shard was not found: {logical_shard}")
         return cls(
             path=index_path,
             weight_map=dict(weight_map),

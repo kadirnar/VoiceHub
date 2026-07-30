@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import torch
 
@@ -278,6 +279,62 @@ class CausalLMGraphTests(unittest.TestCase):
                     token_ids.shape[1],
                 )
 
+    def test_chunked_cache_uses_bottom_right_causal_alignment(self):
+        token_ids = torch.tensor(
+            [[1, 5, 6, 7, 8, 2], [1, 9, 10, 11, 12, 2]],
+            dtype=torch.long,
+        )
+        for key_value_heads in (2, 4):
+            with self.subTest(key_value_heads=key_value_heads):
+                torch.manual_seed(13)
+                model = Qwen3ForCausalLM(_tiny_config(
+                    Qwen3Config,
+                    num_key_value_heads=key_value_heads,
+                )).eval()
+                with torch.no_grad():
+                    full = model(token_ids, use_cache=False).logits
+                    prefix = model(
+                        token_ids[:, :2],
+                        use_cache=True,
+                    )
+                    chunk = model(
+                        token_ids[:, 2:],
+                        past_key_values=prefix.past_key_values,
+                        use_cache=True,
+                    )
+
+                torch.testing.assert_close(
+                    chunk.logits,
+                    full[:, 2:],
+                    atol=1e-6,
+                    rtol=1e-5,
+                )
+
+    def test_output_attentions_preserves_explicit_attention_path(self):
+        torch.manual_seed(17)
+        model = Qwen3ForCausalLM(_tiny_config(Qwen3Config)).eval()
+        token_ids = torch.tensor([[1, 5, 6, 2]], dtype=torch.long)
+
+        with torch.no_grad():
+            fused = model(token_ids, use_cache=False)
+            diagnostic = model(
+                token_ids,
+                use_cache=False,
+                output_attentions=True,
+            )
+
+        self.assertEqual(len(diagnostic.attentions), 2)
+        self.assertEqual(
+            tuple(diagnostic.attentions[0].shape),
+            (1, 4, 4, 4),
+        )
+        torch.testing.assert_close(
+            diagnostic.logits,
+            fused.logits,
+            atol=1e-6,
+            rtol=1e-5,
+        )
+
     def test_left_padding_is_finite_and_cache_equivalent(self):
         token_ids = torch.tensor(
             [[0, 0, 1, 7, 2], [0, 1, 8, 9, 2]],
@@ -348,6 +405,41 @@ class CausalLMGraphTests(unittest.TestCase):
         self.assertEqual(tuple(output.sequences.shape), (1, 6))
         self.assertEqual(output.sequences[0, -3:].tolist(), [0, 0, 0])
         self.assertEqual(output.cache.sequence_length(), 5)
+
+    def test_generation_collapses_only_dense_prompt_masks(self):
+        model = LlamaForCausalLM(_tiny_config(LlamaConfig)).eval()
+        with torch.no_grad():
+            for parameter in model.parameters():
+                parameter.zero_()
+        config = GenerationConfig(
+            max_new_tokens=2,
+            pad_token_id=0,
+            use_cache=True,
+        )
+        prompt = torch.tensor([[1, 5, 6]])
+
+        with mock.patch(
+                "torch.nn.functional.scaled_dot_product_attention",
+                wraps=torch.nn.functional.scaled_dot_product_attention,
+        ) as fused_attention:
+            model.generate(
+                prompt,
+                attention_mask=torch.ones_like(prompt, dtype=torch.bool),
+                generation_config=config,
+            )
+        self.assertGreater(fused_attention.call_count, 0)
+
+        padded_prompt = torch.tensor([[0, 1, 5]])
+        with mock.patch(
+                "torch.nn.functional.scaled_dot_product_attention",
+                wraps=torch.nn.functional.scaled_dot_product_attention,
+        ) as fused_attention:
+            model.generate(
+                padded_prompt,
+                attention_mask=padded_prompt.ne(0),
+                generation_config=config,
+            )
+        self.assertEqual(fused_attention.call_count, 0)
 
 
 class CausalLMCheckpointTests(unittest.TestCase):
@@ -468,6 +560,38 @@ class CausalLMCheckpointTests(unittest.TestCase):
                 torch.testing.assert_close(
                     loaded.state_dict()[name],
                     tensor,
+                )
+
+    def test_explicit_sharded_snapshot_index_keeps_logical_shard_directory(self):
+        from voicehub.architectures.causal_lm.checkpoint import open_causal_lm_tensor_source
+        from voicehub.checkpointing import save_safetensors
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            blobs = root / "blobs"
+            snapshot = root / "snapshots" / "revision"
+            blobs.mkdir()
+            snapshot.mkdir(parents=True)
+            shard_blob = blobs / ("c" * 64)
+            index_blob = blobs / ("d" * 64)
+            save_safetensors({"weight": torch.tensor([5.0])}, shard_blob)
+            index_blob.write_text(
+                json.dumps({
+                    "weight_map": {
+                        "weight": "model-00001-of-00001.safetensors",
+                    },
+                }),
+                encoding="utf-8",
+            )
+            index_path = snapshot / "model.safetensors.index.json"
+            shard_path = snapshot / "model-00001-of-00001.safetensors"
+            index_path.symlink_to(Path("../../blobs") / index_blob.name)
+            shard_path.symlink_to(Path("../../blobs") / shard_blob.name)
+
+            with open_causal_lm_tensor_source(index_path) as reader:
+                torch.testing.assert_close(
+                    reader.get_tensor("weight"),
+                    torch.tensor([5.0]),
                 )
 
     def test_tied_embedding_roundtrip_uses_one_checkpoint_tensor(self):

@@ -50,9 +50,8 @@ class OuteTTSForCausalLM(CausalLMForCausalLM):
             repetition_window: int = 64,
             stopping_criteria: Sequence[StoppingCriterion] = (),
     ) -> GenerationOutput:
-        if attention_mask is None:
-            attention_mask = torch.ones_like(input_ids, dtype=torch.bool)
-        if (not isinstance(attention_mask, Tensor) or tuple(attention_mask.shape) != tuple(input_ids.shape)):
+        if (attention_mask is not None and (not isinstance(attention_mask, Tensor) or
+                                            tuple(attention_mask.shape) != tuple(input_ids.shape))):
             raise ValueError("`attention_mask` must have the same shape as `input_ids`.")
         config = generation_config or GenerationConfig(
             eos_token_id=self.config.eos_token_id,
@@ -73,16 +72,19 @@ class OuteTTSForCausalLM(CausalLMForCausalLM):
             repetition_window,
         )
         engine_config = config.with_updates(repetition_penalty=1.0)
-        prompt_mask = attention_mask.to(device=input_ids.device)
+        prompt_mask = (None if attention_mask is None else attention_mask.to(device=input_ids.device))
+        if prompt_mask is not None and bool(prompt_mask.all()):
+            prompt_mask = None
+        prompt_length = input_ids.shape[1]
 
         def decoder_step(step: GenerationStepInput) -> GenerationStepOutput:
             past_length = (step.cache.sequence_length() if isinstance(step.cache, DynamicKVCache) else 0)
             key_length = past_length + step.token_ids.shape[1]
-            if key_length < prompt_mask.shape[1]:
+            if key_length < prompt_length:
                 raise RuntimeError("Decoder cache length is shorter than the prompt mask.")
-            generated = key_length - prompt_mask.shape[1]
+            generated = key_length - prompt_length
             step_mask = prompt_mask
-            if generated:
+            if generated and prompt_mask is not None:
                 step_mask = torch.cat(
                     (
                         prompt_mask,

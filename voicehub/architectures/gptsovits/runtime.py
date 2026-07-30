@@ -14,6 +14,10 @@ from voicehub.architectures.gptsovits.configuration import SUPPORTED_GPT_SOVITS_
 from voicehub.architectures.gptsovits.frontend import reject_raw_text, validate_prepared_inference
 from voicehub.architectures.gptsovits.modeling import GPTSoVITSSynthesizer, build_s2_generator
 from voicehub.architectures.gptsovits.semantic import GPTSoVITSSemanticModel
+from voicehub.architectures.vits.weight_norm import (
+    LegacyWeightNormInferenceCache,
+    enable_legacy_weight_norm_inference_cache,
+)
 from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
@@ -33,6 +37,19 @@ class GPTSoVITSRuntime(nn.Module):
         self.s1 = s1
         self.s2 = s2
         self.sample_rate = s2.config.sample_rate
+        self._weight_norm_cache: LegacyWeightNormInferenceCache | None = None
+        if not s2.training:
+            self._weight_norm_cache = (enable_legacy_weight_norm_inference_cache(s2))
+
+    def train(self, mode: bool = True) -> GPTSoVITSRuntime:
+        super().train(mode)
+        if mode:
+            if self._weight_norm_cache is not None:
+                self._weight_norm_cache.restore()
+                self._weight_norm_cache = None
+        elif self._weight_norm_cache is None:
+            self._weight_norm_cache = (enable_legacy_weight_norm_inference_cache(self.s2))
+        return self
 
     def optimization_compile_targets(
         self,
@@ -57,7 +74,7 @@ class GPTSoVITSRuntime(nn.Module):
     def vits_model(self) -> GPTSoVITSSynthesizer:
         return self.s2
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def synthesize_prepared(
         self,
         *,

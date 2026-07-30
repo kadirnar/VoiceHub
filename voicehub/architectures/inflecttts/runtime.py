@@ -18,6 +18,10 @@ from voicehub.architectures.inflecttts.frontend import (
     validate_token_ids,
 )
 from voicehub.architectures.inflecttts.modeling import SynthesizerTrn
+from voicehub.architectures.vits.weight_norm import (
+    LegacyWeightNormInferenceCache,
+    enable_legacy_weight_norm_inference_cache,
+)
 from voicehub.optimization.protocols import OptimizationCompileTarget, OptimizationModuleRoot
 
 
@@ -95,6 +99,19 @@ class InflectV2Runtime(nn.Module):
             raise TypeError("`config` must be an InflectV2Config.")
         self.generator = model
         self.config = config
+        self._weight_norm_cache: LegacyWeightNormInferenceCache | None = None
+        if not model.training:
+            self._weight_norm_cache = (enable_legacy_weight_norm_inference_cache(model))
+
+    def train(self, mode: bool = True) -> InflectV2Runtime:
+        super().train(mode)
+        if mode:
+            if self._weight_norm_cache is not None:
+                self._weight_norm_cache.restore()
+                self._weight_norm_cache = None
+        elif self._weight_norm_cache is None:
+            self._weight_norm_cache = (enable_legacy_weight_norm_inference_cache(self.generator))
+        return self
 
     @property
     def sample_rate(self) -> int:

@@ -320,10 +320,7 @@ class NeuCodecModel(nn.Module):
             )
         semantic = self.semantic_adapter(semantic.transpose(1, 2))
         acoustic = self.acoustic_encoder(input_values)
-        if semantic.shape[-1] != acoustic.shape[-1]:
-            raise RuntimeError(
-                "NeuCodec frontend produced misaligned semantic and acoustic "
-                f"frames ({semantic.shape[-1]} != {acoustic.shape[-1]}).")
+        semantic, acoustic = self._align_encoder_frames(semantic, acoustic)
         hidden_states = self.fc_encoder(torch.cat((semantic, acoustic), dim=1).transpose(1, 2))
         latents, audio_codes = self.quantizer(hidden_states)
         latents = latents.transpose(1, 2)
@@ -342,6 +339,21 @@ class NeuCodecModel(nn.Module):
             latents=latents if output_latents else None,
             audio_codes_mask=code_mask,
         )
+
+    @staticmethod
+    def _align_encoder_frames(
+        semantic: Tensor,
+        acoustic: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        """Match the released NeuCodec's safe shortest-stream alignment."""
+        frame_count = min(semantic.shape[-1], acoustic.shape[-1])
+        if frame_count <= 0:
+            raise RuntimeError("NeuCodec encoders produced no alignable audio frames.")
+        if semantic.shape[-1] != frame_count:
+            semantic = semantic[..., :frame_count]
+        if acoustic.shape[-1] != frame_count:
+            acoustic = acoustic[..., :frame_count]
+        return semantic, acoustic
 
     def encode_audio(
         self,

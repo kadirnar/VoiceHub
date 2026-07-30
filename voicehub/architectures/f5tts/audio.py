@@ -73,9 +73,17 @@ class F5MelSpectrogram(nn.Module):
             waveform = waveform[:, 0]
         if waveform.ndim != 2:
             raise ValueError("F5-TTS mel extraction expects `[batch, samples]` audio.")
-        window = self.window.to(device=waveform.device, dtype=waveform.dtype)
+        # cuFFT does not implement FP16/BF16 transforms, and running the
+        # logarithmic acoustic frontend in FP32 is also materially more
+        # stable near ``clamp_min``. Preserve the model-facing dtype at the
+        # boundary so mixed-precision DiT inference remains end-to-end
+        # compatible.
+        output_dtype = waveform.dtype
+        fft_dtype = (waveform.dtype if waveform.dtype in {torch.float32, torch.float64} else torch.float32)
+        fft_waveform = waveform.to(dtype=fft_dtype)
+        window = self.window.to(device=waveform.device, dtype=fft_dtype)
         spectrum = torch.stft(
-            waveform,
+            fft_waveform,
             n_fft=self.n_fft,
             hop_length=self.hop_length,
             win_length=self.win_length,
@@ -91,7 +99,7 @@ class F5MelSpectrogram(nn.Module):
             dtype=spectrum.dtype,
         )
         mel = torch.matmul(spectrum.transpose(-1, -2), filter_bank)
-        return mel.transpose(-1, -2).clamp_min(self.clamp_min).log()
+        return (mel.transpose(-1, -2).clamp_min(self.clamp_min).log().to(dtype=output_dtype))
 
 
 def normalize_reference_rms(

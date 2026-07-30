@@ -34,17 +34,17 @@ and Qwen3 checkpoint families requested for this release.
 
 ## Training and data audit
 
-Training paths were audited separately on 2026-07-29 across all 34 registered
+Training paths were re-audited on 2026-07-30 across all 34 registered
 TTS model types. Registry presence was checked against the actual loaded
 training graph, objective, data boundary, optimizer topology, and export
 semantics.
 
 | Registry support | Count | Practical meaning |
 | --- | ---: | --- |
-| `native` | 8 | A backend-native differentiable objective exists; raw-data preparation may still be external |
-| `preprocessed` | 15 | A verified objective accepts source-shaped tensors or tokens |
-| `custom` | 6 | Source-specific graph or orchestration is required |
-| `inference-only` | 5 | The integrated artifact has no verified gradient path |
+| `native` | 14 | A backend-native differentiable objective exists; raw-data preparation may still be external |
+| `preprocessed` | 17 | A verified objective accepts source-shaped tensors or tokens |
+| `custom` | 3 | Source-specific graph or orchestration is required |
+| `inference-only` | 0 | Every registered TTS model type has a verified fine-tuning route; unsupported checkpoint variants still fail closed |
 
 The principal findings were:
 

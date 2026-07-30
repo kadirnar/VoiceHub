@@ -75,7 +75,7 @@ result = model.optimize(
         compile="auto",
         compile_config={
             "backend": "inductor",
-            "mode": "max-autotune-no-cudagraphs",
+            "mode": "default",
             "dynamic": True,
         },
     ),
@@ -86,10 +86,54 @@ print(result.manifest())
 model.restore_tts_optimization(mode="inference")
 ```
 
-Native VITS exposes `synthesize` as its inference compile target and `forward`
-as its training target. MeloTTS, InflectTTS, GPT-SoVITS, and OpenVoice expose
+Native VITS keeps its request-level `synthesize` wrapper eager and exposes the
+text encoder, reverse flow, and waveform decoder as inference compile targets.
+This leaves tensor validation, request-local random-generator construction,
+duration-dependent output sizing, and monotonic-path validation outside
+TorchDynamo while compiling the expensive, stable tensor regions. Its training
+target remains `forward`. MeloTTS, InflectTTS, GPT-SoVITS, and OpenVoice expose
 their actual tensor module roots and execution boundaries, so compilation does
 not accidentally capture audio loading or text preprocessing.
+
+## Checkpoint-safe weight-normalization caches
+
+The native VITS WaveNet layers preserve the legacy checkpoint
+`weight_g`/`weight_v` namespace. Eval-only deployments can materialize their
+normalized convolution weights once:
+
+```python
+model.eval()
+cache_bytes = model.cache_weight_norm_for_inference()
+with torch.inference_mode():
+    output = model.synthesize(input_ids, sampling=sampling)
+```
+
+`VitsForTextToSpeech` performs this materialization automatically when it
+prepares a loaded checkpoint for inference. The explicit methods above are for
+callers using the low-level architecture directly.
+
+The cached tensors are non-persistent and therefore never appear in
+`state_dict()`. They are used only while autograd is disabled, invalidate after
+a parameter mutation, and are cleared by `train()` or device/dtype conversion.
+Call `model.clear_weight_norm_cache()` to release them explicitly. This has the
+same deployment motivation as removing weight normalization, but keeps the
+canonical checkpoint topology reversible.
+
+MeloTTS, InflectTTS, GPT-SoVITS S2, and OpenVoice use PyTorch's legacy
+weight-normalization pre-hooks. Their loaded evaluation runtimes
+automatically replace those hooks with a guarded cache. The replacement:
+
+- preserves every `weight_g`/`weight_v` state key;
+- invalidates after checkpoint loading, parameter replacement or mutation, and
+  device/dtype conversion;
+- calls the original weight-normalization expression whenever gradients are
+  enabled or TorchDynamo is tracing; and
+- restores the original hooks when the runtime enters training mode.
+
+The inference entry points use `torch.inference_mode()` so the cache is active
+without retaining view tracking or autograd metadata. Calling `eval()` after
+training reinstalls and rematerializes it. Exported checkpoints remain
+canonical and can be loaded by a fresh unoptimized runtime.
 
 ## CUDA graphs and dynamic audio lengths
 
@@ -98,9 +142,12 @@ inference predicts durations, and adversarial training uses variable-length
 batches and random segments. Capturing that entire dynamic lifecycle is not a
 safe default.
 
-The VITS profile therefore keeps dynamic training on
-`max-autotune-no-cudagraphs`. Enable graphs only for padded, static
-length/batch buckets:
+The VITS profile therefore keeps dynamic execution on compile mode `default`
+with CUDA graphs disabled. This balances cold compilation cost and steady
+latency. Long-lived services that reuse a small set of shapes can explicitly
+select `max-autotune-no-cudagraphs` for a little more steady-state throughput
+at a substantially higher first-call autotuning cost. An explicit caller mode
+is preserved. Enable graphs only for padded, static length/batch buckets:
 
 ```python
 from voicehub import VITSOptimizationConfig

@@ -374,6 +374,85 @@ class VitsWaveNetKernelTests(unittest.TestCase):
 
 
 @unittest.skipUnless(TORCH_AVAILABLE, "native VITS requires PyTorch")
+class VitsWeightNormCacheTests(unittest.TestCase):
+
+    def test_inference_cache_is_exact_nonpersistent_and_reversible(self):
+        from voicehub.architectures.vits.modeling import VitsModel, VitsSamplingConfig, WeightNormalizedConv1d
+
+        torch.manual_seed(29)
+        model = VitsModel(_tiny_config()).eval()
+        input_ids = torch.tensor([[1, 2, 3]])
+        sampling = VitsSamplingConfig(
+            seed=41,
+            noise_scale=0.3,
+            noise_scale_duration=0.0,
+            max_output_frames=50,
+        )
+        state_keys = tuple(model.state_dict())
+        with torch.inference_mode():
+            expected = model.synthesize(input_ids, sampling=sampling)
+
+        cached_bytes = model.cache_weight_norm_for_inference()
+        cached_modules = [module for module in model.modules() if isinstance(module, WeightNormalizedConv1d)]
+        self.assertGreater(cached_bytes, 0)
+        self.assertTrue(cached_modules)
+        self.assertTrue(all(module._inference_weight is not None for module in cached_modules))
+        self.assertEqual(tuple(model.state_dict()), state_keys)
+        self.assertFalse(any("_inference_weight" in key for key in model.state_dict()))
+
+        with torch.inference_mode():
+            actual = model.synthesize(input_ids, sampling=sampling)
+        self.assertTrue(torch.equal(actual.waveform, expected.waveform))
+        self.assertTrue(torch.equal(actual.durations, expected.durations))
+
+        model.train()
+        self.assertTrue(all(module._inference_weight is None for module in cached_modules))
+        with self.assertRaisesRegex(RuntimeError, "requires eval mode"):
+            model.cache_weight_norm_for_inference()
+
+    def test_cache_invalidates_after_parameter_or_dtype_mutation(self):
+        from voicehub.architectures.vits.modeling import VitsModel, WeightNormalizedConv1d
+
+        model = VitsModel(_tiny_config()).eval()
+        model.cache_weight_norm_for_inference()
+        layer = next(module for module in model.modules() if isinstance(module, WeightNormalizedConv1d))
+        cached = layer._inference_weight
+        self.assertIsNotNone(cached)
+        with torch.no_grad():
+            layer.weight_v.add_(0.125)
+        with torch.inference_mode():
+            materialized = layer.normalized_weight()
+        self.assertIsNone(layer._inference_weight)
+        self.assertFalse(torch.equal(materialized, cached))
+
+        model.cache_weight_norm_for_inference()
+        cached = layer._inference_weight
+        layer.weight_v = torch.nn.Parameter(layer.weight_v.detach().clone().add_(0.125))
+        with torch.inference_mode():
+            materialized = layer.normalized_weight()
+        self.assertIsNone(layer._inference_weight)
+        self.assertFalse(torch.equal(materialized, cached))
+
+        model.cache_weight_norm_for_inference()
+        model.to(dtype=torch.float64)
+        self.assertTrue(
+            all(
+                module._inference_weight is None for module in model.modules()
+                if isinstance(module, WeightNormalizedConv1d)))
+
+    def test_cache_never_changes_gradient_semantics(self):
+        from voicehub.architectures.vits.modeling import WeightNormalizedConv1d
+
+        layer = WeightNormalizedConv1d(2, 3, 3, padding=1).eval()
+        layer.cache_weight_norm_for_inference()
+        inputs = torch.randn(1, 2, 5, requires_grad=True)
+        layer(inputs).sum().backward()
+        self.assertIsNotNone(inputs.grad)
+        self.assertIsNotNone(layer.weight_g.grad)
+        self.assertIsNotNone(layer.weight_v.grad)
+
+
+@unittest.skipUnless(TORCH_AVAILABLE, "native VITS requires PyTorch")
 class VitsAlignmentTests(unittest.TestCase):
 
     def test_duration_expansion_and_monotonic_search_agree(self):

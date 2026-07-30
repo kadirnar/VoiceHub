@@ -249,6 +249,12 @@ class OpenVoiceArchitectureTests(unittest.TestCase):
                 set(reloaded.model.state_dict()),
                 set(model.state_dict()),
             )
+            self.assertIsNotNone(reloaded._weight_norm_cache)
+            self.assertGreater(reloaded._weight_norm_cache.module_count, 0)
+            reloaded.train()
+            self.assertIsNone(reloaded._weight_norm_cache)
+            reloaded.eval()
+            self.assertIsNotNone(reloaded._weight_norm_cache)
             with self.assertRaises(FileExistsError):
                 runtime.save_pretrained(destination)
 

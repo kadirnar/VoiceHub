@@ -66,7 +66,9 @@ class TTSAccelerationPlanTests(unittest.TestCase):
             diffusion[1].policy,
             FlashAttention4Policy.DISABLED,
         )
-        for plan in (vits, llm, diffusion):
+        self.assertEqual(vits[-1].config.mode, "default")
+        self.assertTrue(vits[-1].config.dynamic)
+        for plan in (llm, diffusion):
             compile_pass = plan[-1]
             self.assertEqual(
                 compile_pass.config.mode,

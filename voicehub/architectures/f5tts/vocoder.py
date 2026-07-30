@@ -234,7 +234,11 @@ class ISTFTHead(nn.Module):
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         predicted = self.out(hidden_states).transpose(1, 2)
-        magnitude, phase = predicted.chunk(2, dim=1)
+        # Complex BF16 tensors are unsupported and cuFFT/istft is more
+        # numerically reliable in FP32. Keep the learned Vocos backbone in
+        # the requested inference dtype, then cross this spectral boundary
+        # explicitly.
+        magnitude, phase = predicted.float().chunk(2, dim=1)
         magnitude = magnitude.exp().clamp_max(1e2)
         spectrum = magnitude * (
             torch.cos(phase) + torch.complex(

@@ -105,16 +105,24 @@ def _local_checkpoint(
     owner: str,
 ) -> Path:
     if filename is not None:
+        logical_checkpoint = root / filename
         checkpoint = _required(root, filename, owner=owner)
     else:
+        logical_checkpoint = root / _CHECKPOINT
         checkpoint = _optional(root, _CHECKPOINT)
         if checkpoint is None:
+            logical_checkpoint = root / _CHECKPOINT_INDEX
             checkpoint = _required(root, _CHECKPOINT_INDEX, owner=owner)
-    _validate_checkpoint(checkpoint, owner=owner)
-    if checkpoint.name.endswith(".safetensors.index.json"):
+    # Hugging Face snapshot directories use logical artifact-name symlinks
+    # whose resolved blob names are content hashes without an extension.
+    # Validate and classify the trusted logical name, and retain that name for
+    # downstream readers that distinguish a single checkpoint from an index
+    # by suffix. The OS still follows the symlink for I/O.
+    _validate_checkpoint(logical_checkpoint, owner=owner)
+    if logical_checkpoint.name.endswith(".safetensors.index.json"):
         for shard in _shard_names(checkpoint, owner=owner):
             _required(root, shard, owner=owner)
-    return checkpoint
+    return logical_checkpoint.absolute()
 
 
 def _remote_optional(

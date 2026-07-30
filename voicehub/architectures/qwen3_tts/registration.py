@@ -38,6 +38,8 @@ def create_qwen3_tts_architecture_spec() -> ArchitectureSpec:
                                "Qwen3TTSSpeechEncoder"),
             "text-tokenizer": ("voicehub.architectures.qwen3_tts.tokenization:"
                                "Qwen3TTSTextTokenizer"),
+            "lora": ("voicehub.models.qwen3tts.lora:"
+                     "inject_qwen3_tts_lora"),
         },
         capabilities=ArchitectureCapabilities(
             tasks=(SpeechTask.TEXT_TO_SPEECH, ),
@@ -67,6 +69,7 @@ def create_qwen3_tts_architecture_spec() -> ArchitectureSpec:
                 "multilingual",
                 "native-icl-reference-audio",
                 "native-speech-tokenizer-encoder",
+                "native-lora-fine-tuning",
                 "speaker-encoder",
                 "voice-clone-xvector",
                 "voice-design",
@@ -81,11 +84,29 @@ def create_qwen3_tts_architecture_spec() -> ArchitectureSpec:
             "pytorch",
             "source":
             QWEN3_TTS_SOURCE,
+            "official_training_documentation": (
+                f"{QWEN3_TTS_SOURCE['repository']}/blob/"
+                f"{QWEN3_TTS_SOURCE['revision']}/finetuning/README.md"),
+            "official_training_source": (
+                f"{QWEN3_TTS_SOURCE['repository']}/blob/"
+                f"{QWEN3_TTS_SOURCE['revision']}/finetuning/sft_12hz.py"),
             "reference_checkpoints":
             QWEN3_TTS_CHECKPOINTS,
             "training_boundary": (
                 "Exact official 12 Hz Base single-speaker SFT objective with "
-                "pre-extracted 16-codebook targets and frozen speaker encoder."),
+                "pre-extracted 16-codebook targets and frozen speaker encoder. "
+                "Full-model SFT remains the default; opt-in VoiceHub-native "
+                "LoRA adapts only the talker and residual code-predictor "
+                "attention/MLP projections."),
+            "lora_finetuning_ready":
+            True,
+            "lora_implementation":
+            "voicehub-native-no-peft",
+            "lora_export": (
+                "adapter-only Safetensors plus clone-merged inference "
+                "checkpoint without mutating live training weights"),
+            "upstream_lora_recipe_published":
+            False,
             "icl_reference_encoder": (
                 "Checkpoint-exact native Mimi-derived encoder, causal "
                 "Transformer, downsampler, and semantic/acoustic residual "

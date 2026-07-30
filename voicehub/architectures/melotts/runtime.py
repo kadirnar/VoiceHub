@@ -13,6 +13,10 @@ from voicehub.architectures.melotts.artifacts import MeloTTSArtifacts, resolve_m
 from voicehub.architectures.melotts.checkpoint import load_melotts_checkpoint, read_legacy_melotts_checkpoint
 from voicehub.architectures.melotts.frontend import NativeMeloTTSFrontend
 from voicehub.architectures.melotts.modeling import build_melotts_model
+from voicehub.architectures.vits.weight_norm import (
+    LegacyWeightNormInferenceCache,
+    enable_legacy_weight_norm_inference_cache,
+)
 from voicehub.optimization.protocols import OptimizationCompileTarget, OptimizationModuleRoot
 
 
@@ -50,6 +54,7 @@ class MeloTTSRuntime:
         parameter = next(self.model.parameters())
         self.dtype = parameter.dtype
         self.frontend = NativeMeloTTSFrontend(self.config)
+        self._weight_norm_cache: LegacyWeightNormInferenceCache | None = None
         self.eval()
 
     def optimization_compile_targets(
@@ -108,11 +113,16 @@ class MeloTTSRuntime:
 
     def train(self, mode: bool = True) -> MeloTTSRuntime:
         self.model.train(mode)
+        if mode:
+            if self._weight_norm_cache is not None:
+                self._weight_norm_cache.restore()
+                self._weight_norm_cache = None
+        elif self._weight_norm_cache is None:
+            self._weight_norm_cache = (enable_legacy_weight_norm_inference_cache(self.model))
         return self
 
     def eval(self) -> MeloTTSRuntime:
-        self.model.eval()
-        return self
+        return self.train(False)
 
     @property
     def speakers(self) -> tuple[str, ...]:
@@ -178,7 +188,7 @@ class MeloTTSRuntime:
             device=self.device,
             dtype=self.dtype,
         )
-        with torch.no_grad():
+        with torch.inference_mode():
             waveform = self.model.infer(
                 features.input_ids,
                 features.input_lengths,

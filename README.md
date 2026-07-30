@@ -91,6 +91,7 @@ provides searchable, task-oriented guides:
 - [TTS optimization](https://kadirnar.github.io/voicehub/guides/tts-optimization/)
 - [Diffusion and flow optimization](https://kadirnar.github.io/voicehub/guides/diffusion-optimization/)
 - [Neural codec optimization](https://kadirnar.github.io/voicehub/guides/codec-optimization/)
+- [RTX 5090 TTS benchmarks](https://kadirnar.github.io/voicehub/guides/rtx-5090-tts-benchmarks/)
 - [vLLM and SGLang TTS serving](https://kadirnar.github.io/voicehub/guides/llm-serving/)
 - [Notebook gallery](https://kadirnar.github.io/voicehub/guides/notebook/)
 - [TTS training support](https://kadirnar.github.io/voicehub/models/training-support/)
@@ -206,7 +207,7 @@ boundaries.
 | `parlertts`       | Parler-TTS      | Natural-language style control          |
 | `styletts2`       | StyleTTS 2      | Native diffusion, cloning + prepared FT |
 | `mosstts`         | MOSS-TTS        | Native four-variant LM + codec v1/v2 FT |
-| `qwen3tts`        | Qwen3-TTS       | Clone, CustomVoice, VoiceDesign         |
+| `qwen3tts`        | Qwen3-TTS       | Clone, design, full SFT, native LoRA    |
 | `irodoritts`      | Irodori-TTS     | Reference and caption conditioning      |
 | `zonos`           | Zonos 1         | Multilingual voice cloning              |
 | `zonos2`          | ZONOS2          | Batched MoE synthesis and cloning       |

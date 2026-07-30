@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import warnings
 from unittest import mock
 
 import torch
@@ -27,6 +28,7 @@ from voicehub.optimization import (
     OptimizationCompatibilityError,
     OptimizationContext,
     OptimizationPassManager,
+    TorchCompilePass,
     accelerators,
 )
 
@@ -138,6 +140,80 @@ class VITSFusedGateTests(unittest.TestCase):
         )
 
 
+class VITSLegacyWeightNormCacheTests(unittest.TestCase):
+
+    def test_cache_preserves_state_gradients_and_parameter_updates(self):
+        from torch.nn.utils import remove_weight_norm, weight_norm
+
+        from voicehub.architectures.vits.weight_norm import enable_legacy_weight_norm_inference_cache
+
+        torch.manual_seed(37)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            layer = weight_norm(nn.Conv1d(3, 4, 3, padding=1)).eval()
+        inputs = torch.randn(2, 3, 7)
+        state_keys = tuple(layer.state_dict())
+        with torch.inference_mode():
+            expected = layer(inputs)
+
+        cache = enable_legacy_weight_norm_inference_cache(layer)
+        self.assertEqual(cache.module_count, 1)
+        self.assertGreater(cache.bytes, 0)
+        self.assertEqual(tuple(layer.state_dict()), state_keys)
+        with torch.inference_mode():
+            actual = layer(inputs)
+        self.assertTrue(torch.equal(actual, expected))
+
+        with torch.no_grad():
+            layer.weight_v.add_(0.125)
+        with torch.inference_mode():
+            updated = layer(inputs)
+        cache.restore()
+        with torch.inference_mode():
+            reference = layer(inputs)
+        self.assertTrue(torch.equal(updated, reference))
+        self.assertEqual(tuple(layer.state_dict()), state_keys)
+
+        cache = enable_legacy_weight_norm_inference_cache(layer)
+        layer.zero_grad(set_to_none=True)
+        layer(inputs.requires_grad_()).sum().backward()
+        self.assertIsNotNone(layer.weight_g.grad)
+        self.assertIsNotNone(layer.weight_v.grad)
+
+        # The wrapper remains a WeightNorm hook, so the canonical destructive
+        # deployment conversion is still available to callers that choose it.
+        remove_weight_norm(layer)
+        self.assertIn("weight", layer.state_dict())
+        self.assertNotIn("weight_g", layer.state_dict())
+        cache.restore()
+
+    def test_cache_falls_back_to_the_original_expression_under_compile(self):
+        from torch.nn.utils import weight_norm
+
+        from voicehub.architectures.vits.weight_norm import enable_legacy_weight_norm_inference_cache
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            layer = weight_norm(nn.Conv1d(3, 4, 3, padding=1)).eval()
+        inputs = torch.randn(2, 3, 7)
+        cache = enable_legacy_weight_norm_inference_cache(layer)
+        compiled = torch.compile(
+            layer,
+            backend="aot_eager",
+            fullgraph=True,
+            dynamic=True,
+        )
+        with torch.inference_mode():
+            expected = layer(inputs)
+            actual = compiled(inputs)
+        self.assertTrue(torch.equal(actual, expected))
+        self.assertEqual(
+            tuple(layer.state_dict()),
+            ("bias", "weight_g", "weight_v"),
+        )
+        cache.restore()
+
+
 class VITSStructuralKernelTests(unittest.TestCase):
 
     @staticmethod
@@ -216,12 +292,78 @@ class VITSStructuralKernelTests(unittest.TestCase):
         self.assertIs(model.kernel_backend, KernelBackend.TORCH)
 
     def test_native_vits_compile_target_matches_public_inference(self):
-        model = VitsModel.__new__(VitsModel)
-        nn.Module.__init__(model)
+        model = VitsModel(_tiny_config())
         inference = model.optimization_compile_targets("inference")
         training = model.optimization_compile_targets("training")
-        self.assertEqual(inference[0].attribute, "synthesize")
+        self.assertEqual(
+            tuple(target.label for target in inference),
+            (
+                "vits.text_encoder.forward",
+                "vits.flow.forward",
+                "vits.decoder.forward",
+            ),
+        )
+        self.assertEqual(
+            tuple(target.owner for target in inference),
+            (
+                model.text_encoder,
+                model.flow,
+                model.decoder,
+            ),
+        )
+        self.assertTrue(all(target.attribute == "forward" for target in inference))
+        self.assertIs(training[0].owner, model)
         self.assertEqual(training[0].attribute, "forward")
+
+    def test_native_vits_regional_compile_preserves_sampling_and_state(self):
+        from voicehub.architectures.vits.modeling import VitsSamplingConfig
+
+        torch.manual_seed(43)
+        model = VitsModel(_tiny_config()).eval()
+        input_ids = torch.tensor([[1, 2, 3]])
+        sampling = VitsSamplingConfig(
+            seed=17,
+            noise_scale=0.3,
+            noise_scale_duration=0.0,
+            max_output_frames=50,
+        )
+        state_keys = tuple(model.state_dict())
+        with torch.inference_mode():
+            expected = model.synthesize(input_ids, sampling=sampling)
+        model.cache_weight_norm_for_inference()
+
+        result = OptimizationPassManager().apply(
+            model,
+            (TorchCompilePass(
+                backend="aot_eager",
+                fullgraph=True,
+                dynamic=True,
+                requirement="required",
+            ), ),
+            OptimizationContext(
+                mode="inference",
+                device="cpu",
+                dtype="float32",
+                persist_result=True,
+            ),
+        )
+        with torch.inference_mode():
+            actual = model.synthesize(input_ids, sampling=sampling)
+
+        self.assertTrue(torch.equal(actual.waveform, expected.waveform))
+        self.assertTrue(torch.equal(actual.durations, expected.durations))
+        self.assertEqual(tuple(model.state_dict()), state_keys)
+        metadata = result.manifest_metadata()[0]["metadata"]
+        self.assertEqual(
+            metadata["execution_targets"],
+            [
+                "vits.text_encoder.forward",
+                "vits.flow.forward",
+                "vits.decoder.forward",
+            ],
+        )
+        result.restore()
+        self.assertEqual(tuple(model.state_dict()), state_keys)
 
 
 class VITSAccelerationPresetTests(unittest.TestCase):
@@ -237,17 +379,29 @@ class VITSAccelerationPresetTests(unittest.TestCase):
                 compile_dynamic=True,
             )
 
-    def test_default_training_profile_keeps_dynamic_graphs_safe(self):
+    def test_default_training_profile_balances_compile_cost_and_latency(self):
         plan = VITSOptimizationConfig().acceleration_plan()
+        compile_config = plan[-1].config
+        self.assertEqual(
+            compile_config.mode,
+            "default",
+        )
+        self.assertTrue(compile_config.dynamic)
+        arguments = VITSOptimizationConfig().training_arguments("output")
+        self.assertTrue(arguments.adamw_fused)
+        self.assertFalse(arguments.adamw_torch_compile)
+
+    def test_explicit_max_autotune_throughput_mode_is_preserved(self):
+        plan = VITSOptimizationConfig().acceleration_plan(
+            compile_mode="max-autotune-no-cudagraphs",
+            compile_dynamic=True,
+        )
         compile_config = plan[-1].config
         self.assertEqual(
             compile_config.mode,
             "max-autotune-no-cudagraphs",
         )
         self.assertTrue(compile_config.dynamic)
-        arguments = VITSOptimizationConfig().training_arguments("output")
-        self.assertTrue(arguments.adamw_fused)
-        self.assertFalse(arguments.adamw_torch_compile)
 
 
 if __name__ == "__main__":

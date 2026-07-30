@@ -117,6 +117,12 @@ class NativeInflectArchitectureTests(unittest.TestCase):
     def test_frontend_requires_explicit_checkpoint_compatible_phonemes(self):
         model = _build(_tiny_config())
         runtime = InflectV2Runtime(model.eval(), _tiny_config())
+        self.assertIsNotNone(runtime._weight_norm_cache)
+        self.assertGreater(runtime._weight_norm_cache.module_count, 0)
+        runtime.train()
+        self.assertIsNone(runtime._weight_norm_cache)
+        runtime.eval()
+        self.assertIsNotNone(runtime._weight_norm_cache)
         with self.assertRaisesRegex(
                 InflectFrontendError,
                 "requires checkpoint-compatible",

@@ -412,12 +412,32 @@ class Qwen3TTSTrainingAdapter(
     """Official Qwen3-TTS 12 Hz single-speaker SFT objective."""
 
     native_export_semantics = "inference-export"
+    _DEFAULT_LORA_TARGETS = (
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj",
+    )
 
     def __init__(self, model, spec):
         super().__init__(model, spec)
         self._target_speaker_embedding = None
+        self._lora_injection = None
+
+    def _configured_lora_targets(self) -> tuple[str, ...]:
+        return tuple(
+            getattr(
+                self.model.config,
+                "training_lora_target_modules",
+                self._DEFAULT_LORA_TARGETS,
+            ))
 
     def setup(self):
+        if self.is_ready:
+            return super().setup()
         super().setup()
         model_type = str(getattr(self.primary_model.config, "tts_model_type", "")).lower()
         speaker_encoder = getattr(self.primary_model, "speaker_encoder", None)
@@ -428,13 +448,63 @@ class Qwen3TTSTrainingAdapter(
                 "are inference/export targets, not valid SFT starting points.")
         for parameter in speaker_encoder.parameters():
             parameter.requires_grad_(False)
+        lora_rank = getattr(self.model.config, "training_lora_rank", None)
+        if lora_rank is not None:
+            from voicehub.models.qwen3tts.lora import inject_qwen3_tts_lora
+
+            self._lora_injection = inject_qwen3_tts_lora(
+                self.primary_model,
+                rank=lora_rank,
+                alpha=getattr(
+                    self.model.config,
+                    "training_lora_alpha",
+                    16.0,
+                ),
+                dropout=getattr(
+                    self.model.config,
+                    "training_lora_dropout",
+                    0.0,
+                ),
+                target_modules=self._configured_lora_targets(),
+                seed=getattr(
+                    self.model.config,
+                    "training_lora_seed",
+                    0,
+                ),
+            )
         return self
 
     def recipe_resume_configuration(self):
         configuration = dict(super().recipe_resume_configuration())
         configuration["resolved_sub_talker_loss_weight"] = float(
             getattr(self.model.config, "sub_talker_loss_weight", 0.3), )
+        lora_rank = getattr(self.model.config, "training_lora_rank", None)
+        configuration.update({
+            "parameter_efficient": lora_rank is not None,
+            "lora_topology": None if lora_rank is None else {
+                "adapter_library":
+                "voicehub-native",
+                "base_model_frozen":
+                True,
+                "speaker_encoder_frozen":
+                True,
+                "decoder_stacks": (
+                    "talker",
+                    "residual-code-predictor",
+                ),
+                "injected_module_names":
+                ([] if self._lora_injection is None else list(self._lora_injection.module_names)),
+            },
+        })
         return configuration
+
+    def artifact_manifest(self) -> dict[str, Any]:
+        manifest = super().artifact_manifest()
+        if getattr(self.model.config, "training_lora_rank", None) is not None:
+            manifest["checkpoint_semantics"]["lora_adapter"] = ("strict-adapter-only-safetensors")
+            manifest["checkpoint_semantics"]["save_pretrained"] = (
+                "clone-merged-inference-export-plus-adapter")
+        return manifest
 
     def create_dataset(self, records, **kwargs):
         del kwargs
@@ -527,6 +597,10 @@ class Qwen3TTSTrainingAdapter(
                 "sub_talker_loss": sub_loss,
             },
             logits=(outputs.logits, sub_logits),
+            metadata={
+                "parameter_efficient": self._lora_injection is not None,
+                "lora_adapter_library": (None if self._lora_injection is None else "voicehub-native"),
+            },
         )
 
     def recipe_state_dict(self) -> Mapping[str, Any]:
@@ -565,10 +639,19 @@ class Qwen3TTSTrainingAdapter(
                 f"embedding table of size {embedding.shape[0]}.")
         talker_config = model.config.talker_config
         destination = Path(save_directory)
-        state_dict = {
-            name: value
-            for name, value in model.state_dict().items() if not name.startswith("speaker_encoder.")
-        }
+        if self._lora_injection is None:
+            state_dict = {
+                name: value
+                for name, value in model.state_dict().items() if not name.startswith("speaker_encoder.")
+            }
+        else:
+            from voicehub.models.qwen3tts.lora import merged_qwen3_tts_state_dict
+
+            state_dict = merged_qwen3_tts_state_dict(
+                model,
+                self._lora_injection,
+                drop_prefixes=("speaker_encoder.", ),
+            )
         embedding_module = model.talker.model.codec_embedding
         embedding_key = next(
             (f"{name}.weight" for name, module in model.named_modules() if module is embedding_module),
@@ -618,6 +701,52 @@ class Qwen3TTSTrainingAdapter(
             safe_serialization=True,
         )
         feature_extractor.save_pretrained(speech_directory)
+        if (self._lora_injection is not None and bool(getattr(
+                self.model.config,
+                "training_lora_export_adapter",
+                True,
+        ))):
+            from voicehub.models.qwen3tts.lora import save_qwen3_tts_lora_adapter
+
+            save_qwen3_tts_lora_adapter(
+                self._lora_injection,
+                destination / "lora_adapter",
+                target_modules=self._configured_lora_targets(),
+                base_model=(getattr(self.model.config, "name_or_path", None) or None),
+                target_speaker_embedding=self._target_speaker_embedding,
+                speaker_name=speaker_name,
+                speaker_id=speaker_id,
+            )
+
+    def load_lora_adapter(self, directory):
+        """Restore a strict adapter-only export into this training graph."""
+        self.setup()
+        if self._lora_injection is None:
+            raise RuntimeError(
+                "Enable Qwen3-TTS LoRA in the training configuration before "
+                "loading an adapter-only checkpoint.")
+        from voicehub.models.qwen3tts.lora import load_qwen3_tts_lora_adapter
+
+        result = load_qwen3_tts_lora_adapter(
+            self._lora_injection,
+            directory,
+            target_modules=self._configured_lora_targets(),
+            expected_base_model=(getattr(self.model.config, "name_or_path", None) or None),
+            expected_speaker_name=str(getattr(
+                self.model.config,
+                "training_speaker_name",
+                "voicehub",
+            )),
+            expected_speaker_id=int(getattr(
+                self.model.config,
+                "training_speaker_id",
+                3000,
+            )),
+            expected_speaker_embedding_size=int(
+                self.primary_model.talker.model.codec_embedding.weight.shape[1]),
+        )
+        self._target_speaker_embedding = result.target_speaker_embedding
+        return result
 
 
 def _native_fish_s2_adapter(model, spec):

@@ -492,6 +492,7 @@ _MODEL_SPECS = (
             "voice-design",
             "multilingual",
             "fine-tuning",
+            "lora-fine-tuning",
             "default-checkpoint-inference-only",
             "safetensors",
             "voicehub-native",

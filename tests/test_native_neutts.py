@@ -74,6 +74,29 @@ class _DatasetTokenizer:
 @unittest.skipUnless(TORCH_AVAILABLE, "Native NeuTTS requires PyTorch")
 class NativeNeuTTSTests(unittest.TestCase):
 
+    def test_neucodec_aligns_rounding_mismatch_like_published_runtime(self):
+        import torch
+
+        from voicehub.architectures.neutts.neucodec import NeuCodecModel
+
+        semantic = torch.arange(2 * 3 * 4).reshape(2, 3, 4)
+        acoustic = torch.arange(2 * 5 * 5).reshape(2, 5, 5)
+        aligned_semantic, aligned_acoustic = NeuCodecModel._align_encoder_frames(
+            semantic,
+            acoustic,
+        )
+
+        self.assertEqual(aligned_semantic.shape, (2, 3, 4))
+        self.assertEqual(aligned_acoustic.shape, (2, 5, 4))
+        self.assertTrue(torch.equal(aligned_semantic, semantic))
+        self.assertTrue(torch.equal(aligned_acoustic, acoustic[..., :4]))
+
+        with self.assertRaisesRegex(RuntimeError, "no alignable audio frames"):
+            NeuCodecModel._align_encoder_frames(
+                semantic[..., :0],
+                acoustic[..., :0],
+            )
+
     def test_configuration_import_keeps_neutts_graph_lazy(self):
         result = subprocess.run(
             [
@@ -246,6 +269,34 @@ class NativeNeuTTSTests(unittest.TestCase):
                     root,
                     checkpoint_filename="weights.bin",
                 )
+
+    def test_hugging_face_snapshot_symlinks_keep_logical_safetensors_identity(self):
+        import torch
+
+        from voicehub.architectures.causal_lm.checkpoint import open_causal_lm_tensor_source
+        from voicehub.architectures.neutts.artifacts import resolve_neutts_artifacts
+        from voicehub.checkpointing import SafeTensorReader, save_safetensors
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            blobs = root / "blobs"
+            snapshot = root / "snapshots" / "revision"
+            blobs.mkdir()
+            snapshot.mkdir(parents=True)
+            blob = blobs / ("a" * 64)
+            save_safetensors({"value": torch.zeros(1)}, blob)
+            (snapshot / "config.json").write_text("{}", encoding="utf-8")
+            (snapshot / "tokenizer.json").write_text("{}", encoding="utf-8")
+            (snapshot / "model.safetensors").symlink_to(blob)
+
+            artifacts = resolve_neutts_artifacts(snapshot)
+            reader = open_causal_lm_tensor_source(snapshot / "model.safetensors", )
+
+        self.assertEqual(
+            artifacts.checkpoint,
+            (snapshot / "model.safetensors").absolute(),
+        )
+        self.assertIsInstance(reader, SafeTensorReader)
 
     def test_published_backbone_graphs_match_checkpoint_counts(self):
         import torch

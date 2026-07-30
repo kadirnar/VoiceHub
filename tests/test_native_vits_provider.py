@@ -237,6 +237,8 @@ class NativeVitsProviderRuntimeTests(unittest.TestCase):
     def test_local_checkpoint_inference_and_native_export_round_trip(self):
         import torch
 
+        from voicehub.architectures.vits.modeling import WeightNormalizedConv1d
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "source"
@@ -249,6 +251,11 @@ class NativeVitsProviderRuntimeTests(unittest.TestCase):
                 device="cpu",
                 lazy_load=False,
             )
+            cached_layers = [
+                module for module in model.model.modules() if isinstance(module, WeightNormalizedConv1d)
+            ]
+            self.assertTrue(cached_layers)
+            self.assertTrue(all(layer._inference_weight is not None for layer in cached_layers))
             first = model(
                 "ab",
                 seed=17,

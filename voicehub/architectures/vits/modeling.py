@@ -345,6 +345,12 @@ class WeightNormalizedConv1d(nn.Module):
         ))
         self.weight_g = nn.Parameter(torch.empty(output_channels, 1, 1))
         self.bias = nn.Parameter(torch.empty(output_channels))
+        self.register_buffer(
+            "_inference_weight",
+            None,
+            persistent=False,
+        )
+        self._inference_weight_signature: tuple[object, ...] | None = None
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -360,7 +366,7 @@ class WeightNormalizedConv1d(nn.Module):
             bound = 1 / math.sqrt(fan_in)
             nn.init.uniform_(self.bias, -bound, bound)
 
-    def normalized_weight(self) -> Tensor:
+    def _normalized_weight(self) -> Tensor:
         norm = torch.linalg.vector_norm(
             self.weight_v.float(),
             dim=(1, 2),
@@ -368,6 +374,72 @@ class WeightNormalizedConv1d(nn.Module):
         ).clamp_min(torch.finfo(torch.float32).tiny)
         scale = self.weight_g.float() / norm
         return self.weight_v * scale.to(dtype=self.weight_v.dtype)
+
+    def cache_weight_norm_for_inference(self) -> int:
+        """Cache the materialized convolution weight for eval-only inference.
+
+        The cache is deliberately non-persistent, so canonical VITS
+        checkpoint keys remain ``weight_g``/``weight_v``. Parameter
+        version counters make the cached value self-invalidating after
+        an in-place checkpoint load or optimizer update.
+        """
+        if self.training:
+            raise RuntimeError("Weight-normalization caching requires eval mode.")
+        with torch.no_grad():
+            weight = self._normalized_weight().detach()
+        self._inference_weight = weight
+        self._inference_weight_signature = (
+            id(self.weight_g),
+            id(self.weight_v),
+            self.weight_g._version,
+            self.weight_v._version,
+            self.weight_g.device,
+            self.weight_v.device,
+            self.weight_g.dtype,
+            self.weight_v.dtype,
+        )
+        return weight.numel() * weight.element_size()
+
+    def clear_weight_norm_cache(self) -> None:
+        """Discard a previously materialized inference weight."""
+        self._inference_weight = None
+        self._inference_weight_signature = None
+
+    def normalized_weight(self) -> Tensor:
+        compiler = getattr(torch, "compiler", None)
+        is_compiling = getattr(compiler, "is_compiling", None)
+        if callable(is_compiling) and is_compiling():
+            # The cache's Python identity/version guard is deliberately
+            # outside compiled graphs. Let Dynamo capture the original tensor
+            # expression so full-graph regional compilation remains valid
+            # after the public inference wrapper has materialized its cache.
+            return self._normalized_weight()
+        cached = self._inference_weight
+        if (cached is not None and not self.training and not torch.is_grad_enabled()):
+            current_signature = (
+                id(self.weight_g),
+                id(self.weight_v),
+                self.weight_g._version,
+                self.weight_v._version,
+                self.weight_g.device,
+                self.weight_v.device,
+                self.weight_g.dtype,
+                self.weight_v.dtype,
+            )
+            if self._inference_weight_signature == current_signature:
+                return cached
+            self.clear_weight_norm_cache()
+        return self._normalized_weight()
+
+    def train(self, mode: bool = True) -> WeightNormalizedConv1d:
+        super().train(mode)
+        if mode:
+            self.clear_weight_norm_cache()
+        return self
+
+    def _apply(self, fn, recurse: bool = True):
+        self.clear_weight_norm_cache()
+        return super()._apply(fn, recurse=recurse)
 
     def forward(self, inputs: Tensor) -> Tensor:
         return functional.conv1d(
@@ -1398,22 +1470,62 @@ class VitsModel(nn.Module):
         self.posterior_encoder = VitsPosteriorEncoder(self.config)
         self.apply(self._initialize_module)
 
+    def cache_weight_norm_for_inference(self) -> int:
+        """Materialize reusable WaveNet weights and return cache bytes.
+
+        This is an opt-in deployment optimization. Call ``eval()`` first
+        and run synthesis under ``torch.inference_mode()`` or
+        ``torch.no_grad()``. The cache is excluded from ``state_dict``
+        and is cleared by ``train()`` or device/dtype conversion.
+        """
+        if self.training:
+            raise RuntimeError("Weight-normalization caching requires eval mode.")
+        return sum(
+            module.cache_weight_norm_for_inference() for module in self.modules()
+            if isinstance(module, WeightNormalizedConv1d))
+
+    def clear_weight_norm_cache(self) -> None:
+        """Clear every materialized WaveNet inference weight."""
+        for module in self.modules():
+            if isinstance(module, WeightNormalizedConv1d):
+                module.clear_weight_norm_cache()
+
     def optimization_compile_targets(
         self,
         mode: str,
     ) -> tuple[OptimizationCompileTarget, ...]:
-        """Compile the execution boundary actually used in each mode."""
+        """Compile stable tensor regions while keeping request logic eager."""
         if mode == "inference":
-            attribute = "synthesize"
-        elif mode == "training":
-            attribute = "forward"
-        else:
-            raise ValueError(f"Unsupported optimization mode {mode!r}.")
-        return (OptimizationCompileTarget(
-            f"vits.{attribute}",
-            self,
-            attribute,
-        ), )
+            # Full synthesis contains intentionally eager input validation,
+            # request-local Generator construction, and data-dependent
+            # duration/alignment control flow. Compiling that wrapper creates
+            # dozens of graph fragments and can take minutes even for a tiny
+            # model. These three regions contain the expensive, shape-stable
+            # tensor work without changing sampling or validation semantics.
+            return (
+                OptimizationCompileTarget(
+                    "vits.text_encoder.forward",
+                    self.text_encoder,
+                    "forward",
+                ),
+                OptimizationCompileTarget(
+                    "vits.flow.forward",
+                    self.flow,
+                    "forward",
+                ),
+                OptimizationCompileTarget(
+                    "vits.decoder.forward",
+                    self.decoder,
+                    "forward",
+                ),
+            )
+        if mode == "training":
+            return (OptimizationCompileTarget(
+                "vits.forward",
+                self,
+                "forward",
+            ), )
+        raise ValueError(f"Unsupported optimization mode {mode!r}.")
 
     def _initialize_module(self, module: nn.Module) -> None:
         """Apply the published VITS initialization without framework hooks."""

@@ -55,8 +55,10 @@ NAVIGATION_PATHS = (
     "guides/data-preparation.md",
     "guides/speech-data.md",
     "guides/training.md",
+    "guides/rtx-5090-tts-benchmarks.md",
     "guides/notebook.md",
     "models/index.md",
+    "models/tts-capabilities.md",
     "models/asr-vad-support.md",
     "models/training-support.md",
     "concepts/architecture.md",
@@ -73,6 +75,7 @@ PUBLIC_ROUTES = (
     "guides/data-preparation/",
     "guides/speech-data/",
     "guides/training/",
+    "guides/rtx-5090-tts-benchmarks/",
     "guides/notebook/",
     "models/asr-vad-support/",
     "models/training-support/",
@@ -418,12 +421,17 @@ class DocumentationSiteTests(unittest.TestCase):
         from voicehub import AutoInferenceModel, list_model_specs
 
         catalog = (DOCS_ROOT / "models" / "index.md").read_text(encoding="utf-8")
+        tts_matrix = (DOCS_ROOT / "models" / "tts-capabilities.md").read_text(encoding="utf-8", )
         speech_matrix = (DOCS_ROOT / "models" / "asr-vad-support.md").read_text(encoding="utf-8", )
         training_matrix = (DOCS_ROOT / "models" / "training-support.md").read_text(encoding="utf-8")
 
         for model_spec in AutoInferenceModel.available_models():
             with self.subTest(model_type=model_spec.model_type):
                 self.assertIn(f"| `{model_spec.model_type}` |", catalog)
+                self.assertEqual(
+                    tts_matrix.count(f"| `{model_spec.model_type}` |"),
+                    1,
+                )
                 self.assertIn(f"(`{model_spec.model_type}`)", training_matrix)
 
         for model_spec in list_model_specs(task=None):

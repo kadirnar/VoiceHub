@@ -31,7 +31,7 @@ from voicehub.architectures.f5tts.modeling import F5ConditionalFlowMatcher
 from voicehub.architectures.f5tts.modules import RotaryEmbedding, apply_rotary_position_embedding
 from voicehub.architectures.f5tts.registration import create_f5tts_architecture_spec
 from voicehub.architectures.f5tts.runtime import NativeF5TTSRuntime
-from voicehub.architectures.f5tts.vocoder import NativeVocos
+from voicehub.architectures.f5tts.vocoder import ISTFTHead, NativeVocos
 from voicehub.models.f5tts.inference import F5TTSConfig, F5TTSForTextToSpeech
 from voicehub.trainer import Trainer
 from voicehub.training.recipes import F5TTSTrainingAdapter
@@ -395,15 +395,34 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
             self.assertTrue(torch.equal(tensor, raw_state[name]))
 
     def test_mel_frontend_is_pure_torch_and_has_expected_shape(self):
-        mel = F5MelSpectrogram(
+        frontend = F5MelSpectrogram(
             sample_rate=8_000,
             n_fft=32,
             hop_length=8,
             win_length=32,
             n_mels=8,
-        )(torch.randn(2, 128))
+        )
+        waveform = torch.randn(2, 128)
+        mel = frontend(waveform)
         self.assertEqual(mel.shape[:2], (2, 8))
         self.assertTrue(torch.isfinite(mel).all())
+
+        reduced_precision = frontend(waveform.bfloat16())
+        self.assertEqual(reduced_precision.dtype, torch.bfloat16)
+        self.assertTrue(torch.isfinite(reduced_precision).all())
+        self.assertTrue(torch.allclose(
+            reduced_precision.float(),
+            mel,
+            atol=0.08,
+            rtol=0.02,
+        ))
+
+    def test_vocoder_istft_boundary_promotes_bfloat16_to_float32(self):
+        head = ISTFTHead(dim=8, n_fft=16, hop_length=4).bfloat16()
+        waveform = head(torch.randn(2, 12, 8, dtype=torch.bfloat16))
+        self.assertEqual(waveform.dtype, torch.float32)
+        self.assertEqual(tuple(waveform.shape), (2, 44))
+        self.assertTrue(torch.isfinite(waveform).all())
 
 
 if __name__ == "__main__":

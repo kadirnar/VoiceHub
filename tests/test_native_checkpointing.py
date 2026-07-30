@@ -178,6 +178,40 @@ class SafeTensorTests(unittest.TestCase):
             with self.assertRaisesRegex(CheckpointFormatError, "Unsafe"):
                 SafeTensorIndex.from_file(index_path)
 
+    def test_sharded_hugging_face_snapshot_symlinks_keep_logical_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            blobs = root / "blobs"
+            snapshot = root / "snapshots" / "revision"
+            blobs.mkdir()
+            snapshot.mkdir(parents=True)
+
+            shard_blob = blobs / ("a" * 64)
+            index_blob = blobs / ("b" * 64)
+            save_safetensors({"weight": torch.tensor([3.0])}, shard_blob)
+            index_blob.write_text(
+                json.dumps({
+                    "metadata": {
+                        "total_size": 4,
+                    },
+                    "weight_map": {
+                        "weight": "model-00001-of-00001.safetensors",
+                    },
+                }),
+                encoding="utf-8",
+            )
+            index_path = snapshot / "model.safetensors.index.json"
+            shard_path = snapshot / "model-00001-of-00001.safetensors"
+            index_path.symlink_to(Path("../../blobs") / index_blob.name)
+            shard_path.symlink_to(Path("../../blobs") / shard_blob.name)
+
+            with ShardedSafeTensorReader(index_path) as reader:
+                self.assertEqual(reader.index.path, index_path.absolute())
+                torch.testing.assert_close(
+                    reader.get_tensor("weight"),
+                    torch.tensor([3.0]),
+                )
+
 
 @unittest.skipUnless(torch is not None, "Native checkpoints use PyTorch tensors")
 class NumpyTensorTests(unittest.TestCase):

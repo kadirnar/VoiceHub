@@ -64,17 +64,23 @@ def _vits_compile_options(
                 "'max-autotune' compile mode.")
         return compile_mode or "reduce-overhead", False
     if policy is VITSCUDAGraphPolicy.DISABLED:
-        if compile_mode not in {None, "max-autotune-no-cudagraphs"}:
-            raise ValueError("Disabled CUDA graphs require "
-                             "'max-autotune-no-cudagraphs' compile mode.")
+        if compile_mode not in {
+                None,
+                "default",
+                "max-autotune-no-cudagraphs",
+        }:
+            raise ValueError(
+                "Disabled CUDA graphs require "
+                "'default' or 'max-autotune-no-cudagraphs' "
+                "compile mode.")
         return (
-            compile_mode or "max-autotune-no-cudagraphs",
+            compile_mode or "default",
             True if compile_dynamic is None else compile_dynamic,
         )
     if compile_mode is None:
         if compile_dynamic is False:
             return "reduce-overhead", False
-        return "max-autotune-no-cudagraphs", (True if compile_dynamic is None else compile_dynamic)
+        return "default", (True if compile_dynamic is None else compile_dynamic)
     return compile_mode, compile_dynamic
 
 

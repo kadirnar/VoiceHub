@@ -425,6 +425,12 @@ class NativeMeloTTSTests(unittest.TestCase):
             )
             report = inspect_melotts_checkpoint(artifact / "model.safetensors")
             runtime = MeloTTSRuntime(artifact, device="cpu")
+            self.assertIsNotNone(runtime._weight_norm_cache)
+            self.assertGreater(runtime._weight_norm_cache.module_count, 0)
+            runtime.train()
+            self.assertIsNone(runtime._weight_norm_cache)
+            runtime.eval()
+            self.assertIsNotNone(runtime._weight_norm_cache)
             kwargs = {
                 "input_ids": [1, 2, 1],
                 "tone_ids": [0, 1, 0],

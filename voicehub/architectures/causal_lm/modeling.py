@@ -326,32 +326,63 @@ class CausalSelfAttention(nn.Module):
             key = torch.cat((existing.key, key), dim=-2)
             value = torch.cat((existing.value, value), dim=-2)
 
-        key = _expand_key_values(key, self.num_key_value_groups)
-        value = _expand_key_values(value, self.num_key_value_groups)
         key_length = key.shape[-2]
-        bias = _attention_bias(
-            attention_mask,
-            batch_size=batch_size,
-            query_length=query_length,
-            key_length=key_length,
-            past_length=past_length,
-            device=hidden_states.device,
-        )
-
-        scores = torch.matmul(
-            query.float(),
-            key.float().transpose(-1, -2),
-        )
-        scores.mul_(self.scaling)
-        scores.add_(bias)
-        probabilities = functional.softmax(scores, dim=-1)
-        probabilities = probabilities.to(dtype=query.dtype)
-        probabilities = functional.dropout(
-            probabilities,
-            p=self.attention_dropout if self.training else 0.0,
-            training=self.training,
-        )
-        attended = torch.matmul(probabilities, value)
+        if attention_mask is None and not output_attentions:
+            # An unpadded prefill is the ordinary top-left causal case, while
+            # a cached one-token decode may attend to every stored key.  Keep
+            # grouped K/V heads compact so PyTorch can select its fused GQA
+            # SDPA kernel instead of materializing repeated heads.
+            chunk_mask = None
+            is_causal = past_length == 0 and query_length > 1
+            if past_length and query_length > 1:
+                query_positions = (past_length + torch.arange(
+                    query_length,
+                    device=hidden_states.device,
+                ))
+                key_positions = torch.arange(
+                    key_length,
+                    device=hidden_states.device,
+                )
+                chunk_mask = (
+                    key_positions.view(1, 1, 1, key_length) <= query_positions.view(1, 1, query_length, 1))
+            attended = functional.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=chunk_mask,
+                dropout_p=self.attention_dropout if self.training else 0.0,
+                is_causal=is_causal,
+                scale=self.scaling,
+                enable_gqa=self.num_key_value_groups != 1,
+            )
+            probabilities = None
+        else:
+            # Preserve the explicit float32 path for arbitrary padding and
+            # additive masks, and whenever callers request attention weights.
+            key = _expand_key_values(key, self.num_key_value_groups)
+            value = _expand_key_values(value, self.num_key_value_groups)
+            bias = _attention_bias(
+                attention_mask,
+                batch_size=batch_size,
+                query_length=query_length,
+                key_length=key_length,
+                past_length=past_length,
+                device=hidden_states.device,
+            )
+            scores = torch.matmul(
+                query.float(),
+                key.float().transpose(-1, -2),
+            )
+            scores.mul_(self.scaling)
+            scores.add_(bias)
+            probabilities = functional.softmax(scores, dim=-1)
+            probabilities = probabilities.to(dtype=query.dtype)
+            probabilities = functional.dropout(
+                probabilities,
+                p=self.attention_dropout if self.training else 0.0,
+                training=self.training,
+            )
+            attended = torch.matmul(probabilities, value)
         attended = (
             attended.transpose(1, 2).contiguous().view(
                 batch_size,
@@ -783,9 +814,8 @@ class CausalLMForCausalLM(nn.Module):
             stopping_criteria: Sequence[StoppingCriterion] = (),
     ) -> GenerationOutput:
         """Run VoiceHub's model-neutral cache-aware generation engine."""
-        if attention_mask is None:
-            attention_mask = torch.ones_like(input_ids, dtype=torch.bool)
-        if (not isinstance(attention_mask, Tensor) or tuple(attention_mask.shape) != tuple(input_ids.shape)):
+        if (attention_mask is not None and (not isinstance(attention_mask, Tensor) or
+                                            tuple(attention_mask.shape) != tuple(input_ids.shape))):
             raise ValueError("`attention_mask` must have the same shape as `input_ids`.")
         config = generation_config or GenerationConfig(
             eos_token_id=self.config.eos_token_id,
@@ -801,16 +831,22 @@ class CausalLMForCausalLM(nn.Module):
             updates["pad_token_id"] = self.config.pad_token_id
         if updates:
             config = config.with_updates(**updates)
-        prompt_mask = attention_mask.to(device=input_ids.device)
+        prompt_mask = (None if attention_mask is None else attention_mask.to(device=input_ids.device))
+        # TTS adapters commonly provide an explicit all-ones mask for their
+        # unbatched prompt.  Collapse it once at request setup so every decoder
+        # layer and generated token can use fused, mask-free SDPA.
+        if prompt_mask is not None and bool(prompt_mask.all()):
+            prompt_mask = None
+        prompt_length = input_ids.shape[1]
 
         def decoder_step(step: GenerationStepInput) -> GenerationStepOutput:
             past_length = (step.cache.sequence_length() if isinstance(step.cache, DynamicKVCache) else 0)
             key_length = past_length + step.token_ids.shape[1]
-            if key_length < prompt_mask.shape[1]:
+            if key_length < prompt_length:
                 raise RuntimeError("Decoder cache length is shorter than the prompt mask.")
-            generated = key_length - prompt_mask.shape[1]
+            generated = key_length - prompt_length
             step_mask = prompt_mask
-            if generated:
+            if generated and prompt_mask is not None:
                 step_mask = torch.cat(
                     (
                         prompt_mask,

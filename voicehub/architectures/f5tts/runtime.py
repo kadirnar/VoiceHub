@@ -244,8 +244,11 @@ class NativeF5TTSRuntime(nn.Module):
                 sway_sampling_coef=sway_sampling_coef,
                 seed=resolved_seed + index,
             )
-            generated = sampled[:, reference_frames:, :].float()
-            waveform = self.vocoder.decode(generated.transpose(1, 2)).squeeze(0)
+            generated = sampled[:, reference_frames:, :]
+            vocoder_dtype = next(self.vocoder.parameters()).dtype
+            waveform = self.vocoder.decode(generated.transpose(
+                1, 2).to(dtype=vocoder_dtype), ).squeeze(0).float()
+            generated = generated.float()
             if original_rms < 0.1:
                 waveform = waveform * (original_rms / 0.1)
             generated_waves.append(waveform)
