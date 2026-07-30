@@ -51,6 +51,7 @@ def create_dia_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", ),
             features=(
+                "llm-tts-codec",
                 "byte-text-encoder",
                 "multi-speaker-dialogue",
                 "nine-codebook-delay-pattern",

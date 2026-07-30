@@ -21,6 +21,7 @@ import typing as tp
 import torch
 from torch import nn
 
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 from ..quantization import (
     QuantizedResult,
@@ -215,6 +216,24 @@ class MimiModel(CompressionModel[_MimiState]):
                     causal=causal,
                     channel_wise=upsample_channel_wise_bug,
                 )
+
+    def codec_optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Select waveform decode for serving, never latent-only decode."""
+        if mode == "inference":
+            attribute = "decode"
+        elif mode == "training":
+            attribute = "forward"
+        else:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            f"codec.mimi.{attribute}",
+            self,
+            attribute,
+            component=("decode" if mode == "inference" else "forward"),
+        ), )
 
     def _init_streaming_state(self, batch_size: int) -> _MimiState:
         device = next(self.parameters()).device

@@ -30,6 +30,7 @@ from voicehub.models.chatterbox.models.s3tokenizer.native_utils import (
     mask_to_bias,
     merge_tokenized_segments,
 )
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 @dataclass
@@ -355,6 +356,28 @@ class S3TokenizerV2(torch.nn.Module):
         self.quantizer = FSQVectorQuantization(
             self.config.n_audio_state,
             self.config.n_codebook_size,
+        )
+
+    def codec_optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the tensor stages used by short-audio tokenization."""
+        if mode not in {"inference", "training"}:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (
+            OptimizationCompileTarget(
+                "codec.encode.chatterbox_s3.encoder.forward",
+                self.encoder,
+                "forward",
+                component="encode",
+            ),
+            OptimizationCompileTarget(
+                "codec.quantizer.chatterbox_s3.encode",
+                self.quantizer,
+                "encode",
+                component="quantizer",
+            ),
         )
 
     def forward(self, mel: torch.Tensor, mel_len: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:

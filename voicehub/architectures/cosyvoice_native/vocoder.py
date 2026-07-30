@@ -15,6 +15,8 @@ except ImportError:  # pragma: no cover - old PyTorch compatibility
     from torch.nn.utils import weight_norm
 
 from voicehub.architectures.cosyvoice_native.configuration import CosyVoiceHiFTConfig
+from voicehub.kernels.codecs import CodecSnakeKernelOptimizable
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 class CausalConv1d(nn.Conv1d):
@@ -121,15 +123,16 @@ class CausalConv1dUpsample(nn.Conv1d):
         return super().forward(values)
 
 
-class Snake(nn.Module):
+class Snake(CodecSnakeKernelOptimizable, nn.Module):
 
     def __init__(self, channels: int) -> None:
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(channels))
+        self._initialize_codec_kernel_backend()
 
     def forward(self, values: Tensor) -> Tensor:
         alpha = self.alpha[None, :, None]
-        return values + torch.sin(values * alpha).square() / (alpha + 1e-9)
+        return self._codec_snake(values, alpha)
 
 
 class ResBlock(nn.Module):
@@ -340,6 +343,20 @@ class CosyVoiceHiFTGenerator(nn.Module):
             torch.hann_window(config.istft_n_fft),
             persistent=False,
         )
+
+    def codec_optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        if mode not in {"inference", "training"}:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (
+            OptimizationCompileTarget(
+                "codec.vocoder.cosyvoice_hift.forward",
+                self,
+                "forward",
+                component="vocoder",
+            ), )
 
     def _stft(self, source: Tensor) -> Tensor:
         complex_spectrum = torch.stft(

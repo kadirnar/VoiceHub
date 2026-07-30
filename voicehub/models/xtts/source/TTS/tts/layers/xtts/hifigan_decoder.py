@@ -7,6 +7,7 @@ from torch.nn.utils.parametrizations import weight_norm
 from torch.nn.utils.parametrize import remove_parametrizations
 
 from voicehub.models.xtts.source.TTS.utils.io import load_fsspec
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 LRELU_SLOPE = 0.1
 
@@ -670,6 +671,19 @@ class HifiDecoder(torch.nn.Module):
     @property
     def device(self):
         return next(self.parameters()).device
+
+    def codec_optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        if mode not in {"inference", "training"}:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (OptimizationCompileTarget(
+            "codec.vocoder.xtts2_hifigan.forward",
+            self,
+            "forward",
+            component="vocoder",
+        ), )
 
     def forward(self, latents, g=None):
         """

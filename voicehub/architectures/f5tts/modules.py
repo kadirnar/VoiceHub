@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from voicehub.kernels import KernelBackend, fused_bias_gelu
+from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
 from voicehub.neural.backends import FlashAttention4Policy, flash_attention4_or_sdpa
 
 
@@ -170,13 +171,14 @@ class RMSNorm(nn.Module):
         return hidden_states.to(source_dtype) * self.weight
 
 
-class AdaLayerNorm(nn.Module):
+class AdaLayerNorm(DiffusionModulationKernelOptimizable, nn.Module):
 
     def __init__(self, dim: int) -> None:
         super().__init__()
         self.silu = nn.SiLU()
         self.linear = nn.Linear(dim, dim * 6)
         self.norm = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
+        self._initialize_diffusion_kernel_backend()
 
     def forward(
         self,
@@ -185,17 +187,22 @@ class AdaLayerNorm(nn.Module):
     ) -> tuple[torch.Tensor, ...]:
         modulation = self.linear(self.silu(embedding))
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (modulation.chunk(6, dim=1))
-        normalized = (self.norm(hidden_states) * (1 + scale_msa[:, None]) + shift_msa[:, None])
+        normalized = self._diffusion_modulate(
+            self.norm(hidden_states),
+            shift_msa[:, None],
+            scale_msa[:, None],
+        )
         return normalized, gate_msa, shift_mlp, scale_mlp, gate_mlp
 
 
-class AdaLayerNormFinal(nn.Module):
+class AdaLayerNormFinal(DiffusionModulationKernelOptimizable, nn.Module):
 
     def __init__(self, dim: int) -> None:
         super().__init__()
         self.silu = nn.SiLU()
         self.linear = nn.Linear(dim, dim * 2)
         self.norm = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
+        self._initialize_diffusion_kernel_backend()
 
     def forward(
         self,
@@ -203,7 +210,11 @@ class AdaLayerNormFinal(nn.Module):
         embedding: torch.Tensor,
     ) -> torch.Tensor:
         scale, shift = self.linear(self.silu(embedding)).chunk(2, dim=1)
-        return (self.norm(hidden_states) * (1 + scale[:, None, :]) + shift[:, None, :])
+        return self._diffusion_modulate(
+            self.norm(hidden_states),
+            shift[:, None, :],
+            scale[:, None, :],
+        )
 
 
 class FeedForward(nn.Module):
@@ -448,7 +459,11 @@ class DiTBlock(nn.Module):
             mask=mask,
             rope=rope,
         )
-        normalized = (self.ff_norm(hidden_states) * (1 + scale_mlp[:, None]) + shift_mlp[:, None])
+        normalized = self.attn_norm._diffusion_modulate(
+            self.ff_norm(hidden_states),
+            shift_mlp[:, None],
+            scale_mlp[:, None],
+        )
         return hidden_states + gate_mlp.unsqueeze(1) * self.ff(normalized)
 
 

@@ -142,7 +142,7 @@ class TTSDatasetContractTests(unittest.TestCase):
                     "speech_tokens": [1, 2],
                 },
                 "llm-record",
-                TTSDataReadiness.PREPROCESSED,
+                TTSDataReadiness.INTEGRATED,
             ),
             (
                 "conversationtts",
@@ -357,6 +357,55 @@ class TTSDatasetContractTests(unittest.TestCase):
                 dataset = TTSDataset([record], model_type=model_type)
                 self.assertEqual(dataset.variant_names, (variant, ))
                 self.assertIs(dataset.spec.readiness, readiness)
+
+    def test_cosyvoice_contract_accepts_raw_audio_and_precomputed_tokens(self):
+        contract = get_tts_dataset_spec("cosyvoice")
+        raw = TTSDataset(
+            [{
+                "text": "Merhaba",
+                "speech_audio": [0.0, 0.1, -0.1],
+                "speech_sampling_rate": 16_000,
+            }],
+            model_type="cosyvoice",
+        )
+        path_backed = TTSDataset(
+            [{
+                "text": "Hello",
+                "audio_path": "speaker.wav",
+            }],
+            model_type="cosyvoice",
+        )
+        tokens = TTSDataset(
+            [{
+                "text": "Bonjour",
+                "speech_tokens": [1, 2, 3],
+            }],
+            model_type="cosyvoice",
+        )
+
+        self.assertIs(contract.readiness, TTSDataReadiness.INTEGRATED)
+        self.assertTrue(contract.accepts_raw_records)
+        self.assertEqual(raw.variant_names, ("llm-raw-audio", ))
+        self.assertEqual(path_backed.variant_names, ("llm-raw-audio", ))
+        self.assertEqual(tokens.variant_names, ("llm-record", ))
+        with self.assertRaisesRegex(ValueError, "speech_audio requires one of"):
+            TTSDataset(
+                [{
+                    "text": "Missing source rate",
+                    "speech_audio": [0.0, 0.1],
+                }],
+                model_type="cosyvoice",
+            )
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            TTSDataset(
+                [{
+                    "text": "Ambiguous source",
+                    "speech_tokens": [1, 2],
+                    "waveform": [0.0, 0.1],
+                    "sample_rate": 16_000,
+                }],
+                model_type="cosyvoice",
+            )
 
     def test_stale_tts_record_shapes_are_rejected(self):
         invalid = (

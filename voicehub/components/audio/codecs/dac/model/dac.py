@@ -265,6 +265,11 @@ class DAC(BaseModel, CodecMixin):
         """
         return self.decoder(z)
 
+    def decode_codes(self, codes: torch.Tensor) -> torch.Tensor:
+        """Decode discrete codebooks through quantizer and waveform decoder."""
+        quantized, _, _ = self.quantizer.from_codes(codes)
+        return self.decode(quantized)
+
     def forward(
         self,
         audio_data: torch.Tensor,

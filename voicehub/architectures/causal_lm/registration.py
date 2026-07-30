@@ -56,6 +56,7 @@ def create_causal_lm_architecture_spec() -> ArchitectureSpec:
             distributed_training=True,
             optimization_passes=("compile", ),
             features=(
+                "llm-tts-codec",
                 "decoder-only",
                 "causal-language-modeling",
                 "grouped-query-attention",

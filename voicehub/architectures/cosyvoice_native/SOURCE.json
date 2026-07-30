@@ -13,6 +13,13 @@
       "llm.pt": {
         "sha256": "69f43bd545131c30e98947fb360ea8b4dc9916d8e83dded7757c7ea4f5a24970",
         "size": 2024669519
+      },
+      "speech_tokenizer_v3.onnx": {
+        "graph_nodes": 2810,
+        "initializers": 198,
+        "parameters": 242009608,
+        "sha256": "23236a74175dbdda47afc66dbadd5bcb41303c467a57c261cb8539ad9db9208d",
+        "size": 969451503
       }
     },
     "license": "Apache-2.0",
@@ -23,7 +30,13 @@
     "claim": "VoiceHub-owned PyTorch implementation; numerical parity is not claimed without checkpoint-level evidence.",
     "executable_checkpoint_compatibility": "Fun-CosyVoice3-0.5B-2512 only; CosyVoice 1 and 2 use different graphs and are not claimed compatible.",
     "external_model_runtime_dependencies": [],
-    "legacy_policy": "Published pickle-based .pt files are accepted only by the explicit audited conversion API. Normal loading and every exported artifact require Safetensors."
+    "legacy_policy": "Published pickle-based .pt files and the ONNX-only speech tokenizer are accepted only by explicit audited conversion APIs. Normal loading and every exported artifact require Safetensors.",
+    "speech_tokenizer": "Native encoder plus eight-dimensional ternary FSQ. The immutable ONNX file is parsed only by the one-time converter and is never executed at runtime."
+  },
+  "speech_tokenizer_source": {
+    "license": "Apache-2.0",
+    "repository": "https://github.com/xingchensong/S3Tokenizer",
+    "revision": "9bf5d845b5e043ffaf4657f4942939091c7697a2"
   },
   "source": {
     "license": "Apache-2.0",

@@ -71,7 +71,7 @@ The current capability groups are:
 | --- | --- |
 | Universal `torch.compile` policy | All 34 TTS model types; apply-time target validation still governs each mode |
 | Selectable FlashAttention-4 with SDPA fallback | `conversationtts`, `f5tts`, `qwen3tts` |
-| Architecture-owned Triton/CUDA/Torch fused activations | `conversationtts`, `f5tts`, `qwen3tts`, `vits` |
+| Architecture-owned Triton/CUDA/Torch fused activations | `conversationtts`, `cosyvoice`, `echo`, `f5tts`, `gptsovits`, `inflecttts`, `irodoritts`, `melotts`, `openvoice`, `qwen3tts`, `vibevoice`, `vits` |
 | Verified built-in SDPA | `chatterbox`, `conversationtts`, `llasa`, `f5tts`, `gptsovits`, `outetts`, `parlertts`, `mosstts`, `qwen3tts`, `irodoritts`, `zonos`, `zonos2`, `voxcpm`, `higgstts`, `xtts`, `vibevoice`, `fishtts`, `csm`, `neutts` |
 | Native attention retained | `orpheustts`, `dia`, `vui`, `kokoro`, `echo`, `cosyvoice`, `melotts`, `openvoice`, `styletts2`, `omnivoice`, `supertonic`, `inflecttts`, `bark`, `speecht5`, `vits` |
 
@@ -98,7 +98,7 @@ are discovered automatically.
 | Field | Accepted values | Automatic behavior |
 | --- | --- | --- |
 | `attn_implementation` | `auto`, `native`, `sdpa`, `flash_attention_4` | Uses an architecture-owned selectable backend only where declared; otherwise retains verified SDPA or native attention |
-| `kernel_backend` | `auto`, `native`, `torch`, `triton`, `cuda_extension` | On custom-kernel architectures, dispatches to the highest-priority supported implementation and keeps Torch as the portable fallback |
+| `kernel_backend` | `auto`, `native`, `torch`, `triton`, `cuda_extension` | Resolves each architecture-owned operation conservatively; periodic codec activations stay on Torch under universal `auto`, while explicit Triton/CUDA is a numerically relaxed request |
 | `compile` | `auto`, `required`, `disabled`, or a boolean | `auto` may retain eager execution; `required` and `True` fail if compilation cannot be prepared or executed; `False` disables compilation |
 | `compile_config` | `TorchCompileConfig`, a mapping, or `None` | Configures backend, mode, `fullgraph`, dynamic shapes, and backend options |
 | `optimization_passes` | Tuple of names registered in `OPTIMIZATION_PASSES` | Appends compatible application-defined passes before compilation |
@@ -278,8 +278,12 @@ Automatic choices are conservative and observable:
 - attention `auto` selects the FA4-aware path only on the three architectures
   that expose the selector; incompatible calls retain their exact SDPA
   semantics;
-- kernel `auto` tries a loaded CUDA extension, then a compatible Triton
-  implementation, then the registered Torch reference implementation;
+- kernel `auto` resolves each operation through its architecture-owned
+  selector. Algebraic fused operations may choose a loaded CUDA extension or
+  compatible Triton implementation; periodic codec Snake/SnakeBeta stays on
+  Torch because the universal policy has no numerical-fidelity declaration.
+  Use the codec-specific relaxed policy—or explicitly request Triton/CUDA—to
+  acknowledge accelerator transcendental differences;
 - compile `auto` retains eager execution for an unsupported context, a
   mode-specific runtime that explicitly declares no target, an unavailable
   backend, a preparation error, or a recognized lazy compiler error;

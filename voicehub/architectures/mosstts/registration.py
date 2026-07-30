@@ -60,6 +60,7 @@ def create_mosstts_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
+                "llm-tts-codec",
                 "delay-pattern-generation",
                 "local-depth-transformer",
                 "local-v1.5-binary-control-head",

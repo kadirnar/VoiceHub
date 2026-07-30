@@ -27,6 +27,8 @@ from torch.nn import functional as F
 from torch.nn.utils.parametrizations import weight_norm
 from torch.nn.utils.parametrize import remove_parametrizations
 
+from voicehub.kernels.codecs import CodecSnakeKernelOptimizable
+
 # --------------------------------------------------------------------
 # Shared helpers
 # --------------------------------------------------------------------
@@ -105,14 +107,15 @@ def snake(x: Tensor, alpha: Tensor) -> Tensor:
     return x
 
 
-class Snake1d(nn.Module):
+class Snake1d(CodecSnakeKernelOptimizable, nn.Module):
 
     def __init__(self, channels: int):
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(1, channels, 1))
+        self._initialize_codec_kernel_backend()
 
     def forward(self, x: Tensor) -> Tensor:
-        return snake(x, self.alpha)
+        return self._codec_snake(x, self.alpha)
 
 
 # --------------------------------------------------------------------

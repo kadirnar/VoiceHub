@@ -18,7 +18,7 @@
   "implementation": "VoiceHub-owned PyTorch graph; no upstream runtime import",
   "license": "Apache-2.0",
   "limitations": [
-    "The native speech decoder is exact. The Mimi-derived speech encoder used to create ICL reference codes is not yet ported; x-vector-only cloning is supported, while ICL reference-audio cloning remains explicitly unavailable.",
+    "The published 12 Hz Mimi-derived speech encoder, semantic/acoustic residual quantizers, and decoder are native and checkpoint-exact. Legacy VoiceHub decoder-only exports remain supported but cannot encode a new ICL reference.",
     "Native file and URL reference decoding accepts uncompressed PCM WAVE; callers can pass predecoded tensors for other audio containers."
   ],
   "revision": "022e286b98fbec7e1e916cb940cdf532cd9f488e",

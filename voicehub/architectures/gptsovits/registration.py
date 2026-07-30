@@ -75,6 +75,7 @@ def create_gptsovits_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa", "custom-kernels"),
             features=(
+                "llm-tts-codec",
                 "vits-family",
                 "vits-wavenet-gate",
                 "autoregressive-semantic-s1",

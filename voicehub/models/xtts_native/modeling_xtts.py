@@ -57,6 +57,7 @@ class XTTSForTextToSpeech(PreTrainedTTSModel):
         self._runtime_config = None
         self._tokenizer = None
         self._model_directory = None
+        self._training_audio_encoder = None
         super().__init__(config, device=device, lazy_load=lazy_load)
 
     @staticmethod
@@ -75,6 +76,85 @@ class XTTSForTextToSpeech(PreTrainedTTSModel):
     @property
     def native_runtime(self):
         return self.model
+
+    @property
+    def training_audio_encoder(self):
+        """Separately loaded frozen DVAE boundary, if configured."""
+        return self._training_audio_encoder
+
+    @staticmethod
+    def _bundled_training_audio_artifacts(directory: str | Path | None, ) -> tuple[Path, Path] | None:
+        if directory is None:
+            return None
+        from voicehub.architectures.xtts2.dvae_checkpoint import (
+            NATIVE_XTTS2_DVAE_FILENAME,
+            NATIVE_XTTS2_DVAE_MEL_STATS_FILENAME,
+        )
+
+        source = Path(directory).expanduser()
+        candidates = (
+            source / NATIVE_EXPORT_DIR,
+            source,
+        )
+        seen = set()
+        for candidate in candidates:
+            identity = str(candidate)
+            if identity in seen or not candidate.is_dir():
+                continue
+            seen.add(identity)
+            dvae = candidate / NATIVE_XTTS2_DVAE_FILENAME
+            mel_stats = candidate / NATIVE_XTTS2_DVAE_MEL_STATS_FILENAME
+            if dvae.is_file() and mel_stats.is_file():
+                return dvae.resolve(), mel_stats.resolve()
+        return None
+
+    def _training_audio_artifacts(self, ) -> tuple[Path, Path] | None:
+        for directory in (
+                self._model_directory,
+                self.config.name_or_path,
+        ):
+            bundled = self._bundled_training_audio_artifacts(directory)
+            if bundled is not None:
+                return bundled
+        if (self.config.training_dvae_checkpoint is None or
+                self.config.training_mel_stats_checkpoint is None):
+            return None
+        return (
+            Path(self.config.training_dvae_checkpoint).expanduser(),
+            Path(self.config.training_mel_stats_checkpoint).expanduser(),
+        )
+
+    def configure_training_audio_encoder(
+        self,
+        dvae_checkpoint: str | Path,
+        mel_stats_checkpoint: str | Path,
+    ):
+        """Attach safe waveform-to-code preparation without changing model
+        state."""
+        if self.model is None or self._runtime_config is None:
+            raise RuntimeError("Load the XTTS runtime before configuring its training DVAE.")
+        from voicehub.architectures.xtts2.dvae import XTTS2DVAEConfig
+        from voicehub.architectures.xtts2.dvae_checkpoint import load_xtts2_training_audio_encoder
+
+        args = self._runtime_config.model_args
+        dvae_config = XTTS2DVAEConfig(
+            sample_rate=args.input_sample_rate,
+            num_tokens=args.gpt_num_audio_tokens - 2,
+        )
+        if dvae_config.code_stride_samples != args.gpt_code_stride_len:
+            raise ValueError(
+                "XTTS GPT/DVAE stride mismatch: GPT expects "
+                f"{args.gpt_code_stride_len}, while the native DVAE produces "
+                f"{dvae_config.code_stride_samples} samples per code.")
+        model_dtype = next(self.model.parameters()).dtype
+        self._training_audio_encoder = load_xtts2_training_audio_encoder(
+            dvae_checkpoint,
+            mel_stats_checkpoint,
+            config=dvae_config,
+            device=self.device,
+            dtype=model_dtype,
+        )
+        return self._training_audio_encoder
 
     def _load_pretrained_model(self) -> None:
         directory = resolve_model_directory(
@@ -146,6 +226,10 @@ class XTTSForTextToSpeech(PreTrainedTTSModel):
         self.config.sample_rate = self._checkpoint_sample_rate(runtime_config)
 
     def _prepare_for_training(self) -> None:
+        if self._training_audio_encoder is None:
+            training_artifacts = self._training_audio_artifacts()
+            if training_artifacts is not None:
+                self.configure_training_audio_encoder(*training_artifacts)
         for parameter in self.model.parameters():
             parameter.requires_grad_(False)
         for parameter in self.model.gpt.parameters():
@@ -281,6 +365,24 @@ class XTTSForTextToSpeech(PreTrainedTTSModel):
             },
         )
 
+    def save_pretrained(
+        self,
+        save_directory: str | Path,
+        *,
+        include_native_export: bool = True,
+    ) -> Path:
+        output_directory = super().save_pretrained(
+            save_directory,
+            include_native_export=include_native_export,
+        )
+        if (include_native_export and self._training_audio_encoder is not None and
+                self._bundled_training_audio_artifacts(output_directory) is not None):
+            portable_values = self.config.to_dict()
+            portable_values["training_dvae_checkpoint"] = None
+            portable_values["training_mel_stats_checkpoint"] = None
+            self.config_class.from_dict(portable_values).save_pretrained(output_directory, )
+        return output_directory
+
     def _save_pretrained(self, save_directory: Path) -> None:
         if self.model is None:
             self.load()
@@ -298,6 +400,13 @@ class XTTSForTextToSpeech(PreTrainedTTSModel):
             if not source.is_file():
                 raise FileNotFoundError(f"XTTS export source artifact was not found: {source}.")
             shutil.copy2(source, save_directory / filename)
+        if self._training_audio_encoder is not None:
+            from voicehub.architectures.xtts2.dvae_checkpoint import save_xtts2_training_audio_encoder
+
+            save_xtts2_training_audio_encoder(
+                self._training_audio_encoder,
+                save_directory,
+            )
 
 
 XTTS = XTTSForTextToSpeech

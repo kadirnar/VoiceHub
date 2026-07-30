@@ -59,6 +59,10 @@ def create_supertonic_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", ),
             features=(
+                "diffusion-family",
+                "diffusion-kind-flow-matching",
+                "diffusion-operation-denoiser",
+                "diffusion-operation-iterative-estimator",
                 "multilingual-unicode-frontend",
                 "reviewed-onnx-import",
                 "pytorch-native-execution",
@@ -72,6 +76,11 @@ def create_supertonic_architecture_spec() -> ArchitectureSpec:
         upstream_revision=SUPERTONIC_SOURCE_REVISION,
         license_id=SUPERTONIC_SOURCE_LICENSE,
         metadata={
+            "diffusion_architecture_kind": "flow-matching",
+            "diffusion_operations": (
+                "denoiser",
+                "iterative-estimator",
+            ),
             "family": "flow-matching-tts",
             "implementation": "voicehub-native",
             "tensor_backend": "pytorch",

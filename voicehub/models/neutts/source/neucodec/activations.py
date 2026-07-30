@@ -5,6 +5,8 @@ import torch
 from torch import nn, sin, pow
 from torch.nn import Parameter
 
+from voicehub.kernels.codecs import CodecSnakeBetaKernelOptimizable
+
 
 class Snake(nn.Module):
     """
@@ -62,7 +64,7 @@ class Snake(nn.Module):
         return x
 
 
-class SnakeBeta(nn.Module):
+class SnakeBeta(CodecSnakeBetaKernelOptimizable, nn.Module):
     """
     A modified Snake function which uses separate parameters for the magnitude of the periodic components
     Shape:
@@ -109,6 +111,7 @@ class SnakeBeta(nn.Module):
         self.beta.requires_grad = alpha_trainable
 
         self.no_div_by_zero = 0.000000001
+        self._initialize_codec_kernel_backend()
 
     def forward(self, x):
         """
@@ -121,6 +124,4 @@ class SnakeBeta(nn.Module):
         if self.alpha_logscale:
             alpha = torch.exp(alpha)
             beta = torch.exp(beta)
-        x = x + (1.0 / (beta + self.no_div_by_zero)) * pow(sin(x * alpha), 2)
-
-        return x
+        return self._codec_snake_beta(x, alpha, beta)

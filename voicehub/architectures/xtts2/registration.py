@@ -11,6 +11,12 @@ from voicehub.architectures.xtts2.metadata import (
     XTTS2_CHECKPOINT_REPOSITORY,
     XTTS2_CHECKPOINT_REVISION,
     XTTS2_CONFIG_SHA256,
+    XTTS2_DVAE_SHA256,
+    XTTS2_DVAE_SIZE_BYTES,
+    XTTS2_DVAE_STORED_ELEMENT_COUNT,
+    XTTS2_DVAE_TENSOR_COUNT,
+    XTTS2_MEL_STATS_SHA256,
+    XTTS2_MEL_STATS_SIZE_BYTES,
     XTTS2_NATIVE_PARAMETER_COUNT,
     XTTS2_NATIVE_TENSOR_COUNT,
     XTTS2_SOURCE_LICENSE,
@@ -39,6 +45,9 @@ def create_xtts2_architecture_spec() -> ArchitectureSpec:
         checkpoint_adapter=("voicehub.architectures.xtts2.checkpoint:"
                             "load_xtts2_checkpoint"),
         components={
+            "acoustic-code-autoencoder": ("voicehub.architectures.xtts2.dvae:XTTS2DVAE"),
+            "acoustic-code-encoder": ("voicehub.architectures.xtts2.dvae:"
+                                      "XTTS2TrainingAudioEncoder"),
             "checkpoint-exporter": ("voicehub.architectures.xtts2.checkpoint:"
                                     "save_xtts2_checkpoint"),
             "conditioning-encoder": ("voicehub.architectures.xtts2.conditioning:"
@@ -46,6 +55,12 @@ def create_xtts2_architecture_spec() -> ArchitectureSpec:
             "legacy-converter":
             ("voicehub.architectures.xtts2.checkpoint:"
              "convert_trusted_legacy_xtts2_checkpoint"),
+            "legacy-dvae-converter":
+            ("voicehub.architectures.xtts2.dvae_checkpoint:"
+             "convert_trusted_legacy_xtts2_dvae_checkpoint"),
+            "legacy-mel-stats-converter":
+            ("voicehub.architectures.xtts2.dvae_checkpoint:"
+             "convert_trusted_legacy_xtts2_mel_stats"),
             "speaker-encoder": ("voicehub.architectures.xtts2.decoder:"
                                 "ResNetSpeakerEncoder"),
             "trainer-adapter": ("voicehub.models.xtts_native.training_xtts:"
@@ -63,15 +78,19 @@ def create_xtts2_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
+                "llm-tts-codec",
                 "17-languages",
                 "24-khz-waveform",
                 "autoregressive-acoustic-tokens",
                 "gpt-finetuning",
                 "hifigan-decoder",
+                "native-dvae-acoustic-encoder",
                 "perceiver-conditioning",
                 "precomputed-audio-code-training",
+                "raw-waveform-code-preparation",
                 "reference-voice-cloning",
                 "resnet-speaker-encoder",
+                "separate-dvae-artifact",
                 "strict-safetensors-runtime",
             ),
         ),
@@ -98,15 +117,33 @@ def create_xtts2_architecture_spec() -> ArchitectureSpec:
             XTTS2_NATIVE_TENSOR_COUNT,
             "reference_native_parameter_count":
             XTTS2_NATIVE_PARAMETER_COUNT,
+            "reference_dvae_sha256":
+            XTTS2_DVAE_SHA256,
+            "reference_dvae_size_bytes":
+            XTTS2_DVAE_SIZE_BYTES,
+            "reference_dvae_tensor_count":
+            XTTS2_DVAE_TENSOR_COUNT,
+            "reference_dvae_stored_element_count":
+            XTTS2_DVAE_STORED_ELEMENT_COUNT,
+            "reference_mel_stats_sha256":
+            XTTS2_MEL_STATS_SHA256,
+            "reference_mel_stats_size_bytes":
+            XTTS2_MEL_STATS_SIZE_BYTES,
             "checkpoint_license":
             XTTS2_CHECKPOINT_LICENSE,
             "steady_state_checkpoint_format":
             "safetensors",
             "training_boundary": (
                 "The complete autoregressive GPT is trainable with the "
-                "source text and acoustic-token cross-entropies. The DVAE "
-                "is an offline, frozen data-preparation boundary; the "
-                "speaker encoder and HiFi-GAN decoder remain frozen."),
+                "source text and acoustic-token cross-entropies. Audio codes "
+                "may be precomputed or produced by the separately loaded, "
+                "frozen native DVAE; the speaker encoder and HiFi-GAN "
+                "decoder remain frozen."),
+            "dvae_artifact_boundary": (
+                "Coqui distributes dvae.pth and mel_stats.pth separately "
+                "from model.pth at the pinned checkpoint revision. VoiceHub "
+                "requires explicit restricted conversion and then loads "
+                "only strict Safetensors artifacts."),
             "legacy_boundary": (
                 "Coqui publishes model.pth. Native runtime loading never "
                 "deserializes it; an explicit weights-only one-time "

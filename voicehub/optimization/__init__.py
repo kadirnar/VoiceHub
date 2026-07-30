@@ -56,6 +56,42 @@ _TORCH_COMPILE_EXPORTS = frozenset({
     "TorchCompileUnavailableError",
     "inspect_torch_compile",
 })
+_CODEC_EXPORTS = frozenset({
+    "CodecCUDAGraphCaptureError",
+    "CodecCUDAGraphRunner",
+    "CodecCompileComponent",
+    "CodecCompilePolicy",
+    "CodecCompileTargetKind",
+    "CodecKernelBackend",
+    "CodecNumericalPolicy",
+    "CodecOptimizationCompatibilityError",
+    "CodecOptimizationConfig",
+    "CodecOptimizationDecision",
+    "CodecOptimizationError",
+    "CodecOptimizationFidelity",
+    "CodecOptimizationPlan",
+    "CodecOptimizationPolicy",
+    "CodecOptimizationResult",
+    "FixedShapeCodecCUDAGraph",
+    "capture_codec_cuda_graph",
+    "codec_component_view",
+    "coerce_codec_optimization_config",
+    "discover_codec_compile_targets",
+    "optimize_codec",
+    "resolve_codec_optimization",
+})
+_DIFFUSION_EXPORTS = frozenset({
+    "DIFFUSION_FAMILY_FEATURE",
+    "DIFFUSION_KIND_FEATURE_PREFIX",
+    "DIFFUSION_OPERATION_FEATURE_PREFIX",
+    "DiffusionArchitectureKind",
+    "DiffusionModelOptimizationSupport",
+    "DiffusionOperation",
+    "diffusion_kind_feature",
+    "diffusion_operation_feature",
+    "get_diffusion_model_optimization_support",
+    "list_diffusion_model_optimization_support",
+})
 _TTS_EXPORTS = frozenset({
     "TTSAttentionImplementation",
     "TTSCompilePolicy",
@@ -131,6 +167,16 @@ def __getattr__(name: str):
         value = getattr(module, name)
         globals()[name] = value
         return value
+    if name in _CODEC_EXPORTS:
+        module = import_module("voicehub.optimization.codecs")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    if name in _DIFFUSION_EXPORTS:
+        module = import_module("voicehub.optimization.diffusion")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
     if name in _TTS_EXPORTS:
         module = import_module("voicehub.optimization.tts")
         value = getattr(module, name)
@@ -148,6 +194,8 @@ def __dir__() -> list[str]:
     return sorted(
         set(globals())
         | _ACCELERATOR_EXPORTS
+        | _CODEC_EXPORTS
+        | _DIFFUSION_EXPORTS
         | _LORA_EXPORTS
         | _TORCH_COMPILE_EXPORTS
         | _TTS_EXPORTS
@@ -160,8 +208,30 @@ __all__ = [
     "AcceleratorRestorationError",
     "AcceleratorStateDictError",
     "AppliedPass",
+    "CodecCUDAGraphCaptureError",
+    "CodecCUDAGraphRunner",
+    "CodecCompileComponent",
+    "CodecCompilePolicy",
+    "CodecCompileTargetKind",
+    "CodecKernelBackend",
+    "CodecNumericalPolicy",
+    "CodecOptimizationCompatibilityError",
+    "CodecOptimizationConfig",
+    "CodecOptimizationDecision",
+    "CodecOptimizationError",
+    "CodecOptimizationFidelity",
+    "CodecOptimizationPlan",
+    "CodecOptimizationPolicy",
+    "CodecOptimizationResult",
     "CustomKernelPass",
+    "DIFFUSION_FAMILY_FEATURE",
+    "DIFFUSION_KIND_FEATURE_PREFIX",
+    "DIFFUSION_OPERATION_FEATURE_PREFIX",
+    "DiffusionArchitectureKind",
+    "DiffusionModelOptimizationSupport",
+    "DiffusionOperation",
     "FlashAttention4Pass",
+    "FixedShapeCodecCUDAGraph",
     "LoRAConfig",
     "LoRAInjection",
     "LoRALinear",
@@ -203,16 +273,26 @@ __all__ = [
     "bind_registered_architecture",
     "canonical_json_string",
     "canonical_json_tree",
+    "capture_codec_cuda_graph",
+    "codec_component_view",
+    "coerce_codec_optimization_config",
     "coerce_tts_optimization_config",
+    "diffusion_kind_feature",
+    "diffusion_operation_feature",
+    "discover_codec_compile_targets",
+    "get_diffusion_model_optimization_support",
     "get_tts_optimization_config",
     "get_tts_optimization_support",
     "get_vits_model_optimization_support",
     "inject_lora",
     "inspect_torch_compile",
     "list_tts_optimization_support",
+    "list_diffusion_model_optimization_support",
     "list_vits_model_optimization_support",
     "normalize_optimization_dtype",
     "normalize_optimization_kind",
+    "optimize_codec",
+    "resolve_codec_optimization",
     "resolve_tts_optimization",
     "snapshot_optimization_pass_declaration",
     "tts_optimization_config_from_options",

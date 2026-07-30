@@ -16,6 +16,8 @@ from torch import Tensor, nn
 from torch.nn import functional
 
 from voicehub.architectures.cosyvoice_native.configuration import CosyVoiceFlowConfig
+from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 def sequence_mask(lengths: Tensor, maximum: int) -> Tensor:
@@ -167,7 +169,7 @@ def _apply_rotary(values: Tensor, rotary: tuple[Tensor, Tensor]) -> Tensor:
     return torch.stack((rotated_even, rotated_odd), dim=-1).flatten(-2)
 
 
-class AdaLayerNormZero(nn.Module):
+class AdaLayerNormZero(DiffusionModulationKernelOptimizable, nn.Module):
 
     def __init__(self, dimension: int) -> None:
         super().__init__()
@@ -178,15 +180,20 @@ class AdaLayerNormZero(nn.Module):
             elementwise_affine=False,
             eps=1e-6,
         )
+        self._initialize_diffusion_kernel_backend()
 
     def forward(self, values: Tensor, embedding: Tensor):
         parameters = self.linear(self.silu(embedding)).chunk(6, dim=-1)
         shift_attention, scale_attention, gate_attention, shift_ff, scale_ff, gate_ff = parameters
-        normalized = (self.norm(values) * (1 + scale_attention[:, None]) + shift_attention[:, None])
+        normalized = self._diffusion_modulate(
+            self.norm(values),
+            shift_attention[:, None],
+            scale_attention[:, None],
+        )
         return normalized, gate_attention, shift_ff, scale_ff, gate_ff
 
 
-class AdaLayerNormZeroFinal(nn.Module):
+class AdaLayerNormZeroFinal(DiffusionModulationKernelOptimizable, nn.Module):
 
     def __init__(self, dimension: int) -> None:
         super().__init__()
@@ -197,10 +204,15 @@ class AdaLayerNormZeroFinal(nn.Module):
             elementwise_affine=False,
             eps=1e-6,
         )
+        self._initialize_diffusion_kernel_backend()
 
     def forward(self, values: Tensor, embedding: Tensor) -> Tensor:
         scale, shift = self.linear(self.silu(embedding)).chunk(2, dim=-1)
-        return self.norm(values) * (1 + scale[:, None]) + shift[:, None]
+        return self._diffusion_modulate(
+            self.norm(values),
+            shift[:, None],
+            scale[:, None],
+        )
 
 
 class Attention(nn.Module):
@@ -317,7 +329,11 @@ class DiTBlock(nn.Module):
             mask=mask,
             rotary=rotary,
         )
-        normalized = self.ff_norm(values) * (1 + scale[:, None]) + shift[:, None]
+        normalized = self.attn_norm._diffusion_modulate(
+            self.ff_norm(values),
+            shift[:, None],
+            scale[:, None],
+        )
         return values + ff_gate[:, None] * self.ff(normalized)
 
 
@@ -558,6 +574,29 @@ class CosyVoiceFlowMatchingModel(nn.Module):
             dtype=dtype,
         )
         self.decoder = CausalConditionalFlowMatcher(config)
+
+    def codec_optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Expose the callable that is actually used for each flow mode."""
+        if mode == "inference":
+            return (
+                OptimizationCompileTarget(
+                    "codec.flow.cosyvoice.estimator.forward",
+                    self.decoder.estimator,
+                    "forward",
+                    component="flow",
+                ), )
+        if mode != "training":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (
+            OptimizationCompileTarget(
+                "codec.flow.cosyvoice.forward",
+                self,
+                "forward",
+                component="flow",
+            ), )
 
     def encode_tokens(
         self,

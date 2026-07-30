@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from voicehub.modeling_outputs import TTSTrainingOutput
+from voicehub.optimization.protocols import OptimizationCompileTarget
 from voicehub.training.adapters import CompositeTrainingAdapter
 from voicehub.training.contracts import TrainingContext
 from voicehub.training.datasets import SpeechDataset
@@ -31,7 +32,7 @@ class CosyVoiceTrainingCollator:
         return {
             "architecture": "cosyvoice3",
             "checkpoint_format": "safetensors",
-            "frontend": "frozen-preencoded-speech-tokens",
+            "frontend": "frozen-native-or-preencoded-speech-tokens",
             "type": "cosyvoice-native-records-v1",
         }
 
@@ -88,9 +89,54 @@ class CosyVoiceTrainingAdapter(CompositeTrainingAdapter):
         super().setup()
         return self
 
+    def optimization_module_roots(self):
+        """Include the frozen raw-audio tokenizer in training policies."""
+        self.setup()
+        return self.model.native_runtime.optimization_module_roots()
+
+    def optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Compile the selected objective and frozen preprocessing boundary."""
+        if mode != "training":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        self.setup()
+        runtime = self.model.native_runtime
+        component = self.selected_component
+        if component in {"llm", "language_model"}:
+            owner = runtime.model.llm
+        elif component == "flow":
+            owner = runtime.model.flow
+        elif component in {"hift", "vocoder"}:
+            owner = runtime.model.hift
+        elif component in {
+                "hifigan_generator",
+                "hifigan_discriminator",
+        }:
+            owner = runtime.model.hifigan
+            if owner is None:
+                raise RuntimeError("CosyVoice HiFiGAN training graph is not attached.")
+        else:
+            raise ValueError(f"Unsupported CosyVoice component {component!r}.")
+        targets = [
+            OptimizationCompileTarget(
+                f"cosyvoice.training.{component}.forward",
+                owner,
+                "forward",
+            ),
+        ]
+        if runtime.speech_tokenizer is not None:
+            targets.append(
+                OptimizationCompileTarget(
+                    "cosyvoice.training.speech_tokenizer.forward",
+                    runtime.speech_tokenizer,
+                    "forward",
+                ))
+        return tuple(targets)
+
     def create_dataset(self, records: Any, **kwargs: Any) -> SpeechDataset:
-        required = (("text", "speech_tokens") if self.selected_component in {"llm", "language_model"} else ())
-        return SpeechDataset(records, required_fields=required, **kwargs)
+        return SpeechDataset(records, required_fields=(), **kwargs)
 
     def prepare_training_inputs(
         self,
@@ -161,7 +207,7 @@ class CosyVoiceTrainingAdapter(CompositeTrainingAdapter):
             "architecture": "cosyvoice3",
             "checkpoint_format": "safetensors",
             "selected_component": self.selected_component,
-            "speech_tokenizer": "frozen-preencoded",
+            "speech_tokenizer": "frozen-native-or-preencoded",
             "source_objectives": {
                 "flow": "rectified-conditional-flow-matching",
                 "hifigan_discriminator": "least-squares-adversarial",

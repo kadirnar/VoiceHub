@@ -4,6 +4,7 @@ import unittest
 
 from torch import nn
 
+from voicehub.architectures.cosyvoice_native.configuration import CosyVoiceArchitectureConfig
 from voicehub.architectures.cosyvoice_native.modeling import CosyVoiceNativeModel
 from voicehub.architectures.gptsovits.runtime import GPTSoVITSRuntime
 from voicehub.architectures.mosstts.modeling import (
@@ -52,13 +53,20 @@ class TTSCompileTargetProtocolTests(unittest.TestCase):
             (("conversationtts.forward", "forward"), ),
         )
 
-    def test_cosyvoice_targets_composite_boundaries(self):
-        model = _bare_module(CosyVoiceNativeModel)
-        self.assert_targets(
-            model,
-            "inference",
-            (("cosyvoice.synthesize", "synthesize"), ),
+    def test_cosyvoice_targets_repeated_inference_stages(self):
+        model = CosyVoiceNativeModel(CosyVoiceArchitectureConfig.tiny())
+        inference = model.optimization_compile_targets("inference")
+        self.assertEqual(
+            tuple((target.label, target.attribute) for target in inference),
+            (
+                ("cosyvoice.llm.transformer.forward", "forward"),
+                ("cosyvoice.flow.estimator.forward", "forward"),
+                ("cosyvoice.hift.forward", "forward"),
+            ),
         )
+        self.assertIs(inference[0].owner, model.llm.llm.model.model)
+        self.assertIs(inference[1].owner, model.flow.decoder.estimator)
+        self.assertIs(inference[2].owner, model.hift)
         self.assert_targets(
             model,
             "training",

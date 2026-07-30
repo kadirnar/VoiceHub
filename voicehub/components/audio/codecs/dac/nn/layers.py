@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 from torch.nn.utils import weight_norm
 
+from voicehub.kernels.codecs import CodecSnakeKernelOptimizable
+
 
 def WNConv1d(*args, **kwargs):
     return weight_norm(nn.Conv1d(*args, **kwargs))
@@ -21,10 +23,11 @@ def snake(x, alpha):
     return x
 
 
-class Snake1d(nn.Module):
+class Snake1d(CodecSnakeKernelOptimizable, nn.Module):
     def __init__(self, channels):
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(1, channels, 1))
+        self._initialize_codec_kernel_backend()
 
     def forward(self, x):
-        return snake(x, self.alpha)
+        return self._codec_snake(x, self.alpha)

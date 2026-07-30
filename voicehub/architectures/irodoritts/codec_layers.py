@@ -12,6 +12,8 @@ import torch.nn.functional as F
 # except ImportError:
 from torch.nn.utils import weight_norm
 
+from voicehub.kernels.codecs import CodecSnakeKernelOptimizable
+
 
 # Scripting this brings model speed up 1.4x
 @torch.jit.script
@@ -34,14 +36,15 @@ def activation(act: str, **act_params):
         raise ValueError(f"Unsupported activation: {act}")
 
 
-class Snake1d(nn.Module):
+class Snake1d(CodecSnakeKernelOptimizable, nn.Module):
 
     def __init__(self, channels):
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(1, channels, 1))
+        self._initialize_codec_kernel_backend()
 
     def forward(self, x):
-        return snake(x, self.alpha)
+        return self._codec_snake(x, self.alpha)
 
 
 def apply_parametrization_norm(module: nn.Module, norm: str = "none"):

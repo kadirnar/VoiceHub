@@ -164,9 +164,14 @@ class ChatterboxTTS:
                 "inference",
             ),
             OptimizationCompileTarget(
-                "s3gen.inference",
+                "s3gen.flow_inference",
                 self.s3gen,
-                "inference",
+                "flow_inference",
+            ),
+            OptimizationCompileTarget(
+                "s3gen.hift_inference",
+                self.s3gen,
+                "hift_inference",
             ),
         )
 

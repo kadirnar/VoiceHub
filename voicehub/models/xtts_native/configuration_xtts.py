@@ -21,6 +21,8 @@ class XTTSConfig(VoiceHubConfig):
         torch_dtype: str = "float32",
         training_text_loss_weight: float = 0.01,
         training_mel_loss_weight: float = 1.0,
+        training_dvae_checkpoint: str | Path | None = None,
+        training_mel_stats_checkpoint: str | Path | None = None,
         sample_rate: int = 24_000,
         **kwargs,
     ) -> None:
@@ -33,6 +35,11 @@ class XTTSConfig(VoiceHubConfig):
         self.torch_dtype = torch_dtype
         self.training_text_loss_weight = training_text_loss_weight
         self.training_mel_loss_weight = training_mel_loss_weight
+        self.training_dvae_checkpoint = (
+            None if training_dvae_checkpoint is None else str(Path(training_dvae_checkpoint).expanduser()))
+        self.training_mel_stats_checkpoint = (
+            None if training_mel_stats_checkpoint is None else str(
+                Path(training_mel_stats_checkpoint).expanduser()))
         self.validate()
 
     def validate(self) -> None:
@@ -50,6 +57,17 @@ class XTTSConfig(VoiceHubConfig):
             raise ValueError("XTTS v2 produces audio at 24,000 Hz.")
         if self.torch_dtype not in {"float32", "float16", "bfloat16"}:
             raise ValueError("XTTS dtype must be float32, float16, or bfloat16.")
+        if ((self.training_dvae_checkpoint is None) != (self.training_mel_stats_checkpoint is None)):
+            raise ValueError(
+                "XTTS raw-waveform fine-tuning requires both "
+                "`training_dvae_checkpoint` and `training_mel_stats_checkpoint`.")
+        for name in (
+                "training_dvae_checkpoint",
+                "training_mel_stats_checkpoint",
+        ):
+            value = getattr(self, name)
+            if value is not None and Path(value).suffix != ".safetensors":
+                raise ValueError(f"XTTS `{name}` must point to a `.safetensors` file.")
         weights = (
             self.training_text_loss_weight,
             self.training_mel_loss_weight,

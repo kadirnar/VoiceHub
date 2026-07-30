@@ -12,7 +12,10 @@ import torch
 from torch.nn import functional as F
 
 from voicehub.kernel_operations import (
+    AUDIO_CODEC_SNAKE,
+    AUDIO_CODEC_SNAKE_BETA,
     DIFFUSION_FUSED_BIAS_GELU,
+    DIFFUSION_FUSED_MODULATE,
     LLM_GATED_SILU,
     VITS_FUSED_ADD_TANH_SIGMOID,
     VITS_TANH_SIGMOID_GATE,
@@ -45,6 +48,9 @@ _ACTIVATION_CUDA_SPEC = CudaExtensionSpec(
         "voicehub_kernels::tanh_sigmoid_gate",
         "voicehub_kernels::fused_add_tanh_sigmoid",
         "voicehub_kernels::fused_bias_gelu",
+        "voicehub_kernels::fused_modulate",
+        "voicehub_kernels::codec_snake",
+        "voicehub_kernels::codec_snake_beta",
     ),
     extra_cflags=("-O3", ),
     extra_cuda_cflags=("-O3", "--use_fast_math"),
@@ -95,6 +101,72 @@ def _validate_bias_gelu(
         raise ValueError("fused_bias_gelu expects tensors with the same dtype.")
     if not inputs.is_floating_point():
         raise TypeError("fused_bias_gelu expects floating-point tensors.")
+
+
+def _validate_fused_modulate(
+    hidden_states: torch.Tensor,
+    shift: torch.Tensor,
+    scale: torch.Tensor,
+) -> None:
+    values = (hidden_states, shift, scale)
+    if any(not isinstance(value, torch.Tensor) for value in values):
+        raise TypeError("`hidden_states`, `shift`, and `scale` must be torch.Tensor values.")
+    if hidden_states.ndim < 1:
+        raise ValueError("fused_modulate expects at least one tensor dimension.")
+    if hidden_states.device != shift.device or hidden_states.device != scale.device:
+        raise ValueError("fused_modulate expects tensors on the same device.")
+    if hidden_states.dtype != shift.dtype or hidden_states.dtype != scale.dtype:
+        raise ValueError("fused_modulate expects tensors with the same dtype.")
+    if not hidden_states.is_floating_point():
+        raise TypeError("fused_modulate expects floating-point tensors.")
+    try:
+        output_shape = torch.broadcast_shapes(
+            hidden_states.shape,
+            shift.shape,
+            scale.shape,
+        )
+    except RuntimeError as error:
+        raise ValueError("fused_modulate expects shift and scale to broadcast to hidden_states.") from error
+    if output_shape != hidden_states.shape:
+        raise ValueError("fused_modulate cannot expand the hidden-state output shape.")
+
+
+def _validate_codec_snake(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+) -> None:
+    if not isinstance(inputs, torch.Tensor) or not isinstance(alpha, torch.Tensor):
+        raise TypeError("`inputs` and `alpha` must be torch.Tensor values.")
+    if inputs.ndim < 2:
+        raise ValueError("codec_snake expects inputs with shape [batch, channels, ...].")
+    if alpha.numel() != inputs.shape[1]:
+        raise ValueError("codec_snake expects one alpha value per input channel.")
+    if inputs.device != alpha.device:
+        raise ValueError("codec_snake expects tensors on the same device.")
+    if inputs.dtype != alpha.dtype:
+        raise ValueError("codec_snake expects tensors with the same dtype.")
+    if not inputs.is_floating_point():
+        raise TypeError("codec_snake expects floating-point tensors.")
+
+
+def _validate_codec_snake_beta(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+) -> None:
+    values = (inputs, alpha, beta)
+    if any(not isinstance(value, torch.Tensor) for value in values):
+        raise TypeError("`inputs`, `alpha`, and `beta` must be torch.Tensor values.")
+    if inputs.ndim < 2:
+        raise ValueError("codec_snake_beta expects inputs with shape [batch, channels, ...].")
+    if alpha.numel() != inputs.shape[1] or beta.numel() != inputs.shape[1]:
+        raise ValueError("codec_snake_beta expects one alpha and beta value per input channel.")
+    if inputs.device != alpha.device or inputs.device != beta.device:
+        raise ValueError("codec_snake_beta expects tensors on the same device.")
+    if inputs.dtype != alpha.dtype or inputs.dtype != beta.dtype:
+        raise ValueError("codec_snake_beta expects tensors with the same dtype.")
+    if not inputs.is_floating_point():
+        raise TypeError("codec_snake_beta expects floating-point tensors.")
 
 
 def _validate_vits_fused_gate(
@@ -170,6 +242,121 @@ def _bias_gelu_triton_support(
     return support
 
 
+def _fused_modulate_contract_supported(
+    hidden_states: torch.Tensor,
+    shift: torch.Tensor,
+    scale: torch.Tensor,
+) -> bool:
+    if not all(isinstance(value, torch.Tensor) for value in (hidden_states, shift, scale)):
+        return False
+    # Accelerated implementations specialize the vector, matrix, and
+    # [batch, time, hidden] contracts used by diffusion TTS. Higher-rank
+    # tensors retain the exact PyTorch fallback instead of materializing
+    # expanded shift/scale tensors.
+    if not 1 <= hidden_states.ndim <= 3:
+        return False
+    try:
+        return torch.broadcast_shapes(
+            hidden_states.shape,
+            shift.shape,
+            scale.shape,
+        ) == hidden_states.shape
+    except RuntimeError:
+        return False
+
+
+def _codec_snake_contract_supported(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+) -> bool:
+    return bool(
+        isinstance(inputs, torch.Tensor) and isinstance(alpha, torch.Tensor) and inputs.ndim >= 2 and
+        alpha.numel() == inputs.shape[1])
+
+
+def _codec_snake_beta_contract_supported(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+) -> bool:
+    return bool(
+        isinstance(inputs, torch.Tensor) and isinstance(alpha, torch.Tensor) and
+        isinstance(beta, torch.Tensor) and inputs.ndim >= 2 and alpha.numel() == inputs.shape[1] and
+        beta.numel() == inputs.shape[1])
+
+
+def _triton_tensor_group_support(
+    tensors: tuple[torch.Tensor, ...],
+    *,
+    operation: str,
+) -> KernelSupport:
+    if not tensors or any(not isinstance(value, torch.Tensor) for value in tensors):
+        return KernelSupport(False, f"{operation} arguments are not tensors")
+    first = tensors[0]
+    if first.device.type != "cuda" or any(value.device != first.device for value in tensors[1:]):
+        return KernelSupport(
+            False,
+            f"Triton {operation} kernels require one CUDA device",
+        )
+    if first.dtype not in _TRITON_DTYPES or any(value.dtype != first.dtype for value in tensors[1:]):
+        return KernelSupport(
+            False,
+            f"Triton {operation} kernels require matching float16, "
+            "bfloat16, or float32 tensors",
+        )
+    if "voicehub.kernels.triton_activations" in sys.modules:
+        return KernelSupport(True)
+    capability = _cached_triton_capability(str(first.device))
+    return KernelSupport(capability.available, capability.reason)
+
+
+def _fused_modulate_triton_support(
+    hidden_states: torch.Tensor,
+    shift: torch.Tensor,
+    scale: torch.Tensor,
+) -> KernelSupport:
+    if not _fused_modulate_contract_supported(hidden_states, shift, scale):
+        return KernelSupport(
+            False,
+            "shift and scale must broadcast to the hidden-state shape",
+        )
+    return _triton_tensor_group_support(
+        (hidden_states, shift, scale),
+        operation="fused modulation",
+    )
+
+
+def _codec_snake_triton_support(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+) -> KernelSupport:
+    if not _codec_snake_contract_supported(inputs, alpha):
+        return KernelSupport(
+            False,
+            "inputs must have [batch, channels, ...] shape and one alpha per channel",
+        )
+    return _triton_tensor_group_support(
+        (inputs, alpha),
+        operation="codec Snake",
+    )
+
+
+def _codec_snake_beta_triton_support(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+) -> KernelSupport:
+    if not _codec_snake_beta_contract_supported(inputs, alpha, beta):
+        return KernelSupport(
+            False,
+            "inputs must have [batch, channels, ...] shape and one alpha/beta pair per channel",
+        )
+    return _triton_tensor_group_support(
+        (inputs, alpha, beta),
+        operation="codec SnakeBeta",
+    )
+
+
 def _vits_fused_gate_triton_support(
     input_a: torch.Tensor,
     input_b: torch.Tensor,
@@ -219,6 +406,75 @@ def _bias_gelu_cuda_extension_support(
     if inputs.ndim < 1 or bias.ndim != 1 or inputs.shape[-1] != bias.shape[0]:
         return KernelSupport(False, "bias must match the input's last dimension")
     return support
+
+
+def _cuda_tensor_group_support(
+    tensors: tuple[torch.Tensor, ...],
+    *,
+    operation: str,
+) -> KernelSupport:
+    if not tensors or any(not isinstance(value, torch.Tensor) for value in tensors):
+        return KernelSupport(False, f"{operation} arguments are not tensors")
+    first = tensors[0]
+    if first.device.type != "cuda" or any(value.device != first.device for value in tensors[1:]):
+        return KernelSupport(
+            False,
+            f"the CUDA {operation} extension requires one CUDA device",
+        )
+    if first.dtype not in _TRITON_DTYPES or any(value.dtype != first.dtype for value in tensors[1:]):
+        return KernelSupport(
+            False,
+            f"the CUDA {operation} extension requires matching float16, "
+            "bfloat16, or float32 tensors",
+        )
+    return KernelSupport(True)
+
+
+def _fused_modulate_cuda_extension_support(
+    hidden_states: torch.Tensor,
+    shift: torch.Tensor,
+    scale: torch.Tensor,
+) -> KernelSupport:
+    if not _fused_modulate_contract_supported(hidden_states, shift, scale):
+        return KernelSupport(
+            False,
+            "shift and scale must broadcast to the hidden-state shape",
+        )
+    return _cuda_tensor_group_support(
+        (hidden_states, shift, scale),
+        operation="fused modulation",
+    )
+
+
+def _codec_snake_cuda_extension_support(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+) -> KernelSupport:
+    if not _codec_snake_contract_supported(inputs, alpha):
+        return KernelSupport(
+            False,
+            "inputs must have [batch, channels, ...] shape and one alpha per channel",
+        )
+    return _cuda_tensor_group_support(
+        (inputs, alpha),
+        operation="codec Snake",
+    )
+
+
+def _codec_snake_beta_cuda_extension_support(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+) -> KernelSupport:
+    if not _codec_snake_beta_contract_supported(inputs, alpha, beta):
+        return KernelSupport(
+            False,
+            "inputs must have [batch, channels, ...] shape and one alpha/beta pair per channel",
+        )
+    return _cuda_tensor_group_support(
+        (inputs, alpha, beta),
+        operation="codec SnakeBeta",
+    )
 
 
 def _vits_fused_gate_cuda_extension_support(
@@ -282,6 +538,41 @@ def fused_bias_gelu_reference(
     return F.gelu(inputs + bias, approximate="tanh")
 
 
+def fused_modulate_reference(
+    hidden_states: torch.Tensor,
+    shift: torch.Tensor,
+    scale: torch.Tensor,
+) -> torch.Tensor:
+    """Exact PyTorch reference for DiT adaptive-normalization modulation."""
+    return hidden_states * (1.0 + scale) + shift
+
+
+def codec_snake_reference(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+) -> torch.Tensor:
+    """Exact PyTorch reference for DAC/SNAC periodic Snake activation."""
+    shape = inputs.shape
+    flattened = inputs.reshape(shape[0], shape[1], -1)
+    channel_alpha = alpha.reshape(1, shape[1], 1)
+    output = (flattened + (channel_alpha + 1e-9).reciprocal() * torch.sin(channel_alpha * flattened).square())
+    return output.reshape(shape)
+
+
+def codec_snake_beta_reference(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+) -> torch.Tensor:
+    """Exact PyTorch reference for independent-frequency SnakeBeta."""
+    shape = inputs.shape
+    flattened = inputs.reshape(shape[0], shape[1], -1)
+    channel_alpha = alpha.reshape(1, shape[1], 1)
+    channel_beta = beta.reshape(1, shape[1], 1)
+    output = (flattened + (channel_beta + 1e-9).reciprocal() * torch.sin(channel_alpha * flattened).square())
+    return output.reshape(shape)
+
+
 def _gated_silu_triton(
     gate: torch.Tensor,
     up: torch.Tensor,
@@ -313,6 +604,32 @@ def _fused_bias_gelu_triton(
 ) -> torch.Tensor:
     module = import_module("voicehub.kernels.triton_activations")
     return module.fused_bias_gelu_triton(inputs, bias)
+
+
+def _fused_modulate_triton(
+    hidden_states: torch.Tensor,
+    shift: torch.Tensor,
+    scale: torch.Tensor,
+) -> torch.Tensor:
+    module = import_module("voicehub.kernels.triton_activations")
+    return module.fused_modulate_triton(hidden_states, shift, scale)
+
+
+def _codec_snake_triton(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+) -> torch.Tensor:
+    module = import_module("voicehub.kernels.triton_activations")
+    return module.codec_snake_triton(inputs, alpha)
+
+
+def _codec_snake_beta_triton(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+) -> torch.Tensor:
+    module = import_module("voicehub.kernels.triton_activations")
+    return module.codec_snake_beta_triton(inputs, alpha, beta)
 
 
 def _gated_silu_cuda(
@@ -348,6 +665,37 @@ def _fused_bias_gelu_cuda(
     return torch.ops.voicehub_kernels.fused_bias_gelu(inputs, bias)
 
 
+def _fused_modulate_cuda(
+    hidden_states: torch.Tensor,
+    shift: torch.Tensor,
+    scale: torch.Tensor,
+) -> torch.Tensor:
+    return torch.ops.voicehub_kernels.fused_modulate(
+        hidden_states,
+        shift,
+        scale,
+    )
+
+
+def _codec_snake_cuda(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+) -> torch.Tensor:
+    return torch.ops.voicehub_kernels.codec_snake(inputs, alpha)
+
+
+def _codec_snake_beta_cuda(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+) -> torch.Tensor:
+    return torch.ops.voicehub_kernels.codec_snake_beta(
+        inputs,
+        alpha,
+        beta,
+    )
+
+
 def _register_builtin_kernels() -> None:
     register_cuda_extension(_ACTIVATION_CUDA_SPEC)
     for operation, reference, triton_implementation, support_check in (
@@ -368,6 +716,24 @@ def _register_builtin_kernels() -> None:
             fused_bias_gelu_reference,
             _fused_bias_gelu_triton,
             _bias_gelu_triton_support,
+        ),
+        (
+            DIFFUSION_FUSED_MODULATE,
+            fused_modulate_reference,
+            _fused_modulate_triton,
+            _fused_modulate_triton_support,
+        ),
+        (
+            AUDIO_CODEC_SNAKE,
+            codec_snake_reference,
+            _codec_snake_triton,
+            _codec_snake_triton_support,
+        ),
+        (
+            AUDIO_CODEC_SNAKE_BETA,
+            codec_snake_beta_reference,
+            _codec_snake_beta_triton,
+            _codec_snake_beta_triton_support,
         ),
     ):
         register_kernel(
@@ -423,6 +789,21 @@ def _register_cuda_kernels() -> None:
             DIFFUSION_FUSED_BIAS_GELU,
             _fused_bias_gelu_cuda,
             _bias_gelu_cuda_extension_support,
+        ),
+        (
+            DIFFUSION_FUSED_MODULATE,
+            _fused_modulate_cuda,
+            _fused_modulate_cuda_extension_support,
+        ),
+        (
+            AUDIO_CODEC_SNAKE,
+            _codec_snake_cuda,
+            _codec_snake_cuda_extension_support,
+        ),
+        (
+            AUDIO_CODEC_SNAKE_BETA,
+            _codec_snake_beta_cuda,
+            _codec_snake_beta_cuda_extension_support,
         ),
     ):
         register_kernel(
@@ -532,6 +913,51 @@ def _register_cuda_autograd_locked() -> None:
             input_gradient if not reduction_dimensions else input_gradient.sum(dim=reduction_dimensions))
         return input_gradient, bias_gradient
 
+    def fused_modulate_backward(ctx, gradient):
+        hidden_states, shift, scale = ctx.saved_tensors
+        return (
+            gradient * (1.0 + scale),
+            gradient.sum_to_size(shift.shape),
+            (gradient * hidden_states).sum_to_size(scale.shape),
+        )
+
+    def codec_snake_backward(ctx, gradient):
+        inputs, alpha = ctx.saved_tensors
+        shape = inputs.shape
+        flattened = inputs.reshape(shape[0], shape[1], -1)
+        channel_alpha = alpha.reshape(1, shape[1], 1)
+        denominator = channel_alpha + 1e-9
+        angles = channel_alpha * flattened
+        sine = torch.sin(angles)
+        double_sine = torch.sin(2.0 * angles)
+        input_derivative = 1.0 + (channel_alpha / denominator) * double_sine
+        alpha_derivative = (flattened * double_sine / denominator - sine.square() / denominator.square())
+        flat_gradient = gradient.reshape_as(flattened)
+        return (
+            (flat_gradient * input_derivative).reshape(shape),
+            (flat_gradient * alpha_derivative).sum(dim=(0, 2), ).reshape(alpha.shape),
+        )
+
+    def codec_snake_beta_backward(ctx, gradient):
+        inputs, alpha, beta = ctx.saved_tensors
+        shape = inputs.shape
+        flattened = inputs.reshape(shape[0], shape[1], -1)
+        channel_alpha = alpha.reshape(1, shape[1], 1)
+        channel_beta = beta.reshape(1, shape[1], 1)
+        denominator = channel_beta + 1e-9
+        angles = channel_alpha * flattened
+        sine = torch.sin(angles)
+        double_sine = torch.sin(2.0 * angles)
+        flat_gradient = gradient.reshape_as(flattened)
+        input_gradient = (flat_gradient * (1.0 + channel_alpha * double_sine / denominator))
+        alpha_gradient = (flat_gradient * flattened * double_sine / denominator)
+        beta_gradient = (-flat_gradient * sine.square() / denominator.square())
+        return (
+            input_gradient.reshape(shape),
+            alpha_gradient.sum(dim=(0, 2)).reshape(alpha.shape),
+            beta_gradient.sum(dim=(0, 2)).reshape(beta.shape),
+        )
+
     def fake_gated_silu(gate, up):
         check_same_tensor_contract(
             gate,
@@ -630,6 +1056,89 @@ def _register_cuda_autograd_locked() -> None:
             memory_format=torch.contiguous_format,
         )
 
+    def fake_fused_modulate(hidden_states, shift, scale):
+        torch._check(
+            hidden_states.device == shift.device and hidden_states.device == scale.device,
+            lambda: ("voicehub_kernels::fused_modulate expects tensors on "
+                     "the same device"),
+        )
+        torch._check(
+            hidden_states.dtype == shift.dtype and hidden_states.dtype == scale.dtype,
+            lambda: ("voicehub_kernels::fused_modulate expects tensors with "
+                     "the same dtype"),
+        )
+        torch._check(
+            hidden_states.ndim >= 1,
+            lambda: ("voicehub_kernels::fused_modulate expects at least one "
+                     "dimension"),
+        )
+        output_shape = torch.broadcast_shapes(
+            hidden_states.shape,
+            shift.shape,
+            scale.shape,
+        )
+        torch._check(
+            output_shape == hidden_states.shape,
+            lambda: ("voicehub_kernels::fused_modulate shift and scale must "
+                     "broadcast to hidden_states"),
+        )
+        return torch.empty_like(
+            hidden_states,
+            memory_format=torch.contiguous_format,
+        )
+
+    def fake_codec_snake(inputs, alpha):
+        torch._check(
+            inputs.ndim >= 2,
+            lambda: ("voicehub_kernels::codec_snake expects "
+                     "[batch, channels, ...] inputs"),
+        )
+        torch._check(
+            alpha.numel() == inputs.shape[1],
+            lambda: ("voicehub_kernels::codec_snake expects one alpha per "
+                     "channel"),
+        )
+        torch._check(
+            inputs.device == alpha.device,
+            lambda: ("voicehub_kernels::codec_snake expects tensors on the "
+                     "same device"),
+        )
+        torch._check(
+            inputs.dtype == alpha.dtype,
+            lambda: ("voicehub_kernels::codec_snake expects tensors with "
+                     "the same dtype"),
+        )
+        return torch.empty_like(
+            inputs,
+            memory_format=torch.contiguous_format,
+        )
+
+    def fake_codec_snake_beta(inputs, alpha, beta):
+        torch._check(
+            inputs.ndim >= 2,
+            lambda: ("voicehub_kernels::codec_snake_beta expects "
+                     "[batch, channels, ...] inputs"),
+        )
+        torch._check(
+            alpha.numel() == inputs.shape[1] and beta.numel() == inputs.shape[1],
+            lambda: ("voicehub_kernels::codec_snake_beta expects one "
+                     "alpha/beta pair per channel"),
+        )
+        torch._check(
+            inputs.device == alpha.device and inputs.device == beta.device,
+            lambda: ("voicehub_kernels::codec_snake_beta expects tensors "
+                     "on the same device"),
+        )
+        torch._check(
+            inputs.dtype == alpha.dtype and inputs.dtype == beta.dtype,
+            lambda: ("voicehub_kernels::codec_snake_beta expects tensors "
+                     "with the same dtype"),
+        )
+        return torch.empty_like(
+            inputs,
+            memory_format=torch.contiguous_format,
+        )
+
     registration_library = torch.library.Library(
         "voicehub_kernels",
         "FRAGMENT",
@@ -654,6 +1163,21 @@ def _register_cuda_autograd_locked() -> None:
         fake_fused_bias_gelu,
         lib=registration_library,
     )
+    torch.library.register_fake(
+        "voicehub_kernels::fused_modulate",
+        fake_fused_modulate,
+        lib=registration_library,
+    )
+    torch.library.register_fake(
+        "voicehub_kernels::codec_snake",
+        fake_codec_snake,
+        lib=registration_library,
+    )
+    torch.library.register_fake(
+        "voicehub_kernels::codec_snake_beta",
+        fake_codec_snake_beta,
+        lib=registration_library,
+    )
     torch.library.register_autograd(
         "voicehub_kernels::gated_silu",
         gated_silu_backward,
@@ -675,6 +1199,24 @@ def _register_cuda_autograd_locked() -> None:
     torch.library.register_autograd(
         "voicehub_kernels::fused_bias_gelu",
         fused_bias_gelu_backward,
+        setup_context=pair_setup_context,
+        lib=registration_library,
+    )
+    torch.library.register_autograd(
+        "voicehub_kernels::fused_modulate",
+        fused_modulate_backward,
+        setup_context=pair_setup_context,
+        lib=registration_library,
+    )
+    torch.library.register_autograd(
+        "voicehub_kernels::codec_snake",
+        codec_snake_backward,
+        setup_context=pair_setup_context,
+        lib=registration_library,
+    )
+    torch.library.register_autograd(
+        "voicehub_kernels::codec_snake_beta",
+        codec_snake_beta_backward,
         setup_context=pair_setup_context,
         lib=registration_library,
     )
@@ -772,6 +1314,58 @@ def fused_bias_gelu(
         DIFFUSION_FUSED_BIAS_GELU,
         inputs,
         bias,
+        backend=backend,
+    )
+
+
+def fused_modulate(
+    hidden_states: torch.Tensor,
+    shift: torch.Tensor,
+    scale: torch.Tensor,
+    *,
+    backend: KernelBackend | str = KernelBackend.AUTO,
+) -> torch.Tensor:
+    """Fuse DiT ``hidden * (1 + scale) + shift`` with broadcasting."""
+    _validate_fused_modulate(hidden_states, shift, scale)
+    return dispatch_kernel(
+        DIFFUSION_FUSED_MODULATE,
+        hidden_states,
+        shift,
+        scale,
+        backend=backend,
+    )
+
+
+def codec_snake(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+    *,
+    backend: KernelBackend | str = KernelBackend.AUTO,
+) -> torch.Tensor:
+    """Run the exact periodic Snake activation used by native audio codecs."""
+    _validate_codec_snake(inputs, alpha)
+    return dispatch_kernel(
+        AUDIO_CODEC_SNAKE,
+        inputs,
+        alpha,
+        backend=backend,
+    )
+
+
+def codec_snake_beta(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+    *,
+    backend: KernelBackend | str = KernelBackend.AUTO,
+) -> torch.Tensor:
+    """Run exact SnakeBeta with independent frequency and magnitude."""
+    _validate_codec_snake_beta(inputs, alpha, beta)
+    return dispatch_kernel(
+        AUDIO_CODEC_SNAKE_BETA,
+        inputs,
+        alpha,
+        beta,
         backend=backend,
     )
 

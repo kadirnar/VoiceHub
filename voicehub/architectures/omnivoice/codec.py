@@ -18,6 +18,7 @@ from torch.nn import functional
 
 from voicehub.architectures.hubert import HubertModel
 from voicehub.architectures.omnivoice.configuration import HiggsAcousticConfig, HiggsAudioV2Config
+from voicehub.kernels.codecs import CodecSnakeKernelOptimizable
 from voicehub.processing.waveform import resample_waveform_kaiser
 
 
@@ -41,18 +42,16 @@ class HiggsAudioOutput:
     audio_values: Tensor
 
 
-class Snake1d(nn.Module):
+class Snake1d(CodecSnakeKernelOptimizable, nn.Module):
     """Periodic activation used by the published DAC encoder and decoder."""
 
     def __init__(self, hidden_size: int) -> None:
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(1, hidden_size, 1))
+        self._initialize_codec_kernel_backend()
 
     def forward(self, hidden_states: Tensor) -> Tensor:
-        shape = hidden_states.shape
-        values = hidden_states.reshape(shape[0], shape[1], -1)
-        values = values + (self.alpha + 1e-9).reciprocal() * torch.sin(self.alpha * values).square()
-        return values.reshape(shape)
+        return self._codec_snake(hidden_states, self.alpha)
 
 
 class DacResidualUnit(nn.Module):

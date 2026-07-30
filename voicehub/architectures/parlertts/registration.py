@@ -65,6 +65,7 @@ def create_parlertts_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
+                "llm-tts-codec",
                 "description-conditioned-tts",
                 "flan-t5-text-encoder",
                 "delayed-parallel-codebooks",

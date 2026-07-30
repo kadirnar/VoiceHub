@@ -69,6 +69,12 @@ def create_chatterbox_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
+                "llm-tts-codec",
+                "diffusion-family",
+                "diffusion-kind-conditional-flow-matching",
+                "diffusion-operation-denoiser",
+                "diffusion-operation-classifier-free-guidance",
+                "diffusion-operation-euler-solver",
                 "zero-shot-voice-cloning",
                 "native-bpe-tokenizer",
                 "native-s3tokenizer",
@@ -83,6 +89,13 @@ def create_chatterbox_architecture_spec() -> ArchitectureSpec:
         upstream_revision=CHATTERBOX_SOURCE_REVISION,
         license_id=CHATTERBOX_SOURCE_LICENSE,
         metadata={
+            "diffusion_architecture_kind":
+            "conditional-flow-matching",
+            "diffusion_operations": (
+                "denoiser",
+                "classifier-free-guidance",
+                "euler-solver",
+            ),
             "implementation":
             "voicehub-native",
             "tensor_backend":

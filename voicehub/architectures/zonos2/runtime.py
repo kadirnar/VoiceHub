@@ -257,8 +257,7 @@ class NativeZonos2Runtime:
             device=self.device,
             dtype=torch.long,
         )
-        quantized = dac.quantizer.from_codes(codes)[0]
-        return dac.decode(quantized).float().squeeze(0).squeeze(0).cpu()
+        return dac.decode_codes(codes).float().squeeze(0).squeeze(0).cpu()
 
     def prepare_training_batch(
         self,

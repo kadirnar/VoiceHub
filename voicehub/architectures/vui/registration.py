@@ -47,6 +47,7 @@ def create_vui_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", ),
             features=(
+                "llm-tts-codec",
                 "byte-tokenizer",
                 "delayed-codebooks",
                 "fluac-codec",

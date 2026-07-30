@@ -719,6 +719,8 @@ class VibeVoiceCodecEncoderOutput:
 class VibeVoiceAcousticTokenizer(nn.Module):
     """Full 1.5B codec, or decoder-only realtime codec."""
 
+    deterministic_codec_targets = ("encode", )
+
     def __init__(
         self,
         config: VibeVoiceLegacyTokenizerConfig | dict[str, Any],

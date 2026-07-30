@@ -8,6 +8,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint as _torch_checkpoint
 
+from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
+
 from .conditioning import SPEAKER_INVERSION_UNCOND_MODES, SpeakerInversionEmbedding
 from .configuration import IrodoriModelConfig as ModelConfig
 
@@ -68,7 +70,7 @@ class RMSNorm(nn.Module):
         return (x * self.weight).to(x_dtype)
 
 
-class LowRankAdaLN(nn.Module):
+class LowRankAdaLN(DiffusionModulationKernelOptimizable, nn.Module):
     """Echo-style low-rank AdaLN that returns both modulated activations and a
     residual gate."""
 
@@ -92,6 +94,7 @@ class LowRankAdaLN(nn.Module):
             nn.init.zeros_(self.scale_up.bias)
         if self.gate_up.bias is not None:
             nn.init.zeros_(self.gate_up.bias)
+        self._initialize_diffusion_kernel_backend()
 
     def forward(self, x: torch.Tensor, cond_embed: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         shift, scale, gate = cond_embed.chunk(3, dim=-1)
@@ -102,7 +105,11 @@ class LowRankAdaLN(nn.Module):
         x_dtype = x.dtype
         x = x.float()
         x = x * torch.rsqrt((x * x).mean(dim=-1, keepdim=True) + self.eps)
-        x = x * (1.0 + scale) + shift
+        x = self._diffusion_modulate(
+            x,
+            shift.to(x.dtype),
+            scale.to(x.dtype),
+        )
         gate = torch.tanh(gate)
         return x.to(x_dtype), gate
 

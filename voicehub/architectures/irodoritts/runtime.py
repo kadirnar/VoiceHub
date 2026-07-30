@@ -12,7 +12,7 @@ from typing import Any
 import torch
 
 from voicehub.checkpointing import SafeTensorReader
-from voicehub.optimization.protocols import OptimizationCompileTarget
+from voicehub.optimization.protocols import OptimizationCompileTarget, OptimizationModuleRoot
 from voicehub.processing.waveform import load_pcm_wave, resample_waveform
 
 from .checkpoint import load_irodori_safetensors
@@ -226,6 +226,21 @@ class InferenceRuntime:
                 "decode_latent",
             ),
         )
+
+    def optimization_module_roots(self, ) -> tuple[OptimizationModuleRoot, ...]:
+        """Expose the native DiT and codec without reparenting either graph."""
+        codec_root = (self.codec if isinstance(self.codec, torch.nn.Module) else self.codec.model)
+        return (
+            OptimizationModuleRoot("model", self.model),
+            OptimizationModuleRoot("codec", codec_root),
+        )
+
+    def state_dict(self) -> dict[str, torch.Tensor]:
+        """Return stable runtime-owned checkpoint keys for selector safety."""
+        codec_root = (self.codec if isinstance(self.codec, torch.nn.Module) else self.codec.model)
+        state = {f"model.{name}": value for name, value in self.model.state_dict().items()}
+        state.update({f"codec.{name}": value for name, value in codec_root.state_dict().items()})
+        return state
 
     @classmethod
     def from_key(cls, key: RuntimeKey) -> InferenceRuntime:

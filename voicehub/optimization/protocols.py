@@ -37,6 +37,7 @@ class OptimizationCompileTarget:
     label: str
     owner: Any
     attribute: str
+    component: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -49,6 +50,12 @@ class OptimizationCompileTarget:
             "attribute",
             _label(self.attribute, name="attribute"),
         )
+        if self.component is not None:
+            object.__setattr__(
+                self,
+                "component",
+                _label(self.component, name="component"),
+            )
         if self.owner is None:
             raise ValueError("`owner` must not be None.")
         if not callable(getattr(self.owner, self.attribute, None)):

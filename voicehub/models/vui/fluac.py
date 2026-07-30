@@ -17,6 +17,7 @@ from torch.nn import Module
 from torch.nn.utils.parametrizations import weight_norm
 
 from voicehub.hub import resolve_pretrained_file
+from voicehub.kernels.codecs import CodecSnakeKernelOptimizable
 from voicehub.models.vui.utils import decompile_state_dict
 
 
@@ -281,16 +282,17 @@ def snake(x, alpha):
     return x
 
 
-class Snake1d(nn.Module):
+class Snake1d(CodecSnakeKernelOptimizable, nn.Module):
     """Learnable Snake activation for 1-D signals with per-channel
     frequency."""
 
     def __init__(self, channels):
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(1, channels, 1))
+        self._initialize_codec_kernel_backend()
 
     def forward(self, x):
-        return snake(x, self.alpha)
+        return self._codec_snake(x, self.alpha)
 
 
 def init_weights(m):

@@ -65,12 +65,18 @@ def create_irodori_architecture_spec() -> ArchitectureSpec:
             batched_inference=True,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", "sdpa"),
+            optimization_passes=("compile", "sdpa", "custom-kernels"),
             features=(
+                "diffusion-family",
+                "diffusion-kind-rectified-flow",
+                "diffusion-operation-denoiser",
+                "diffusion-operation-classifier-free-guidance",
+                "diffusion-operation-euler-solver",
                 "48-khz-waveform",
                 "caption-conditioning",
                 "classifier-free-guidance",
                 "duration-prediction",
+                "fused-diffusion-modulation-kernels",
                 "full-model-finetuning",
                 "native-dacvae",
                 "raw-audio-finetuning",
@@ -84,6 +90,13 @@ def create_irodori_architecture_spec() -> ArchitectureSpec:
         upstream_revision=IRODORI_SOURCE_REVISION,
         license_id=IRODORI_SOURCE_LICENSE,
         metadata={
+            "diffusion_architecture_kind":
+            "rectified-flow",
+            "diffusion_operations": (
+                "denoiser",
+                "classifier-free-guidance",
+                "euler-solver",
+            ),
             "implementation":
             "voicehub-native",
             "tensor_backend":

@@ -1671,6 +1671,16 @@ _BUILTIN_TRAINING_SPECS = (
                 "sequence_dim": -1,
                 "padding_value": 1_025,
             },
+            "wav": {
+                "sequence_dim": -1,
+                "padding_value": 0.0,
+                "length_field": "wav_lengths",
+            },
+            "audio_values": {
+                "sequence_dim": -1,
+                "padding_value": 0.0,
+                "length_field": "wav_lengths",
+            },
             "cond_mels": {
                 "sequence_dim": -1,
                 "padding_value": 0.0,

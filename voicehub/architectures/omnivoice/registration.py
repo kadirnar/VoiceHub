@@ -78,6 +78,7 @@ def create_omnivoice_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", ),
             features=(
+                "llm-tts-codec",
                 "bidirectional-qwen3-backbone",
                 "classifier-free-guidance",
                 "frozen-higgs-audio-v2",

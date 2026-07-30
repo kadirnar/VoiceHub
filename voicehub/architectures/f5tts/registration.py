@@ -64,6 +64,12 @@ def create_f5tts_architecture_spec() -> ArchitectureSpec:
                 "custom-kernels",
             ),
             features=(
+                "diffusion-family",
+                "diffusion-kind-conditional-flow-matching",
+                "diffusion-operation-denoiser",
+                "diffusion-operation-classifier-free-guidance",
+                "diffusion-operation-euler-solver",
+                "diffusion-operation-midpoint-solver",
                 "voice-cloning",
                 "conditional-flow-matching",
                 "classifier-free-guidance",
@@ -81,6 +87,14 @@ def create_f5tts_architecture_spec() -> ArchitectureSpec:
         upstream_revision=F5TTS_SOURCE_REVISION,
         license_id=F5TTS_SOURCE_LICENSE,
         metadata={
+            "diffusion_architecture_kind":
+            "conditional-flow-matching",
+            "diffusion_operations": (
+                "denoiser",
+                "classifier-free-guidance",
+                "euler-solver",
+                "midpoint-solver",
+            ),
             "implementation":
             "voicehub-native",
             "tensor_backend":

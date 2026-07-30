@@ -42,6 +42,15 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
     def native_runtime(self):
         return self._runtime
 
+    def _tts_optimization_runtime(self, mode):
+        """Include the optional native speech tokenizer during inference."""
+        normalized_mode = self._optimization_mode(mode)
+        if normalized_mode.value == "inference":
+            if self._runtime is None:
+                raise RuntimeError("Native CosyVoice runtime was not loaded.")
+            return self._runtime
+        return super()._tts_optimization_runtime(normalized_mode)
+
     def _load_pretrained_model(self) -> None:
         from voicehub.architectures.cosyvoice_native.runtime import CosyVoiceNativeRuntime, load_cosyvoice_runtime
 
@@ -109,10 +118,21 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
         seed = model_inputs.get("seed")
         if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
             raise ValueError("`seed` must be a non-negative integer or None.")
-        if model_inputs.get("speaker_audio_path") is not None:
+        prompt_audio = model_inputs.get("prompt_audio")
+        speaker_audio_path = model_inputs.get("speaker_audio_path")
+        if prompt_audio is not None and speaker_audio_path is not None:
+            raise ValueError("Use either `prompt_audio` or the `speaker_audio_path` alias, "
+                             "not both.")
+        raw_prompt = (prompt_audio if prompt_audio is not None else speaker_audio_path)
+        raw_tokenizer_missing = (self._runtime is None or not self._runtime.supports_raw_speech_tokens)
+        if raw_prompt is not None and raw_tokenizer_missing:
             raise ValueError(
-                "Raw reference audio requires the frozen speech tokenizer "
-                "and speaker encoder. Supply precomputed prompt tensors.")
+                "Raw prompt audio requires an attached native CosyVoice "
+                "speech tokenizer. Supply `prompt_speech_tokens` or load an "
+                "artifact containing `speech_tokenizer.safetensors`.")
+        if (raw_prompt is not None and model_inputs.get("prompt_speech_tokens") is not None):
+            raise ValueError("Supply either raw prompt audio or `prompt_speech_tokens`, "
+                             "not both.")
 
     def _generate(
         self,
@@ -122,6 +142,8 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
         speaker_embedding,
         instruction: str | None = None,
         prompt_speech_tokens=None,
+        prompt_audio=None,
+        prompt_audio_sample_rate: int | None = None,
         prompt_features=None,
         seed: int | None = None,
         min_new_tokens: int | None = None,
@@ -132,9 +154,12 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
         flow_steps: int | None = None,
         speaker_audio_path: str | None = None,
     ) -> TTSOutput:
-        del speaker_audio_path
         if self._runtime is None:
             raise RuntimeError("Native CosyVoice runtime was not loaded.")
+        if prompt_audio is not None and speaker_audio_path is not None:
+            raise ValueError("Use either `prompt_audio` or `speaker_audio_path`, not both.")
+        if prompt_audio is None:
+            prompt_audio = speaker_audio_path
         values = dict(self.config.generation_config)
         values.update({
             name: value
@@ -152,6 +177,8 @@ class CosyVoiceForTextToSpeech(PreTrainedTTSModel):
             speaker_embedding=speaker_embedding,
             instruction=instruction,
             prompt_speech_tokens=prompt_speech_tokens,
+            prompt_audio=prompt_audio,
+            prompt_audio_sample_rate=prompt_audio_sample_rate,
             prompt_features=prompt_features,
             seed=seed,
             **values,

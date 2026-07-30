@@ -4,17 +4,31 @@
   "checkpoint_config_sha256": "ef262b1454dd2a77e1461b0b2cd53e19b8a7624cc131b837d36df67356bc75e8",
   "checkpoint_revision": "6c2b0d75eae4b7047358e3b6bd9325f857d43f77",
   "checkpoint_vocab_sha256": "928260878a59da8a72a2a5b7687fea29d5106137669d90945430fe17e415304a",
+  "dvae_artifact": {
+    "filename": "dvae.pth",
+    "sha256": "b29bc227d410d4991e0a8c09b858f77415013eeb9fba9650258e96095557d97a",
+    "size_bytes": 210514388,
+    "stored_element_count": 52616784,
+    "tensor_count": 53
+  },
   "implementation_license": "MPL-2.0",
+  "mel_stats_artifact": {
+    "filename": "mel_stats.pth",
+    "sha256": "1f69422a8a8f344c4fca2f0c6b8d41d2151d6615b7321e48e6bb15ae949b119c",
+    "size_bytes": 1067
+  },
   "model_license": "Coqui Public Model License",
   "model_license_url": "https://coqui.ai/cpml",
-  "policy": "VoiceHub-owned PyTorch port. The published model.pth is accepted only at an explicit, one-time restricted legacy conversion boundary; steady-state loading is strict Safetensors.",
+  "policy": "VoiceHub-owned PyTorch port. Published model.pth, dvae.pth, and mel_stats.pth files are accepted only at explicit, one-time restricted legacy conversion boundaries; steady-state loading is strict Safetensors. DVAE artifacts remain separate from the inference model checkpoint.",
   "source_files": [
     "TTS/tts/models/xtts.py",
+    "TTS/tts/layers/xtts/dvae.py",
     "TTS/tts/layers/xtts/gpt.py",
     "TTS/tts/layers/xtts/gpt_inference.py",
     "TTS/tts/layers/xtts/hifigan_decoder.py",
     "TTS/tts/layers/xtts/latent_encoder.py",
-    "TTS/tts/layers/xtts/perceiver_encoder.py"
+    "TTS/tts/layers/xtts/perceiver_encoder.py",
+    "TTS/tts/layers/xtts/trainer/gpt_trainer.py"
   ],
   "upstream": "https://github.com/coqui-ai/TTS",
   "upstream_revision": "dbf1a08a0d4e47fdad6172e433eeb34bc6b13b4e"

@@ -10,6 +10,8 @@ from typing import TypeAlias
 import torch
 from torch import Tensor, nn
 
+from voicehub.optimization.protocols import OptimizationCompileTarget
+
 from .configuration import (
     EncodecConfig,
     encodec_24khz_config,
@@ -275,15 +277,19 @@ class EncodecModel(nn.Module):
         if self.segment_length is None:
             if len(encoded_frames) != 1:
                 raise ValueError("Non-segmented Encodec expects exactly one frame.")
-            return self._decode_frame(encoded_frames[0])
-        decoded = [self._decode_frame(frame) for frame in encoded_frames]
+            return self._decode_frame_unchecked(*encoded_frames[0])
+        decoded = [self._decode_frame_unchecked(*frame) for frame in encoded_frames]
         stride = self.segment_stride
         if stride is None:  # guarded by segment_length above
             raise RuntimeError("Segmented Encodec has no segment stride.")
         return linear_overlap_add(decoded, stride)
 
-    def _decode_frame(self, encoded_frame: EncodedFrame) -> Tensor:
-        codes, scale = encoded_frame
+    def _decode_frame_unchecked(
+        self,
+        codes: Tensor,
+        scale: Tensor | None,
+    ) -> Tensor:
+        """Decode one already validated frame without tensor-to-host sync."""
         embedding = self.quantizer.decode(codes.transpose(0, 1))
         output = self.decoder(embedding)
         if scale is not None:
@@ -292,6 +298,26 @@ class EncodecModel(nn.Module):
                 dtype=output.dtype,
             ).view(-1, 1, 1)
         return output
+
+    def codec_optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        if mode == "inference":
+            return (OptimizationCompileTarget(
+                "codec.decode.encodec.decode_frame",
+                self,
+                "_decode_frame_unchecked",
+                component="decode",
+            ), )
+        if mode == "training":
+            return (OptimizationCompileTarget(
+                "codec.forward.encodec.forward",
+                self,
+                "forward",
+                component="forward",
+            ), )
+        raise ValueError(f"Unsupported optimization mode {mode!r}.")
 
     def forward_quantized(self, value: Tensor) -> EncodecTrainingOutput:
         """Run the differentiable straight-through fine-tuning path."""

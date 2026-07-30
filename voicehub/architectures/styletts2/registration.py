@@ -61,6 +61,11 @@ def create_styletts2_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", ),
             features=(
+                "diffusion-family",
+                "diffusion-kind-style-diffusion",
+                "diffusion-operation-denoiser",
+                "diffusion-operation-classifier-free-guidance",
+                "diffusion-operation-adpm2-solver",
                 "multispeaker-style-diffusion",
                 "voice-cloning",
                 "multispeaker-reference-style-required",
@@ -76,6 +81,13 @@ def create_styletts2_architecture_spec() -> ArchitectureSpec:
         upstream_revision=STYLETTS2_SOURCE_REVISION,
         license_id=STYLETTS2_SOURCE_LICENSE,
         metadata={
+            "diffusion_architecture_kind":
+            "style-diffusion",
+            "diffusion_operations": (
+                "denoiser",
+                "classifier-free-guidance",
+                "adpm2-solver",
+            ),
             "implementation":
             "voicehub-native",
             "tensor_backend":

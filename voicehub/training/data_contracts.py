@@ -683,16 +683,70 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
         "sample_rate":
         24_000,
         "readiness":
-        TTSDataReadiness.PREPROCESSED,
+        TTSDataReadiness.INTEGRATED,
         "variants": (
+            _variant(
+                "llm-raw-audio",
+                required=("text", ),
+                one_of=((
+                    "speech_audio",
+                    "audio",
+                    "waveform",
+                    "audio_path",
+                ), ),
+                at_most_one_of=((
+                    "speech_audio",
+                    "audio",
+                    "waveform",
+                    "audio_path",
+                ), ),
+                forbidden=("speech_tokens", ),
+                requires_one_of=(
+                    (
+                        "speech_audio",
+                        (
+                            "speech_sampling_rate",
+                            "sampling_rate",
+                            "sample_rate",
+                        ),
+                    ),
+                    (
+                        "audio",
+                        (
+                            "speech_sampling_rate",
+                            "sampling_rate",
+                            "sample_rate",
+                        ),
+                    ),
+                    (
+                        "waveform",
+                        (
+                            "speech_sampling_rate",
+                            "sampling_rate",
+                            "sample_rate",
+                        ),
+                    ),
+                ),
+                description=(
+                    "Text plus raw audio for the frozen native S3Tokenizer. "
+                    "Tensor-like audio declares its source rate; PCM WAVE "
+                    "paths use `audio_path` and carry their own rate."),
+            ),
             _variant(
                 "llm-record",
                 required=("text", "speech_tokens"),
+                forbidden=(
+                    "speech_audio",
+                    "audio",
+                    "waveform",
+                    "audio_path",
+                ),
                 description=(
-                    "Text plus offline speech tokens for the turnkey native "
+                    "Text plus precomputed speech tokens for the native "
                     "CosyVoice language-model dataset."),
                 preprocessed=True,
-            ), ),
+            ),
+        ),
     },
     "llasa": {
         "sample_rate":
@@ -1077,10 +1131,28 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
                 ),
                 one_of=(("cond_mels", "cond_latents"), ),
                 description=(
-                    "Offline-tokenized native XTTS GPT inputs. Frozen legacy "
-                    "DVAE/audio conversion remains outside the trainer."),
+                    "Precomputed native XTTS GPT inputs; this remains the "
+                    "zero-DVAE-overhead training path."),
                 preprocessed=True,
-            ), ),
+            ),
+            _variant(
+                "native-gpt-waveform",
+                required=(
+                    "text_inputs",
+                    "text_lengths",
+                ),
+                one_of=(
+                    ("wav", "audio_values"),
+                    ("cond_mels", "cond_latents"),
+                ),
+                at_most_one_of=(("wav", "audio_values"), ),
+                forbidden=("audio_codes", ),
+                description=(
+                    "Tokenized text and conditioning plus waveform audio; "
+                    "the separately loaded native frozen DVAE produces targets."),
+                preprocessed=True,
+            ),
+        ),
     },
     "vibevoice": {
         "sample_rate":

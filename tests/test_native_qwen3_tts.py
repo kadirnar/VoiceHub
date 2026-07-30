@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import base64
+import inspect
 import io
 import json
 import tempfile
@@ -29,6 +30,7 @@ from voicehub.architectures.qwen3_tts.modeling import Qwen3TTSForConditionalGene
 from voicehub.architectures.qwen3_tts.registration import create_qwen3_tts_architecture_spec
 from voicehub.architectures.qwen3_tts.runtime import _load_reference_audio, load_qwen3_tts_runtime
 from voicehub.architectures.qwen3_tts.tokenization import EXPECTED_TTS_TOKEN_IDS
+from voicehub.optimization.codecs import discover_codec_compile_targets
 from voicehub.tokenization import encode_gpt2_token
 
 
@@ -683,6 +685,59 @@ class NativeQwen3TTSTests(unittest.TestCase):
                 actual = target(codes)
         torch.testing.assert_close(waveform.detach(), actual)
 
+    def test_speech_decoder_optimizer_targets_capture_safe_inner_boundary(self):
+        torch.manual_seed(14)
+        config = _tiny_decoder()
+        decoder = Qwen3TTSSpeechDecoder(config).eval()
+        codes = torch.randint(
+            0,
+            config.codebook_size,
+            (1, config.num_quantizers, 3),
+        )
+        target, = discover_codec_compile_targets(
+            decoder,
+            mode="inference",
+        )
+        self.assertEqual(target.label, "codec.decode.qwen3_tts.decode_codes")
+        self.assertEqual(target.attribute, "_decode_codes_unchecked")
+        self.assertEqual(target.component, "decode")
+        source = inspect.getsource(getattr(type(decoder), target.attribute))
+        for value_sync in (
+                "bool(",
+                ".item(",
+                ".any(",
+                ".tolist(",
+                ".numpy(",
+        ):
+            self.assertNotIn(value_sync, source)
+
+        with mock.patch.object(
+                decoder,
+                "_decode_codes_unchecked",
+                wraps=decoder._decode_codes_unchecked,
+        ) as inner:
+            expected = decoder(codes)
+        inner.assert_called_once_with(codes)
+
+        with mock.patch.object(
+                decoder,
+                "_validate_codes",
+                side_effect=AssertionError("validation entered capture target"),
+        ):
+            actual = getattr(target.owner, target.attribute)(codes)
+        torch.testing.assert_close(actual, expected)
+
+        invalid = codes.clone()
+        invalid[..., 0] = config.codebook_size
+        with mock.patch.object(
+                decoder,
+                "_decode_codes_unchecked",
+                wraps=decoder._decode_codes_unchecked,
+        ) as inner:
+            with self.assertRaisesRegex(ValueError, "outside"):
+                decoder(invalid)
+        inner.assert_not_called()
+
     def test_portable_runtime_export_reloads_without_upstream_runtime(self):
         torch.manual_seed(17)
         architecture = _portable_architecture()
@@ -745,7 +800,14 @@ class NativeQwen3TTSTests(unittest.TestCase):
         self.assertTrue(spec.capabilities.training)
         self.assertIn("sdpa", spec.capabilities.optimization_passes)
         self.assertIn("voice-clone-xvector", spec.capabilities.features)
-        self.assertIn("not yet native", spec.metadata["icl_reference_encoder"])
+        self.assertIn(
+            "Checkpoint-exact native Mimi-derived encoder",
+            spec.metadata["icl_reference_encoder"],
+        )
+        self.assertIn(
+            "native-speech-tokenizer-encoder",
+            spec.capabilities.features,
+        )
 
 
 if __name__ == "__main__":

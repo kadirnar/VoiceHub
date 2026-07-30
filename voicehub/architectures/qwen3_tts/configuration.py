@@ -7,6 +7,7 @@ checkpoints created by newer compatible releases remain loadable.
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
@@ -367,9 +368,174 @@ class Qwen3TTSDecoderConfig:
 
 
 @dataclass(slots=True)
+class Qwen3TTSEncoderConfig:
+    """Checkpoint-exact configuration of the published 12 Hz encoder.
+
+    Qwen subclasses the Apache-2.0 Transformers 4.57.3 Mimi encoder and
+    removes its decoder.  These fields are the complete construction
+    contract used by the pinned speech-tokenizer checkpoint.
+    """
+
+    sampling_rate: int = 24_000
+    frame_rate: float = 12.5
+    audio_channels: int = 1
+    hidden_size: int = 512
+    num_filters: int = 64
+    num_residual_layers: int = 1
+    upsampling_ratios: tuple[int, ...] = (8, 6, 5, 4)
+    kernel_size: int = 7
+    last_kernel_size: int = 3
+    residual_kernel_size: int = 3
+    dilation_growth_rate: int = 2
+    use_causal_conv: bool = True
+    pad_mode: str = "constant"
+    compress: int = 2
+    trim_right_ratio: float = 1.0
+    codebook_size: int = 2048
+    codebook_dim: int = 256
+    num_quantizers: int = 32
+    use_conv_shortcut: bool = False
+    vector_quantization_hidden_dimension: int = 256
+    num_semantic_quantizers: int = 1
+    upsample_groups: int = 512
+    num_hidden_layers: int = 8
+    intermediate_size: int = 2048
+    num_attention_heads: int = 8
+    num_key_value_heads: int = 8
+    head_dim: int = 64
+    hidden_act: str = "gelu"
+    max_position_embeddings: int = 8000
+    initializer_range: float = 0.02
+    norm_eps: float = 1e-5
+    use_cache: bool = False
+    use_streaming: bool = False
+    rope_theta: float = 10_000.0
+    sliding_window: int = 250
+    attention_dropout: float = 0.0
+    layer_scale_initial_scale: float = 0.01
+    attention_bias: bool = False
+    normalize: bool = False
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(
+        cls,
+        values: Mapping[str, Any] | None,
+    ) -> Qwen3TTSEncoderConfig:
+        source = _mapping(values, name="encoder_config")
+        frame_rate = source.pop("_frame_rate", source.pop("frame_rate", 12.5))
+        known = {
+            name: source.pop(name)
+            for name in tuple(source) if name in cls.__dataclass_fields__ and name != "extra"
+        }
+        if "upsampling_ratios" in known:
+            known["upsampling_ratios"] = tuple(int(item) for item in known["upsampling_ratios"])
+        result = cls(
+            frame_rate=float(frame_rate),
+            **known,
+            extra=source,
+        )
+        result.validate()
+        return result
+
+    @property
+    def encodec_frame_rate(self) -> int:
+        return math.ceil(self.sampling_rate / math.prod(self.upsampling_ratios))
+
+    @property
+    def downsample_factor(self) -> int:
+        if math.isclose(
+                float(self.encodec_frame_rate),
+                float(self.frame_rate),
+        ):
+            return 1
+        return 2
+
+    @property
+    def total_downsample(self) -> int:
+        return math.prod(self.upsampling_ratios) * self.downsample_factor
+
+    def validate(self) -> None:
+        for name in (
+                "sampling_rate",
+                "audio_channels",
+                "hidden_size",
+                "num_filters",
+                "num_residual_layers",
+                "kernel_size",
+                "last_kernel_size",
+                "residual_kernel_size",
+                "dilation_growth_rate",
+                "compress",
+                "codebook_size",
+                "codebook_dim",
+                "num_quantizers",
+                "vector_quantization_hidden_dimension",
+                "num_semantic_quantizers",
+                "upsample_groups",
+                "num_hidden_layers",
+                "intermediate_size",
+                "num_attention_heads",
+                "num_key_value_heads",
+                "head_dim",
+                "max_position_embeddings",
+                "sliding_window",
+        ):
+            _positive(getattr(self, name), name=name)
+        if any(value <= 0 for value in self.upsampling_ratios):
+            raise ValueError("Encoder sampling ratios must be positive.")
+        if self.audio_channels != 1:
+            raise ValueError("Published Qwen3-TTS encoder checkpoints are mono.")
+        if not self.use_causal_conv or self.pad_mode != "constant":
+            raise ValueError("Published Qwen3-TTS encoders require constant-padded "
+                             "causal convolutions.")
+        if self.use_streaming or self.use_cache:
+            raise ValueError(
+                "The published Qwen3-TTS encoder graph is non-streaming "
+                "and does not use a KV cache.")
+        if self.hidden_act != "gelu":
+            raise ValueError("Published Qwen3-TTS encoder checkpoints require GELU.")
+        if self.hidden_size % self.num_attention_heads:
+            raise ValueError("Encoder hidden size must divide evenly across heads.")
+        if self.num_attention_heads % self.num_key_value_heads:
+            raise ValueError("Encoder attention heads must divide across key/value heads.")
+        if self.head_dim * self.num_attention_heads != self.hidden_size:
+            raise ValueError("Encoder head dimensions do not reconstruct hidden size.")
+        if self.vector_quantization_hidden_dimension != self.codebook_dim:
+            raise ValueError("Qwen3-TTS encoder VQ hidden and codebook dimensions must match.")
+        if self.num_semantic_quantizers >= self.num_quantizers:
+            raise ValueError("Encoder requires acoustic residual quantizers.")
+        if self.frame_rate <= 0:
+            raise ValueError("Encoder frame rate must be positive.")
+        ratio = self.encodec_frame_rate / self.frame_rate
+        if not (math.isclose(ratio, 1.0) or math.isclose(ratio, 2.0)):
+            raise ValueError(
+                "Native Qwen3-TTS supports the published Mimi frame-rate "
+                "conversion of one or two only.")
+        if self.initializer_range <= 0 or self.norm_eps <= 0:
+            raise ValueError("Encoder initialization and normalization constants must be positive.")
+        if self.rope_theta <= 1 or self.layer_scale_initial_scale <= 0:
+            raise ValueError("Encoder RoPE and layer-scale constants are invalid.")
+        if not 0 <= self.attention_dropout < 1:
+            raise ValueError("Encoder attention dropout must be in [0, 1).")
+        if self.trim_right_ratio != 1.0:
+            raise ValueError("Published encoder checkpoints require full right trimming.")
+        if self.normalize:
+            raise ValueError("Published Qwen3-TTS encoder checkpoints are not normalized.")
+
+    def to_dict(self) -> dict[str, Any]:
+        output = asdict(self)
+        extra = output.pop("extra")
+        output["_frame_rate"] = output.pop("frame_rate")
+        output["upsampling_ratios"] = list(output["upsampling_ratios"])
+        output.update(extra)
+        return output
+
+
+@dataclass(slots=True)
 class Qwen3TTSTokenizerConfig:
     decoder_config: Qwen3TTSDecoderConfig = field(default_factory=Qwen3TTSDecoderConfig)
-    encoder_config: dict[str, Any] = field(default_factory=dict)
+    encoder_config: Qwen3TTSEncoderConfig | None = None
     encoder_valid_num_quantizers: int = 16
     input_sample_rate: int = 24_000
     output_sample_rate: int = 24_000
@@ -382,7 +548,8 @@ class Qwen3TTSTokenizerConfig:
     def from_dict(cls, values: Mapping[str, Any]) -> Qwen3TTSTokenizerConfig:
         source = _mapping(values, name="speech tokenizer config")
         decoder = Qwen3TTSDecoderConfig.from_dict(source.pop("decoder_config", None))
-        encoder = _mapping(source.pop("encoder_config", None), name="encoder_config")
+        encoder_values = source.pop("encoder_config", None)
+        encoder = (None if encoder_values is None else Qwen3TTSEncoderConfig.from_dict(encoder_values))
         known = {
             name: source.pop(name)
             for name in tuple(source)
@@ -412,11 +579,20 @@ class Qwen3TTSTokenizerConfig:
             raise ValueError("Tokenizer and decoder codebook counts disagree.")
         if self.decode_upsample_rate != self.decoder_config.total_upsample:
             raise ValueError("Tokenizer decode rate does not match decoder upsampling.")
+        if self.encoder_config is not None:
+            self.encoder_config.validate()
+            if self.input_sample_rate != self.encoder_config.sampling_rate:
+                raise ValueError("Tokenizer input rate does not match its encoder.")
+            if self.encoder_valid_num_quantizers > self.encoder_config.num_quantizers:
+                raise ValueError("Tokenizer requests unavailable encoder codebooks.")
+            if self.encode_downsample_rate != self.encoder_config.total_downsample:
+                raise ValueError("Tokenizer encode rate does not match encoder downsampling.")
 
     def to_dict(self) -> dict[str, Any]:
         output = asdict(self)
         extra = output.pop("extra")
         output["decoder_config"] = self.decoder_config.to_dict()
+        output["encoder_config"] = (None if self.encoder_config is None else self.encoder_config.to_dict())
         output.update(extra)
         return output
 
@@ -491,6 +667,7 @@ __all__ = [
     "Qwen3TTSArchitectureConfig",
     "Qwen3TTSCodePredictorConfig",
     "Qwen3TTSDecoderConfig",
+    "Qwen3TTSEncoderConfig",
     "Qwen3TTSSpeakerEncoderConfig",
     "Qwen3TTSTalkerConfig",
     "Qwen3TTSTokenizerConfig",

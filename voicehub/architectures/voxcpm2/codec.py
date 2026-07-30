@@ -15,6 +15,7 @@ from torch.nn import functional
 from torch.nn.utils import weight_norm
 
 from voicehub.architectures.voxcpm2.configuration import VoxCPMAudioVAEConfig
+from voicehub.kernels.codecs import CodecSnakeKernelOptimizable
 
 
 def _weighted_conv1d(*args, **kwargs):
@@ -76,17 +77,15 @@ def _weighted_causal_transpose_conv1d(*args, **kwargs):
     return weight_norm(_CausalTransposeConv1d(*args, **kwargs))
 
 
-class _Snake1d(nn.Module):
+class _Snake1d(CodecSnakeKernelOptimizable, nn.Module):
 
     def __init__(self, channels: int, *, device=None, dtype=None) -> None:
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(1, channels, 1, device=device, dtype=dtype))
+        self._initialize_codec_kernel_backend()
 
     def forward(self, inputs: Tensor) -> Tensor:
-        shape = inputs.shape
-        inputs = inputs.reshape(shape[0], shape[1], -1)
-        inputs = (inputs + (self.alpha + 1e-9).reciprocal() * torch.sin(self.alpha * inputs).pow(2))
-        return inputs.reshape(shape)
+        return self._codec_snake(inputs, self.alpha)
 
 
 class _CausalResidualUnit(nn.Module):
@@ -492,6 +491,8 @@ class _CausalDecoder(nn.Module):
 
 class VoxCPMAudioVAE(nn.Module):
     """Asymmetric 16 kHz encoder / 48 kHz decoder from VoxCPM2."""
+
+    deterministic_codec_targets = ("encode", )
 
     def __init__(
         self,

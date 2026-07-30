@@ -99,6 +99,11 @@ adversarial windows, codec/LLM token budgets, and diffusion frame/EMA policies
 separate, adds architecture-compatible compile/Triton/CUDA/FA4 plans, and ties
 every default to a pinned original implementation.
 
+Use the focused [diffusion and flow optimization](diffusion-optimization.md)
+and [neural codec optimization](codec-optimization.md) guides for the active
+model inventories, safe repeated graph boundaries, native codec component
+catalog, fixed-shape CUDA Graph rules, and exact versus approximate policies.
+
 For production LLM-based synthesis, use the
 [vLLM and SGLang serving guide](llm-serving.md). It separates flat token
 generation from complete Omni speech pipelines, lists every verified

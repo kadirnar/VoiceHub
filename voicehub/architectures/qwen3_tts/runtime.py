@@ -21,11 +21,15 @@ from voicehub.architectures.qwen3_tts.artifacts import Qwen3TTSArtifacts, resolv
 from voicehub.architectures.qwen3_tts.checkpoint import (
     export_qwen3_tts_decoder,
     export_qwen3_tts_model,
+    export_qwen3_tts_speech_tokenizer,
+    inspect_qwen3_tts_checkpoint,
     load_qwen3_tts_decoder_checkpoint,
+    load_qwen3_tts_encoder_checkpoint,
     load_qwen3_tts_model_checkpoint,
 )
 from voicehub.architectures.qwen3_tts.codec import Qwen3TTSSpeechDecoder
 from voicehub.architectures.qwen3_tts.configuration import Qwen3TTSArchitectureConfig, Qwen3TTSTokenizerConfig
+from voicehub.architectures.qwen3_tts.encoder import Qwen3TTSSpeechEncoder
 from voicehub.architectures.qwen3_tts.metadata import QWEN3_TTS_CHECKPOINTS
 from voicehub.architectures.qwen3_tts.modeling import Qwen3TTSForConditionalGeneration
 from voicehub.architectures.qwen3_tts.tokenization import Qwen3TTSTextTokenizer
@@ -209,10 +213,17 @@ class _SpeechDecoderExporter:
             raise ValueError("Native Qwen3-TTS speech export is Safetensors-only.")
         target = Path(directory).expanduser()
         target.mkdir(parents=True, exist_ok=True)
-        export_qwen3_tts_decoder(
-            self.runtime.speech_decoder,
-            target / "model.safetensors",
-        )
+        if self.runtime.speech_encoder is None:
+            export_qwen3_tts_decoder(
+                self.runtime.speech_decoder,
+                target / "model.safetensors",
+            )
+        else:
+            export_qwen3_tts_speech_tokenizer(
+                self.runtime.speech_encoder,
+                self.runtime.speech_decoder,
+                target / "model.safetensors",
+            )
         (target / "config.json").write_text(
             json.dumps(
                 self.runtime.tokenizer_config.to_dict(),
@@ -297,6 +308,7 @@ class NativeQwen3TTSRuntime:
     model: Qwen3TTSForConditionalGeneration
     speech_decoder: Qwen3TTSSpeechDecoder
     generation_config: dict[str, Any]
+    speech_encoder: Qwen3TTSSpeechEncoder | None = None
 
     @property
     def device(self) -> torch.device:
@@ -305,6 +317,8 @@ class NativeQwen3TTSRuntime:
     def parameters(self):
         """Iterate optimizer-owned modules for runtime capability discovery."""
         yield from self.model.parameters()
+        if self.speech_encoder is not None:
+            yield from self.speech_encoder.parameters()
         yield from self.speech_decoder.parameters()
 
     def state_dict(self) -> dict[str, Tensor]:
@@ -314,17 +328,28 @@ class NativeQwen3TTSRuntime:
             f"speech_decoder.{name}": value
             for name, value in self.speech_decoder.state_dict().items()
         })
+        if self.speech_encoder is not None:
+            state.update({
+                f"speech_encoder.{name}": value
+                for name, value in self.speech_encoder.state_dict().items()
+            })
         return state
 
     def optimization_module_roots(self):
         """Expose the exact native module roots owned by this runtime."""
-        return (
+        roots = [
             OptimizationModuleRoot("model", self.model),
             OptimizationModuleRoot(
                 "speech_decoder",
                 self.speech_decoder,
             ),
-        )
+        ]
+        if self.speech_encoder is not None:
+            roots.append(OptimizationModuleRoot(
+                "speech_encoder",
+                self.speech_encoder,
+            ))
+        return tuple(roots)
 
     def optimization_compile_targets(self, mode: str):
         """Expose graph boundaries that synthesis or training really
@@ -344,7 +369,7 @@ class NativeQwen3TTSRuntime:
             )
         if mode != "inference":
             raise ValueError(f"Unsupported optimization mode {mode!r}.")
-        return (
+        targets = [
             OptimizationCompileTarget(
                 "model.talker.generate_codes",
                 self.model.talker,
@@ -355,14 +380,136 @@ class NativeQwen3TTSRuntime:
                 self.speech_decoder,
                 "chunked_decode",
             ),
-        )
+        ]
+        if self.speech_encoder is not None:
+            targets.append(
+                OptimizationCompileTarget(
+                    "speech_encoder.forward",
+                    self.speech_encoder,
+                    "forward",
+                ))
+        return tuple(targets)
 
-    def _speaker_embedding(self, reference_audio: Any) -> Tensor:
+    def _speaker_embedding_from_audio(
+        self,
+        audio: NativeAudio,
+    ) -> Tensor:
         if self.model.speaker_encoder is None:
             raise ValueError("Only Qwen3-TTS Base checkpoints expose a speaker encoder.")
-        audio = _load_reference_audio(reference_audio)
         features = qwen3_tts_speaker_mel(audio.waveform.to(self.device)).to(dtype=self.model.dtype)
         return self.model.speaker_encoder(features)[0]
+
+    def _speaker_embedding(self, reference_audio: Any) -> Tensor:
+        return self._speaker_embedding_from_audio(_load_reference_audio(reference_audio))
+
+    def _reference_codes(self, audio: NativeAudio) -> Tensor:
+        if self.speech_encoder is None:
+            raise NotImplementedError(
+                "This Qwen3-TTS artifact does not include a native "
+                "speech-tokenizer encoder.")
+        parameter = next(self.speech_encoder.parameters())
+        waveform = audio.waveform.to(
+            device=parameter.device,
+            dtype=parameter.dtype,
+        ).unsqueeze(0)
+        return self.speech_encoder.encode(waveform)[0]
+
+    def _icl_prompt(
+        self,
+        *,
+        target_ids: Tensor,
+        reference_text: str,
+        reference_codes: Tensor,
+        tts_pad: Tensor,
+        tts_eos: Tensor,
+        non_streaming_mode: bool,
+    ) -> tuple[Tensor, Tensor]:
+        """Build the published Base-model reference-text/code alignment."""
+        if not reference_text.strip():
+            raise ValueError("Qwen3-TTS ICL cloning requires reference text.")
+        talker = self.model.talker
+        groups = self.config.talker_config.num_code_groups
+        if (reference_codes.ndim != 2 or reference_codes.shape[1] != groups or reference_codes.shape[0] == 0):
+            raise ValueError("Qwen3-TTS reference codes must be "
+                             "[frames, codebooks].")
+        if (reference_codes.dtype == torch.bool or reference_codes.is_floating_point() or
+                reference_codes.is_complex()):
+            raise TypeError("Qwen3-TTS reference codes must be integers.")
+        reference_codes = reference_codes.to(
+            device=self.device,
+            dtype=torch.long,
+        )
+        reference_ids = self.tokenizer.encode_tensor(
+            f"<|im_start|>assistant\n{reference_text}<|im_end|>\n",
+            device=self.device,
+        )
+        text_ids = torch.cat(
+            (
+                reference_ids[:, 3:-2],
+                target_ids[:, 3:-5],
+            ),
+            dim=-1,
+        )
+        text_embeddings = talker.text_projection(talker.get_text_embeddings()(text_ids))
+        text_embeddings = torch.cat(
+            (text_embeddings, tts_eos),
+            dim=1,
+        )
+
+        codebook_embeddings = [talker.get_input_embeddings()(reference_codes[:, :1])]
+        codebook_embeddings.extend(
+            table(reference_codes[:, index:index + 1]) for index, table in enumerate(
+                talker.code_predictor.get_input_embeddings(),
+                start=1,
+            ))
+        codec_embeddings = torch.cat(
+            codebook_embeddings,
+            dim=1,
+        ).sum(dim=1).unsqueeze(0)
+        codec_bos = talker.get_input_embeddings()(
+            torch.tensor(
+                [[self.config.talker_config.codec_bos_id]],
+                device=self.device,
+                dtype=torch.long,
+            ))
+        codec_embeddings = torch.cat(
+            (codec_bos, codec_embeddings),
+            dim=1,
+        )
+
+        text_length = text_embeddings.shape[1]
+        codec_length = codec_embeddings.shape[1]
+        if non_streaming_mode:
+            codec_padding = talker.get_input_embeddings()(
+                torch.full(
+                    (1, text_length),
+                    self.config.talker_config.codec_pad_id,
+                    device=self.device,
+                    dtype=torch.long,
+                ))
+            prompt = torch.cat(
+                (
+                    text_embeddings + codec_padding,
+                    codec_embeddings + tts_pad,
+                ),
+                dim=1,
+            )
+            return prompt, tts_pad
+        if text_length > codec_length:
+            return (
+                text_embeddings[:, :codec_length] + codec_embeddings,
+                text_embeddings[:, codec_length:],
+            )
+        padding = tts_pad.expand(
+            -1,
+            codec_length - text_length,
+            -1,
+        )
+        text_embeddings = torch.cat(
+            (text_embeddings, padding),
+            dim=1,
+        )
+        return text_embeddings + codec_embeddings, tts_pad
 
     def _prompt(
         self,
@@ -373,6 +520,8 @@ class NativeQwen3TTSRuntime:
         instruction: str,
         speaker_embedding: Tensor | None,
         non_streaming_mode: bool,
+        reference_text: str | None = None,
+        reference_codes: Tensor | None = None,
     ) -> tuple[Tensor, Tensor, Tensor]:
         if not isinstance(text, str) or not text.strip():
             raise ValueError("Qwen3-TTS text must be non-empty.")
@@ -465,6 +614,26 @@ class NativeQwen3TTSRuntime:
                 dim=1,
             ) + codec_embeddings[:, :-1])
         prompt = torch.cat((role, aligned_prefix), dim=1)
+        if reference_codes is not None:
+            if reference_text is None:
+                raise ValueError("Qwen3-TTS ICL reference codes require reference text.")
+            icl_prompt, trailing = self._icl_prompt(
+                target_ids=input_ids,
+                reference_text=reference_text,
+                reference_codes=reference_codes,
+                tts_pad=tts_pad,
+                tts_eos=tts_eos,
+                non_streaming_mode=non_streaming_mode,
+            )
+            prompt = torch.cat((prompt, icl_prompt), dim=1)
+            pieces.append(prompt)
+            prompt = torch.cat(pieces, dim=1)
+            attention_mask = torch.ones(
+                prompt.shape[:2],
+                device=self.device,
+                dtype=torch.long,
+            )
+            return prompt, attention_mask, trailing
         first_text = (
             talker.text_projection(talker.get_text_embeddings()(input_ids[:, 3:4])) +
             codec_embeddings[:, -1:])
@@ -543,6 +712,8 @@ class NativeQwen3TTSRuntime:
         speaker_embedding: Tensor | None,
         non_streaming_mode: bool,
         seed: int | None,
+        reference_text: str | None = None,
+        reference_codes: Tensor | None = None,
         **generation_options: Any,
     ) -> tuple[list[Tensor], int]:
         options = dict(generation_options)
@@ -556,6 +727,8 @@ class NativeQwen3TTSRuntime:
             instruction=instruction,
             speaker_embedding=speaker_embedding,
             non_streaming_mode=non_streaming_mode,
+            reference_text=reference_text,
+            reference_codes=reference_codes,
         )
         codes = self.model.talker.generate_codes(
             prompt_embeds=prompt,
@@ -566,7 +739,21 @@ class NativeQwen3TTSRuntime:
         )
         if codes.shape[0] == 0:
             raise RuntimeError("Qwen3-TTS generated no speech codes.")
-        waveform = self.speech_decoder.chunked_decode(codes.transpose(0, 1).unsqueeze(0), )[0, 0]
+        decode_codes = codes
+        reference_frames = 0
+        if reference_codes is not None:
+            reference_codes = reference_codes.to(
+                device=codes.device,
+                dtype=codes.dtype,
+            )
+            decode_codes = torch.cat(
+                (reference_codes, codes),
+                dim=0,
+            )
+            reference_frames = reference_codes.shape[0]
+        waveform = self.speech_decoder.chunked_decode(decode_codes.transpose(0, 1).unsqueeze(0), )[0, 0]
+        if reference_frames:
+            waveform = waveform[reference_frames * self.tokenizer_config.decode_upsample_rate:]
         return [waveform], self.tokenizer_config.output_sample_rate
 
     def generate_custom_voice(
@@ -631,14 +818,15 @@ class NativeQwen3TTSRuntime:
     ) -> tuple[list[Tensor], int]:
         if self.config.tts_model_type != "base":
             raise ValueError("Voice cloning requires a Base checkpoint.")
+        audio = _load_reference_audio(ref_audio)
+        speaker_embedding = self._speaker_embedding_from_audio(audio)
+        reference_codes = None
+        reference_text = None
         if not x_vector_only_mode:
-            raise NotImplementedError(
-                "Native Qwen3-TTS ICL cloning requires speech-tokenizer "
-                "encoder codes. The exact published decoder and x-vector "
-                "cloning are available now; set `x_vector_only_mode=True` "
-                "until the Mimi-derived reference encoder port lands.")
-        del ref_text
-        speaker_embedding = self._speaker_embedding(ref_audio)
+            if ref_text is None or not ref_text.strip():
+                raise ValueError("Qwen3-TTS ICL cloning requires `ref_text`.")
+            reference_codes = self._reference_codes(audio)
+            reference_text = ref_text
         return self._synthesize(
             text,
             language=language,
@@ -647,6 +835,8 @@ class NativeQwen3TTSRuntime:
             speaker_embedding=speaker_embedding,
             non_streaming_mode=non_streaming_mode,
             seed=seed,
+            reference_text=reference_text,
+            reference_codes=reference_codes,
             **generation_options,
         )
 
@@ -671,10 +861,17 @@ class NativeQwen3TTSRuntime:
             destination / "model.safetensors",
             state_override=model_state_override,
         )
-        export_qwen3_tts_decoder(
-            self.speech_decoder,
-            speech / "model.safetensors",
-        )
+        if self.speech_encoder is None:
+            export_qwen3_tts_decoder(
+                self.speech_decoder,
+                speech / "model.safetensors",
+            )
+        else:
+            export_qwen3_tts_speech_tokenizer(
+                self.speech_encoder,
+                self.speech_decoder,
+                speech / "model.safetensors",
+            )
         (destination / "config.json").write_text(
             json.dumps(
                 self.config.to_dict(),
@@ -711,7 +908,7 @@ class NativeQwen3TTSRuntime:
                     "format": "voicehub-qwen3-tts-v1",
                     "source": self.artifacts.source,
                     "revision": self.artifacts.revision,
-                    "speech_encoder_included": False,
+                    "speech_encoder_included": (self.speech_encoder is not None),
                 },
                 indent=2,
                 sort_keys=True,
@@ -763,6 +960,34 @@ def load_qwen3_tts_runtime(
         source=artifacts.source,
         revision=artifacts.revision,
     )
+    verify_official_tokenizer = (
+        artifacts.source in QWEN3_TTS_CHECKPOINTS and
+        artifacts.revision == QWEN3_TTS_CHECKPOINTS[artifacts.source]["revision"])
+    encoder = None
+    encoder_report = inspect_qwen3_tts_checkpoint(
+        artifacts.speech_checkpoint,
+        prefix="encoder.",
+    )
+    if verify_official_tokenizer and tokenizer_config.encoder_config is None:
+        raise ValueError("Published Qwen3-TTS tokenizer config is missing its encoder.")
+    load_speech_encoder = (
+        tokenizer_config.encoder_config is not None and
+        bool(encoder_report.tensor_count or verify_official_tokenizer))
+    if load_speech_encoder:
+        assert tokenizer_config.encoder_config is not None
+        encoder = Qwen3TTSSpeechEncoder(
+            tokenizer_config.encoder_config,
+            valid_num_quantizers=(tokenizer_config.encoder_valid_num_quantizers),
+            initialize=False,
+            dtype=dtype,
+        )
+        load_qwen3_tts_encoder_checkpoint(
+            encoder,
+            artifacts.speech_checkpoint,
+            device=resolved_device,
+            dtype=dtype,
+            verify_official=verify_official_tokenizer,
+        )
     decoder = Qwen3TTSSpeechDecoder(
         tokenizer_config.decoder_config,
         initialize=False,
@@ -773,9 +998,7 @@ def load_qwen3_tts_runtime(
         artifacts.speech_checkpoint,
         device=resolved_device,
         dtype=dtype,
-        verify_official=(
-            artifacts.source in QWEN3_TTS_CHECKPOINTS and
-            artifacts.revision == QWEN3_TTS_CHECKPOINTS[artifacts.source]["revision"]),
+        verify_official=verify_official_tokenizer,
     )
     tokenizer = Qwen3TTSTextTokenizer.from_files(
         artifacts.vocab,
@@ -791,6 +1014,7 @@ def load_qwen3_tts_runtime(
         tokenizer=tokenizer,
         processor=Qwen3TTSProcessor(tokenizer),
         model=model,
+        speech_encoder=encoder,
         speech_decoder=decoder,
         generation_config=dict(generation),
     )
@@ -801,9 +1025,15 @@ def load_qwen3_tts_runtime(
         runtime.speech_decoder.eval()
         for parameter in runtime.speech_decoder.parameters():
             parameter.requires_grad_(False)
+        if runtime.speech_encoder is not None:
+            runtime.speech_encoder.eval()
+            for parameter in runtime.speech_encoder.parameters():
+                parameter.requires_grad_(False)
     else:
         runtime.model.eval()
         runtime.speech_decoder.eval()
+        if runtime.speech_encoder is not None:
+            runtime.speech_encoder.eval()
     return runtime
 
 

@@ -10,7 +10,11 @@ from pathlib import Path
 import torch
 from torch import Tensor, nn
 
-from voicehub.architectures.cosyvoice_native.metadata import COSYVOICE3_LEGACY_FILES, NATIVE_COSYVOICE_FORMAT
+from voicehub.architectures.cosyvoice_native.metadata import (
+    COSYVOICE3_LEGACY_FILES,
+    COSYVOICE3_SPEECH_TOKENIZER_FILE,
+    NATIVE_COSYVOICE_FORMAT,
+)
 from voicehub.checkpointing import SafeTensorReader, save_safetensors
 from voicehub.checkpointing.errors import CheckpointCompatibilityError, CheckpointIntegrityError
 
@@ -113,6 +117,9 @@ def _materialize_runtime_buffers(
 ) -> None:
     """Rebuild deterministic non-persistent buffers after a meta load."""
     target_device = torch.device(device)
+    materialize = getattr(model, "materialize_runtime_buffers", None)
+    if callable(materialize):
+        materialize(target_device)
     for module in model.modules():
         inverse_frequency = module._buffers.get("inverse_frequency")
         if (isinstance(inverse_frequency, Tensor) and inverse_frequency.device.type == "meta" and
@@ -150,10 +157,19 @@ def validate_cosyvoice_checkpoint(
     with SafeTensorReader(report.path) as reader:
         _validate_layout(model, reader)
     if require_official_inventory:
-        try:
-            expected = COSYVOICE3_LEGACY_FILES[component]
-        except KeyError as error:
-            raise ValueError("Official inventory exists only for llm, flow, and hift.") from error
+        if component == "speech_tokenizer":
+            expected = {
+                "tensor_count": COSYVOICE3_SPEECH_TOKENIZER_FILE["initializer_count"],
+                "parameter_count": COSYVOICE3_SPEECH_TOKENIZER_FILE["parameter_count"],
+                "header_fingerprint": COSYVOICE3_SPEECH_TOKENIZER_FILE["native_header_fingerprint"],
+            }
+        else:
+            try:
+                expected = COSYVOICE3_LEGACY_FILES[component]
+            except KeyError as error:
+                raise ValueError(
+                    "Official inventory exists only for llm, flow, hift, "
+                    "and speech_tokenizer.") from error
         actual = (
             report.tensor_count,
             report.parameter_count,
@@ -330,6 +346,180 @@ def convert_audited_cosyvoice_legacy_checkpoint(
         raise CheckpointCompatibilityError(
             "Converted CosyVoice inventory does not match the immutable audit.")
     return destination
+
+
+def _onnx_tensor_dtype(onnx, value) -> str:
+    return onnx.TensorProto.DataType.Name(value.data_type)
+
+
+def _audited_speech_tokenizer_state(
+    source: Path,
+    *,
+    onnx,
+) -> dict[str, Tensor]:
+    """Extract tensors for the explicit out-of-runtime conversion tool."""
+    graph_model = onnx.load(str(source), load_external_data=False)
+    graph = graph_model.graph
+    expected = COSYVOICE3_SPEECH_TOKENIZER_FILE
+    opsets = {entry.domain: int(entry.version) for entry in graph_model.opset_import}
+    if opsets != {"": expected["opset"]}:
+        raise CheckpointCompatibilityError(f"Speech-tokenizer ONNX opsets differ from the audit: {opsets!r}.")
+    if len(graph.node) != expected["graph_node_count"]:
+        raise CheckpointCompatibilityError("Speech-tokenizer ONNX node count differs from the audit.")
+    if tuple(value.name for value in graph.input) != (
+            "feats",
+            "feats_length",
+    ) or tuple(value.name for value in graph.output) != ("indices", ):
+        raise CheckpointCompatibilityError(
+            "Speech-tokenizer ONNX input/output contract differs from the audit.")
+
+    initializers = {value.name: value for value in graph.initializer}
+    if len(initializers) != expected["initializer_count"]:
+        raise CheckpointCompatibilityError("Speech-tokenizer ONNX initializer count differs from the audit.")
+    inventory = {
+        name: (
+            _onnx_tensor_dtype(onnx, value),
+            tuple(value.dims),
+        )
+        for name, value in initializers.items()
+    }
+    if tensor_inventory_fingerprint(inventory) != expected["onnx_initializer_fingerprint"]:
+        raise CheckpointCompatibilityError(
+            "Speech-tokenizer ONNX initializer inventory differs from the audit.")
+    parameter_count = sum(
+        value.number_of_elements if hasattr(value, "number_of_elements") else torch.Size(value.dims).numel()
+        for value in initializers.values())
+    if parameter_count != expected["parameter_count"]:
+        raise CheckpointCompatibilityError("Speech-tokenizer ONNX parameter count differs from the audit.")
+
+    nodes: dict[str, object] = {}
+    for node in graph.node:
+        if node.name in nodes:
+            raise CheckpointCompatibilityError(f"Speech-tokenizer ONNX repeats node name {node.name!r}.")
+        nodes[node.name] = node
+    consumed: set[str] = set()
+
+    def from_initializer(name: str, *, transpose: bool = False) -> Tensor:
+        try:
+            value = initializers[name]
+        except KeyError as error:
+            raise CheckpointCompatibilityError(
+                f"Speech-tokenizer initializer {name!r} is missing.") from error
+        if name in consumed:
+            raise CheckpointCompatibilityError(f"Speech-tokenizer initializer {name!r} is mapped twice.")
+        consumed.add(name)
+        array = onnx.numpy_helper.to_array(value).copy()
+        tensor = torch.from_numpy(array)
+        if transpose:
+            if tensor.ndim != 2:
+                raise CheckpointCompatibilityError(f"Initializer {name!r} cannot be transposed as a matrix.")
+            tensor = tensor.t().contiguous()
+        return tensor
+
+    def node_parameter(
+        name: str,
+        *,
+        transpose: bool = False,
+        index: int | None = None,
+    ) -> Tensor:
+        try:
+            node = nodes[name]
+        except KeyError as error:
+            raise CheckpointCompatibilityError(f"Speech-tokenizer ONNX node {name!r} is missing.") from error
+        if index is not None:
+            if index >= len(node.input) or node.input[index] not in initializers:
+                raise CheckpointCompatibilityError(
+                    f"Speech-tokenizer node {name!r} has no audited parameter "
+                    f"at input {index}.")
+            parameter_name = node.input[index]
+        else:
+            candidates = [value for value in node.input if value in initializers]
+            if len(candidates) != 1:
+                raise CheckpointCompatibilityError(
+                    f"Speech-tokenizer node {name!r} must reference exactly "
+                    f"one parameter, found {candidates!r}.")
+            parameter_name = candidates[0]
+        return from_initializer(
+            parameter_name,
+            transpose=transpose,
+        )
+
+    state = {
+        "encoder.conv1.weight": node_parameter("/conv1/Conv", index=1),
+        "encoder.conv1.bias": node_parameter("/conv1/Conv", index=2),
+        "encoder.conv2.weight": node_parameter("/conv2/Conv", index=1),
+        "encoder.conv2.bias": node_parameter("/conv2/Conv", index=2),
+    }
+    for index in range(12):
+        graph_prefix = f"/blocks.{index}"
+        state_prefix = f"encoder.blocks.{index}"
+        state.update({
+            f"{state_prefix}.attn.query.weight":
+            node_parameter(
+                f"{graph_prefix}/attn/query/MatMul",
+                transpose=True,
+            ),
+            f"{state_prefix}.attn.query.bias":
+            node_parameter(f"{graph_prefix}/attn/query/Add"),
+            f"{state_prefix}.attn.key.weight":
+            node_parameter(
+                f"{graph_prefix}/attn/key/MatMul",
+                transpose=True,
+            ),
+            f"{state_prefix}.attn.value.weight":
+            node_parameter(
+                f"{graph_prefix}/attn/value/MatMul",
+                transpose=True,
+            ),
+            f"{state_prefix}.attn.value.bias":
+            node_parameter(f"{graph_prefix}/attn/value/Add"),
+            f"{state_prefix}.attn.out.weight":
+            node_parameter(
+                f"{graph_prefix}/attn/out/MatMul",
+                transpose=True,
+            ),
+            f"{state_prefix}.attn.out.bias":
+            node_parameter(f"{graph_prefix}/attn/out/Add"),
+            f"{state_prefix}.attn.fsmn_block.weight":
+            from_initializer(f"blocks.{index}.attn.fsmn_block.weight"),
+            f"{state_prefix}.attn_ln.weight":
+            node_parameter(f"{graph_prefix}/attn_ln/Mul"),
+            f"{state_prefix}.attn_ln.bias":
+            node_parameter(f"{graph_prefix}/attn_ln/Add_1"),
+            f"{state_prefix}.mlp.0.weight":
+            node_parameter(
+                f"{graph_prefix}/mlp/mlp.0/MatMul",
+                transpose=True,
+            ),
+            f"{state_prefix}.mlp.0.bias":
+            node_parameter(f"{graph_prefix}/mlp/mlp.0/Add"),
+            f"{state_prefix}.mlp.2.weight":
+            node_parameter(
+                f"{graph_prefix}/mlp/mlp.2/MatMul",
+                transpose=True,
+            ),
+            f"{state_prefix}.mlp.2.bias":
+            node_parameter(f"{graph_prefix}/mlp/mlp.2/Add"),
+            f"{state_prefix}.mlp_ln.weight":
+            node_parameter(f"{graph_prefix}/mlp_ln/Mul"),
+            f"{state_prefix}.mlp_ln.bias":
+            node_parameter(f"{graph_prefix}/mlp_ln/Add_1"),
+        })
+    state.update({
+        "quantizer._codebook.project_down.weight":
+        node_parameter(
+            "/quantizer/project_in/MatMul",
+            transpose=True,
+        ),
+        "quantizer._codebook.project_down.bias":
+        node_parameter("/quantizer/project_in/Add"),
+    })
+    if consumed != set(initializers):
+        unused = sorted(set(initializers) - consumed)
+        raise CheckpointCompatibilityError(
+            "Speech-tokenizer conversion did not consume every audited "
+            f"initializer: {unused[:12]!r}.")
+    return state
 
 
 __all__ = [

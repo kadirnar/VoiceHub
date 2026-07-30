@@ -244,6 +244,89 @@ def _fused_bias_gelu_forward(
     tl.store(output_pointer + offsets, output, mask=mask)
 
 
+@triton.jit
+def _fused_modulate_forward(
+    hidden_pointer,
+    shift_pointer,
+    scale_pointer,
+    output_pointer,
+    size,
+    DIMENSION_1: tl.constexpr,
+    DIMENSION_2: tl.constexpr,
+    SHIFT_STRIDE_0: tl.constexpr,
+    SHIFT_STRIDE_1: tl.constexpr,
+    SHIFT_STRIDE_2: tl.constexpr,
+    SCALE_STRIDE_0: tl.constexpr,
+    SCALE_STRIDE_1: tl.constexpr,
+    SCALE_STRIDE_2: tl.constexpr,
+    BLOCK_SIZE: tl.constexpr,
+):
+    offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < size
+    dimension_2_offsets = offsets % DIMENSION_2
+    outer_offsets = offsets // DIMENSION_2
+    dimension_1_offsets = outer_offsets % DIMENSION_1
+    dimension_0_offsets = outer_offsets // DIMENSION_1
+    shift_offsets = (
+        dimension_0_offsets * SHIFT_STRIDE_0 + dimension_1_offsets * SHIFT_STRIDE_1 +
+        dimension_2_offsets * SHIFT_STRIDE_2)
+    scale_offsets = (
+        dimension_0_offsets * SCALE_STRIDE_0 + dimension_1_offsets * SCALE_STRIDE_1 +
+        dimension_2_offsets * SCALE_STRIDE_2)
+    hidden = tl.load(hidden_pointer + offsets, mask=mask).to(tl.float32)
+    shift = tl.load(shift_pointer + shift_offsets, mask=mask).to(tl.float32)
+    scale = tl.load(scale_pointer + scale_offsets, mask=mask).to(tl.float32)
+    tl.store(
+        output_pointer + offsets,
+        hidden * (1.0 + scale) + shift,
+        mask=mask,
+    )
+
+
+@triton.jit
+def _codec_snake_forward(
+    input_pointer,
+    alpha_pointer,
+    output_pointer,
+    size,
+    channels,
+    inner_size,
+    BLOCK_SIZE: tl.constexpr,
+):
+    offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < size
+    channel_offsets = (offsets // inner_size) % channels
+    values = tl.load(input_pointer + offsets, mask=mask).to(tl.float32)
+    alpha = tl.load(alpha_pointer + channel_offsets, mask=mask).to(tl.float32)
+    denominator = alpha + 1e-9
+    sine = tl.sin(alpha * values)
+    output = values + sine * sine / denominator
+    tl.store(output_pointer + offsets, output, mask=mask)
+
+
+@triton.jit
+def _codec_snake_beta_forward(
+    input_pointer,
+    alpha_pointer,
+    beta_pointer,
+    output_pointer,
+    size,
+    channels,
+    inner_size,
+    BLOCK_SIZE: tl.constexpr,
+):
+    offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < size
+    channel_offsets = (offsets // inner_size) % channels
+    values = tl.load(input_pointer + offsets, mask=mask).to(tl.float32)
+    alpha = tl.load(alpha_pointer + channel_offsets, mask=mask).to(tl.float32)
+    beta = tl.load(beta_pointer + channel_offsets, mask=mask).to(tl.float32)
+    denominator = beta + 1e-9
+    sine = tl.sin(alpha * values)
+    output = values + sine * sine / denominator
+    tl.store(output_pointer + offsets, output, mask=mask)
+
+
 def _empty_contiguous(tensor: torch.Tensor) -> torch.Tensor:
     return torch.empty_like(
         tensor,
@@ -257,6 +340,25 @@ def _launch_grid(size):
         return (triton.cdiv(size, meta["BLOCK_SIZE"]), )
 
     return grid
+
+
+def _padded_broadcast_strides(
+    tensor: torch.Tensor,
+    output: torch.Tensor,
+) -> tuple[int, int, int]:
+    """Return rank-three strides, with zero strides for broadcast axes."""
+    padding = output.ndim - tensor.ndim
+    shape = (1, ) * padding + tuple(tensor.shape)
+    strides = (0, ) * padding + tuple(tensor.stride())
+    output_shape = (1, ) * (3 - output.ndim) + tuple(output.shape)
+    shape = (1, ) * (3 - len(shape)) + shape
+    strides = (0, ) * (3 - len(strides)) + strides
+    return tuple(
+        0 if source_size == 1 and target_size != 1 else stride for source_size, target_size, stride in zip(
+            shape,
+            output_shape,
+            strides,
+        ))
 
 
 @torch.library.triton_op(
@@ -466,6 +568,108 @@ def fused_bias_gelu_triton(
     return output
 
 
+@torch.library.triton_op(
+    "voicehub_triton::fused_modulate",
+    mutates_args=(),
+)
+def fused_modulate_triton(
+    hidden_states: torch.Tensor,
+    shift: torch.Tensor,
+    scale: torch.Tensor,
+) -> torch.Tensor:
+    """Execute broadcast DiT modulation without expanded intermediates."""
+    if not 1 <= hidden_states.ndim <= 3:
+        raise ValueError("The Triton fused modulation kernel supports tensor ranks 1 through 3.")
+    hidden_contiguous = hidden_states.contiguous()
+    output_shape = torch.broadcast_shapes(
+        hidden_states.shape,
+        shift.shape,
+        scale.shape,
+    )
+    if output_shape != hidden_states.shape:
+        raise ValueError("Triton fused modulation cannot expand the hidden-state shape.")
+    shift_strides = _padded_broadcast_strides(shift, hidden_states)
+    scale_strides = _padded_broadcast_strides(scale, hidden_states)
+    padded_shape = (1, ) * (3 - hidden_states.ndim) + tuple(hidden_states.shape)
+    output = _empty_contiguous(hidden_contiguous)
+    if output.numel() == 0:
+        return output
+    torch.library.wrap_triton(_fused_modulate_forward)[_launch_grid(output.numel())](
+        hidden_contiguous,
+        shift,
+        scale,
+        output,
+        output.numel(),
+        DIMENSION_1=padded_shape[1],
+        DIMENSION_2=padded_shape[2],
+        SHIFT_STRIDE_0=shift_strides[0],
+        SHIFT_STRIDE_1=shift_strides[1],
+        SHIFT_STRIDE_2=shift_strides[2],
+        SCALE_STRIDE_0=scale_strides[0],
+        SCALE_STRIDE_1=scale_strides[1],
+        SCALE_STRIDE_2=scale_strides[2],
+        BLOCK_SIZE=_BLOCK_SIZE,
+    )
+    return output
+
+
+@torch.library.triton_op(
+    "voicehub_triton::codec_snake",
+    mutates_args=(),
+)
+def codec_snake_triton(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+) -> torch.Tensor:
+    """Execute the exact DAC/SNAC Snake activation as a traceable Triton op."""
+    input_contiguous = inputs.contiguous()
+    alpha_contiguous = alpha.reshape(-1).contiguous()
+    output = _empty_contiguous(input_contiguous)
+    if output.numel() == 0:
+        return output
+    inner_size = inputs.numel() // (inputs.shape[0] * inputs.shape[1])
+    torch.library.wrap_triton(_codec_snake_forward)[_launch_grid(output.numel())](
+        input_contiguous,
+        alpha_contiguous,
+        output,
+        output.numel(),
+        inputs.shape[1],
+        inner_size,
+        BLOCK_SIZE=_BLOCK_SIZE,
+    )
+    return output
+
+
+@torch.library.triton_op(
+    "voicehub_triton::codec_snake_beta",
+    mutates_args=(),
+)
+def codec_snake_beta_triton(
+    inputs: torch.Tensor,
+    alpha: torch.Tensor,
+    beta: torch.Tensor,
+) -> torch.Tensor:
+    """Execute exact SnakeBeta as a traceable Triton operation."""
+    input_contiguous = inputs.contiguous()
+    alpha_contiguous = alpha.reshape(-1).contiguous()
+    beta_contiguous = beta.reshape(-1).contiguous()
+    output = _empty_contiguous(input_contiguous)
+    if output.numel() == 0:
+        return output
+    inner_size = inputs.numel() // (inputs.shape[0] * inputs.shape[1])
+    torch.library.wrap_triton(_codec_snake_beta_forward)[_launch_grid(output.numel())](
+        input_contiguous,
+        alpha_contiguous,
+        beta_contiguous,
+        output,
+        output.numel(),
+        inputs.shape[1],
+        inner_size,
+        BLOCK_SIZE=_BLOCK_SIZE,
+    )
+    return output
+
+
 def _pair_setup_context(ctx, inputs, output) -> None:
     del output
     ctx.save_for_backward(*inputs)
@@ -519,6 +723,50 @@ def _fused_bias_gelu_backward_formula(ctx, gradient):
     return input_gradient, bias_gradient
 
 
+def _fused_modulate_backward_formula(ctx, gradient):
+    hidden_states, shift, scale = ctx.saved_tensors
+    hidden_gradient = gradient * (1.0 + scale)
+    shift_gradient = gradient.sum_to_size(shift.shape)
+    scale_gradient = (gradient * hidden_states).sum_to_size(scale.shape)
+    return hidden_gradient, shift_gradient, scale_gradient
+
+
+def _codec_snake_backward_formula(ctx, gradient):
+    inputs, alpha = ctx.saved_tensors
+    shape = inputs.shape
+    flattened = inputs.reshape(shape[0], shape[1], -1)
+    channel_alpha = alpha.reshape(1, shape[1], 1)
+    denominator = channel_alpha + 1e-9
+    angles = channel_alpha * flattened
+    sine = torch.sin(angles)
+    double_sine = torch.sin(2.0 * angles)
+    input_derivative = 1.0 + (channel_alpha / denominator) * double_sine
+    alpha_derivative = (flattened * double_sine / denominator - sine.square() / denominator.square())
+    gradient_flat = gradient.reshape_as(flattened)
+    input_gradient = (gradient_flat * input_derivative).reshape(shape)
+    alpha_gradient = (gradient_flat * alpha_derivative).sum(dim=(0, 2)).reshape(alpha.shape)
+    return input_gradient, alpha_gradient
+
+
+def _codec_snake_beta_backward_formula(ctx, gradient):
+    inputs, alpha, beta = ctx.saved_tensors
+    shape = inputs.shape
+    flattened = inputs.reshape(shape[0], shape[1], -1)
+    channel_alpha = alpha.reshape(1, shape[1], 1)
+    channel_beta = beta.reshape(1, shape[1], 1)
+    denominator = channel_beta + 1e-9
+    angles = channel_alpha * flattened
+    sine = torch.sin(angles)
+    double_sine = torch.sin(2.0 * angles)
+    gradient_flat = gradient.reshape_as(flattened)
+    input_gradient = gradient_flat * (1.0 + channel_alpha * double_sine / denominator)
+    alpha_gradient = (gradient_flat * flattened * double_sine / denominator).sum(dim=(0, 2)).reshape(
+        alpha.shape)
+    beta_gradient = (-gradient_flat * sine.square() / denominator.square()).sum(dim=(0,
+                                                                                     2)).reshape(beta.shape)
+    return input_gradient.reshape(shape), alpha_gradient, beta_gradient
+
+
 torch.library.register_autograd(
     gated_silu_triton,
     _gated_silu_backward_formula,
@@ -537,5 +785,20 @@ torch.library.register_autograd(
 torch.library.register_autograd(
     fused_bias_gelu_triton,
     _fused_bias_gelu_backward_formula,
+    setup_context=_pair_setup_context,
+)
+torch.library.register_autograd(
+    fused_modulate_triton,
+    _fused_modulate_backward_formula,
+    setup_context=_pair_setup_context,
+)
+torch.library.register_autograd(
+    codec_snake_triton,
+    _codec_snake_backward_formula,
+    setup_context=_pair_setup_context,
+)
+torch.library.register_autograd(
+    codec_snake_beta_triton,
+    _codec_snake_beta_backward_formula,
     setup_context=_pair_setup_context,
 )

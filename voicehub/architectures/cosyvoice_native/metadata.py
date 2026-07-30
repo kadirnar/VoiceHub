@@ -4,6 +4,8 @@ COSYVOICE_SOURCE_REPOSITORY = "https://github.com/FunAudioLLM/CosyVoice"
 COSYVOICE_SOURCE_REVISION = "074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc"
 COSYVOICE3_MODEL_ID = "FunAudioLLM/Fun-CosyVoice3-0.5B-2512"
 COSYVOICE3_MODEL_REVISION = "29e01c4e8d000f4bcd70751be16fa94bf3d85a18"
+S3TOKENIZER_SOURCE_REPOSITORY = "https://github.com/xingchensong/S3Tokenizer"
+S3TOKENIZER_SOURCE_REVISION = "9bf5d845b5e043ffaf4657f4942939091c7697a2"
 
 COSYVOICE3_LEGACY_FILES = {
     "llm": {
@@ -32,13 +34,28 @@ COSYVOICE3_LEGACY_FILES = {
     },
 }
 
+COSYVOICE3_SPEECH_TOKENIZER_FILE = {
+    "filename": "speech_tokenizer_v3.onnx",
+    "sha256": "23236a74175dbdda47afc66dbadd5bcb41303c467a57c261cb8539ad9db9208d",
+    "size": 969_451_503,
+    "graph_node_count": 2_810,
+    "initializer_count": 198,
+    "parameter_count": 242_009_608,
+    "onnx_initializer_fingerprint": "1744e0d777657d5d7641952c86d2729066f44a1961d76741b48b4aa6b3854f47",
+    "native_header_fingerprint": "d38ce77f1bce44629c4a4befd3bfa2be90fee6655815c9fda764d26a4d838a50",
+    "opset": 16,
+}
+
 NATIVE_COSYVOICE_FORMAT = "voicehub-native-cosyvoice-v1"
 
 __all__ = [
     "COSYVOICE3_LEGACY_FILES",
     "COSYVOICE3_MODEL_ID",
     "COSYVOICE3_MODEL_REVISION",
+    "COSYVOICE3_SPEECH_TOKENIZER_FILE",
     "COSYVOICE_SOURCE_REPOSITORY",
     "COSYVOICE_SOURCE_REVISION",
     "NATIVE_COSYVOICE_FORMAT",
+    "S3TOKENIZER_SOURCE_REPOSITORY",
+    "S3TOKENIZER_SOURCE_REVISION",
 ]

@@ -18,6 +18,8 @@ _REQUIRED = (
     "merges.txt",
     "tokenizer_config.json",
 )
+_OPTIONAL_SPEECH_TOKENIZER = "speech_tokenizer.safetensors"
+_OPTIONAL_SPEECH_TOKENIZER_CONFIG = "speech_tokenizer_config.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +31,8 @@ class CosyVoiceArtifacts:
     llm: Path
     flow: Path
     hift: Path
+    speech_tokenizer: Path | None
+    speech_tokenizer_config: Path | None
     vocab: Path
     merges: Path
     tokenizer_config: Path
@@ -47,6 +51,11 @@ def _local(root: Path) -> CosyVoiceArtifacts:
         llm=root / "llm.safetensors",
         flow=root / "flow.safetensors",
         hift=root / "hift.safetensors",
+        speech_tokenizer=(
+            root / _OPTIONAL_SPEECH_TOKENIZER if (root / _OPTIONAL_SPEECH_TOKENIZER).is_file() else None),
+        speech_tokenizer_config=(
+            root / _OPTIONAL_SPEECH_TOKENIZER_CONFIG if
+            (root / _OPTIONAL_SPEECH_TOKENIZER_CONFIG).is_file() else None),
         vocab=root / "vocab.json",
         merges=root / "merges.txt",
         tokenizer_config=root / "tokenizer_config.json",
@@ -101,6 +110,8 @@ def resolve_cosyvoice_artifacts(
         llm=files["llm.safetensors"],
         flow=files["flow.safetensors"],
         hift=files["hift.safetensors"],
+        speech_tokenizer=None,
+        speech_tokenizer_config=None,
         vocab=files["vocab.json"],
         merges=files["merges.txt"],
         tokenizer_config=files["tokenizer_config.json"],

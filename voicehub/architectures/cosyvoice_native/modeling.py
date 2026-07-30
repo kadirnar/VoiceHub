@@ -72,18 +72,32 @@ class CosyVoiceNativeModel(nn.Module):
         self,
         mode: str,
     ) -> tuple[OptimizationCompileTarget, ...]:
-        """Expose the composite boundary invoked by synthesis or training."""
+        """Expose repeated stages instead of the Python sampling loops."""
         if mode == "training":
-            attribute = "forward"
-        elif mode == "inference":
-            attribute = "synthesize"
-        else:
+            return (OptimizationCompileTarget(
+                "cosyvoice.forward",
+                self,
+                "forward",
+            ), )
+        if mode != "inference":
             raise ValueError(f"Unsupported optimization mode {mode!r}.")
-        return (OptimizationCompileTarget(
-            f"cosyvoice.{attribute}",
-            self,
-            attribute,
-        ), )
+        return (
+            OptimizationCompileTarget(
+                "cosyvoice.llm.transformer.forward",
+                self.llm.llm.model.model,
+                "forward",
+            ),
+            OptimizationCompileTarget(
+                "cosyvoice.flow.estimator.forward",
+                self.flow.decoder.estimator,
+                "forward",
+            ),
+            OptimizationCompileTarget(
+                "cosyvoice.hift.forward",
+                self.hift,
+                "forward",
+            ),
+        )
 
     def attach_discriminator(self, *, tiny: bool = False) -> None:
         """Attach the training-only adversarial graph exactly once."""

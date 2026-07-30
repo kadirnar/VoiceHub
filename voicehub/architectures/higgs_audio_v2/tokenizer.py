@@ -21,22 +21,20 @@ from voicehub.architectures.higgs_audio_v2.tokenizer_configuration import (
     HiggsAudioV2TokenizerConfig,
 )
 from voicehub.architectures.hubert import HubertModel
+from voicehub.kernels.codecs import CodecSnakeKernelOptimizable
 from voicehub.processing.waveform import resample_waveform
 
 
-class Snake1d(nn.Module):
+class Snake1d(CodecSnakeKernelOptimizable, nn.Module):
     """Periodic activation used by the released DAC graph."""
 
     def __init__(self, hidden_size: int) -> None:
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(1, hidden_size, 1))
+        self._initialize_codec_kernel_backend()
 
     def forward(self, hidden_states: Tensor) -> Tensor:
-        shape = hidden_states.shape
-        hidden_states = hidden_states.reshape(shape[0], shape[1], -1)
-        hidden_states = hidden_states + (
-            (self.alpha + 1e-9).reciprocal() * torch.sin(self.alpha * hidden_states).pow(2))
-        return hidden_states.reshape(shape)
+        return self._codec_snake(hidden_states, self.alpha)
 
 
 class DacResidualUnit(nn.Module):

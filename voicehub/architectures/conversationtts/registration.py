@@ -76,6 +76,7 @@ def create_conversationtts_architecture_spec() -> ArchitectureSpec:
                 "custom-kernels",
             ),
             features=(
+                "llm-tts-codec",
                 "autoregressive-32-codebook-audio",
                 "flash-attention-4-optional",
                 "frozen-native-mimi",

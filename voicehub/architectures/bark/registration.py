@@ -71,6 +71,7 @@ def create_bark_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", ),
             features=(
+                "llm-tts-codec",
                 "three-stage-token-generation",
                 "native-multilingual-wordpiece",
                 "speaker-history-conditioning",

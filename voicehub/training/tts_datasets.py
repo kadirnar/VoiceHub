@@ -26,6 +26,12 @@ _COMMON_ALIASES = MappingProxyType({
     "speaker_audio": "reference_audio",
 })
 _MODEL_ALIASES = MappingProxyType({
+    "cosyvoice":
+    MappingProxyType({
+        # Keep the path form distinct from in-memory ``audio`` so the
+        # CosyVoice contract can require a sampling rate only for arrays.
+        "audio_path": "audio_path",
+    }),
     "qwen3tts":
     MappingProxyType({
         "reference_audio": "ref_audio",

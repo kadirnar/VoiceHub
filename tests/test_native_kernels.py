@@ -12,8 +12,11 @@ import torch
 
 from voicehub.kernels import (
     ACTIVATION_CUDA_EXTENSION_NAME,
+    AUDIO_CODEC_SNAKE,
+    AUDIO_CODEC_SNAKE_BETA,
     CUDA_EXTENSIONS,
     DIFFUSION_FUSED_BIAS_GELU,
+    DIFFUSION_FUSED_MODULATE,
     LLM_GATED_SILU,
     VITS_FUSED_ADD_TANH_SIGMOID,
     VITS_TANH_SIGMOID_GATE,
@@ -26,11 +29,17 @@ from voicehub.kernels import (
     KernelRegistrationError,
     KernelRegistry,
     KernelSupport,
+    codec_snake,
+    codec_snake_beta,
+    codec_snake_beta_reference,
+    codec_snake_reference,
     cuda_extension_capability,
     fused_add_tanh_sigmoid,
     fused_add_tanh_sigmoid_reference,
     fused_bias_gelu,
     fused_bias_gelu_reference,
+    fused_modulate,
+    fused_modulate_reference,
     gated_silu,
     gated_silu_reference,
     load_tts_activation_cuda_extension,
@@ -147,6 +156,12 @@ print(json.dumps({
         vits_condition = torch.randn(2, 6, 1)
         inputs = torch.randn(2, 4)
         bias = torch.randn(4)
+        hidden_states = torch.randn(2, 5, 4)
+        shift = torch.randn(2, 1, 4)
+        scale = torch.randn(2, 1, 4)
+        codec_inputs = torch.randn(2, 4, 5)
+        alpha = torch.rand(4) + 0.5
+        beta = torch.rand(4) + 0.5
 
         torch.testing.assert_close(
             gated_silu(gate, up),
@@ -168,6 +183,18 @@ print(json.dumps({
             fused_bias_gelu(inputs, bias),
             fused_bias_gelu_reference(inputs, bias),
         )
+        torch.testing.assert_close(
+            fused_modulate(hidden_states, shift, scale),
+            fused_modulate_reference(hidden_states, shift, scale),
+        )
+        torch.testing.assert_close(
+            codec_snake(codec_inputs, alpha),
+            codec_snake_reference(codec_inputs, alpha),
+        )
+        torch.testing.assert_close(
+            codec_snake_beta(codec_inputs, alpha, beta),
+            codec_snake_beta_reference(codec_inputs, alpha, beta),
+        )
         for operation, args in (
             (LLM_GATED_SILU, (gate, up)),
             (VITS_TANH_SIGMOID_GATE, (activation, gate)),
@@ -176,6 +203,15 @@ print(json.dumps({
                 (vits_input, vits_condition, 3),
             ),
             (DIFFUSION_FUSED_BIAS_GELU, (inputs, bias)),
+            (
+                DIFFUSION_FUSED_MODULATE,
+                (hidden_states, shift, scale),
+            ),
+            (AUDIO_CODEC_SNAKE, (codec_inputs, alpha)),
+            (
+                AUDIO_CODEC_SNAKE_BETA,
+                (codec_inputs, alpha, beta),
+            ),
         ):
             with self.subTest(operation=operation):
                 self.assertEqual(
@@ -222,6 +258,9 @@ print(json.dumps([
     str(triton_activations.tanh_sigmoid_gate_triton),
     str(triton_activations.fused_add_tanh_sigmoid_triton),
     str(triton_activations.fused_bias_gelu_triton),
+    str(triton_activations.fused_modulate_triton),
+    str(triton_activations.codec_snake_triton),
+    str(triton_activations.codec_snake_beta_triton),
 ]))
 """
         result = subprocess.run(
@@ -238,6 +277,9 @@ print(json.dumps([
             result.stdout,
         )
         self.assertIn("voicehub_triton::fused_bias_gelu", result.stdout)
+        self.assertIn("voicehub_triton::fused_modulate", result.stdout)
+        self.assertIn("voicehub_triton::codec_snake", result.stdout)
+        self.assertIn("voicehub_triton::codec_snake_beta", result.stdout)
 
     def test_torch_fallback_gradients_cover_all_inputs_and_bias(self):
         gate = torch.randn(2, 3, dtype=torch.float64, requires_grad=True)
@@ -250,11 +292,52 @@ print(json.dumps([
         )
         inputs = torch.randn(3, 2, 4, dtype=torch.float64, requires_grad=True)
         bias = torch.randn(4, dtype=torch.float64, requires_grad=True)
+        hidden_states = torch.randn(
+            3,
+            2,
+            4,
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        shift = torch.randn(
+            3,
+            1,
+            4,
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        scale = torch.randn(
+            3,
+            1,
+            4,
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        codec_inputs = torch.randn(
+            2,
+            4,
+            5,
+            dtype=torch.float64,
+            requires_grad=True,
+        )
+        alpha = torch.rand(
+            4,
+            dtype=torch.float64,
+            requires_grad=True,
+        ) + 0.5
+        beta = torch.rand(
+            4,
+            dtype=torch.float64,
+            requires_grad=True,
+        ) + 0.5
 
         for function, arguments in (
             (gated_silu, (gate, up)),
             (tanh_sigmoid_gate, (activation, gate)),
             (fused_bias_gelu, (inputs, bias)),
+            (fused_modulate, (hidden_states, shift, scale)),
+            (codec_snake, (codec_inputs, alpha)),
+            (codec_snake_beta, (codec_inputs, alpha, beta)),
         ):
             with self.subTest(function=function.__name__):
                 output = function(
@@ -300,6 +383,9 @@ class CudaExtensionInfrastructureTests(unittest.TestCase):
                 "tanh_sigmoid_gate_kernel",
                 "fused_add_tanh_sigmoid_kernel",
                 "fused_bias_gelu_kernel",
+                "fused_modulate_kernel",
+                "codec_snake_kernel",
+                "codec_snake_beta_kernel",
         ):
             self.assertIn(kernel_name, cuda_source)
 
@@ -321,6 +407,13 @@ definitions.define(
     "-> Tensor"
 )
 definitions.define("fused_bias_gelu(Tensor input, Tensor bias) -> Tensor")
+definitions.define(
+    "fused_modulate(Tensor hidden_states, Tensor shift, Tensor scale) -> Tensor"
+)
+definitions.define("codec_snake(Tensor input, Tensor alpha) -> Tensor")
+definitions.define(
+    "codec_snake_beta(Tensor input, Tensor alpha, Tensor beta) -> Tensor"
+)
 implementations = torch.library.Library("voicehub_kernels", "IMPL", "CPU")
 implementations.impl(
     "gated_silu",
@@ -345,6 +438,34 @@ implementations.impl(
         inputs + bias,
         approximate="tanh",
     ).contiguous(),
+)
+implementations.impl(
+    "fused_modulate",
+    lambda hidden_states, shift, scale: (
+        hidden_states * (1.0 + scale) + shift
+    ).contiguous(),
+)
+implementations.impl(
+    "codec_snake",
+    lambda inputs, alpha: (
+        inputs.reshape(inputs.shape[0], inputs.shape[1], -1)
+        + torch.sin(
+            alpha.reshape(1, inputs.shape[1], 1)
+            * inputs.reshape(inputs.shape[0], inputs.shape[1], -1)
+        ).square()
+        / (alpha.reshape(1, inputs.shape[1], 1) + 1e-9)
+    ).reshape_as(inputs).contiguous(),
+)
+implementations.impl(
+    "codec_snake_beta",
+    lambda inputs, alpha, beta: (
+        inputs.reshape(inputs.shape[0], inputs.shape[1], -1)
+        + torch.sin(
+            alpha.reshape(1, inputs.shape[1], 1)
+            * inputs.reshape(inputs.shape[0], inputs.shape[1], -1)
+        ).square()
+        / (beta.reshape(1, inputs.shape[1], 1) + 1e-9)
+    ).reshape_as(inputs).contiguous(),
 )
 
 with ThreadPoolExecutor(max_workers=4) as executor:
@@ -384,6 +505,29 @@ cases = (
         (
             torch.randn(2, 4, 3).transpose(1, 2).requires_grad_(),
             torch.randn(4, requires_grad=True),
+        ),
+    ),
+    (
+        "fused_modulate",
+        (
+            torch.randn(2, 3, 4).requires_grad_(),
+            torch.randn(2, 1, 4).requires_grad_(),
+            torch.randn(2, 1, 4).requires_grad_(),
+        ),
+    ),
+    (
+        "codec_snake",
+        (
+            torch.randn(2, 5, 4).transpose(1, 2).requires_grad_(),
+            torch.ones(4, requires_grad=True),
+        ),
+    ),
+    (
+        "codec_snake_beta",
+        (
+            torch.randn(2, 5, 4).transpose(1, 2).requires_grad_(),
+            torch.ones(4, requires_grad=True),
+            torch.full((4,), 1.5, requires_grad=True),
         ),
     ),
 )
@@ -583,6 +727,42 @@ class TritonActivationKernelTests(unittest.TestCase):
                 torch.randn(256, device=device),
             ),
         )
+        self._compare_forward_and_backward(
+            fused_modulate,
+            fused_modulate_reference,
+            (
+                torch.randn(4, 8, 256, device=device),
+                torch.randn(4, 1, 256, device=device),
+                torch.randn(4, 1, 256, device=device),
+            ),
+        )
+        self._compare_forward_and_backward(
+            codec_snake,
+            codec_snake_reference,
+            (
+                torch.randn(
+                    4,
+                    128,
+                    257,
+                    device=device,
+                ).transpose(1, 2),
+                torch.rand(257, device=device) + 0.5,
+            ),
+        )
+        self._compare_forward_and_backward(
+            codec_snake_beta,
+            codec_snake_beta_reference,
+            (
+                torch.randn(
+                    4,
+                    128,
+                    257,
+                    device=device,
+                ).transpose(1, 2),
+                torch.rand(257, device=device) + 0.5,
+                torch.rand(257, device=device) + 0.5,
+            ),
+        )
 
 
 @unittest.skipUnless(
@@ -604,6 +784,17 @@ class CompiledCudaActivationKernelTests(unittest.TestCase):
         vits_condition = torch.randn(2, 128, 1, device=device)
         inputs = torch.randn(4, 8, 256, device=device)
         bias = torch.randn(256, device=device)
+        hidden_states = torch.randn(4, 8, 256, device=device)
+        shift = torch.randn(4, 1, 256, device=device)
+        scale = torch.randn(4, 1, 256, device=device)
+        codec_inputs = torch.randn(
+            4,
+            128,
+            257,
+            device=device,
+        ).transpose(1, 2)
+        alpha = torch.rand(257, device=device) + 0.5
+        beta = torch.rand(257, device=device) + 0.5
         for function, reference, arguments in (
             (gated_silu, gated_silu_reference, (gate, up)),
             (
@@ -620,6 +811,21 @@ class CompiledCudaActivationKernelTests(unittest.TestCase):
                 fused_bias_gelu,
                 fused_bias_gelu_reference,
                 (inputs, bias),
+            ),
+            (
+                fused_modulate,
+                fused_modulate_reference,
+                (hidden_states, shift, scale),
+            ),
+            (
+                codec_snake,
+                codec_snake_reference,
+                (codec_inputs, alpha),
+            ),
+            (
+                codec_snake_beta,
+                codec_snake_beta_reference,
+                (codec_inputs, alpha, beta),
             ),
         ):
             with self.subTest(function=function.__name__):

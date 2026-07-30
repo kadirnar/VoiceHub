@@ -296,12 +296,16 @@ class UniversalTTSOptimizationTests(unittest.TestCase):
     def test_default_specialization_matrix_is_semantics_driven(self):
         custom_kernel_models = {
             "conversationtts",
+            "cosyvoice",
+            "echo",
             "f5tts",
             "gptsovits",
             "inflecttts",
+            "irodoritts",
             "melotts",
             "openvoice",
             "qwen3tts",
+            "vibevoice",
             "vits",
         }
         flash_attention_models = {

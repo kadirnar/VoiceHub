@@ -89,6 +89,8 @@ provides searchable, task-oriented guides:
 - [Data preparation](https://kadirnar.github.io/voicehub/guides/data-preparation/)
 - [Training](https://kadirnar.github.io/voicehub/guides/training/)
 - [TTS optimization](https://kadirnar.github.io/voicehub/guides/tts-optimization/)
+- [Diffusion and flow optimization](https://kadirnar.github.io/voicehub/guides/diffusion-optimization/)
+- [Neural codec optimization](https://kadirnar.github.io/voicehub/guides/codec-optimization/)
 - [vLLM and SGLang TTS serving](https://kadirnar.github.io/voicehub/guides/llm-serving/)
 - [Notebook gallery](https://kadirnar.github.io/voicehub/guides/notebook/)
 - [TTS training support](https://kadirnar.github.io/voicehub/models/training-support/)
@@ -352,8 +354,8 @@ trainer.train()
 ```
 
 Every registered TTS model uses the same capability-driven execution policy.
-Automatic selections retain native PyTorch behavior when an architecture or
-runtime cannot use a faster backend:
+Automatic selections retain native PyTorch behavior when an architecture,
+runtime, or numerical-fidelity contract cannot safely select a faster backend:
 
 ```python
 from voicehub import AutoModelForTextToSpeech, TTSOptimizationConfig

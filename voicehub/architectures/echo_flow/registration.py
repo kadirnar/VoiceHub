@@ -44,12 +44,18 @@ def create_echo_architecture_spec() -> ArchitectureSpec:
             streaming=False,
             batched_inference=False,
             distributed_training=True,
-            optimization_passes=("compile", ),
+            optimization_passes=("compile", "custom-kernels"),
             features=(
+                "diffusion-family",
+                "diffusion-kind-rectified-flow",
+                "diffusion-operation-denoiser",
+                "diffusion-operation-classifier-free-guidance",
+                "diffusion-operation-euler-solver",
                 "rectified-flow",
                 "voice-cloning",
                 "byte-tokenizer",
                 "classifier-free-guidance",
+                "fused-diffusion-modulation-kernels",
                 "native-audio-codec",
                 "blockwise-generation",
             ),
@@ -57,6 +63,12 @@ def create_echo_architecture_spec() -> ArchitectureSpec:
         upstream_revision=ECHO_SOURCE_REVISION,
         license_id="MIT",
         metadata={
+            "diffusion_architecture_kind": "rectified-flow",
+            "diffusion_operations": (
+                "denoiser",
+                "classifier-free-guidance",
+                "euler-solver",
+            ),
             "implementation": "voicehub-native",
             "tensor_backend": "pytorch",
             "source": ("https://github.com/jordandare/echo-tts/tree/"

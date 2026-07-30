@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
+
 
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> torch.Tensor:
     freqs = 1.0 / (theta**(torch.arange(0, dim, 2)[:(dim // 2)] / dim))
@@ -42,7 +44,7 @@ def get_timestep_embedding(
     return embedding.to(timestep.dtype)
 
 
-class LowRankAdaLN(nn.Module):
+class LowRankAdaLN(DiffusionModulationKernelOptimizable, nn.Module):
 
     def __init__(self, model_size: int, rank: int, eps: float):
         super().__init__()
@@ -55,6 +57,7 @@ class LowRankAdaLN(nn.Module):
         self.shift_up = nn.Linear(rank, model_size, bias=True)
         self.scale_up = nn.Linear(rank, model_size, bias=True)
         self.gate_up = nn.Linear(rank, model_size, bias=True)
+        self._initialize_diffusion_kernel_backend()
 
     def forward(
         self,
@@ -71,7 +74,11 @@ class LowRankAdaLN(nn.Module):
         x_dtype = x.dtype
         x = x.float()
         x = x * torch.rsqrt(torch.pow(x.float(), 2).mean(dim=-1, keepdim=True) + self.eps)
-        x = x * (scale + 1) + shift
+        x = self._diffusion_modulate(
+            x,
+            shift.to(x.dtype),
+            scale.to(x.dtype),
+        )
 
         gate = torch.tanh(gate)
 

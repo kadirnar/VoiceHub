@@ -23,6 +23,7 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
+from voicehub.kernels.codecs import CodecSnakeBetaKernelOptimizable
 from voicehub.processing.kaldi import KaldiFbankConfig, kaldi_fbank
 
 XCODEC2_TRANSFORMERS_SOURCE_REVISION = ("7f5d5d1aaca3cc3d236c80ec8cb34d06f08a5fb8")
@@ -605,17 +606,18 @@ class Wav2Vec2BertSemanticModel(nn.Module):
         )
 
 
-class XCodec2SnakeBeta(nn.Module):
+class XCodec2SnakeBeta(CodecSnakeBetaKernelOptimizable, nn.Module):
 
     def __init__(self, channels: int) -> None:
         super().__init__()
         self.alpha = nn.Parameter(torch.zeros(channels))
         self.beta = nn.Parameter(torch.zeros(channels))
+        self._initialize_codec_kernel_backend()
 
     def forward(self, hidden_states: Tensor) -> Tensor:
         alpha = self.alpha[None, :, None].exp()
         beta = self.beta[None, :, None].exp()
-        return hidden_states + (torch.sin(hidden_states * alpha).square() / (beta + 1e-9))
+        return self._codec_snake_beta(hidden_states, alpha, beta)
 
 
 def kaiser_sinc_filter1d(

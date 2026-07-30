@@ -79,6 +79,7 @@ def create_higgs_audio_v2_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
+                "llm-tts-codec",
                 "24-khz-waveform",
                 "25-hz-audio-tokens",
                 "custom-license-checkpoint",

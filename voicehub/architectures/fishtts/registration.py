@@ -64,6 +64,7 @@ def create_fish_s2_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
+                "llm-tts-codec",
                 "dual-autoregressive-generation",
                 "ten-codebook-modified-dac",
                 "multilingual-inline-control",

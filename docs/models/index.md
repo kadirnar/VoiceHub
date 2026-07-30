@@ -87,7 +87,7 @@ call `model.load()` once during service startup to warm the checkpoint.
 | `echo` | VoiceHub Echo-TTS source | Included |
 | `conversationtts` | VoiceHub-native Llama 3.2 conversational codec LM + bundled MimiCodec | Pinned CC BY-NC 4.0 source/checkpoint; restricted one-time legacy load and strict Safetensors export |
 | `llasa` | VoiceHub-native Llama 3.2 codec LM, tokenizer, and XCodec2 graph | Pinned CC BY-NC 4.0 Safetensors; no external model runtime |
-| `cosyvoice` | VoiceHub-native CosyVoice 3 LM, flow matcher, HiFT generator/discriminator, and byte-BPE tokenizer | Pinned Apache-2.0 source/checkpoint; audited legacy conversion and strict three-part Safetensors runtime |
+| `cosyvoice` | VoiceHub-native CosyVoice 3 LM, S3 speech-tokenizer encoder/FSQ, flow matcher, HiFT generator/discriminator, and byte-BPE tokenizer | Pinned Apache-2.0 sources/checkpoint; audited one-time conversion and dependency-free strict Safetensors runtime |
 | `f5tts` | F5-TTS v1 DiT + Vocos | VoiceHub-native; vendored tree retained only as an audited reference |
 | `gptsovits` | VoiceHub-native GPT-SoVITS V1/V2/V2Pro/V2ProPlus S1 semantic and classic-S2 VITS/GAN graphs | Pinned MIT source and 12 exact component inventories; restricted legacy import and variant-aware staged Safetensors export |
 | `melotts` | VoiceHub-native multilingual VITS2 generator, MPD, and duration discriminator | Pinned MIT source/releases; restricted legacy conversion and strict Safetensors runtime/export |
@@ -96,14 +96,14 @@ call `model.load()` once during service startup to warm the checkpoint.
 | `parlertts` | VoiceHub-native Parler decoder + FLAN-T5 + shared DAC | Pinned Apache-2.0 source/checkpoint; no external model runtime |
 | `styletts2` | VoiceHub-native StyleTTS 2 diffusion, PL-BERT, HiFi-GAN/iSTFTNet, and training objectives | Pinned MIT source; strict Safetensors runtime/export and explicit restricted legacy import |
 | `mosstts` | VoiceHub-native Delay, Local, Local v1.5, and Realtime semantic graphs, Qwen byte-BPE tokenizer, and MOSS Audio Tokenizer v1/v2 | Pinned Apache-2.0 source and seven immutable Safetensors repositories; raw-audio or pre-encoded full semantic-model fine-tuning |
-| `qwen3tts` | VoiceHub-native Qwen3 talker, residual predictor, speaker encoder, and speech decoder | Pinned Apache-2.0 source/checkpoints; no Transformers runtime |
+| `qwen3tts` | VoiceHub-native Qwen3 talker, residual predictor, speaker encoder, and complete Mimi-derived speech tokenizer encoder/quantizer/decoder | Pinned Apache-2.0 source/checkpoints; raw-reference ICL and no Transformers runtime |
 | `irodoritts` | VoiceHub-native Irodori RF-DiT, duration predictor, tokenizer, and frozen Semantic-DACVAE | Pinned MIT source/checkpoints; raw-audio flow/duration FT and strict Safetensors export |
 | `zonos` | VoiceHub-native Zonos v0.1 dense Transformer, conditioning, and shared DAC | Pinned Apache-2.0 source/checkpoints; strict Safetensors runtime and export |
 | `zonos2` | VoiceHub-native ZONOS2 dense/MoE graph, speaker encoder, and shared DAC | Pinned source/checkpoints; no fused provider runtime |
 | `voxcpm` | VoiceHub-native VoxCPM2 language/flow graph, tokenizer, and AudioVAE V2 | Pinned Apache-2.0 source/checkpoint; strict Safetensors runtime and export |
 | `omnivoice` | VoiceHub-native bidirectional Qwen3 graph, tokenizer, generation loop, and frozen Higgs Audio v2 codec | Pinned Apache-2.0 source/checkpoints; raw-audio full FT and strict Safetensors export |
 | `higgstts` | VoiceHub-native Higgs Audio v2 dual-FFN decoder, tokenizer, and frozen native audio tokenizer | Apache-2.0 source, custom-license checkpoint; raw-audio full SFT and strict Safetensors export |
-| `xtts` | VoiceHub-native XTTS v2 GPT, tokenizer, conditioning, speaker encoder, and HiFi-GAN decoder | Pinned MPL-2.0 source/CPML checkpoint; explicit legacy conversion, strict Safetensors runtime, and precomputed-code GPT FT |
+| `xtts` | VoiceHub-native XTTS v2 GPT, tokenizer, conditioning, speaker encoder, HiFi-GAN decoder, and separate full DVAE encoder/codebook/decoder | Pinned MPL-2.0 source/CPML checkpoint; explicit legacy conversion, strict Safetensors runtime, and [raw-waveform or precomputed-code GPT FT](xtts2.md) |
 | `vibevoice` | VoiceHub-native ASR, 1.5B TTS, and realtime-stage graphs | Pinned MIT source/checkpoints; strict Safetensors loading and export |
 | `fishtts` | VoiceHub-native Fish Speech S2 DualAR + ModifiedDAC | Pinned Fish Audio Research License source/checkpoint; strict semantic Safetensors, explicit digest-gated codec conversion, and native full semantic FT |
 | `csm` | VoiceHub-native Sesame CSM + frozen native Mimi | Pinned Apache-2.0/CC-BY-4.0 Safetensors; explicit SilentCipher boundary |
@@ -129,7 +129,7 @@ The current backends keep checkpoint variants behind one architecture key:
 | `kokoro` | Kokoro-82M native Safetensors runtime; released `.pth` and voice packs cross a restricted one-time `weights_only=True` conversion boundary |
 | `gptsovits` | V1, V2, V2Pro, and V2ProPlus classic-S2 checkpoints. V3, V4, and LoRA fail closed because they require distinct flow-matching/vocoder or PEFT-merge graphs. |
 | `mosstts` | Official MOSS-TTS/MOSS-TTS-v1.5 Delay, Local Transformer, Local Transformer v1.5, and Realtime checkpoints. Realtime uses the published buffered generation schedule; incremental queue/transport streaming is not claimed. |
-| `qwen3tts` | 0.6B/1.7B Base, CustomVoice, VoiceDesign, and x-vector voice cloning; raw-reference ICL awaits a native port of the separately published Mimi-derived speech encoder |
+| `qwen3tts` | 0.6B/1.7B Base, CustomVoice, VoiceDesign, x-vector voice cloning, and native raw-reference ICL through the published Mimi-derived speech encoder |
 | `irodoritts` | v2, v3, and VoiceDesign-compatible checkpoints |
 | `zonos` | Exact Zonos v0.1 dense Transformer; the structurally distinct Mamba-2 hybrid checkpoint is rejected until its graph is implemented |
 | `zonos2` | ZONOS2 dense and mixture-of-experts checkpoints |

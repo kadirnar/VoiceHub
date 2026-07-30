@@ -62,6 +62,9 @@ QWEN3_TTS_SPEECH_TOKENIZER = {
     "decoder_tensors": 271,
     "decoder_parameters": 114_323_137,
     "decoder_header_fingerprint": ("804f87cf403a839dd152466b8a53afaef776aacfdf90b6ad0f246534d9c5d5c9"),
+    "encoder_tensors": 225,
+    "encoder_parameters": 56_234_304,
+    "encoder_header_fingerprint": ("5e8d7354d9c30a170d083126d8f73ed15e48395cc12814f1eb9cabe8a320e6e2"),
 }
 
 __all__ = [

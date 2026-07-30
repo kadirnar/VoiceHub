@@ -4,14 +4,16 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
-from torch import nn, pow, sin
+from torch import nn
 from torch.distributions.uniform import Uniform
 from torch.nn import Conv1d, ConvTranspose1d, Parameter
 from torch.nn.utils import remove_weight_norm
 from torch.nn.utils.parametrizations import weight_norm
 
+from voicehub.kernels.codecs import CodecSnakeKernelOptimizable
 
-class Snake(nn.Module):
+
+class Snake(CodecSnakeKernelOptimizable, nn.Module):
     """
     Implementation of a sine-based periodic activation function.
 
@@ -52,6 +54,7 @@ class Snake(nn.Module):
         self.alpha.requires_grad = alpha_trainable
 
         self.no_div_by_zero = 0.000000001
+        self._initialize_codec_kernel_backend()
 
     def forward(self, x):
         """Forward pass of the function.
@@ -62,9 +65,7 @@ class Snake(nn.Module):
         alpha = self.alpha.unsqueeze(0).unsqueeze(-1)  # line up with x to [B, C, T]
         if self.alpha_logscale:
             alpha = torch.exp(alpha)
-        x = x + (1.0 / (alpha + self.no_div_by_zero)) * pow(sin(x * alpha), 2)
-
-        return x
+        return self._codec_snake(x, alpha)
 
 
 def get_padding(kernel_size, dilation=1):

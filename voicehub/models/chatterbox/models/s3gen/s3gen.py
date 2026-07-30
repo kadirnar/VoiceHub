@@ -14,6 +14,7 @@ from voicehub.models.chatterbox.models.s3gen.transformer.upsample_encoder import
 from voicehub.models.chatterbox.models.s3gen.utils.mel import mel_spectrogram
 from voicehub.models.chatterbox.models.s3gen.xvector import CAMPPlus
 from voicehub.models.chatterbox.models.s3tokenizer import S3_SR, SPEECH_VOCAB_SIZE, S3Tokenizer
+from voicehub.optimization.protocols import OptimizationCompileTarget
 from voicehub.processing.waveform import resample_waveform
 
 
@@ -225,6 +226,36 @@ class S3Token2Wav(S3Token2Mel):
         trim_fade[n_trim:] = (torch.cos(torch.linspace(torch.pi, 0, n_trim)) + 1) / 2
         self.register_buffer(
             "trim_fade", trim_fade, persistent=False)  # (buffers get automatic device casting)
+
+    def codec_optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        """Keep flow matching and HiFT independently compilable."""
+        if mode == "training":
+            return (
+                OptimizationCompileTarget(
+                    "codec.forward.chatterbox_s3gen",
+                    self,
+                    "forward",
+                    component="forward",
+                ), )
+        if mode != "inference":
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (
+            OptimizationCompileTarget(
+                "codec.flow.chatterbox_s3gen",
+                self,
+                "flow_inference",
+                component="flow",
+            ),
+            OptimizationCompileTarget(
+                "codec.vocoder.chatterbox_hift",
+                self,
+                "hift_inference",
+                component="vocoder",
+            ),
+        )
 
     def forward(
             self,

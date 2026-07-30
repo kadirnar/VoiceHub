@@ -74,6 +74,9 @@ def _adapter_component_roots(model: Any) -> tuple[tuple[str, nn.Module], ...]:
             if (isinstance(entry, (tuple, list)) and len(entry) == 2 and isinstance(entry[0], str) and
                     entry[0]):
                 candidates.append((f"component:{entry[0]}", entry[1]))
+    attributes = vars(model) if hasattr(model, "__dict__") else {}
+    for name in ("_model", "model", "codec_model"):
+        candidates.append((name.removeprefix("_"), attributes.get(name)))
     return tuple((label, candidate) for label, candidate in candidates if isinstance(candidate, nn.Module))
 
 
@@ -152,12 +155,23 @@ def _state_dict_key_tree(value: Any, *, path: str) -> tuple[Any, ...]:
 
 def _state_dict_keys(model: Any) -> tuple[Any, ...]:
     state_dict = getattr(model, "state_dict", None)
-    if not callable(state_dict):
-        raise TypeError(f"{type(model).__name__} has no checkpoint state_dict().")
-    return _state_dict_key_tree(
-        state_dict(),
-        path=f"{type(model).__name__}.state_dict()",
-    )
+    if callable(state_dict):
+        return _state_dict_key_tree(
+            state_dict(),
+            path=f"{type(model).__name__}.state_dict()",
+        )
+    roots = _module_roots(model)
+    if not roots:
+        raise TypeError(
+            f"{type(model).__name__} has no checkpoint state_dict() or "
+            "declared optimization module roots.")
+    return tuple((
+        label,
+        _state_dict_key_tree(
+            module.state_dict(),
+            path=f"{type(model).__name__}.{label}.state_dict()",
+        ),
+    ) for label, module in roots)
 
 
 def _key_count(tree: tuple[Any, ...]) -> int:
@@ -266,10 +280,13 @@ class _SelectorPass(OptimizationPass):
     def validate(self, model: Any, context: OptimizationContext) -> None:
         super().validate(model, context)
         self._targets_or_error(model, compatibility=True)
-        if not callable(getattr(model, "state_dict", None)):
+        try:
+            _state_dict_keys(model)
+        except TypeError as error:
             raise OptimizationCompatibilityError(
                 f"Optimization pass {self.qualified_id!r} requires "
-                f"{type(model).__name__}.state_dict() to verify checkpoint keys.")
+                "a checkpoint state_dict() or declared module roots to verify "
+                f"checkpoint keys: {error}") from error
         issues = self._selection_issues(context)
         if issues:
             raise OptimizationCompatibilityError(

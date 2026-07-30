@@ -1,9 +1,8 @@
 """Native decoder for the Qwen3-TTS 12 Hz speech tokenizer.
 
-The public tokenizer checkpoint also contains a Mimi-derived audio
-encoder. Generated speech only needs the decoder graph implemented here.
-The encoder is deliberately not emulated: ICL cloning remains
-unavailable until that published graph is ported separately.
+The checkpoint-exact Mimi-derived encoder lives in the adjacent
+``encoder`` module so decoder-only use keeps this existing API and its
+lightweight construction boundary.
 """
 
 from __future__ import annotations
@@ -16,8 +15,10 @@ from torch import Tensor, nn
 from torch.nn import functional
 
 from voicehub.architectures.qwen3_tts.configuration import Qwen3TTSDecoderConfig
+from voicehub.kernels.codecs import CodecSnakeBetaKernelOptimizable
 from voicehub.neural.normalization import RMSNorm
 from voicehub.neural.rotary import RotaryEmbedding, apply_rotary_embedding
+from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
 def _factory(
@@ -431,7 +432,7 @@ class DecoderTransformer(nn.Module):
         return self.output_proj(self.norm(hidden_states))
 
 
-class SnakeBeta(nn.Module):
+class SnakeBeta(CodecSnakeBetaKernelOptimizable, nn.Module):
 
     def __init__(
         self,
@@ -442,11 +443,12 @@ class SnakeBeta(nn.Module):
         super().__init__()
         self.alpha = nn.Parameter(torch.zeros(channels, **factory_kwargs))
         self.beta = nn.Parameter(torch.zeros(channels, **factory_kwargs))
+        self._initialize_codec_kernel_backend()
 
     def forward(self, hidden_states: Tensor) -> Tensor:
         alpha = self.alpha.exp()[None, :, None]
         beta = self.beta.exp()[None, :, None]
-        return (hidden_states + torch.sin(hidden_states * alpha).square() / (beta + 1e-9))
+        return self._codec_snake_beta(hidden_states, alpha, beta)
 
 
 class DecoderResidualUnit(nn.Module):
@@ -743,12 +745,15 @@ class Qwen3TTSSpeechDecoder(nn.Module):
         ])
         self.decoder = nn.ModuleList(modules)
 
-    def forward(self, codes: Tensor) -> Tensor:
+    def _validate_codes(self, codes: Tensor) -> None:
         if (codes.ndim != 3 or codes.shape[1] != self.config.num_quantizers or codes.dtype == torch.bool or
                 codes.is_floating_point() or codes.is_complex()):
             raise ValueError("Speech codes must be integer [batch, codebooks, frames].")
         if codes.numel() and (bool((codes < 0).any()) or bool((codes >= self.config.codebook_size).any())):
             raise ValueError("Speech code ID is outside the decoder codebook.")
+
+    def _decode_codes_unchecked(self, codes: Tensor) -> Tensor:
+        """Decode already validated code IDs without tensor-to-host sync."""
         hidden_states = self.quantizer.decode(codes)
         hidden_states = self.pre_conv(hidden_states).transpose(1, 2)
         hidden_states = self.pre_transformer(hidden_states).transpose(1, 2)
@@ -758,6 +763,24 @@ class Qwen3TTSSpeechDecoder(nn.Module):
         for module in self.decoder:
             hidden_states = module(hidden_states)
         return hidden_states.clamp(-1, 1)
+
+    def forward(self, codes: Tensor) -> Tensor:
+        self._validate_codes(codes)
+        return self._decode_codes_unchecked(codes)
+
+    def codec_optimization_compile_targets(
+        self,
+        mode: str,
+    ) -> tuple[OptimizationCompileTarget, ...]:
+        if mode not in {"inference", "training"}:
+            raise ValueError(f"Unsupported optimization mode {mode!r}.")
+        return (
+            OptimizationCompileTarget(
+                "codec.decode.qwen3_tts.decode_codes",
+                self,
+                "_decode_codes_unchecked",
+                component="decode",
+            ), )
 
     def chunked_decode(
         self,

@@ -69,6 +69,12 @@ def create_voxcpm2_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
+                "llm-tts-codec",
+                "diffusion-family",
+                "diffusion-kind-conditional-flow-matching",
+                "diffusion-operation-denoiser",
+                "diffusion-operation-classifier-free-guidance",
+                "diffusion-operation-euler-solver",
                 "30-language-multilingual",
                 "audio-continuation",
                 "cjk-multichar-token-split",
@@ -88,6 +94,13 @@ def create_voxcpm2_architecture_spec() -> ArchitectureSpec:
         upstream_revision=VOXCPM2_SOURCE_REVISION,
         license_id=VOXCPM2_LICENSE,
         metadata={
+            "diffusion_architecture_kind":
+            "conditional-flow-matching",
+            "diffusion_operations": (
+                "denoiser",
+                "classifier-free-guidance",
+                "euler-solver",
+            ),
             "implementation":
             "voicehub-native",
             "tensor_backend":

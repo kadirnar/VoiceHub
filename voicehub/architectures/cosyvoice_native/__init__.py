@@ -15,6 +15,9 @@ _EXPORTS = {
     "CosyVoiceLanguageModel": _PACKAGE + "language_model",
     "CosyVoiceNativeModel": _PACKAGE + "modeling",
     "CosyVoiceNativeRuntime": _PACKAGE + "runtime",
+    "CosyVoiceSpeechTokenizer": _PACKAGE + "speech_tokenizer",
+    "CosyVoiceSpeechTokenizerConfig": _PACKAGE + "speech_tokenizer",
+    "CosyVoiceSpeechTokenizerEncoder": _PACKAGE + "speech_tokenizer",
     "CosyVoiceHiFTGenerator": _PACKAGE + "vocoder",
     "CosyVoiceHiFTTrainingModel": _PACKAGE + "vocoder",
 }

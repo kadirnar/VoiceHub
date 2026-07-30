@@ -1,5 +1,7 @@
 __version__ = "0.3.0"
 
+from importlib import import_module
+
 from voicehub.audio import AudioInput, load_audio
 from voicehub.audio_modeling_utils import PreTrainedASRModel, PreTrainedAudioModel, PreTrainedVADModel
 from voicehub.auto import (
@@ -185,6 +187,46 @@ from voicehub.training import (
 )
 from voicehub.training_args import TrainingArguments
 
+_LAZY_ROOT_EXPORTS = {
+    "AudioAutoencoderView": "voicehub.components.audio.codecs",
+    "AudioCodec": "voicehub.components.audio.codecs",
+    "AudioCodecComponentView": "voicehub.components.audio.codecs",
+    "CODEC_CATALOG": "voicehub.components.audio.codecs",
+    "CodecCatalogEntry": "voicehub.components.audio.codecs",
+    "CodecCodeBatch": "voicehub.components.audio.codecs",
+    "CodecIntegration": "voicehub.components.audio.codecs",
+    "CodecRepresentation": "voicehub.components.audio.codecs",
+    "CodecStageAvailability": "voicehub.components.audio.codecs",
+    "DenseCodecCodes": "voicehub.components.audio.codecs",
+    "RaggedCodecCodes": "voicehub.components.audio.codecs",
+    "codec_is_stochastic_vae": "voicehub.components.audio.codecs",
+    "codec_target_is_stochastic": "voicehub.components.audio.codecs",
+    "coerce_codec_codes": "voicehub.components.audio.codecs",
+    "get_codec_entries_for_model": "voicehub.components.audio.codecs",
+    "get_codec_entry": "voicehub.components.audio.codecs",
+    "list_codec_entries": "voicehub.components.audio.codecs",
+    "separate_audio_codec": "voicehub.components.audio.codecs",
+    "CodecCUDAGraphCaptureError": "voicehub.optimization",
+    "CodecCUDAGraphRunner": "voicehub.optimization",
+    "CodecCompileComponent": "voicehub.optimization",
+    "CodecCompilePolicy": "voicehub.optimization",
+    "CodecKernelBackend": "voicehub.optimization",
+    "CodecOptimizationCompatibilityError": "voicehub.optimization",
+    "CodecOptimizationConfig": "voicehub.optimization",
+    "CodecOptimizationPlan": "voicehub.optimization",
+    "CodecOptimizationPolicy": "voicehub.optimization",
+    "CodecOptimizationResult": "voicehub.optimization",
+    "DiffusionArchitectureKind": "voicehub.optimization",
+    "DiffusionModelOptimizationSupport": "voicehub.optimization",
+    "DiffusionOperation": "voicehub.optimization",
+    "capture_codec_cuda_graph": "voicehub.optimization",
+    "discover_codec_compile_targets": "voicehub.optimization",
+    "get_diffusion_model_optimization_support": "voicehub.optimization",
+    "list_diffusion_model_optimization_support": "voicehub.optimization",
+    "optimize_codec": "voicehub.optimization",
+    "resolve_codec_optimization": "voicehub.optimization",
+}
+
 __all__ = [
     "AcousticTrainingAdapter",
     "ALL_MODEL_TRAINING_SPECS",
@@ -197,7 +239,10 @@ __all__ = [
     "ASRSegment",
     "ASRWord",
     "ASRRecordVariant",
+    "AudioAutoencoderView",
     "AudioClassificationTrainingAdapter",
+    "AudioCodec",
+    "AudioCodecComponentView",
     "AudioFieldSchema",
     "AudioInput",
     "AudioProcessor",
@@ -213,9 +258,29 @@ __all__ = [
     "CausalLMTrainingAdapter",
     "CompositeTrainingAdapter",
     "CTCTrainingAdapter",
+    "CodecCUDAGraphCaptureError",
+    "CodecCUDAGraphRunner",
+    "CODEC_CATALOG",
+    "CodecCatalogEntry",
+    "CodecCodeBatch",
+    "CodecCompileComponent",
+    "CodecCompilePolicy",
+    "CodecIntegration",
+    "CodecKernelBackend",
+    "CodecOptimizationCompatibilityError",
+    "CodecOptimizationConfig",
+    "CodecOptimizationPlan",
+    "CodecOptimizationPolicy",
+    "CodecOptimizationResult",
+    "CodecRepresentation",
+    "CodecStageAvailability",
     "DataCollatorForAudioTraining",
     "DataCollatorForTTSTraining",
     "DefaultDataCollator",
+    "DenseCodecCodes",
+    "DiffusionArchitectureKind",
+    "DiffusionModelOptimizationSupport",
+    "DiffusionOperation",
     "DiffusionTrainingPair",
     "DiffusionTTSOptimizationConfig",
     "EarlyStoppingCallback",
@@ -252,6 +317,7 @@ __all__ = [
     "PreTrainedTTSModel",
     "PreTrainedVADModel",
     "RNNTTrainingAdapter",
+    "RaggedCodecCodes",
     "SchedulerType",
     "SchedulerBundle",
     "Seq2SeqTrainingAdapter",
@@ -319,13 +385,21 @@ __all__ = [
     "__version__",
     "build_diffusion_training_pair",
     "build_flow_matching_training_pair",
+    "capture_codec_cuda_graph",
+    "codec_is_stochastic_vae",
+    "codec_target_is_stochastic",
+    "coerce_codec_codes",
     "diffusion_tts_acceleration_plan",
+    "discover_codec_compile_targets",
     "default_data_collator",
     "get_model_spec",
     "get_last_checkpoint",
     "get_llm_backend_support",
     "get_inference_strategy",
     "get_asr_dataset_spec",
+    "get_codec_entries_for_model",
+    "get_codec_entry",
+    "get_diffusion_model_optimization_support",
     "get_training_strategy",
     "get_training_spec",
     "get_tts_dataset_spec",
@@ -334,8 +408,10 @@ __all__ = [
     "get_vits_model_optimization_support",
     "get_tts_training_optimization_profile",
     "list_inference_strategies",
+    "list_diffusion_model_optimization_support",
     "list_llm_backend_support",
     "list_asr_dataset_specs",
+    "list_codec_entries",
     "list_model_specs",
     "list_training_specs",
     "list_training_strategies",
@@ -346,13 +422,16 @@ __all__ = [
     "load_audio",
     "masked_diffusion_regression_loss",
     "multi_codebook_cross_entropy",
+    "optimize_codec",
     "register_inference_strategy",
     "register_model_alias",
     "register_model_spec",
     "register_training_alias",
     "register_training_spec",
     "register_training_strategy",
+    "resolve_codec_optimization",
     "resolve_tts_optimization",
+    "separate_audio_codec",
     "set_seed",
     "unregister_inference_strategy",
     "unregister_model_alias",
@@ -366,3 +445,16 @@ __all__ = [
     "vits_kl_loss",
     "vits_acceleration_plan",
 ]
+
+
+def __getattr__(name: str):
+    module_name = _LAZY_ROOT_EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

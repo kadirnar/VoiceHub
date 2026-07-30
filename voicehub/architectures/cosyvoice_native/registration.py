@@ -50,6 +50,9 @@ def create_cosyvoice_architecture_spec() -> ArchitectureSpec:
             "legacy-converter": (
                 "voicehub.architectures.cosyvoice_native.checkpoint:"
                 "convert_audited_cosyvoice_legacy_checkpoint"),
+            "speech-tokenizer":
+            ("voicehub.architectures.cosyvoice_native.speech_tokenizer:"
+             "CosyVoiceSpeechTokenizer"),
             "runtime": ("voicehub.architectures.cosyvoice_native.runtime:"
                         "load_cosyvoice_runtime"),
             "trainer-adapter":
@@ -66,16 +69,26 @@ def create_cosyvoice_architecture_spec() -> ArchitectureSpec:
             batched_inference=False,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", ),
+            optimization_passes=("compile", "custom-kernels"),
             features=(
+                "llm-tts-codec",
+                "diffusion-family",
+                "diffusion-kind-conditional-flow-matching",
+                "diffusion-operation-denoiser",
+                "diffusion-operation-classifier-free-guidance",
+                "diffusion-operation-euler-solver",
                 "audited-legacy-conversion",
                 "causal-hift",
+                "fused-diffusion-modulation-kernels",
                 "family-extensible-component-boundaries",
                 "flow-matching-finetuning",
                 "full-llm-finetuning",
                 "hifigan-adversarial-finetuning",
                 "multilingual",
                 "native-qwen2",
+                "native-s3tokenizer-v3-encoder",
+                "native-s3tokenizer-v3-fsq",
+                "raw-audio-speech-token-extraction",
                 "strict-safetensors",
                 "voice-cloning-with-precomputed-prompt",
             ),
@@ -83,6 +96,13 @@ def create_cosyvoice_architecture_spec() -> ArchitectureSpec:
         upstream_revision=COSYVOICE_SOURCE_REVISION,
         license_id="Apache-2.0",
         metadata={
+            "diffusion_architecture_kind":
+            "conditional-flow-matching",
+            "diffusion_operations": (
+                "denoiser",
+                "classifier-free-guidance",
+                "euler-solver",
+            ),
             "implementation":
             "voicehub-native",
             "tensor_backend":
@@ -98,7 +118,13 @@ def create_cosyvoice_architecture_spec() -> ArchitectureSpec:
             "training_boundary": (
                 "LM, conditional flow matcher, and HiFT generator/"
                 "discriminator are trainable with their author objectives. "
-                "Text and speech-token frontends remain frozen."),
+                "Text and speech-token frontends remain frozen; the native "
+                "S3Tokenizer is optional because precomputed speech tokens "
+                "remain a supported dataset boundary."),
+            "speech_tokenizer_boundary": (
+                "The published ONNX graph is never executed at runtime. Its "
+                "fully audited encoder and FSQ initializers require explicit "
+                "one-time conversion to strict Safetensors."),
             "parity_boundary": (
                 "Official tensor inventories are exact. Numerical waveform "
                 "parity is not claimed without checkpoint-level evidence."),

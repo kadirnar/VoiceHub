@@ -49,6 +49,9 @@ class _Codec(nn.Module):
     def decode(self, value):
         return value * self.weight
 
+    def decode_codes(self, value):
+        return value * self.weight
+
     def decode_latent(self, value):
         return value * self.weight
 
@@ -87,6 +90,8 @@ class CompileTargetHookTests(unittest.TestCase):
         )
         runtime.s3gen = SimpleNamespace(
             inference=lambda **kwargs: kwargs,
+            flow_inference=lambda **kwargs: kwargs,
+            hift_inference=lambda *args, **kwargs: (args, kwargs),
             flow=SimpleNamespace(forward=lambda *args, **kwargs: (args, kwargs),
                                  ),
         )
@@ -195,7 +200,11 @@ class CompileTargetHookTests(unittest.TestCase):
         cases = (
             (
                 self._chatterbox(),
-                ("t3.inference", "s3gen.inference"),
+                (
+                    "t3.inference",
+                    "s3gen.flow_inference",
+                    "s3gen.hift_inference",
+                ),
             ),
             (
                 self._melotts(),
@@ -203,7 +212,7 @@ class CompileTargetHookTests(unittest.TestCase):
             ),
             (
                 self._outetts(),
-                ("language_model.forward", "codec.decode"),
+                ("language_model.forward", "codec.decode_codes"),
             ),
             (
                 self._styletts2(),

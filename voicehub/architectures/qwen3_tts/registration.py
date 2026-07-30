@@ -34,6 +34,8 @@ def create_qwen3_tts_architecture_spec() -> ArchitectureSpec:
              "resolve_qwen3_tts_artifacts"),
             "speaker-encoder": ("voicehub.architectures.qwen3_tts.modeling:"
                                 "Qwen3TTSSpeakerEncoder"),
+            "speech-encoder": ("voicehub.architectures.qwen3_tts.encoder:"
+                               "Qwen3TTSSpeechEncoder"),
             "text-tokenizer": ("voicehub.architectures.qwen3_tts.tokenization:"
                                "Qwen3TTSTextTokenizer"),
         },
@@ -55,12 +57,16 @@ def create_qwen3_tts_architecture_spec() -> ArchitectureSpec:
                 "custom-kernels",
             ),
             features=(
+                "llm-tts-codec",
                 "autoregressive-codebooks",
                 "custom-voice",
                 "delayed-codebook-sft",
                 "flash-attention-4-optional",
+                "fused-codec-snake-beta-kernels",
                 "fused-swiglu-kernels",
                 "multilingual",
+                "native-icl-reference-audio",
+                "native-speech-tokenizer-encoder",
                 "speaker-encoder",
                 "voice-clone-xvector",
                 "voice-design",
@@ -81,9 +87,10 @@ def create_qwen3_tts_architecture_spec() -> ArchitectureSpec:
                 "Exact official 12 Hz Base single-speaker SFT objective with "
                 "pre-extracted 16-codebook targets and frozen speaker encoder."),
             "icl_reference_encoder": (
-                "The published Mimi-derived encoder is not yet native; "
-                "x-vector cloning is available and ICL reference-audio "
-                "cloning remains explicitly unavailable."),
+                "Checkpoint-exact native Mimi-derived encoder, causal "
+                "Transformer, downsampler, and semantic/acoustic residual "
+                "quantizers support raw-reference ICL codes; legacy local "
+                "decoder-only exports remain loadable without an encoder."),
             "reference_audio_boundary": (
                 "Native paths and URLs accept PCM WAVE; other containers "
                 "must be supplied as predecoded tensors."),

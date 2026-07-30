@@ -58,6 +58,7 @@ def create_outetts_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
+                "llm-tts-codec",
                 "completion-only-codec-language-modeling",
                 "frozen-dac",
                 "llama-and-qwen-backbones",

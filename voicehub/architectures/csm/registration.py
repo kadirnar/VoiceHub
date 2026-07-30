@@ -70,6 +70,7 @@ def create_csm_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
+                "llm-tts-codec",
                 "conversational-multi-speaker",
                 "grouped-query-attention",
                 "hierarchical-32-codebook",

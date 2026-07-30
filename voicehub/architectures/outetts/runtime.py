@@ -96,9 +96,9 @@ class OuteTTSRuntime(nn.Module):
                 "forward",
             ),
             OptimizationCompileTarget(
-                "codec.decode",
+                "codec.decode_codes",
                 self.codec,
-                "decode",
+                "decode_codes",
             ),
         )
 
@@ -154,8 +154,7 @@ class OuteTTSRuntime(nn.Module):
             dtype=torch.long,
             device=device,
         )
-        quantized = self.codec.quantizer.from_codes(codes)[0]
-        audio = self.codec.decode(quantized)
+        audio = self.codec.decode_codes(codes)
         if audio.ndim != 3 or audio.shape[0] != 1 or audio.shape[1] != 1:
             raise RuntimeError(
                 "Native OuteTTS DAC returned an invalid waveform shape "

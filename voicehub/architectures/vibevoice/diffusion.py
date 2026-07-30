@@ -11,6 +11,7 @@ from torch import Tensor, nn
 from torch.nn import functional
 
 from voicehub.architectures.vibevoice.configuration import VibeVoiceDiffusionConfig
+from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
 from voicehub.neural.normalization import RMSNorm
 
 
@@ -132,7 +133,7 @@ def _modulate(hidden_states: Tensor, shift: Tensor, scale: Tensor) -> Tensor:
     return hidden_states * (1 + scale) + shift
 
 
-class VibeVoiceDiffusionLayer(nn.Module):
+class VibeVoiceDiffusionLayer(DiffusionModulationKernelOptimizable, nn.Module):
 
     def __init__(
         self,
@@ -166,13 +167,19 @@ class VibeVoiceDiffusionLayer(nn.Module):
                 dtype=dtype,
             ),
         )
+        self._initialize_diffusion_kernel_backend()
 
     def forward(self, hidden_states: Tensor, condition: Tensor) -> Tensor:
         shift, scale, gate = self.adaLN_modulation(condition).chunk(3, dim=-1)
-        return hidden_states + gate * self.ffn(_modulate(self.norm(hidden_states), shift, scale))
+        normalized = self._diffusion_modulate(
+            self.norm(hidden_states),
+            shift,
+            scale,
+        )
+        return hidden_states + gate * self.ffn(normalized)
 
 
-class VibeVoiceDiffusionFinalLayer(nn.Module):
+class VibeVoiceDiffusionFinalLayer(DiffusionModulationKernelOptimizable, nn.Module):
 
     def __init__(
         self,
@@ -202,10 +209,11 @@ class VibeVoiceDiffusionFinalLayer(nn.Module):
                 dtype=dtype,
             ),
         )
+        self._initialize_diffusion_kernel_backend()
 
     def forward(self, hidden_states: Tensor, condition: Tensor) -> Tensor:
         shift, scale = self.adaLN_modulation(condition).chunk(2, dim=-1)
-        hidden_states = _modulate(
+        hidden_states = self._diffusion_modulate(
             self.norm_final(hidden_states),
             shift,
             scale,

@@ -67,6 +67,7 @@ def create_zonos_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
+                "llm-tts-codec",
                 "dense-transformer",
                 "delayed-codebook-language-model",
                 "frozen-native-descript-dac",

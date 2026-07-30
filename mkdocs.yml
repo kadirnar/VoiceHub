@@ -63,6 +63,8 @@ nav:
       - ASR and VAD data: guides/speech-data.md
       - Training: guides/training.md
       - TTS optimization: guides/tts-optimization.md
+      - Codec optimization: guides/codec-optimization.md
+      - Diffusion and flow optimization: guides/diffusion-optimization.md
       - VITS-family optimization: guides/vits-optimization.md
       - LLM TTS serving: guides/llm-serving.md
   - Notebooks: guides/notebook.md
@@ -70,6 +72,7 @@ nav:
       - TTS model catalog: models/index.md
       - ASR and VAD support: models/asr-vad-support.md
       - TTS training support: models/training-support.md
+      - XTTS v2 native DVAE: models/xtts2.md
   - Architecture:
       - Library architecture: concepts/architecture.md
       - Trainer architecture: concepts/trainer.md

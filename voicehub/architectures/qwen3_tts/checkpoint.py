@@ -11,6 +11,7 @@ import torch
 from torch import Tensor, nn
 
 from voicehub.architectures.qwen3_tts.codec import Qwen3TTSSpeechDecoder, materialize_qwen3_tts_decoder_buffers
+from voicehub.architectures.qwen3_tts.encoder import Qwen3TTSSpeechEncoder, materialize_qwen3_tts_encoder_buffers
 from voicehub.architectures.qwen3_tts.metadata import QWEN3_TTS_CHECKPOINTS, QWEN3_TTS_SPEECH_TOKENIZER
 from voicehub.architectures.qwen3_tts.modeling import Qwen3TTSForConditionalGeneration, materialize_qwen3_tts_buffers
 from voicehub.checkpointing import SafeTensorReader, save_safetensors
@@ -217,6 +218,68 @@ def load_qwen3_tts_decoder_checkpoint(
     return decoder_report
 
 
+def load_qwen3_tts_encoder_checkpoint(
+    encoder: Qwen3TTSSpeechEncoder,
+    path: str | Path,
+    *,
+    device: str | torch.device,
+    dtype: torch.dtype | None,
+    verify_official: bool,
+) -> Qwen3TTSCheckpointReport:
+    """Load the exact 225-tensor encoder namespace, failing closed."""
+    full_report = inspect_qwen3_tts_checkpoint(path)
+    encoder_report = inspect_qwen3_tts_checkpoint(path, prefix="encoder.")
+    if verify_official:
+        expected_full = (
+            QWEN3_TTS_SPEECH_TOKENIZER["tensors"],
+            QWEN3_TTS_SPEECH_TOKENIZER["parameters"],
+            QWEN3_TTS_SPEECH_TOKENIZER["header_fingerprint"],
+        )
+        actual_full = (
+            full_report.tensor_count,
+            full_report.parameter_count,
+            full_report.header_fingerprint,
+        )
+        if actual_full != expected_full:
+            raise CheckpointCompatibilityError(
+                "Published Qwen3-TTS speech-tokenizer inventory verification "
+                f"failed: found={actual_full!r}, expected={expected_full!r}.")
+        expected_encoder = (
+            QWEN3_TTS_SPEECH_TOKENIZER["encoder_tensors"],
+            QWEN3_TTS_SPEECH_TOKENIZER["encoder_parameters"],
+            QWEN3_TTS_SPEECH_TOKENIZER["encoder_header_fingerprint"],
+        )
+        actual_encoder = (
+            encoder_report.tensor_count,
+            encoder_report.parameter_count,
+            encoder_report.header_fingerprint,
+        )
+        if actual_encoder != expected_encoder:
+            raise CheckpointCompatibilityError(
+                "Qwen3-TTS encoder inventory verification failed: "
+                f"found={actual_encoder!r}, expected={expected_encoder!r}.")
+    with SafeTensorReader(full_report.path) as reader:
+        names = _validate_namespace(
+            encoder,
+            reader,
+            source_prefix="encoder.",
+            permit_other_prefixes=True,
+        )
+        _assign(
+            encoder,
+            reader,
+            names,
+            source_prefix="encoder.",
+            device=device,
+            dtype=dtype,
+        )
+    materialize_qwen3_tts_encoder_buffers(
+        encoder,
+        device=device,
+    )
+    return encoder_report
+
+
 def export_qwen3_tts_model(
     model: Qwen3TTSForConditionalGeneration,
     path: str | Path,
@@ -259,12 +322,32 @@ def export_qwen3_tts_decoder(
     ).resolve()
 
 
+def export_qwen3_tts_speech_tokenizer(
+    encoder: Qwen3TTSSpeechEncoder,
+    decoder: Qwen3TTSSpeechDecoder,
+    path: str | Path,
+) -> Path:
+    """Export both exact tokenizer namespaces in the official layout."""
+    state = {"encoder." + name: value.detach() for name, value in encoder.state_dict().items()}
+    state.update({"decoder." + name: value.detach() for name, value in decoder.state_dict().items()})
+    return save_safetensors(
+        state,
+        path,
+        metadata={
+            "format": NATIVE_QWEN3_TTS_FORMAT,
+            "component": "speech-tokenizer",
+        },
+    ).resolve()
+
+
 __all__ = [
     "NATIVE_QWEN3_TTS_FORMAT",
     "Qwen3TTSCheckpointReport",
     "export_qwen3_tts_decoder",
     "export_qwen3_tts_model",
+    "export_qwen3_tts_speech_tokenizer",
     "inspect_qwen3_tts_checkpoint",
     "load_qwen3_tts_decoder_checkpoint",
+    "load_qwen3_tts_encoder_checkpoint",
     "load_qwen3_tts_model_checkpoint",
 ]

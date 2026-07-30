@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import gc
 import hashlib
+import inspect
 import json
 import math
 import subprocess
@@ -31,6 +32,7 @@ from voicehub.components.audio.codecs.encodec import (
     verify_native_graph_contract,
 )
 from voicehub.components.audio.codecs.encodec.metadata import ENCODEC_24KHZ_RELEASE, ENCODEC_48KHZ_RELEASE
+from voicehub.optimization.codecs import discover_codec_compile_targets
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENCODEC_ROOT = (PROJECT_ROOT / "voicehub" / "components" / "audio" / "codecs" / "encodec")
@@ -312,6 +314,64 @@ class NativeEncodecGraphTests(unittest.TestCase):
                     None,
                 ),
             ])
+
+    def test_decoder_optimizer_targets_capture_safe_inner_boundary(self):
+        torch.manual_seed(10)
+        model = EncodecModel.from_config(_tiny_config()).eval()
+        frame, = model.encode(torch.randn(1, 1, 20))
+        codes, scale = frame
+        target, = discover_codec_compile_targets(
+            model,
+            mode="inference",
+        )
+        self.assertEqual(target.label, "codec.decode.encodec.decode_frame")
+        self.assertEqual(target.attribute, "_decode_frame_unchecked")
+        self.assertEqual(target.component, "decode")
+        source = inspect.getsource(getattr(type(model), target.attribute))
+        for value_sync in (
+                "bool(",
+                ".item(",
+                ".any(",
+                ".tolist(",
+                ".numpy(",
+        ):
+            self.assertNotIn(value_sync, source)
+
+        with patch.object(
+                model,
+                "_decode_frame_unchecked",
+                wraps=model._decode_frame_unchecked,
+        ) as inner:
+            expected = model.decode([frame])
+        self.assertEqual(inner.call_count, 1)
+        self.assertIs(inner.call_args.args[0], codes)
+        self.assertIs(inner.call_args.args[1], scale)
+
+        with patch.object(
+                model,
+                "_validate_encoded_frame",
+                side_effect=AssertionError("validation entered capture target"),
+        ):
+            actual = getattr(target.owner, target.attribute)(codes, scale)
+        torch.testing.assert_close(actual, expected)
+
+        invalid = codes.clone()
+        invalid[..., 0] = model.quantizer.bins
+        with patch.object(
+                model,
+                "_decode_frame_unchecked",
+                wraps=model._decode_frame_unchecked,
+        ) as inner:
+            with self.assertRaisesRegex(ValueError, "outside"):
+                model.decode([(invalid, scale)])
+        inner.assert_not_called()
+
+        training_target, = discover_codec_compile_targets(
+            model.train(),
+            mode="training",
+        )
+        self.assertEqual(training_target.attribute, "forward")
+        self.assertEqual(training_target.component, "forward")
 
 
 class NativeEncodecCheckpointTests(unittest.TestCase):

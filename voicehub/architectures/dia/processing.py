@@ -489,8 +489,7 @@ class DiaProcessor:
                 if ((codes < 0).any() or (codes >= codec.config.codebook_size).any()):
                     raise ValueError("Dia output contains a special token inside decoded "
                                      "DAC frames.")
-                quantized, _, _ = codec.quantizer.from_codes(codes.long())
-                audio = codec.decode(quantized).cpu().squeeze(0).squeeze(0)
+                audio = codec.decode_codes(codes.long()).cpu().squeeze(0).squeeze(0)
                 audios.append(audio)
         return audios
 

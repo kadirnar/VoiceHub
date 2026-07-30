@@ -64,6 +64,7 @@ def create_neutts_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=("compile", "sdpa"),
             features=(
+                "llm-tts-codec",
                 "completion-only-codec-language-modeling",
                 "emotion-control",
                 "frozen-neucodec",
