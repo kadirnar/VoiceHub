@@ -21,6 +21,7 @@ from voicehub.architectures.vibevoice.configuration import VibeVoiceASRConfig, V
 from voicehub.architectures.vibevoice.diffusion import VibeVoiceDiffusionHead, VibeVoiceDPMSolver
 from voicehub.neural.cache import DynamicKVCache
 from voicehub.neural.normalization import RMSNorm
+from voicehub.optimization.diffusion_sampling import DiffusionStepContext
 from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
@@ -1015,43 +1016,106 @@ class VibeVoiceRealtimeForConditionalGeneration(nn.Module):
         if (isinstance(guidance_scale, bool) or not isinstance(guidance_scale, (int, float)) or
                 not math.isfinite(guidance_scale) or guidance_scale <= 0):
             raise ValueError("Guidance scale must be finite and positive.")
-        self.model.prediction_head.reset_diffusion_cache()
         if condition.shape != negative_condition.shape or condition.ndim != 2:
             raise ValueError("Positive and negative TTS conditions must align.")
-        combined_condition = torch.cat(
-            (condition, negative_condition),
-            dim=0,
-        )
-        speech = torch.randn(
-            (
-                combined_condition.shape[0],
-                self.config.acoustic_vae_dim,
-            ),
-            generator=generator,
-            device=combined_condition.device,
-            dtype=combined_condition.dtype,
-        )
-        self.model.noise_scheduler.set_timesteps(
-            inference_steps,
-            device=speech.device,
-        )
-        for timestep in self.model.noise_scheduler.timesteps:
-            half = speech[:speech.shape[0] // 2]
-            duplicated = torch.cat((half, half), dim=0)
-            prediction = self.model.prediction_head(
-                duplicated,
-                timestep.to(duplicated.dtype).expand(duplicated.shape[0]),
-                combined_condition,
+        prediction_head = self.model.prediction_head
+        prediction_head.reset_diffusion_cache()
+        prediction_head.reset_diffusion_sampling()
+        combined_condition = torch.cat((condition, negative_condition), dim=0)
+        with (
+                prediction_head.diffusion_cache_session(),
+                prediction_head.diffusion_sampling_session(),
+        ):
+            speech = torch.randn(
+                (
+                    combined_condition.shape[0],
+                    self.config.acoustic_vae_dim,
+                ),
+                generator=generator,
+                device=combined_condition.device,
+                dtype=combined_condition.dtype,
             )
-            positive, negative = prediction.chunk(2, dim=0)
-            guided = negative + float(guidance_scale) * (positive - negative)
-            prediction = torch.cat((guided, guided), dim=0)
-            speech = self.model.noise_scheduler.step(
-                prediction,
-                timestep,
-                speech,
-            ).prev_sample
-        return speech[:speech.shape[0] // 2]
+            native_schedule = (self.model.noise_scheduler.inference_timestep_schedule(inference_steps))
+            controller = prediction_head.diffusion_sampling_controller
+            prepared_schedule = (
+                native_schedule if controller is None else controller.prepare_schedule(native_schedule))
+            prepared_steps = prepared_schedule.numel() - 1
+            # Rebuilding through the scheduler is essential: DPM-Solver++(2M)
+            # history belongs to this exact sigma grid and this request.
+            self.model.noise_scheduler.set_timesteps(
+                prepared_steps,
+                device=speech.device,
+                timestep_schedule=prepared_schedule,
+            )
+            total_steps = self.model.noise_scheduler.timesteps.numel()
+            for index, timestep in enumerate(self.model.noise_scheduler.timesteps):
+                half = speech[:speech.shape[0] // 2]
+                next_timestep = (
+                    self.model.noise_scheduler.timesteps[index + 1] if index +
+                    1 < total_steps else timestep.new_tensor(-1))
+                guidance_context = DiffusionStepContext(
+                    index=index,
+                    total_steps=total_steps,
+                    timestep=timestep,
+                    next_timestep=next_timestep,
+                    lane="guidance",
+                    solver="dpm-solver++(2m)",
+                )
+                native_guidance = float(guidance_scale) != 1.0
+                use_guidance = (
+                    True if controller is None else controller.should_use_guidance(
+                        guidance_context,
+                        native=native_guidance,
+                    ))
+                evaluation_context = DiffusionStepContext(
+                    index=index,
+                    total_steps=total_steps,
+                    timestep=timestep,
+                    next_timestep=next_timestep,
+                    lane="guided" if use_guidance else "conditional",
+                    solver="dpm-solver++(2m)",
+                )
+
+                def evaluate_prediction() -> Tensor:
+                    model_timestep = timestep.to(half.dtype)
+                    if not use_guidance:
+                        return prediction_head(
+                            half,
+                            model_timestep.expand(half.shape[0]),
+                            condition,
+                            diffusion_cache_lane="conditional",
+                        )
+                    duplicated = torch.cat((half, half), dim=0)
+                    packed_prediction = prediction_head(
+                        duplicated,
+                        model_timestep.expand(duplicated.shape[0]),
+                        combined_condition,
+                        diffusion_cache_lane="packed-cfg",
+                    )
+                    positive, negative = packed_prediction.chunk(2, dim=0)
+                    if controller is not None:
+                        controller.observe_guidance(
+                            guidance_context,
+                            positive,
+                            negative,
+                        )
+                    return (negative + float(guidance_scale) * (positive - negative))
+
+                guided = (
+                    evaluate_prediction() if controller is None else controller.evaluate(
+                        evaluation_context,
+                        half,
+                        evaluate_prediction,
+                    ))
+                prediction = torch.cat((guided, guided), dim=0)
+                # A model prediction may be reused, but no DPM++ update is
+                # skipped: each prepared sigma transition consumes one value.
+                speech = self.model.noise_scheduler.step(
+                    prediction,
+                    timestep,
+                    speech,
+                ).prev_sample
+            return speech[:speech.shape[0] // 2]
 
     @torch.no_grad()
     def decode_speech_latents(

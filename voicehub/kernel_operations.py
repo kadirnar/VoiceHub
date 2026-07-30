@@ -7,8 +7,10 @@ DIFFUSION_FUSED_BIAS_GELU = "tts.diffusion.fused_bias_gelu"
 DIFFUSION_FUSED_MODULATE = "tts.diffusion.fused_modulate"
 AUDIO_CODEC_SNAKE = "audio.codec.snake"
 AUDIO_CODEC_SNAKE_BETA = "audio.codec.snake_beta"
+AUDIO_CODEC_EUCLIDEAN_VQ = "audio.codec.euclidean_vq_search"
 
 __all__ = [
+    "AUDIO_CODEC_EUCLIDEAN_VQ",
     "AUDIO_CODEC_SNAKE",
     "AUDIO_CODEC_SNAKE_BETA",
     "DIFFUSION_FUSED_BIAS_GELU",

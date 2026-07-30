@@ -612,7 +612,7 @@ class StructuralKernelSelectorTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     [optimization_pass.pass_id for optimization_pass in plan],
-                    ["custom-kernels"],
+                    ["codec-kernels"],
                 )
                 result = plan.apply(codec)
                 self.assertIs(snake.kernel_backend, KernelBackend.TORCH)

@@ -9,6 +9,7 @@ from torch import nn
 from voicehub.optimization import (
     DiffusionBlockResidualCache,
     DiffusionCacheConfig,
+    DiffusionCacheMethod,
     DiffusionCacheMixin,
     DiffusionCachePass,
     DiffusionCachePolicy,
@@ -108,6 +109,7 @@ class DiffusionCacheConfigurationTests(unittest.TestCase):
         encoded = json.dumps(payload, allow_nan=False, sort_keys=True)
 
         self.assertEqual(config.predictor, DiffusionCachePredictor.TAYLOR)
+        self.assertEqual(config.method, DiffusionCacheMethod.DBCACHE)
         self.assertEqual(config.compute_step_mask, (True, False, True))
         self.assertEqual(json.loads(encoded), payload)
         self.assertEqual(DiffusionCacheConfig.from_dict(payload), config)
@@ -156,6 +158,11 @@ class DiffusionCacheConfigurationTests(unittest.TestCase):
                     DiffusionCacheConfig(**values)
         with self.assertRaisesRegex(ValueError, "Unknown diffusion-cache"):
             DiffusionCachePolicy.coerce("sometimes")
+        with self.assertRaisesRegex(ValueError, "First-block cache"):
+            DiffusionCacheConfig(
+                method="fbcache",
+                front_blocks=2,
+            )
 
 
 class DiffusionBlockResidualCacheTests(unittest.TestCase):
@@ -659,13 +666,19 @@ class UniversalDiffusionCacheResolutionTests(unittest.TestCase):
         )
         self.assertEqual(
             [decision.feature for decision in plan.decisions],
-            ["kernels", "attention", "diffusion_cache", "compile"],
+            [
+                "kernels",
+                "attention",
+                "diffusion_sampling",
+                "diffusion_cache",
+                "compile",
+            ],
         )
-        cache_decision = plan.decisions[2]
+        cache_decision = plan.decisions[3]
         self.assertEqual(cache_decision.requested, "required")
         self.assertEqual(
             cache_decision.selected,
-            "block-residual-cache:taylor",
+            "block-residual-cache:dbcache:taylor",
         )
 
     def test_unsupported_auto_falls_back_and_required_fails(self):

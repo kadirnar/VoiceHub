@@ -14,6 +14,7 @@ from voicehub.architectures.vibevoice.configuration import VibeVoiceDiffusionCon
 from voicehub.kernels.diffusion import DiffusionModulationKernelOptimizable
 from voicehub.neural.normalization import RMSNorm
 from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
+from voicehub.optimization.diffusion_sampling import DiffusionSamplingMixin
 
 
 class _RMSNormNoAffine(nn.Module):
@@ -222,7 +223,11 @@ class VibeVoiceDiffusionFinalLayer(DiffusionModulationKernelOptimizable, nn.Modu
         return self.linear(hidden_states)
 
 
-class VibeVoiceDiffusionHead(DiffusionCacheMixin, nn.Module):
+class VibeVoiceDiffusionHead(
+        DiffusionCacheMixin,
+        DiffusionSamplingMixin,
+        nn.Module,
+):
     """Checkpoint-compatible latent velocity predictor."""
 
     def __init__(
@@ -277,6 +282,7 @@ class VibeVoiceDiffusionHead(DiffusionCacheMixin, nn.Module):
         if initialize:
             self.initialize_weights()
         self._initialize_diffusion_cache()
+        self._initialize_diffusion_sampling()
 
     def initialize_weights(self) -> None:
         nn.init.normal_(self.t_embedder.mlp[0].weight, std=0.02)
@@ -291,6 +297,8 @@ class VibeVoiceDiffusionHead(DiffusionCacheMixin, nn.Module):
         noisy_latents: Tensor,
         timesteps: Tensor,
         condition: Tensor,
+        *,
+        diffusion_cache_lane: str = "packed-cfg",
     ) -> Tensor:
         if noisy_latents.ndim != 2:
             raise ValueError("Diffusion latents must have shape [tokens, latent].")
@@ -309,7 +317,7 @@ class VibeVoiceDiffusionHead(DiffusionCacheMixin, nn.Module):
             self.layers,
             hidden_states,
             lambda layer, value: layer(value, modulation),
-            cache_lane="packed-cfg",
+            cache_lane=diffusion_cache_lane,
         )
         return self.final_layer(hidden_states, modulation)
 
@@ -366,12 +374,11 @@ class VibeVoiceDPMSolver:
         self._step_index: int | None = None
         self._lower_order_steps = 0
 
-    def set_timesteps(
+    def inference_timestep_schedule(
         self,
         num_inference_steps: int | None = None,
-        *,
-        device: str | torch.device | None = None,
-    ) -> None:
+    ) -> Tensor:
+        """Build evaluation timesteps plus the virtual clean-data endpoint."""
         steps = (self.config.ddpm_num_inference_steps if num_inference_steps is None else num_inference_steps)
         if isinstance(steps, bool) or not isinstance(steps, int) or steps <= 0:
             raise ValueError("Inference step count must be a positive integer.")
@@ -384,11 +391,67 @@ class VibeVoiceDPMSolver:
                 self.config.ddpm_num_steps - 1,
                 steps + 1,
                 dtype=torch.float64,
-            ).round().flip(0)[:-1].to(torch.long))
-        schedule = self.training_sigmas[values]
+            ).round().flip(0)[:-1])
+        if values.numel() > 1 and not bool(torch.all(values[1:] < values[:-1]).item()):
+            raise ValueError(
+                "Inference steps collapse onto duplicate training timesteps; "
+                "use fewer inference steps.")
+        # DPM-Solver++ terminates at sigma=0, represented by a virtual
+        # timestep below the training grid rather than training timestep 0.
+        return torch.cat((values, values.new_tensor([-1.0])))
+
+    def set_timesteps(
+        self,
+        num_inference_steps: int | None = None,
+        *,
+        device: str | torch.device | None = None,
+        timestep_schedule: Tensor | None = None,
+    ) -> None:
+        if timestep_schedule is None:
+            schedule = self.inference_timestep_schedule(num_inference_steps)
+        else:
+            if not isinstance(timestep_schedule, Tensor):
+                raise TypeError("DPM timestep schedule must be a torch.Tensor.")
+            if timestep_schedule.ndim != 1 or timestep_schedule.numel() < 2:
+                raise ValueError(
+                    "DPM timestep schedule must contain at least one step "
+                    "and its terminal endpoint.")
+            if not bool(torch.isfinite(timestep_schedule).all().item()):
+                raise ValueError("DPM timestep schedule must contain only finite values.")
+            schedule = timestep_schedule.detach().to(
+                device="cpu",
+                dtype=torch.float64,
+            )
+            differences = schedule[1:] - schedule[:-1]
+            if not bool(torch.all(differences < 0).item()):
+                raise ValueError("DPM timestep schedule must be strictly decreasing.")
+            if not math.isclose(
+                    float(schedule[-1].item()),
+                    -1.0,
+                    rel_tol=0.0,
+                    abs_tol=1e-9,
+            ):
+                raise ValueError(
+                    "DPM timestep schedule must terminate at the virtual "
+                    "clean-data timestep -1.")
+            steps = schedule.numel() - 1
+            if num_inference_steps is not None and (isinstance(num_inference_steps, bool) or
+                                                    not isinstance(num_inference_steps, int) or
+                                                    num_inference_steps != steps):
+                raise ValueError("`num_inference_steps` must match the explicit DPM "
+                                 "timestep schedule.")
+            if steps > self.config.ddpm_num_steps:
+                raise ValueError("Inference steps cannot exceed training steps.")
+
+        values = schedule[:-1].round().to(torch.long)
+        if bool(torch.any((values < 0) | (values >= self.config.ddpm_num_steps)).item()):
+            raise ValueError("DPM evaluation timesteps must lie inside the training grid.")
+        if values.numel() > 1 and not bool(torch.all(values[1:] < values[:-1]).item()):
+            raise ValueError("Rounded DPM evaluation timesteps must be strictly decreasing.")
+        sigma_schedule = self.training_sigmas[values]
         self.timesteps = values.to(device=device)
         self.sigmas = torch.cat(
-            (schedule, schedule.new_zeros(1)),
+            (sigma_schedule, sigma_schedule.new_zeros(1)),
             dim=0,
         ).cpu()
         self._model_outputs = [None, None]

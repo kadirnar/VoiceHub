@@ -67,7 +67,12 @@ def create_voxcpm2_architecture_spec() -> ArchitectureSpec:
             batched_inference=False,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", "sdpa", "diffusion-cache"),
+            optimization_passes=(
+                "compile",
+                "sdpa",
+                "diffusion-cache",
+                "diffusion-sampling",
+            ),
             features=(
                 "llm-tts-codec",
                 "diffusion-family",
@@ -75,6 +80,9 @@ def create_voxcpm2_architecture_spec() -> ArchitectureSpec:
                 "diffusion-operation-denoiser",
                 "diffusion-operation-classifier-free-guidance",
                 "diffusion-operation-euler-solver",
+                "diffusion-sampling-schedule",
+                "diffusion-sampling-guidance",
+                "diffusion-sampling-prediction-cache",
                 "30-language-multilingual",
                 "audio-continuation",
                 "cjk-multichar-token-split",
@@ -100,6 +108,11 @@ def create_voxcpm2_architecture_spec() -> ArchitectureSpec:
                 "denoiser",
                 "classifier-free-guidance",
                 "euler-solver",
+            ),
+            "diffusion_sampling_capabilities": (
+                "schedule",
+                "guidance",
+                "prediction-cache",
             ),
             "implementation":
             "voicehub-native",

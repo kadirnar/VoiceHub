@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from importlib import import_module
 from types import MappingProxyType
@@ -42,6 +43,16 @@ class KernelCapabilities:
 
     cuda_runtime: CapabilityStatus
     triton: CapabilityStatus
+    cuda_extension: CapabilityStatus
+
+
+@dataclass(frozen=True)
+class CodecKernelCapabilities:
+    """Optional accelerator providers usable by codec-domain policies."""
+
+    cuda_runtime: CapabilityStatus
+    triton: CapabilityStatus
+    cute: CapabilityStatus
     cuda_extension: CapabilityStatus
 
 
@@ -138,6 +149,95 @@ def triton_capability(device: torch.device | str | None = None, ) -> CapabilityS
     )
 
 
+def cute_dsl_capability(device: torch.device | str | None = None, ) -> CapabilityStatus:
+    """Probe NVIDIA's optional CuTe DSL without making it a core dependency.
+
+    CuTe is kept codec-scoped because its useful VoiceHub targets are
+    matrix-heavy codec operations.  Merely importing the package does
+    not imply that a concrete codec operation has a registered CuTe
+    implementation; operation resolution must still fail closed.
+    """
+    if not sys.platform.startswith("linux"):
+        return CapabilityStatus(
+            False,
+            "CuTe DSL is supported only on Linux",
+            {"platform": sys.platform},
+        )
+    cuda = cuda_runtime_capability(device)
+    if not cuda.available:
+        return CapabilityStatus(
+            False,
+            f"CuTe DSL requires CUDA: {cuda.reason}",
+            cuda.details,
+        )
+    try:
+        cutlass = import_module("cutlass")
+        import_module("cutlass.cute")
+    except (ImportError, OSError, RuntimeError) as error:
+        return CapabilityStatus(
+            False,
+            f"CuTe DSL could not be imported: {error}",
+            cuda.details,
+        )
+    version = getattr(cutlass, "__version__", "unknown")
+    return CapabilityStatus(
+        True,
+        "CuTe DSL and CUDA are available",
+        {
+            **cuda.details,
+            "cutlass": str(version),
+        },
+    )
+
+
+def cute_operator_capability(device: torch.device | str | None = None, ) -> CapabilityStatus:
+    """Probe the CuTe-backed CUTLASS Operator API used by codec GEMMs.
+
+    The DSL package and Operator API are separate optional
+    distributions. A generic CuTe import is therefore insufficient
+    evidence that the codec VQ operation can discover, compile, and run
+    a GEMM.
+    """
+    cute = cute_dsl_capability(device)
+    if not cute.available:
+        return cute
+    compute_capability = cute.details.get("compute_capability", "")
+    try:
+        compute_major = int(compute_capability.partition(".")[0])
+    except ValueError:
+        compute_major = 0
+    if compute_major < 8:
+        return CapabilityStatus(
+            False,
+            "CUTLASS Operator API dense GEMMs require an Ampere-or-newer GPU",
+            cute.details,
+        )
+    try:
+        operators = import_module("cutlass.operators")
+    except (ImportError, OSError, RuntimeError) as error:
+        return CapabilityStatus(
+            False,
+            f"CUTLASS Operator API could not be imported: {error}",
+            cute.details,
+        )
+    missing = tuple(name for name in ("GemmArguments", "get_operators") if not hasattr(operators, name))
+    if missing:
+        return CapabilityStatus(
+            False,
+            "CUTLASS Operator API is missing required GEMM interfaces: "
+            f"{', '.join(missing)}",
+            cute.details,
+        )
+    return CapabilityStatus(
+        True,
+        "CuTe DSL, CUTLASS Operator API, and CUDA are available",
+        {
+            **cute.details,
+            "operator_api": str(getattr(operators, "__version__", "unknown")),
+        },
+    )
+
+
 def cuda_extension_capability(
     *,
     require_runtime: bool = True,
@@ -191,5 +291,15 @@ def get_kernel_capabilities() -> KernelCapabilities:
     return KernelCapabilities(
         cuda_runtime=cuda_runtime_capability(),
         triton=triton_capability(),
+        cuda_extension=cuda_extension_capability(),
+    )
+
+
+def get_codec_kernel_capabilities(device: torch.device | str | None = None, ) -> CodecKernelCapabilities:
+    """Return a codec-scoped capability snapshot, including optional CuTe."""
+    return CodecKernelCapabilities(
+        cuda_runtime=cuda_runtime_capability(device),
+        triton=triton_capability(device),
+        cute=cute_operator_capability(device),
         cuda_extension=cuda_extension_capability(),
     )

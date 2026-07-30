@@ -12,6 +12,7 @@ from torch.nn import functional
 from voicehub.architectures.voxcpm2.configuration import VoxCPM2ArchitectureConfig, VoxCPMCFMConfig
 from voicehub.architectures.voxcpm2.minicpm import MiniCPMModel, local_transformer_config
 from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
+from voicehub.optimization.diffusion_sampling import DiffusionSamplingMixin, DiffusionStepContext
 from voicehub.optimization.protocols import OptimizationCompileTarget
 
 
@@ -143,7 +144,7 @@ class _TimeMLP(nn.Module):
         return self.linear_2(self.act(self.linear_1(inputs)))
 
 
-class VoxCPMLocalDiT(DiffusionCacheMixin, nn.Module):
+class VoxCPMLocalDiT(DiffusionCacheMixin, DiffusionSamplingMixin, nn.Module):
     """Source-compatible local diffusion transformer."""
 
     def __init__(
@@ -188,6 +189,7 @@ class VoxCPMLocalDiT(DiffusionCacheMixin, nn.Module):
         )
         self.decoder = MiniCPMModel(config, device=device, dtype=dtype)
         self._initialize_diffusion_cache()
+        self._initialize_diffusion_sampling()
 
     def forward(
         self,
@@ -196,6 +198,8 @@ class VoxCPMLocalDiT(DiffusionCacheMixin, nn.Module):
         time: Tensor,
         prefix_condition: Tensor,
         delta_time: Tensor,
+        *,
+        diffusion_cache_lane: str = "packed-cfg",
     ) -> Tensor:
         inputs = self.in_proj(inputs.transpose(1, 2).contiguous())
         condition = self.cond_proj(prefix_condition.transpose(1, 2).contiguous())
@@ -233,7 +237,7 @@ class VoxCPMLocalDiT(DiffusionCacheMixin, nn.Module):
                 position_embedding,
                 is_causal=False,
             )[0],
-            cache_lane="packed-cfg",
+            cache_lane=diffusion_cache_lane,
         )
         hidden = self.decoder.norm(hidden)
         hidden = hidden[
@@ -286,6 +290,7 @@ class VoxCPMConditionalFlowMatcher(nn.Module):
         # The outer autoregressive frame changes prefix conditioning.  Every
         # local solve starts a new cache history.
         self.estimator.reset_diffusion_cache()
+        self.estimator.reset_diffusion_sampling()
         batch = conditioning_embedding.shape[0]
         state = torch.randn(
             (batch, self.in_channels, patch_size),
@@ -301,43 +306,97 @@ class VoxCPMConditionalFlowMatcher(nn.Module):
             dtype=state.dtype,
         )
         time_span = time_span + sway * (torch.cos(torch.pi / 2 * time_span) - 1 + time_span)
+        controller = self.estimator.diffusion_sampling_controller
+        if controller is not None:
+            time_span = controller.prepare_schedule(time_span)
         time = time_span[0]
         delta = time_span[0] - time_span[1]
         zero_steps = max(1, int(len(time_span) * 0.04))
         for step in range(1, len(time_span)):
+            index = step - 1
+            total_steps = len(time_span) - 1
             if use_cfg_zero_star and step <= zero_steps:
                 velocity = torch.zeros_like(state)
             else:
-                model_state = torch.cat((state, state), dim=0)
-                model_embedding = torch.cat(
-                    (
-                        conditioning_embedding,
-                        torch.zeros_like(conditioning_embedding),
-                    ),
-                    dim=0,
+                guidance_context = DiffusionStepContext(
+                    index=index,
+                    total_steps=total_steps,
+                    timestep=time,
+                    next_timestep=time_span[step],
+                    lane="guidance",
+                    solver="euler",
                 )
-                model_time = time.expand(2 * batch)
-                model_delta = (
-                    torch.zeros_like(model_time) if not self.mean_mode else delta.expand(2 * batch))
-                model_prefix = torch.cat(
-                    (prefix_condition, prefix_condition),
-                    dim=0,
+                use_guidance = (
+                    True if controller is None else controller.should_use_guidance(
+                        guidance_context,
+                        native=True,
+                    ))
+                evaluation_context = DiffusionStepContext(
+                    index=index,
+                    total_steps=total_steps,
+                    timestep=time,
+                    next_timestep=time_span[step],
+                    lane="packed-cfg" if use_guidance else "conditional",
+                    solver="euler",
                 )
-                positive, negative = self.estimator(
-                    model_state,
-                    model_embedding,
-                    model_time,
-                    model_prefix,
-                    model_delta,
-                ).chunk(2)
-                if use_cfg_zero_star:
-                    positive_flat = positive.flatten(1)
-                    negative_flat = negative.flatten(1)
-                    scale = ((positive_flat * negative_flat).sum(1, keepdim=True) /
-                             (negative_flat.pow(2).sum(1, keepdim=True) + 1e-8)).view(batch, 1, 1)
-                else:
-                    scale = 1.0
-                velocity = (negative * scale + guidance * (positive - negative * scale))
+
+                def evaluate_velocity() -> Tensor:
+                    if not use_guidance:
+                        model_time = time.expand(batch)
+                        model_delta = (
+                            torch.zeros_like(model_time) if not self.mean_mode else delta.expand(batch))
+                        return self.estimator(
+                            state,
+                            conditioning_embedding,
+                            model_time,
+                            prefix_condition,
+                            model_delta,
+                            diffusion_cache_lane="conditional",
+                        )
+                    model_state = torch.cat((state, state), dim=0)
+                    model_embedding = torch.cat(
+                        (
+                            conditioning_embedding,
+                            torch.zeros_like(conditioning_embedding),
+                        ),
+                        dim=0,
+                    )
+                    model_time = time.expand(2 * batch)
+                    model_delta = (
+                        torch.zeros_like(model_time) if not self.mean_mode else delta.expand(2 * batch))
+                    model_prefix = torch.cat(
+                        (prefix_condition, prefix_condition),
+                        dim=0,
+                    )
+                    positive, negative = self.estimator(
+                        model_state,
+                        model_embedding,
+                        model_time,
+                        model_prefix,
+                        model_delta,
+                        diffusion_cache_lane="packed-cfg",
+                    ).chunk(2)
+                    if controller is not None:
+                        controller.observe_guidance(
+                            guidance_context,
+                            positive,
+                            negative,
+                        )
+                    if use_cfg_zero_star:
+                        positive_flat = positive.flatten(1)
+                        negative_flat = negative.flatten(1)
+                        scale = ((positive_flat * negative_flat).sum(1, keepdim=True) /
+                                 (negative_flat.pow(2).sum(1, keepdim=True) + 1e-8)).view(batch, 1, 1)
+                    else:
+                        scale = 1.0
+                    return (negative * scale + guidance * (positive - negative * scale))
+
+                velocity = (
+                    evaluate_velocity() if controller is None else controller.evaluate(
+                        evaluation_context,
+                        state,
+                        evaluate_velocity,
+                    ))
             state = state - delta * velocity
             time = time - delta
             if step < len(time_span) - 1:

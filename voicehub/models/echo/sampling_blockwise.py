@@ -4,6 +4,7 @@ import torch
 
 from voicehub.models.echo.model import EchoDiT
 from voicehub.models.echo.sampling import KVCache, _concat_kv_caches, _multiply_kv_cache, _temporal_score_rescale
+from voicehub.optimization.diffusion_sampling import DiffusionStepContext
 
 
 @torch.inference_mode()
@@ -31,6 +32,9 @@ def sample_blockwise_euler_cfg_independent_guidances(
 
     INIT_SCALE = 0.999  # so that we can apply rescale to first step
     model.reset_diffusion_cache()
+    sampling_controller = model.diffusion_sampling_controller
+    if sampling_controller is not None:
+        sampling_controller.reset()
 
     device, dtype = model.device, model.dtype
     batch_size = text_input_ids.shape[0]
@@ -38,6 +42,8 @@ def sample_blockwise_euler_cfg_independent_guidances(
     rng = torch.Generator(device=device).manual_seed(rng_seed)
 
     t_schedule = torch.linspace(1., 0., num_steps + 1, device=device) * INIT_SCALE
+    if sampling_controller is not None:
+        t_schedule = sampling_controller.prepare_schedule(t_schedule)
 
     text_mask_uncond = torch.zeros_like(text_mask)
     speaker_mask_uncond = torch.zeros_like(speaker_mask)
@@ -60,10 +66,12 @@ def sample_blockwise_euler_cfg_independent_guidances(
         prefix_latent = torch.cat([continuation_latent, prefix_latent], dim=1)
         start_pos = continuation_len
 
-    for block_size in block_sizes:
+    for outer_step, block_size in enumerate(block_sizes):
         # Prefix K/V, start position, and latent length change at every outer
         # block; residuals from the previous block are therefore invalid.
         model.reset_diffusion_cache()
+        if sampling_controller is not None and outer_step:
+            sampling_controller.reset()
         if speaker_kv_scale is not None:
             _multiply_kv_cache(kv_speaker_cond, speaker_kv_scale, speaker_kv_max_layers)
             kv_speaker_full = _concat_kv_caches(kv_speaker_cond, kv_speaker_cond, kv_speaker_cond)
@@ -76,27 +84,66 @@ def sample_blockwise_euler_cfg_independent_guidances(
         if truncation_factor is not None:
             x_t = x_t * truncation_factor
 
-        for i in range(num_steps):
+        prepared_steps = len(t_schedule) - 1
+        for i in range(prepared_steps):
             t, t_next = t_schedule[i], t_schedule[i + 1]
 
-            has_cfg = ((t >= cfg_min_t) * (t <= cfg_max_t)).item()
+            native_cfg = bool(((t >= cfg_min_t) * (t <= cfg_max_t)).item())
+            guidance_context = DiffusionStepContext(
+                index=i,
+                total_steps=prepared_steps,
+                timestep=t,
+                next_timestep=t_next,
+                lane="packed-cfg",
+                solver="euler",
+                outer_step=outer_step,
+            )
+            has_cfg = (
+                native_cfg if sampling_controller is None else sampling_controller.should_use_guidance(
+                    guidance_context,
+                    native=native_cfg,
+                ))
+            context = (
+                guidance_context if has_cfg else DiffusionStepContext(
+                    index=i,
+                    total_steps=prepared_steps,
+                    timestep=t,
+                    next_timestep=t_next,
+                    lane="conditional",
+                    solver="euler",
+                    outer_step=outer_step,
+                ))
 
-            if has_cfg:
-                v_cond, v_uncond_text, v_uncond_speaker = model(
-                    x=torch.cat([x_t, x_t, x_t], dim=0).to(dtype),
-                    t=(torch.ones((batch_size * 3, ), device=device) * t).to(dtype),
-                    text_mask=full_text_mask,
-                    speaker_mask=full_speaker_mask,
-                    start_pos=start_pos,
-                    kv_cache_text=kv_text_full,
-                    kv_cache_speaker=kv_speaker_full,
-                    kv_cache_latent=kv_latent_full,
-                ).float().chunk(
-                    3, dim=0)
-                v_pred = v_cond + cfg_scale_text * (v_cond - v_uncond_text) + cfg_scale_speaker * (
-                    v_cond - v_uncond_speaker)
-            else:
-                v_pred = model(
+            def compute_velocity() -> torch.Tensor:
+                if has_cfg:
+                    v_cond, v_uncond_text, v_uncond_speaker = model(
+                        x=torch.cat([x_t, x_t, x_t], dim=0).to(dtype),
+                        t=(torch.ones(
+                            (batch_size * 3, ),
+                            device=device,
+                        ) * t).to(dtype),
+                        text_mask=full_text_mask,
+                        speaker_mask=full_speaker_mask,
+                        start_pos=start_pos,
+                        kv_cache_text=kv_text_full,
+                        kv_cache_speaker=kv_speaker_full,
+                        kv_cache_latent=kv_latent_full,
+                        diffusion_cache_lane="packed-cfg",
+                    ).float().chunk(
+                        3, dim=0)
+                    if sampling_controller is not None:
+                        sampling_controller.observe_guidance(
+                            context,
+                            torch.cat((v_cond, v_cond), dim=0),
+                            torch.cat(
+                                (v_uncond_text, v_uncond_speaker),
+                                dim=0,
+                            ),
+                        )
+                    return (
+                        v_cond + cfg_scale_text * (v_cond - v_uncond_text) + cfg_scale_speaker *
+                        (v_cond - v_uncond_speaker))
+                return model(
                     x=x_t.to(dtype),
                     t=(torch.ones((batch_size, ), device=device) * t).to(dtype),
                     text_mask=text_mask,
@@ -105,7 +152,15 @@ def sample_blockwise_euler_cfg_independent_guidances(
                     kv_cache_text=kv_text_cond,
                     kv_cache_speaker=kv_speaker_cond,
                     kv_cache_latent=kv_latent_cond,
+                    diffusion_cache_lane="conditional",
                 ).float()
+
+            v_pred = (
+                compute_velocity() if sampling_controller is None else sampling_controller.evaluate(
+                    context,
+                    x_t,
+                    compute_velocity,
+                ))
 
             # optional temporal score rescaling: https://arxiv.org/pdf/2510.01184
             if rescale_k is not None and rescale_sigma is not None:
@@ -116,6 +171,8 @@ def sample_blockwise_euler_cfg_independent_guidances(
                 _multiply_kv_cache(kv_speaker_cond, 1. / speaker_kv_scale, speaker_kv_max_layers)
                 kv_speaker_full = _concat_kv_caches(kv_speaker_cond, kv_speaker_cond, kv_speaker_cond)
                 model.reset_diffusion_cache()
+                if sampling_controller is not None:
+                    sampling_controller.reset()
 
             x_t = x_t + v_pred * (t_next - t)
 

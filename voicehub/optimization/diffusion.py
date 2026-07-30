@@ -16,6 +16,7 @@ from voicehub.tasks import SpeechTask
 DIFFUSION_FAMILY_FEATURE = "diffusion-family"
 DIFFUSION_KIND_FEATURE_PREFIX = "diffusion-kind-"
 DIFFUSION_OPERATION_FEATURE_PREFIX = "diffusion-operation-"
+DIFFUSION_SAMPLING_FEATURE_PREFIX = "diffusion-sampling-"
 
 
 class DiffusionArchitectureKind(str, Enum):
@@ -97,6 +98,7 @@ class DiffusionModelOptimizationSupport:
     training: bool
     distributed_training: bool
     optimization_passes: tuple[str, ...]
+    sampling_techniques: tuple[str, ...]
 
     @property
     def compile_supported(self) -> bool:
@@ -107,6 +109,11 @@ class DiffusionModelOptimizationSupport:
     def diffusion_cache_supported(self) -> bool:
         """Whether an architecture-owned approximate block cache is exposed."""
         return "diffusion-cache" in self.optimization_passes
+
+    @property
+    def diffusion_sampling_supported(self) -> bool:
+        """Whether sampler-level NFE/guidance acceleration is exposed."""
+        return "diffusion-sampling" in self.optimization_passes
 
     def supports_optimization_pass(self, optimization_pass: str) -> bool:
         """Return whether an optimization pass is declared compatible."""
@@ -127,6 +134,8 @@ class DiffusionModelOptimizationSupport:
             "distributed_training": self.distributed_training,
             "compile_supported": self.compile_supported,
             "diffusion_cache_supported": self.diffusion_cache_supported,
+            "diffusion_sampling_supported": self.diffusion_sampling_supported,
+            "sampling_techniques": list(self.sampling_techniques),
             "optimization_passes": list(self.optimization_passes),
         }
 
@@ -185,6 +194,48 @@ def _architecture_operations(architecture) -> tuple[DiffusionOperation, ...]:
     return operations
 
 
+def _architecture_sampling_techniques(architecture) -> tuple[str, ...]:
+    techniques = tuple(
+        feature.removeprefix(DIFFUSION_SAMPLING_FEATURE_PREFIX)
+        for feature in architecture.capabilities.features
+        if feature.startswith(DIFFUSION_SAMPLING_FEATURE_PREFIX))
+    sampling_pass = ("diffusion-sampling" in architecture.capabilities.optimization_passes)
+    if sampling_pass and not techniques:
+        raise ValueError(
+            f"Diffusion-family architecture {architecture.architecture_id!r} "
+            "declares the diffusion-sampling pass without any "
+            "diffusion-sampling-* technique features.")
+    if techniques and not sampling_pass:
+        raise ValueError(
+            f"Diffusion-family architecture {architecture.architecture_id!r} "
+            "declares sampler techniques without the diffusion-sampling pass.")
+    raw_metadata = architecture.metadata.get(
+        "diffusion_sampling_capabilities",
+        (),
+    )
+    if isinstance(raw_metadata, str):
+        raw_metadata = (raw_metadata, )
+    else:
+        try:
+            raw_metadata = tuple(raw_metadata)
+        except TypeError as error:
+            raise TypeError(
+                f"Diffusion-family architecture "
+                f"{architecture.architecture_id!r} must declare "
+                "metadata.diffusion_sampling_capabilities as an iterable.") from error
+    if raw_metadata != techniques:
+        raise ValueError(
+            f"Diffusion-family architecture {architecture.architecture_id!r} "
+            "must keep metadata.diffusion_sampling_capabilities aligned "
+            f"with sampler features; expected {techniques!r}, found "
+            f"{raw_metadata!r}.")
+    if len(techniques) != len(set(techniques)):
+        raise ValueError(
+            f"Diffusion-family architecture {architecture.architecture_id!r} "
+            "declares duplicate diffusion sampling techniques.")
+    return techniques
+
+
 def list_diffusion_model_optimization_support() -> tuple[DiffusionModelOptimizationSupport, ...]:
     """List active public diffusion/flow TTS models by architecture traits."""
     from voicehub.architectures import get_architecture_spec
@@ -207,6 +258,7 @@ def list_diffusion_model_optimization_support() -> tuple[DiffusionModelOptimizat
                 training=capabilities.training,
                 distributed_training=capabilities.distributed_training,
                 optimization_passes=capabilities.optimization_passes,
+                sampling_techniques=_architecture_sampling_techniques(architecture, ),
             ))
     return tuple(sorted(output, key=lambda item: item.model_type))
 
@@ -228,6 +280,7 @@ __all__ = [
     "DIFFUSION_FAMILY_FEATURE",
     "DIFFUSION_KIND_FEATURE_PREFIX",
     "DIFFUSION_OPERATION_FEATURE_PREFIX",
+    "DIFFUSION_SAMPLING_FEATURE_PREFIX",
     "DiffusionArchitectureKind",
     "DiffusionModelOptimizationSupport",
     "DiffusionOperation",

@@ -70,6 +70,7 @@ def create_irodori_architecture_spec() -> ArchitectureSpec:
                 "sdpa",
                 "custom-kernels",
                 "diffusion-cache",
+                "diffusion-sampling",
             ),
             features=(
                 "diffusion-family",
@@ -77,6 +78,9 @@ def create_irodori_architecture_spec() -> ArchitectureSpec:
                 "diffusion-operation-denoiser",
                 "diffusion-operation-classifier-free-guidance",
                 "diffusion-operation-euler-solver",
+                "diffusion-sampling-schedule",
+                "diffusion-sampling-guidance",
+                "diffusion-sampling-prediction-cache",
                 "48-khz-waveform",
                 "caption-conditioning",
                 "classifier-free-guidance",
@@ -101,6 +105,11 @@ def create_irodori_architecture_spec() -> ArchitectureSpec:
                 "denoiser",
                 "classifier-free-guidance",
                 "euler-solver",
+            ),
+            "diffusion_sampling_capabilities": (
+                "schedule",
+                "guidance",
+                "prediction-cache",
             ),
             "implementation":
             "voicehub-native",

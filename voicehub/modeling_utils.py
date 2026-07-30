@@ -481,6 +481,8 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         compile_config=None,
         diffusion_cache: bool | str | None = None,
         diffusion_cache_config=None,
+        diffusion_sampling: bool | str | None = None,
+        diffusion_sampling_config=None,
         config_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ):
@@ -530,6 +532,8 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
                 compile_config=compile_config,
                 diffusion_cache=diffusion_cache,
                 diffusion_cache_config=diffusion_cache_config,
+                diffusion_sampling=diffusion_sampling,
+                diffusion_sampling_config=diffusion_sampling_config,
             ))
 
         external_backend_requested = (llm_backend is not None or llm_backend_config is not None)

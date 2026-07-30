@@ -21,6 +21,7 @@ from voicehub.architectures.f5tts.modules import (
     TimestepEmbedding,
 )
 from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
+from voicehub.optimization.diffusion_sampling import DiffusionSamplingMixin, DiffusionStepContext
 
 
 def lengths_to_mask(
@@ -66,8 +67,15 @@ def epss_timesteps(
     return torch.tensor(schedule, device=device, dtype=dtype) / 32
 
 
-class F5DiT(DiffusionCacheMixin, nn.Module):
+class F5DiT(DiffusionCacheMixin, DiffusionSamplingMixin, nn.Module):
     """State-compatible F5-TTS diffusion transformer."""
+
+    diffusion_sampling_capabilities = frozenset({
+        "schedule",
+        "guidance",
+        "prediction-cache",
+        "stork2",
+    })
 
     def __init__(
         self,
@@ -111,6 +119,7 @@ class F5DiT(DiffusionCacheMixin, nn.Module):
         self._text_cond: torch.Tensor | None = None
         self._text_uncond: torch.Tensor | None = None
         self._initialize_diffusion_cache()
+        self._initialize_diffusion_sampling()
         self.initialize_weights()
 
     def initialize_weights(self) -> None:
@@ -309,6 +318,7 @@ class F5ConditionalFlowMatcher(nn.Module):
         token_ids: torch.Tensor,
         mask: torch.Tensor | None,
         cfg_strength: float,
+        guidance_context: DiffusionStepContext | None = None,
     ) -> torch.Tensor:
         if cfg_strength < 1e-5:
             return self.transformer(
@@ -329,6 +339,13 @@ class F5ConditionalFlowMatcher(nn.Module):
             cache=True,
         )
         conditional, unconditional = packed.chunk(2, dim=0)
+        controller = self.transformer.diffusion_sampling_controller
+        if controller is not None and guidance_context is not None:
+            controller.observe_guidance(
+                guidance_context,
+                conditional,
+                unconditional,
+            )
         return conditional + (conditional - unconditional) * cfg_strength
 
     @torch.no_grad()
@@ -351,6 +368,7 @@ class F5ConditionalFlowMatcher(nn.Module):
         if steps <= 0:
             raise ValueError("`steps` must be positive.")
         self.transformer.reset_diffusion_cache()
+        self.transformer.reset_diffusion_sampling()
         if conditioning.ndim == 2:
             conditioning = self.mel_spec(conditioning).transpose(1, 2)
         if conditioning.ndim != 3 or conditioning.shape[-1] != self.num_channels:
@@ -426,30 +444,112 @@ class F5ConditionalFlowMatcher(nn.Module):
             ))
         if sway_sampling_coef is not None:
             times = times + sway_sampling_coef * (torch.cos(torch.pi / 2 * times) - 1 + times)
+        controller = self.transformer.diffusion_sampling_controller
+        if controller is not None:
+            times = controller.prepare_schedule(times)
+            if (controller.config.solver.value == "stork2" and self.ode_method != "euler"):
+                raise ValueError("STORK-2 requires F5-TTS `ode_method='euler'`.")
         trajectory = [state]
         try:
             for index in range(times.numel() - 1):
                 start = times[index]
                 step_size = times[index + 1] - start
-                velocity = self._velocity(
-                    start,
-                    state,
-                    conditioning=step_conditioning,
-                    token_ids=token_ids,
-                    mask=attention_mask,
-                    cfg_strength=cfg_strength,
+                total_steps = times.numel() - 1
+                guidance_context = DiffusionStepContext(
+                    index=index,
+                    total_steps=total_steps,
+                    timestep=start,
+                    next_timestep=times[index + 1],
+                    lane="guidance",
+                    solver=self.ode_method,
+                    stage="main",
                 )
-                if self.ode_method == "midpoint":
-                    midpoint = state + 0.5 * step_size * velocity
-                    velocity = self._velocity(
-                        start + 0.5 * step_size,
-                        midpoint,
+                native_guidance = cfg_strength >= 1e-5
+                use_guidance = (
+                    native_guidance if controller is None else controller.should_use_guidance(
+                        guidance_context,
+                        native=native_guidance,
+                    ))
+                effective_cfg_strength = cfg_strength if use_guidance else 0.0
+                evaluation_context = DiffusionStepContext(
+                    index=index,
+                    total_steps=total_steps,
+                    timestep=start,
+                    next_timestep=times[index + 1],
+                    lane="packed-cfg" if use_guidance else "conditional",
+                    solver=self.ode_method,
+                    stage="main",
+                )
+
+                def evaluate_main() -> torch.Tensor:
+                    return self._velocity(
+                        start,
+                        state,
                         conditioning=step_conditioning,
                         token_ids=token_ids,
                         mask=attention_mask,
-                        cfg_strength=cfg_strength,
+                        cfg_strength=effective_cfg_strength,
+                        guidance_context=guidance_context,
                     )
-                state = state + step_size * velocity
+
+                velocity = (
+                    evaluate_main() if controller is None else controller.evaluate(
+                        evaluation_context,
+                        state,
+                        evaluate_main,
+                    ))
+                if self.ode_method == "midpoint":
+                    midpoint = state + 0.5 * step_size * velocity
+                    midpoint_time = start + 0.5 * step_size
+                    midpoint_guidance_context = DiffusionStepContext(
+                        index=index,
+                        total_steps=total_steps,
+                        timestep=midpoint_time,
+                        next_timestep=times[index + 1],
+                        lane="guidance",
+                        solver=self.ode_method,
+                        stage="midpoint",
+                    )
+                    midpoint_guidance = (
+                        native_guidance if controller is None else controller.should_use_guidance(
+                            midpoint_guidance_context,
+                            native=native_guidance,
+                        ))
+                    midpoint_cfg_strength = (cfg_strength if midpoint_guidance else 0.0)
+                    midpoint_context = DiffusionStepContext(
+                        index=index,
+                        total_steps=total_steps,
+                        timestep=midpoint_time,
+                        next_timestep=times[index + 1],
+                        lane=("packed-cfg" if midpoint_guidance else "conditional"),
+                        solver=self.ode_method,
+                        stage="midpoint",
+                    )
+
+                    def evaluate_midpoint() -> torch.Tensor:
+                        return self._velocity(
+                            midpoint_time,
+                            midpoint,
+                            conditioning=step_conditioning,
+                            token_ids=token_ids,
+                            mask=attention_mask,
+                            cfg_strength=midpoint_cfg_strength,
+                            guidance_context=midpoint_guidance_context,
+                        )
+
+                    velocity = (
+                        evaluate_midpoint() if controller is None else controller.evaluate(
+                            midpoint_context,
+                            midpoint,
+                            evaluate_midpoint,
+                        ))
+                state = (
+                    state + step_size * velocity
+                    if controller is None or self.ode_method == "midpoint" else controller.advance(
+                        evaluation_context,
+                        state,
+                        velocity,
+                    ))
                 trajectory.append(state)
         finally:
             self.transformer.clear_cache()

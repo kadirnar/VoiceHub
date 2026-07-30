@@ -28,7 +28,8 @@ _DYNAMIC_IMPORT_INFRASTRUCTURE = frozenset({
 })
 _PER_FILE_ALLOWED_IMPORT_ROOTS = {
     "integrations.py": frozenset({"wandb"}),
-    "kernels/capabilities.py": frozenset({"triton"}),
+    "kernels/capabilities.py": frozenset({"cutlass", "triton"}),
+    "kernels/cute_codecs.py": frozenset({"cutlass"}),
     "kernels/triton_activations.py": frozenset({"triton"}),
     "neural/backends/flash_attention4.py": frozenset({"flash_attn"}),
 }

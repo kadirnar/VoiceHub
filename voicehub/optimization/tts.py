@@ -36,6 +36,7 @@ from voicehub.tasks import SpeechTask
 if TYPE_CHECKING:
     from voicehub.architectures.specifications import ArchitectureSpec
     from voicehub.optimization.diffusion_cache import DiffusionCacheConfig, DiffusionCachePolicy
+    from voicehub.optimization.diffusion_sampling import DiffusionSamplingConfig, DiffusionSamplingPolicy
     from voicehub.optimization.passes import OptimizationResult
     from voicehub.registry import ModelSpec
 
@@ -206,6 +207,8 @@ class TTSOptimizationConfig:
     compile_config: TorchCompileConfig | Mapping[str, Any] | None = None
     diffusion_cache: DiffusionCachePolicy | str | bool = "disabled"
     diffusion_cache_config: DiffusionCacheConfig | Mapping[str, Any] | None = None
+    diffusion_sampling: DiffusionSamplingPolicy | str | bool = "disabled"
+    diffusion_sampling_config: (DiffusionSamplingConfig | Mapping[str, Any] | None) = None
     optimization_passes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -220,6 +223,10 @@ class TTSOptimizationConfig:
         diffusion_cache = diffusion_module.DiffusionCachePolicy.coerce(self.diffusion_cache, )
         diffusion_cache_config = (
             diffusion_module.coerce_diffusion_cache_config(self.diffusion_cache_config, ))
+        sampling_module = import_module("voicehub.optimization.diffusion_sampling")
+        diffusion_sampling = sampling_module.DiffusionSamplingPolicy.coerce(self.diffusion_sampling, )
+        diffusion_sampling_config = (
+            sampling_module.coerce_diffusion_sampling_config(self.diffusion_sampling_config, ))
         extra_passes = _optimization_pass_names(self.optimization_passes)
         object.__setattr__(self, "attn_implementation", attention)
         object.__setattr__(self, "kernel_backend", kernels)
@@ -230,6 +237,16 @@ class TTSOptimizationConfig:
             self,
             "diffusion_cache_config",
             diffusion_cache_config,
+        )
+        object.__setattr__(
+            self,
+            "diffusion_sampling",
+            diffusion_sampling,
+        )
+        object.__setattr__(
+            self,
+            "diffusion_sampling_config",
+            diffusion_sampling_config,
         )
         object.__setattr__(
             self,
@@ -268,6 +285,8 @@ class TTSOptimizationConfig:
             "compile_config": self.compile_config.manifest(),
             "diffusion_cache": self.diffusion_cache.value,
             "diffusion_cache_config": self.diffusion_cache_config.to_dict(),
+            "diffusion_sampling": self.diffusion_sampling.value,
+            "diffusion_sampling_config": self.diffusion_sampling_config.to_dict(),
             "optimization_passes": list(self.optimization_passes),
         }
 
@@ -321,6 +340,8 @@ def tts_optimization_config_from_options(
     compile_config: TorchCompileConfig | Mapping[str, Any] | None = None,
     diffusion_cache: bool | str | None = None,
     diffusion_cache_config: DiffusionCacheConfig | Mapping[str, Any] | None = None,
+    diffusion_sampling: bool | str | None = None,
+    diffusion_sampling_config: (DiffusionSamplingConfig | Mapping[str, Any] | None) = None,
 ) -> TTSOptimizationConfig | None:
     """Merge ``from_pretrained``-style optimization keyword arguments.
 
@@ -337,6 +358,8 @@ def tts_optimization_config_from_options(
             compile_config,
             diffusion_cache,
             diffusion_cache_config,
+            diffusion_sampling,
+            diffusion_sampling_config,
         ))
     if optimization_config is None and not direct:
         return None
@@ -350,6 +373,8 @@ def tts_optimization_config_from_options(
             compile_config=compile_config,
             diffusion_cache=("disabled" if diffusion_cache is None else diffusion_cache),
             diffusion_cache_config=diffusion_cache_config,
+            diffusion_sampling=("disabled" if diffusion_sampling is None else diffusion_sampling),
+            diffusion_sampling_config=diffusion_sampling_config,
         )
 
     resolved = coerce_tts_optimization_config(optimization_config)
@@ -368,6 +393,10 @@ def tts_optimization_config_from_options(
         values["diffusion_cache"] = diffusion_cache
     if diffusion_cache_config is not None:
         values["diffusion_cache_config"] = diffusion_cache_config
+    if diffusion_sampling is not None:
+        values["diffusion_sampling"] = diffusion_sampling
+    if diffusion_sampling_config is not None:
+        values["diffusion_sampling_config"] = diffusion_sampling_config
     return TTSOptimizationConfig(**values)
 
 
@@ -410,6 +439,8 @@ class TTSOptimizationSupport:
     kernel_backends: tuple[str, ...]
     compile: bool
     diffusion_cache: bool
+    diffusion_sampling: bool
+    diffusion_sampling_techniques: tuple[str, ...]
     optimization_kinds: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -420,6 +451,8 @@ class TTSOptimizationSupport:
             "kernel_backends": list(self.kernel_backends),
             "compile": self.compile,
             "diffusion_cache": self.diffusion_cache,
+            "diffusion_sampling": self.diffusion_sampling,
+            "diffusion_sampling_techniques": list(self.diffusion_sampling_techniques),
             "optimization_kinds": list(self.optimization_kinds),
         }
 
@@ -683,6 +716,10 @@ def get_tts_optimization_support(target: str | Any, ) -> TTSOptimizationSupport:
     kernels = ["native", "torch"]
     if "custom-kernels" in kinds:
         kernels.extend(("auto", "triton", "cuda_extension"))
+    sampling_prefix = "diffusion-sampling-"
+    sampling_techniques = (() if architecture is None else tuple(
+        feature.removeprefix(sampling_prefix) for feature in architecture.capabilities.features
+        if feature.startswith(sampling_prefix)))
 
     return TTSOptimizationSupport(
         model_type=(None if model_spec is None else model_spec.model_type),
@@ -691,6 +728,8 @@ def get_tts_optimization_support(target: str | Any, ) -> TTSOptimizationSupport:
         kernel_backends=tuple(kernels),
         compile=architecture is None or "compile" in kinds,
         diffusion_cache="diffusion-cache" in kinds,
+        diffusion_sampling="diffusion-sampling" in kinds,
+        diffusion_sampling_techniques=sampling_techniques,
         optimization_kinds=tuple(kinds),
     )
 
@@ -731,6 +770,12 @@ def validate_tts_optimization_config(
         raise TTSOptimizationCompatibilityError(
             f"Architecture {support.architecture!r} does not declare an "
             "architecture-owned diffusion-cache block surface.")
+    sampling_module = import_module("voicehub.optimization.diffusion_sampling", )
+    if (resolved.diffusion_sampling is sampling_module.DiffusionSamplingPolicy.REQUIRED and
+            not support.diffusion_sampling):
+        raise TTSOptimizationCompatibilityError(
+            f"Architecture {support.architecture!r} does not declare an "
+            "architecture-owned diffusion-sampling surface.")
     return resolved
 
 
@@ -1024,13 +1069,115 @@ def _resolve_diffusion_cache(
     return optimization_pass, _pass_decision(
         "diffusion_cache",
         policy.value,
-        ("block-residual-cache:"
-         f"{config.diffusion_cache_config.predictor.value}"),
+        (
+            "block-residual-cache:"
+            f"{config.diffusion_cache_config.method.value}:"
+            f"{config.diffusion_cache_config.predictor.value}"),
         optimization_pass,
         (
             "Approximate first/middle/last block caching was explicitly "
             "enabled. Samplers reset request state, CFG lanes remain separate, and "
             "training or gradient-enabled calls bypass the cache."),
+    )
+
+
+def _resolve_diffusion_sampling(
+    config: TTSOptimizationConfig,
+    support: TTSOptimizationSupport,
+    context: OptimizationContext,
+) -> tuple[OptimizationPass | None, TTSOptimizationDecision]:
+    module = import_module("voicehub.optimization.diffusion_sampling")
+    policy = config.diffusion_sampling
+    if policy is module.DiffusionSamplingPolicy.DISABLED:
+        return None, _pass_decision(
+            "diffusion_sampling",
+            policy.value,
+            "disabled",
+            None,
+            "Approximate sampler-level diffusion acceleration is disabled "
+            "by default.",
+        )
+    if context.mode is not OptimizationMode.INFERENCE:
+        reason = ("Schedule rebuilding, guidance reduction, and prediction reuse "
+                  "are inference-only.")
+        if policy is module.DiffusionSamplingPolicy.REQUIRED:
+            raise TTSOptimizationCompatibilityError(reason)
+        return None, _pass_decision(
+            "diffusion_sampling",
+            policy.value,
+            "disabled",
+            None,
+            reason,
+        )
+    if not support.diffusion_sampling:
+        reason = (
+            f"Architecture {support.architecture!r} does not declare an "
+            "architecture-owned sampler integration.")
+        if policy is module.DiffusionSamplingPolicy.REQUIRED:
+            raise TTSOptimizationCompatibilityError(reason)
+        return None, _pass_decision(
+            "diffusion_sampling",
+            policy.value,
+            "unsupported",
+            None,
+            reason,
+        )
+    sampling_config = config.diffusion_sampling_config
+    requested_techniques = []
+    if (sampling_config.target_steps is not None and not {
+            "schedule",
+            "discrete-step-count",
+    }.intersection(support.diffusion_sampling_techniques)):
+        requested_techniques.append("schedule")
+    if sampling_config.guidance.value != "native":
+        requested_techniques.append("guidance")
+    if sampling_config.prediction_cache.value != "disabled":
+        requested_techniques.append("prediction-cache")
+    if sampling_config.solver.value == "stork2":
+        requested_techniques.append("stork2")
+    missing = tuple(
+        technique for technique in requested_techniques
+        if technique not in support.diffusion_sampling_techniques)
+    if missing:
+        reason = (
+            f"Architecture {support.architecture!r} does not declare "
+            "diffusion sampling technique(s): " + ", ".join(missing) + ".")
+        if policy is module.DiffusionSamplingPolicy.REQUIRED:
+            raise TTSOptimizationCompatibilityError(reason)
+        return None, _pass_decision(
+            "diffusion_sampling",
+            policy.value,
+            "unsupported",
+            None,
+            reason + " Automatic policy retained native sampling.",
+        )
+    optimization_pass = module.DiffusionSamplingPass(config.diffusion_sampling_config, )
+    incompatibilities = optimization_pass.capabilities.incompatibilities(context, )
+    if incompatibilities:
+        reason = ("Diffusion sampler acceleration does not support " + ", ".join(incompatibilities))
+        if policy is module.DiffusionSamplingPolicy.REQUIRED:
+            raise TTSOptimizationCompatibilityError(reason + ".")
+        return None, _pass_decision(
+            "diffusion_sampling",
+            policy.value,
+            "disabled",
+            None,
+            reason + "; automatic policy retained exact sampling.",
+        )
+    selected = (
+        f"steps:{sampling_config.target_steps or 'native'}"
+        f"+solver:{sampling_config.solver.value}"
+        f"+guidance:{sampling_config.guidance.value}"
+        f"+prediction:{sampling_config.prediction_cache.value}")
+    return optimization_pass, _pass_decision(
+        "diffusion_sampling",
+        policy.value,
+        selected,
+        optimization_pass,
+        (
+            "Sampler-level acceleration was explicitly enabled. Native "
+            "schedules are rebuilt before integration, CFG lanes remain "
+            "isolated, and calibrated cache modes fail closed."),
     )
 
 
@@ -1115,6 +1262,11 @@ def resolve_tts_optimization(
         support,
         resolved_context,
     )
+    sampling_pass, sampling_decision = _resolve_diffusion_sampling(
+        resolved_config,
+        support,
+        resolved_context,
+    )
     extra_passes, extra_decisions = _resolve_extra_passes(
         resolved_config,
         support,
@@ -1131,6 +1283,7 @@ def resolve_tts_optimization(
         item for item in (
             kernel_pass,
             attention_pass,
+            sampling_pass,
             cache_pass,
             *extra_passes,
             compile_pass,
@@ -1150,6 +1303,7 @@ def resolve_tts_optimization(
             kernel_decision,
             attention_decision,
             *extra_decisions,
+            sampling_decision,
             cache_decision,
             compile_decision,
         ),

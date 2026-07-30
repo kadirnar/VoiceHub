@@ -85,6 +85,36 @@ class DiffusionCachePolicy(str, Enum):
                 f"{choices}.") from error
 
 
+class DiffusionCacheMethod(str, Enum):
+    """Architecture-owned block-cache layouts."""
+
+    DBCACHE = "dbcache"
+    FIRST_BLOCK = "first_block"
+
+    @classmethod
+    def coerce(
+        cls,
+        value: DiffusionCacheMethod | str,
+    ) -> DiffusionCacheMethod:
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, str):
+            raise TypeError("`method` must be a string or DiffusionCacheMethod.")
+        normalized = value.strip().lower().replace("-", "_")
+        aliases = {
+            "cache_dit": cls.DBCACHE.value,
+            "fbcache": cls.FIRST_BLOCK.value,
+            "first_block_cache": cls.FIRST_BLOCK.value,
+        }
+        try:
+            return cls(aliases.get(normalized, normalized))
+        except ValueError as error:
+            choices = ", ".join(item.value for item in cls)
+            raise ValueError(
+                f"Unknown diffusion cache method {value!r}; expected one of: "
+                f"{choices}.") from error
+
+
 class DiffusionCachePredictor(str, Enum):
     """Approximation used for a skipped middle-block residual."""
 
@@ -143,6 +173,7 @@ class DiffusionCacheConfig:
     TTS optimizer, or apply :class:`DiffusionCachePass` directly.
     """
 
+    method: DiffusionCacheMethod | str = DiffusionCacheMethod.DBCACHE
     front_blocks: int = 1
     back_blocks: int = 0
     residual_diff_threshold: float = 0.08
@@ -156,10 +187,14 @@ class DiffusionCacheConfig:
     epsilon: float = 1e-6
 
     def __post_init__(self) -> None:
+        method = DiffusionCacheMethod.coerce(self.method)
         front = _non_negative_integer(self.front_blocks, name="front_blocks")
         if front == 0:
             raise ValueError("`front_blocks` must be at least one.")
         back = _non_negative_integer(self.back_blocks, name="back_blocks")
+        if (method is DiffusionCacheMethod.FIRST_BLOCK and (front != 1 or back != 0)):
+            raise ValueError("First-block cache requires `front_blocks=1` and "
+                             "`back_blocks=0`.")
         warmup = _non_negative_integer(self.warmup_steps, name="warmup_steps")
         maximum = _bounded_step_limit(
             self.max_cached_steps,
@@ -201,6 +236,7 @@ class DiffusionCacheConfig:
         epsilon = float(self.epsilon)
         if not math.isfinite(epsilon) or epsilon <= 0:
             raise ValueError("`epsilon` must be finite and greater than zero.")
+        object.__setattr__(self, "method", method)
         object.__setattr__(self, "front_blocks", front)
         object.__setattr__(self, "back_blocks", back)
         object.__setattr__(self, "residual_diff_threshold", threshold)
@@ -234,6 +270,7 @@ class DiffusionCacheConfig:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "method": self.method.value,
             "front_blocks": self.front_blocks,
             "back_blocks": self.back_blocks,
             "residual_diff_threshold": self.residual_diff_threshold,
@@ -819,7 +856,7 @@ class DiffusionCachePass(OptimizationPass):
 
     def manifest_configuration(self) -> Mapping[str, Any]:
         return {
-            "algorithm": "first-last-block-residual-cache",
+            "algorithm": self.config.method.value,
             "fidelity": "approximate",
             **self.config.to_dict(),
         }
@@ -893,6 +930,7 @@ __all__ = [
     "DiffusionCacheConfig",
     "DiffusionCacheError",
     "DiffusionCacheMixin",
+    "DiffusionCacheMethod",
     "DiffusionCachePass",
     "DiffusionCachePolicy",
     "DiffusionCachePredictor",

@@ -17,6 +17,15 @@ from voicehub.architectures.supertonic.frontend import SupertonicStyle, Superton
 from voicehub.checkpointing import ONNXModel
 from voicehub.hub import read_json_file
 from voicehub.neural.onnx import NativeONNXGraph
+from voicehub.optimization.diffusion_sampling import (
+    DiffusionGuidanceStrategy,
+    DiffusionPredictionCacheMethod,
+    DiffusionSamplingCompatibilityError,
+    DiffusionSamplingMixin,
+    DiffusionScheduleStrategy,
+    DiffusionSolverStrategy,
+    coerce_diffusion_sampling_config,
+)
 from voicehub.optimization.protocols import OptimizationCompileTarget
 
 _SENTENCE_BOUNDARY = re.compile(
@@ -63,7 +72,7 @@ class SupertonicFineTuningOutput:
     waveform: Tensor | None = None
 
 
-class NativeSupertonicRuntime(nn.Module):
+class NativeSupertonicRuntime(DiffusionSamplingMixin, nn.Module):
     """Own all four released graphs as trainable PyTorch modules.
 
     The public release omits the audio/style encoders and original
@@ -72,6 +81,8 @@ class NativeSupertonicRuntime(nn.Module):
     text-to-latent, vector-update, and vocoder graphs from precomputed
     style/latent targets.
     """
+
+    diffusion_sampling_capabilities = frozenset({"discrete-step-count"})
 
     def __init__(
         self,
@@ -94,7 +105,30 @@ class NativeSupertonicRuntime(nn.Module):
         self.text_encoder = NativeONNXGraph(text_encoder)
         self.vector_estimator = NativeONNXGraph(vector_estimator)
         self.vocoder = NativeONNXGraph(vocoder)
+        self._initialize_diffusion_sampling()
         self._validate_graph_contracts()
+
+    def enable_diffusion_sampling(self, config=None):
+        resolved = coerce_diffusion_sampling_config(config)
+        if resolved.schedule is not DiffusionScheduleStrategy.NATIVE:
+            raise DiffusionSamplingCompatibilityError(
+                "Supertonic uses a discrete current_step/total_step "
+                "estimator; non-native continuous schedules are not "
+                "supported.")
+        if resolved.guidance is not DiffusionGuidanceStrategy.NATIVE:
+            raise DiffusionSamplingCompatibilityError(
+                "Supertonic has no classifier-free-guidance branch to "
+                "prune or adapt.")
+        if (resolved.prediction_cache is not DiffusionPredictionCacheMethod.DISABLED):
+            raise DiffusionSamplingCompatibilityError(
+                "Supertonic returns the next absolute latent rather than "
+                "a denoiser or velocity prediction; reusing that output "
+                "would stall the released recurrence.")
+        if resolved.solver is not DiffusionSolverStrategy.NATIVE:
+            raise DiffusionSamplingCompatibilityError(
+                "Supertonic does not expose the direct continuous velocity "
+                "required by STORK-2.")
+        return super().enable_diffusion_sampling(resolved)
 
     def optimization_compile_targets(
         self,
@@ -249,6 +283,8 @@ class NativeSupertonicRuntime(nn.Module):
         if (isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or
                 speed <= 0):
             raise ValueError("`speed` must be a finite positive number.")
+        self.reset_diffusion_sampling()
+        sampling_controller = self.diffusion_sampling_controller
         duration, text_embedding, text_mask, style_ttl = (self._text_features(texts, languages, style))
         duration = duration / float(speed)
         if (not torch.isfinite(duration).all() or (duration <= 0).any()):
@@ -263,13 +299,22 @@ class NativeSupertonicRuntime(nn.Module):
             generator=generator,
         )
         latent = latent * latent_mask.to(dtype=self.dtype)
+        effective_steps = total_steps
+        if sampling_controller is not None:
+            native_steps = torch.arange(
+                total_steps + 1,
+                device=self.device,
+                dtype=torch.float32,
+            )
+            prepared_steps = sampling_controller.prepare_schedule(native_steps)
+            effective_steps = int(prepared_steps.numel() - 1)
         total = torch.full(
             (len(texts), ),
-            float(total_steps),
+            float(effective_steps),
             device=self.device,
             dtype=self.dtype,
         )
-        for step in range(total_steps):
+        for step in range(effective_steps):
             current = torch.full(
                 (len(texts), ),
                 float(step),

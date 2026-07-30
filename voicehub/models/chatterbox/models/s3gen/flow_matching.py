@@ -5,11 +5,24 @@ import torch.nn.functional as F
 
 from voicehub.models.chatterbox.models.s3gen.configs import CFM_PARAMS
 from voicehub.models.chatterbox.models.s3gen.matcha.flow_matching import BASECFM
+from voicehub.optimization.diffusion_sampling import (
+    DiffusionGuidanceStrategy,
+    DiffusionSamplingCompatibilityError,
+    DiffusionSamplingMixin,
+    DiffusionSolverStrategy,
+    DiffusionStepContext,
+    coerce_diffusion_sampling_config,
+)
 
 
-class ConditionalCFM(BASECFM):
+class ConditionalCFM(DiffusionSamplingMixin, BASECFM):
     """Conditional Flow Matching with classifier-free guidance for speaker-
     conditioned mel generation."""
+
+    diffusion_sampling_capabilities = frozenset({
+        "schedule",
+        "prediction-cache",
+    })
 
     def __init__(self, in_channels, cfm_params, n_spks=1, spk_emb_dim=64, estimator: torch.nn.Module = None):
         super().__init__(
@@ -25,6 +38,21 @@ class ConditionalCFM(BASECFM):
         # Just change the architecture of the estimator here
         self.estimator = estimator
         self.lock = threading.Lock()
+        self._initialize_diffusion_sampling()
+
+    def enable_diffusion_sampling(self, config=None):
+        resolved = coerce_diffusion_sampling_config(config)
+        if resolved.guidance is not DiffusionGuidanceStrategy.NATIVE:
+            raise DiffusionSamplingCompatibilityError(
+                "Chatterbox S3Gen has a fixed two-branch CFG estimator "
+                "contract; limited or adaptive guidance cannot safely "
+                "change its batch shape.")
+        if resolved.solver is not DiffusionSolverStrategy.NATIVE:
+            raise DiffusionSamplingCompatibilityError(
+                "Chatterbox S3Gen uses a fixed packed-CFG Euler path and "
+                "does not expose the direct single-lane velocity contract "
+                "required by STORK-2.")
+        return super().enable_diffusion_sampling(resolved)
 
     @torch.inference_mode()
     def forward(
@@ -84,8 +112,12 @@ class ConditionalCFM(BASECFM):
                 shape: (batch_size, spk_emb_dim)
             cond: Not used but kept for future purposes
         """
-        t, _, dt = t_span[0], t_span[-1], t_span[1] - t_span[0]
-        t = t.unsqueeze(dim=0)
+        controller = self.diffusion_sampling_controller
+        if controller is not None:
+            controller.reset()
+            t_span = controller.prepare_schedule(t_span)
+        t = t_span[0].unsqueeze(dim=0)
+        dt = t_span[1] - t_span[0]
 
         # I am storing this because I can later plot it by putting a debugger here and saving it to a file
         # Or in future might add like a return_all_steps flag
@@ -99,16 +131,45 @@ class ConditionalCFM(BASECFM):
         spks_in = torch.zeros([2, 80], device=x.device, dtype=x.dtype)
         cond_in = torch.zeros([2, 80, x.size(2)], device=x.device, dtype=x.dtype)
         for step in range(1, len(t_span)):
+            index = step - 1
+            context = DiffusionStepContext(
+                index=index,
+                total_steps=len(t_span) - 1,
+                timestep=t.squeeze(0),
+                next_timestep=t_span[step],
+                lane="packed-cfg",
+                solver="euler",
+            )
+
             # Classifier-Free Guidance inference introduced in VoiceBox
-            x_in[:] = x
-            mask_in[:] = mask
-            mu_in[0] = mu
-            t_in[:] = t.unsqueeze(0)
-            spks_in[0] = spks
-            cond_in[0] = cond
-            dphi_dt = self.forward_estimator(x_in, mask_in, mu_in, t_in, spks_in, cond_in)
-            dphi_dt, cfg_dphi_dt = torch.split(dphi_dt, [x.size(0), x.size(0)], dim=0)
-            dphi_dt = ((1.0 + self.inference_cfg_rate) * dphi_dt - self.inference_cfg_rate * cfg_dphi_dt)
+            def evaluate_velocity():
+                x_in[:] = x
+                mask_in[:] = mask
+                mu_in[0] = mu
+                t_in[:] = t.unsqueeze(0)
+                spks_in[0] = spks
+                cond_in[0] = cond
+                conditional, unconditional = torch.split(
+                    self.forward_estimator(
+                        x_in,
+                        mask_in,
+                        mu_in,
+                        t_in,
+                        spks_in,
+                        cond_in,
+                    ),
+                    [x.size(0), x.size(0)],
+                    dim=0,
+                )
+                return ((1.0 + self.inference_cfg_rate) * conditional -
+                        self.inference_cfg_rate * unconditional)
+
+            dphi_dt = (
+                evaluate_velocity() if controller is None else controller.evaluate(
+                    context,
+                    x,
+                    evaluate_velocity,
+                ))
             x = x + dt * dphi_dt
             t = t + dt
             sol.append(x)

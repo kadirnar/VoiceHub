@@ -39,7 +39,7 @@ python -m pip install "voicehub[training]"
 | Training loop | `TrainingArguments`, `Trainer`, callbacks, trainer outputs |
 | Training execution | `TrainingStrategy`, `TorchTrainingStrategy` |
 | TTS datasets | `TTSDataset`, `TTSDatasetSpec`, `TTSDataArchitecture`, `TTSDataReadiness`, length-aware batching |
-| TTS optimization | Universal `TTSOptimizationConfig`, approximate diffusion caching, capability discovery/resolution, plus source-specific training profiles |
+| TTS optimization | Universal `TTSOptimizationConfig`, sampler/NFE acceleration, diffusion caching, codec kernels, capability discovery/resolution, and source-specific training profiles |
 | ASR datasets | `ASRDataset`, `ASRDatasetSpec`, `ASRDataArchitecture`, `ASRDataReadiness` |
 | TTS objectives | Multi-codebook CE, diffusion/flow pair builders, VITS loss primitives |
 | Collation | `default_data_collator`, `DefaultDataCollator`, `DataCollatorForTTSTraining`, `DataCollatorForAudioTraining` |
@@ -607,6 +607,8 @@ TTSOptimizationConfig(
     compile_config=None,
     diffusion_cache="disabled",
     diffusion_cache_config=None,
+    diffusion_sampling="disabled",
+    diffusion_sampling_config=None,
     optimization_passes=(),
 )
 ```
@@ -634,6 +636,12 @@ aliases `False` and `True` mean `disabled` and `required`. This is a separate,
 approximate inference policy and therefore defaults to `disabled`.
 `diffusion_cache_config` accepts a `DiffusionCacheConfig`, a mapping with the
 same fields, or `None`.
+
+Diffusion-sampling values are also `disabled`, `auto`, and `required`.
+This independent, approximate inference policy rebuilds sampler schedules,
+reduces CFG evaluations, predicts selected model outputs, or activates a
+compatible specialized solver. `diffusion_sampling_config` accepts a
+`DiffusionSamplingConfig`, a mapping with the same fields, or `None`.
 
 The enclosing compile policy controls `requirement`, so
 `TTSOptimizationConfig(compile="required")` always produces a required
@@ -690,6 +698,51 @@ required compile choices fail rather than silently selecting another
 implementation. CUDA-extension compilation/loading remains an explicit
 `load_tts_activation_cuda_extension()` operation.
 
+### Diffusion sampler acceleration
+
+`DiffusionSamplingConfig` controls the architecture-owned solver boundary:
+
+```python
+DiffusionSamplingConfig(
+    target_steps=None,
+    schedule="native",  # native, uniform, quadratic, or trailing
+    solver="native",  # native or stork2
+    stork_stages=9,
+    guidance="native",  # native, limited_interval, or adaptive
+    guidance_start=0.0,
+    guidance_end=1.0,
+    adaptive_guidance_threshold=0.01,
+    adaptive_guidance_warmup_steps=4,
+    adaptive_guidance_patience=2,
+    prediction_cache="disabled",  # fora, teacache, smoothcache, or taylor
+    cache_interval=2,
+    cache_warmup_steps=2,
+    cache_max_consecutive_steps=2,
+    cache_rel_l1_threshold=0.08,
+    cache_error_budget=0.20,
+    teacache_coefficients=(),
+    smoothcache_compute_step_mask=(),
+    taylor_order=1,
+    epsilon=1e-6,
+)
+
+DiffusionSamplingConfig.from_dict(values, **overrides)
+config.to_dict()
+DiffusionSamplingPass(config=None)
+```
+
+The pass is inference-only, reversible, and disabled by default. TeaCache
+requires checkpoint-specific rescaling coefficients; SmoothCache requires an
+explicit compute mask for the prepared schedule. STORK-2 is accepted only by
+reviewed direct deterministic velocity-field adapters and cannot be combined
+with guidance pruning or whole-prediction caching.
+
+Architecture registrations expose `sampling_techniques` through
+`get_diffusion_model_optimization_support()`. Required unsupported
+techniques fail during resolution; automatic requests retain the native
+sampler. See the diffusion optimization guide for the per-model matrix and
+50-step examples.
+
 ### Diffusion block-residual cache
 
 `DiffusionCacheConfig` configures the architecture-owned, Cache-DiT-style
@@ -697,6 +750,7 @@ middle-block residual cache:
 
 ```python
 DiffusionCacheConfig(
+    method="dbcache",  # dbcache or first_block
     front_blocks=1,
     back_blocks=0,
     residual_diff_threshold=0.08,
@@ -1011,13 +1065,18 @@ TorchCompilePass(
 CustomKernelPass(
     backend="auto",  # torch, triton, or cuda_extension
 )
+CodecKernelPass(
+    backend="auto",  # torch, triton, cute, or cuda_extension
+)
 FlashAttention4Pass(
     policy="auto",  # disabled, auto, or required
 )
 ```
 
-All three are reversible configuration/execution passes and preserve canonical
-state-dict keys. `CustomKernelPass` never builds an extension. Call
+All four are reversible configuration/execution passes and preserve canonical
+state-dict keys. `CodecKernelPass` only visits codec-specific selectors, and
+can resolve different effective backends for different codec operations.
+`CustomKernelPass` never builds an extension. Call
 `voicehub.kernels.load_tts_activation_cuda_extension()` explicitly before
 selecting `backend="cuda_extension"`. `FlashAttention4Pass` imports the
 optional `flash_attn.cute` package only for a compatible concrete attention
@@ -1029,6 +1088,8 @@ for application-defined implementations. It also exposes
 `get_kernel_capabilities()` and the explicit
 `load_tts_activation_cuda_extension()` build seam. Importing this namespace
 does not import Triton, initialize CUDA, or invoke a compiler.
+`get_codec_kernel_capabilities()` additionally probes the optional
+CuTe-backed CUTLASS Operator API used by DAC Euclidean VQ search.
 
 Pretrained speech wrappers expose:
 

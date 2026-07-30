@@ -73,6 +73,7 @@ def create_cosyvoice_architecture_spec() -> ArchitectureSpec:
                 "compile",
                 "custom-kernels",
                 "diffusion-cache",
+                "diffusion-sampling",
             ),
             features=(
                 "llm-tts-codec",
@@ -81,6 +82,10 @@ def create_cosyvoice_architecture_spec() -> ArchitectureSpec:
                 "diffusion-operation-denoiser",
                 "diffusion-operation-classifier-free-guidance",
                 "diffusion-operation-euler-solver",
+                "diffusion-sampling-schedule",
+                "diffusion-sampling-guidance",
+                "diffusion-sampling-prediction-cache",
+                "diffusion-sampling-stork2",
                 "audited-legacy-conversion",
                 "causal-hift",
                 "fused-diffusion-modulation-kernels",
@@ -106,6 +111,12 @@ def create_cosyvoice_architecture_spec() -> ArchitectureSpec:
                 "denoiser",
                 "classifier-free-guidance",
                 "euler-solver",
+            ),
+            "diffusion_sampling_capabilities": (
+                "schedule",
+                "guidance",
+                "prediction-cache",
+                "stork2",
             ),
             "implementation":
             "voicehub-native",

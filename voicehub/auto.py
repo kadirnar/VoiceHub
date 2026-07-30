@@ -148,6 +148,8 @@ class _BaseAutoModel:
         compile_config=None,
         diffusion_cache: bool | str | None = None,
         diffusion_cache_config=None,
+        diffusion_sampling: bool | str | None = None,
+        diffusion_sampling_config=None,
         **kwargs,
     ):
         spec = cls._get_spec(config.model_type)
@@ -163,6 +165,8 @@ class _BaseAutoModel:
                 compile_config=compile_config,
                 diffusion_cache=diffusion_cache,
                 diffusion_cache_config=diffusion_cache_config,
+                diffusion_sampling=diffusion_sampling,
+                diffusion_sampling_config=diffusion_sampling_config,
             ) if cls.task is SpeechTask.TEXT_TO_SPEECH else None)
         if cls.task is not SpeechTask.TEXT_TO_SPEECH and any(value is not None for value in (
                 optimization_config,
@@ -172,6 +176,8 @@ class _BaseAutoModel:
                 compile_config,
                 diffusion_cache,
                 diffusion_cache_config,
+                diffusion_sampling,
+                diffusion_sampling_config,
                 llm_backend,
                 llm_backend_config,
         )):

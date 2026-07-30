@@ -59,13 +59,17 @@ def create_styletts2_architecture_spec() -> ArchitectureSpec:
             batched_inference=False,
             distributed_training=True,
             export_formats=("safetensors", ),
-            optimization_passes=("compile", ),
+            optimization_passes=(
+                "compile",
+                "diffusion-sampling",
+            ),
             features=(
                 "diffusion-family",
                 "diffusion-kind-style-diffusion",
                 "diffusion-operation-denoiser",
                 "diffusion-operation-classifier-free-guidance",
                 "diffusion-operation-adpm2-solver",
+                "diffusion-sampling-schedule",
                 "multispeaker-style-diffusion",
                 "voice-cloning",
                 "multispeaker-reference-style-required",
@@ -88,6 +92,7 @@ def create_styletts2_architecture_spec() -> ArchitectureSpec:
                 "classifier-free-guidance",
                 "adpm2-solver",
             ),
+            "diffusion_sampling_capabilities": ("schedule", ),
             "implementation":
             "voicehub-native",
             "tensor_backend":
