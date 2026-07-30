@@ -249,6 +249,27 @@ def _native_ten_artifact(directory: str | Path) -> Path:
 
 class SherpaONNXVADRuntimeTests(unittest.TestCase):
 
+    def test_silero_scorer_preserves_native_frame_and_state_contract(self):
+        import torch
+
+        from voicehub.architectures.silero_vad.configuration import SileroVADConfig
+        from voicehub.architectures.silero_vad.modeling import SileroVADModel
+        from voicehub.models.vad_sherpa_onnx.streaming import NativeSileroScorer
+
+        torch.manual_seed(29)
+        native = SileroVADModel(SileroVADConfig()).eval()
+        waveform = torch.randn(native.config.frame_size * 3)
+        expected = native.frame_probabilities(
+            waveform.unsqueeze(0),
+            pad_final_frame=False,
+        ).probabilities[0]
+
+        scorer = NativeSileroScorer(native)
+        actual = torch.tensor([scorer.compute(frame) for frame in waveform.split(native.config.frame_size)])
+
+        self.assertEqual(scorer.window_size, native.config.frame_size)
+        torch.testing.assert_close(actual, expected)
+
     @staticmethod
     def _model(directory: str | Path):
         return SherpaONNXVADForVoiceActivityDetection(

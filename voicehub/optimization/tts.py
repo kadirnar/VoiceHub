@@ -849,10 +849,11 @@ def _resolve_kernels(
     module = import_module("voicehub.optimization.accelerators")
     selection = ("auto" if requested is TTSKernelBackend.AUTO else requested.value)
     optimization_pass = module.CustomKernelPass(backend=selection)
-    selected = ("cuda_extension/triton/torch" if requested is TTSKernelBackend.AUTO else requested.value)
+    selected = ("torch" if requested is TTSKernelBackend.AUTO else requested.value)
     reason = (
-        "Runtime dispatch will choose the highest-priority compatible "
-        "registered kernel and retain the Torch fallback." if requested is TTSKernelBackend.AUTO else
+        "Automatic kernel selection conservatively retains the portable "
+        "Torch implementation; accelerator kernels require an explicit "
+        "backend or codec fidelity policy." if requested is TTSKernelBackend.AUTO else
         "The explicitly requested architecture-owned kernel backend "
         "will be validated before mutation.")
     return optimization_pass, _pass_decision(

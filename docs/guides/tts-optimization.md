@@ -605,14 +605,22 @@ The kernel selector accepts:
 - `"torch"` for the portable reference implementation;
 - `"triton"` for a fused, autograd-registered training kernel;
 - `"cuda_extension"` for the packaged C++/CUDA op; or
-- `"auto"` to select the highest-priority compatible registered backend and
-  otherwise use Torch.
+- `"auto"` to prefer the portable Torch implementation among VoiceHub's
+  built-in providers. A higher-priority application-registered implementation
+  can still override that policy. Use an explicit accelerator backend after
+  measuring it on representative shapes.
 
-Triton stays optional and is imported only after a compatible CUDA tensor is
-seen. Install it for the CUDA environment in which training will run:
+Triton stays optional. Install and activate it in the CUDA environment before
+full-graph capture:
 
 ```bash
 python -m pip install triton
+```
+
+```python
+from voicehub.kernels import load_tts_activation_triton_kernels
+
+load_tts_activation_triton_kernels("cuda")
 ```
 
 The CUDA extension ships as `.cpp` and `.cu` source, has fake-tensor and

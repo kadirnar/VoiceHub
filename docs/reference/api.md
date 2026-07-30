@@ -1086,8 +1086,10 @@ call.
 `resolve_kernel()`, `dispatch_kernel()`, `KernelBackend`, and `KernelSupport`
 for application-defined implementations. It also exposes
 `get_kernel_capabilities()` and the explicit
-`load_tts_activation_cuda_extension()` build seam. Importing this namespace
-does not import Triton, initialize CUDA, or invoke a compiler.
+`load_tts_activation_cuda_extension()` build seam, plus
+`load_tts_activation_triton_kernels()` for eager activation before full-graph
+capture. Importing this namespace does not import Triton, initialize CUDA, or
+invoke a compiler.
 `get_codec_kernel_capabilities()` additionally probes the optional
 CuTe-backed CUTLASS Operator API used by DAC Euclidean VQ search.
 

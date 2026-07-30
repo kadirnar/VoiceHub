@@ -12,6 +12,7 @@ import torch
 
 from voicehub import AutoConfig, AutoModelForSpeechRecognition, get_model_spec
 from voicehub.architectures.wav2vec2 import Wav2Vec2Config, Wav2Vec2ForCTC
+from voicehub.architectures.wav2vec2.tokenization import Wav2Vec2CTCTokenizer
 from voicehub.checkpointing import save_safetensors
 from voicehub.models.asr_wav2vec2 import NativeWav2Vec2TrainingAdapter, Wav2Vec2ASRConfig, Wav2Vec2ForSpeechRecognition
 from voicehub.training.auto import AutoTrainingAdapter
@@ -132,6 +133,45 @@ class _DeterministicCTCModel(torch.nn.Module):
 
 
 class NativeWav2Vec2ProviderTests(unittest.TestCase):
+
+    def test_runtime_language_override_does_not_leak_into_default_calls(self):
+        vocabulary = {
+            "<pad>": 0,
+            "<s>": 1,
+            "</s>": 2,
+            "<unk>": 3,
+            "|": 4,
+            "A": 5,
+            "B": 6,
+            "'": 7,
+        }
+        tokenizer = Wav2Vec2CTCTokenizer(
+            {
+                "en": vocabulary,
+                "fr": vocabulary,
+            },
+            target_language="en",
+        )
+        wrapper = Wav2Vec2ForSpeechRecognition(
+            Wav2Vec2ASRConfig(target_language="en"),
+            device="cpu",
+        )
+        wrapper.ctc_processor = SimpleNamespace(
+            tokenizer=tokenizer,
+            sampling_rate=16_000,
+        )
+        wrapper.native_config = SimpleNamespace(
+            sampling_rate=16_000,
+            vocab_size=len(vocabulary),
+            pad_token_id=0,
+            bos_token_id=1,
+            eos_token_id=2,
+        )
+
+        self.assertEqual(wrapper._select_runtime_language("fr"), "fr")
+        self.assertEqual(tokenizer.target_language, "fr")
+        self.assertEqual(wrapper._select_runtime_language(None), "en")
+        self.assertEqual(tokenizer.target_language, "en")
 
     def test_provider_import_does_not_load_external_model_runtimes(self):
         code = """

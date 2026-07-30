@@ -304,9 +304,16 @@ class ChatterboxTTS:
         exaggeration=0.5,
         cfg_weight=0.5,
         temperature=0.8,
+        max_new_tokens=1000,
     ):
         """Synthesise speech from text and return a watermarked waveform
         tensor."""
+        if (isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or max_new_tokens <= 0):
+            raise ValueError("max_new_tokens must be a positive integer.")
+        maximum = int(self.t3.hp.max_speech_tokens)
+        if max_new_tokens > maximum:
+            raise ValueError("max_new_tokens cannot exceed the T3 checkpoint limit "
+                             f"({maximum}).")
         if audio_prompt_path:
             self.prepare_conditionals(audio_prompt_path, exaggeration=exaggeration)
         elif self.conds is None:
@@ -337,7 +344,7 @@ class ChatterboxTTS:
             speech_tokens = self.t3.inference(
                 t3_cond=self.conds.t3,
                 text_tokens=text_tokens,
-                max_new_tokens=1000,  # TODO: use the value in config
+                max_new_tokens=max_new_tokens,
                 temperature=temperature,
                 cfg_weight=cfg_weight,
                 repetition_penalty=repetition_penalty,

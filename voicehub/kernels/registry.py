@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from threading import RLock
+from types import MappingProxyType
 from typing import Any, Callable
 
 
@@ -129,7 +130,28 @@ class KernelRegistry:
 
     def __init__(self) -> None:
         self._implementations: dict[str, dict[KernelBackend, RegisteredKernel]] = {}
+        self._implementation_snapshots: MappingProxyType[
+            str,
+            tuple[RegisteredKernel, ...],
+        ] = MappingProxyType({})
         self._lock = RLock()
+
+    def _publish_snapshot(self, operation: str) -> None:
+        """Publish one immutable registry view while holding the write lock."""
+        candidates = tuple(self._implementations.get(operation, {}).values())
+        updated = dict(self._implementation_snapshots)
+        if candidates:
+            updated[operation] = tuple(
+                sorted(
+                    candidates,
+                    key=lambda candidate: (
+                        -candidate.priority,
+                        candidate.backend.value,
+                    ),
+                ))
+        else:
+            updated.pop(operation, None)
+        self._implementation_snapshots = MappingProxyType(updated)
 
     def register(
         self,
@@ -160,6 +182,7 @@ class KernelRegistry:
                     f"Kernel {candidate.operation!r} already has a "
                     f"{candidate.backend.value!r} implementation.")
             operation_candidates[candidate.backend] = candidate
+            self._publish_snapshot(candidate.operation)
         return candidate
 
     def unregister(
@@ -186,20 +209,44 @@ class KernelRegistry:
             del operation_candidates[normalized_backend]
             if not operation_candidates:
                 del self._implementations[normalized_operation]
+            self._publish_snapshot(normalized_operation)
+
+    def replace_implementation_if_current(
+        self,
+        operation: str,
+        backend: KernelBackend | str,
+        *,
+        expected: KernelCallable,
+        replacement: KernelCallable,
+    ) -> bool:
+        """Atomically replace one implementation only if it is unchanged."""
+        normalized_operation = _normalize_operation(operation)
+        normalized_backend = KernelBackend.coerce(backend)
+        if normalized_backend is KernelBackend.AUTO:
+            raise ValueError("`auto` does not identify a registered implementation.")
+        if not callable(expected) or not callable(replacement):
+            raise TypeError("Expected and replacement implementations must be callable.")
+        with self._lock:
+            candidates = self._implementations.get(normalized_operation)
+            current = (None if candidates is None else candidates.get(normalized_backend))
+            if current is None or current.implementation is not expected:
+                return False
+            candidates[normalized_backend] = RegisteredKernel(
+                operation=current.operation,
+                backend=current.backend,
+                implementation=replacement,
+                priority=current.priority,
+                support_check=current.support_check,
+            )
+            self._publish_snapshot(normalized_operation)
+            return True
 
     def implementations(self, operation: str) -> tuple[RegisteredKernel, ...]:
         normalized = _normalize_operation(operation)
-        with self._lock:
-            candidates = tuple(self._implementations.get(normalized, {}).values())
-        return tuple(
-            sorted(
-                candidates,
-                key=lambda candidate: (-candidate.priority, candidate.backend.value),
-            ))
+        return self._implementation_snapshots.get(normalized, ())
 
     def list_operations(self) -> tuple[str, ...]:
-        with self._lock:
-            return tuple(sorted(self._implementations))
+        return tuple(sorted(self._implementation_snapshots))
 
     def resolve(
         self,

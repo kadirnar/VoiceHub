@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
+from torch import nn
 from coqpit import Coqpit
 
 from voicehub.components.audio.codecs.encodec import (
@@ -22,7 +23,6 @@ from voicehub.models.xtts.source.TTS.tts.layers.bark.inference_funcs import (
 from voicehub.models.xtts.source.TTS.tts.layers.bark.load_model import load_model
 from voicehub.models.xtts.source.TTS.tts.layers.bark.model import GPT
 from voicehub.models.xtts.source.TTS.tts.layers.bark.model_fine import FineGPT
-from voicehub.models.xtts.source.TTS.tts.models.base_tts import BaseTTS
 
 if TYPE_CHECKING:
     from transformers import BertTokenizer
@@ -146,7 +146,7 @@ def load_bark_encodec(
     return codec
 
 
-class Bark(BaseTTS):
+class Bark(nn.Module):
     def __init__(
         self,
         config: Coqpit,
@@ -158,7 +158,8 @@ class Bark(BaseTTS):
         encodec_local_files_only: bool | None = None,
         trust_official_encodec_pickle: bool | None = None,
     ) -> None:
-        super().__init__(config=config, ap=None, tokenizer=None, speaker_manager=None, language_manager=None)
+        super().__init__()
+        self.config = config
         if tokenizer is None:
             tokenizer = _load_default_tokenizer()
         self.config.num_chars = len(tokenizer)

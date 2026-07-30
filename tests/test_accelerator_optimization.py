@@ -242,6 +242,30 @@ class AcceleratorOptimizationTests(unittest.TestCase):
                 _context(),
             )
 
+    def test_explicit_triton_is_preloaded_for_a_plain_selector(self):
+        model = _KernelLeaf()
+        available = mock.Mock(available=True, reason="")
+        with (
+                mock.patch.object(
+                    accelerators,
+                    "triton_capability",
+                    return_value=available,
+                ),
+                mock.patch.object(
+                    accelerators,
+                    "load_tts_activation_triton_kernels",
+                ) as preload,
+        ):
+            result = OptimizationPassManager().apply(
+                model,
+                (CustomKernelPass(backend="triton"), ),
+                _context(device="cuda", dtype="float16"),
+            )
+
+        preload.assert_called_once_with("cuda")
+        self.assertIs(model.kernel_backend, KernelBackend.TRITON)
+        result.restore()
+
     def test_cuda_extension_backend_must_be_preloaded_and_never_compiles(self):
         model = _KernelLeaf()
         optimization_pass = CustomKernelPass(backend="cuda-extension")

@@ -62,8 +62,9 @@ Fusing before the channel split avoids materializing the intermediate addition
 and two split views. `CustomKernelPass` discovers compatible blocks
 structurally, records the exact operation in its manifest, verifies explicit
 Triton availability before mutation, and restores the previous selectors.
-`kernel_backend="auto"` resolves once from the optimization context:
-preloaded CUDA extension, then Triton, then PyTorch.
+`kernel_backend="auto"` resolves conservatively to PyTorch. Triton and the
+preloaded CUDA extension are explicit choices, so an accelerator is not
+selected when its launch overhead is slower for the active shape.
 
 ```python
 from voicehub import TTSOptimizationConfig

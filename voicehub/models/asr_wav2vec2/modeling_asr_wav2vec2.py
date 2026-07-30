@@ -93,6 +93,8 @@ class Wav2Vec2ForSpeechRecognition(PreTrainedASRModel):
         # Compatibility aliases are data attributes, not upstream runtimes.
         self.training_processor: Any | None = None
         self.transformers_processor: Any | None = None
+        self._default_runtime_language: str | None = None
+        self._default_runtime_language_initialized = False
         config = self._coerce_config(
             config,
             model_path=model_path,
@@ -222,8 +224,13 @@ class Wav2Vec2ForSpeechRecognition(PreTrainedASRModel):
             raise RuntimeError(f"{self.runtime_name} processor is not loaded.")
         tokenizer = self.ctc_processor.tokenizer
         available = tokenizer.available_languages
+        if not self._default_runtime_language_initialized:
+            self._default_runtime_language = tokenizer.target_language
+            self._default_runtime_language_initialized = True
         if language is None:
-            return tokenizer.target_language
+            language = self._default_runtime_language
+            if language is None:
+                return None
         if not available:
             configured = self.config.target_language
             if configured is None or language != configured:
@@ -484,6 +491,7 @@ class Wav2Vec2ForSpeechRecognition(PreTrainedASRModel):
             self.load_for_training()
         if self.native_config is None or self.ctc_processor is None:
             raise RuntimeError(f"{self.runtime_name} training processor is not loaded.")
+        self._select_runtime_language(None)
         audio = inputs.get("audio")
         text = inputs.get(
             "text",
@@ -581,6 +589,7 @@ class Wav2Vec2ForSpeechRecognition(PreTrainedASRModel):
             "voicehub_provider": self.config_class.model_type,
         })
         write_json_file(save_directory / "config.json", config_values)
+        self._select_runtime_language(None)
         self.ctc_processor.save_pretrained(save_directory)
 
     def export_native_pretrained(

@@ -223,7 +223,7 @@ at::Tensor launch_elementwise_pair(const at::Tensor &left,
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16, left.scalar_type(),
-      operation, [&] {
+      "voicehub_elementwise_pair_cuda", [&] {
         launch(left_contiguous.data_ptr<scalar_t>(),
                right_contiguous.data_ptr<scalar_t>(),
                output.data_ptr<scalar_t>(), size, blocks, stream);

@@ -29,6 +29,7 @@ from voicehub.kernels.activations import (
     gated_silu,
     gated_silu_reference,
     load_tts_activation_cuda_extension,
+    load_tts_activation_triton_kernels,
     tanh_sigmoid_gate,
     tanh_sigmoid_gate_reference,
 )
@@ -138,6 +139,7 @@ __all__ = [
     "get_kernel_capabilities",
     "load_cuda_extension",
     "load_tts_activation_cuda_extension",
+    "load_tts_activation_triton_kernels",
     "register_cuda_extension",
     "register_kernel",
     "resolve_kernel",

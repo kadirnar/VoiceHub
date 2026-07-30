@@ -7,6 +7,7 @@ from functools import cache
 from importlib import import_module
 from pathlib import Path
 from threading import RLock
+from types import ModuleType
 
 import torch
 from torch.nn import functional as F
@@ -27,7 +28,14 @@ from voicehub.kernels.cuda_extensions import (
     load_cuda_extension,
     register_cuda_extension,
 )
-from voicehub.kernels.registry import KernelBackend, KernelSupport, dispatch_kernel, register_kernel
+from voicehub.kernels.registry import (
+    KERNEL_REGISTRY,
+    KernelBackend,
+    KernelDispatchError,
+    KernelSupport,
+    dispatch_kernel,
+    register_kernel,
+)
 
 ACTIVATION_CUDA_EXTENSION_NAME = "voicehub_kernels_activations"
 
@@ -36,6 +44,11 @@ _TRITON_DTYPES = frozenset({
     torch.bfloat16,
     torch.float32,
 })
+# Built-in AUTO dispatch stays conservative while leaving positive priorities
+# available to application-registered implementations.
+_BUILTIN_TORCH_PRIORITY = 0
+_BUILTIN_CUDA_EXTENSION_PRIORITY = -100
+_BUILTIN_TRITON_PRIORITY = -200
 _CSRC_ROOT = Path(__file__).with_name("csrc")
 _ACTIVATION_CUDA_SPEC = CudaExtensionSpec(
     name=ACTIVATION_CUDA_EXTENSION_NAME,
@@ -63,6 +76,48 @@ _CUDA_REGISTRATION_LOCK = RLock()
 def _cached_triton_capability(device: str):
     """Avoid repeating CUDA/package discovery in every eager FFN block."""
     return triton_capability(torch.device(device))
+
+
+def _activate_tts_activation_triton_kernels() -> ModuleType:
+    module = import_module("voicehub.kernels.triton_activations")
+    implementations = {
+        LLM_GATED_SILU: module.gated_silu_triton,
+        VITS_TANH_SIGMOID_GATE: module.tanh_sigmoid_gate_triton,
+        VITS_FUSED_ADD_TANH_SIGMOID: module.fused_add_tanh_sigmoid_triton,
+        DIFFUSION_FUSED_BIAS_GELU: module.fused_bias_gelu_triton,
+        DIFFUSION_FUSED_MODULATE: module.fused_modulate_triton,
+        AUDIO_CODEC_SNAKE: module.codec_snake_triton,
+        AUDIO_CODEC_SNAKE_BETA: module.codec_snake_beta_triton,
+    }
+    lazy_implementations = {
+        LLM_GATED_SILU: _gated_silu_triton,
+        VITS_TANH_SIGMOID_GATE: _tanh_sigmoid_gate_triton,
+        VITS_FUSED_ADD_TANH_SIGMOID: _fused_add_tanh_sigmoid_triton,
+        DIFFUSION_FUSED_BIAS_GELU: _fused_bias_gelu_triton,
+        DIFFUSION_FUSED_MODULATE: _fused_modulate_triton,
+        AUDIO_CODEC_SNAKE: _codec_snake_triton,
+        AUDIO_CODEC_SNAKE_BETA: _codec_snake_beta_triton,
+    }
+    for operation, implementation in implementations.items():
+        # A plugin may have replaced the built-in while the provider was being
+        # prepared. Preserve that replacement rather than silently taking the
+        # operation back.
+        KERNEL_REGISTRY.replace_implementation_if_current(
+            operation,
+            KernelBackend.TRITON,
+            expected=lazy_implementations[operation],
+            replacement=implementation,
+        )
+    return module
+
+
+def load_tts_activation_triton_kernels(device: torch.device | str | None = None, ) -> ModuleType:
+    """Preload the traceable Triton operators before full-graph capture."""
+    capability = triton_capability(device)
+    if not capability.available:
+        raise KernelDispatchError("Triton activation kernels are unavailable: "
+                                  f"{capability.reason}.")
+    return _activate_tts_activation_triton_kernels()
 
 
 def _validate_pair(
@@ -577,7 +632,7 @@ def _gated_silu_triton(
     gate: torch.Tensor,
     up: torch.Tensor,
 ) -> torch.Tensor:
-    module = import_module("voicehub.kernels.triton_activations")
+    module = _activate_tts_activation_triton_kernels()
     return module.gated_silu_triton(gate, up)
 
 
@@ -585,7 +640,7 @@ def _tanh_sigmoid_gate_triton(
     activation: torch.Tensor,
     gate: torch.Tensor,
 ) -> torch.Tensor:
-    module = import_module("voicehub.kernels.triton_activations")
+    module = _activate_tts_activation_triton_kernels()
     return module.tanh_sigmoid_gate_triton(activation, gate)
 
 
@@ -594,7 +649,7 @@ def _fused_add_tanh_sigmoid_triton(
     input_b: torch.Tensor,
     channels: int,
 ) -> torch.Tensor:
-    module = import_module("voicehub.kernels.triton_activations")
+    module = _activate_tts_activation_triton_kernels()
     return module.fused_add_tanh_sigmoid_triton(input_a, input_b, channels)
 
 
@@ -602,7 +657,7 @@ def _fused_bias_gelu_triton(
     inputs: torch.Tensor,
     bias: torch.Tensor,
 ) -> torch.Tensor:
-    module = import_module("voicehub.kernels.triton_activations")
+    module = _activate_tts_activation_triton_kernels()
     return module.fused_bias_gelu_triton(inputs, bias)
 
 
@@ -611,7 +666,7 @@ def _fused_modulate_triton(
     shift: torch.Tensor,
     scale: torch.Tensor,
 ) -> torch.Tensor:
-    module = import_module("voicehub.kernels.triton_activations")
+    module = _activate_tts_activation_triton_kernels()
     return module.fused_modulate_triton(hidden_states, shift, scale)
 
 
@@ -619,7 +674,7 @@ def _codec_snake_triton(
     inputs: torch.Tensor,
     alpha: torch.Tensor,
 ) -> torch.Tensor:
-    module = import_module("voicehub.kernels.triton_activations")
+    module = _activate_tts_activation_triton_kernels()
     return module.codec_snake_triton(inputs, alpha)
 
 
@@ -628,7 +683,7 @@ def _codec_snake_beta_triton(
     alpha: torch.Tensor,
     beta: torch.Tensor,
 ) -> torch.Tensor:
-    module = import_module("voicehub.kernels.triton_activations")
+    module = _activate_tts_activation_triton_kernels()
     return module.codec_snake_beta_triton(inputs, alpha, beta)
 
 
@@ -740,14 +795,14 @@ def _register_builtin_kernels() -> None:
             operation,
             KernelBackend.TORCH,
             reference,
-            priority=0,
+            priority=_BUILTIN_TORCH_PRIORITY,
             replace=True,
         )
         register_kernel(
             operation,
             KernelBackend.TRITON,
             triton_implementation,
-            priority=200,
+            priority=_BUILTIN_TRITON_PRIORITY,
             support_check=support_check,
             replace=True,
         )
@@ -755,14 +810,14 @@ def _register_builtin_kernels() -> None:
         VITS_FUSED_ADD_TANH_SIGMOID,
         KernelBackend.TORCH,
         fused_add_tanh_sigmoid_reference,
-        priority=0,
+        priority=_BUILTIN_TORCH_PRIORITY,
         replace=True,
     )
     register_kernel(
         VITS_FUSED_ADD_TANH_SIGMOID,
         KernelBackend.TRITON,
         _fused_add_tanh_sigmoid_triton,
-        priority=200,
+        priority=_BUILTIN_TRITON_PRIORITY,
         support_check=_vits_fused_gate_triton_support,
         replace=True,
     )
@@ -810,7 +865,7 @@ def _register_cuda_kernels() -> None:
             operation,
             KernelBackend.CUDA_EXTENSION,
             implementation,
-            priority=300,
+            priority=_BUILTIN_CUDA_EXTENSION_PRIORITY,
             support_check=support_check,
             replace=True,
         )

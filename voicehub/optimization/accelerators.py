@@ -1,8 +1,9 @@
 """Reversible accelerator-selector passes for native VoiceHub modules.
 
 These passes configure execution policies already owned by architecture
-submodules. They do not replace modules, add parameters, import Triton,
-load FlashAttention-4, or compile CUDA extensions.
+submodules. They do not replace modules, add parameters, load
+FlashAttention-4, or compile CUDA extensions. Explicit Triton selection
+activates its operators before graph capture.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from typing import Any
 
 from torch import nn
 
-from voicehub.kernels.activations import ACTIVATION_CUDA_EXTENSION_NAME
+from voicehub.kernels.activations import ACTIVATION_CUDA_EXTENSION_NAME, load_tts_activation_triton_kernels
 from voicehub.kernels.capabilities import triton_capability
 from voicehub.kernels.cuda_extensions import CUDA_EXTENSIONS
 from voicehub.kernels.registry import KernelBackend
@@ -505,13 +506,19 @@ class CustomKernelPass(_SelectorPass):
         context: OptimizationContext,
     ) -> KernelBackend:
         resolver = getattr(target.module, "resolve_kernel_backend", None)
-        if not callable(resolver):
-            return self.backend
-        return KernelBackend.coerce(resolver(
-            self.backend,
-            device=context.device,
-            dtype=context.dtype,
-        ))
+        selected = (
+            self.backend if not callable(resolver) else KernelBackend.coerce(
+                resolver(
+                    self.backend,
+                    device=context.device,
+                    dtype=context.dtype,
+                )))
+        if selected is KernelBackend.TRITON:
+            # Capability validation has already succeeded. Import and bind the
+            # concrete torch.library.triton_op before torch.compile sees the
+            # model-facing public activation call.
+            load_tts_activation_triton_kernels(context.device)
+        return selected
 
     def _extra_metadata(self) -> Mapping[str, Any]:
         return {

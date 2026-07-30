@@ -273,6 +273,21 @@ def cuda_extension_capability(
             "the CUDA toolkit was not found (CUDA_HOME is unset)",
             {"torch_cuda": compiled_version},
         )
+    is_ninja_available = getattr(
+        cpp_extension,
+        "is_ninja_available",
+        None,
+    )
+    if not callable(is_ninja_available) or not is_ninja_available():
+        return CapabilityStatus(
+            False,
+            "the Ninja build system required by PyTorch C++ extensions was "
+            "not found",
+            {
+                "cuda_home": str(cuda_home),
+                "torch_cuda": compiled_version,
+            },
+        )
     details = {
         "cuda_home": str(cuda_home),
         "torch_cuda": compiled_version,

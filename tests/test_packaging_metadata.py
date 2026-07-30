@@ -237,6 +237,15 @@ class PackagingMetadataTests(unittest.TestCase):
                 self.assertEqual(duplicates, set())
                 self.assertNotIn("voicehub", distributions)
 
+    def test_test_extra_does_not_install_an_external_trainer(self):
+        distributions = {_distribution_name(requirement) for requirement in self.extras["test"]}
+        self.assertNotIn(
+            "trainer",
+            distributions,
+            "Inference imports and VoiceHub's native trainer must not depend "
+            "on Coqui's Python-version-limited trainer distribution.",
+        )
+
     def test_wandb_is_training_only(self):
         inference_distributions = {_distribution_name(requirement) for requirement in self.dependencies}
         training_distributions = {_distribution_name(requirement) for requirement in self.extras["training"]}

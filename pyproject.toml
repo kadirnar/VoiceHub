@@ -73,7 +73,6 @@ test = [
   "scipy",
   "soundfile>=0.12",
   "torchaudio>=2.8,<2.9",
-  "trainer",
   "transformers>=5.14,<6",
 ]
 

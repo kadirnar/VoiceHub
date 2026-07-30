@@ -105,7 +105,7 @@ def frame_probabilities_to_segments(
     onset = config.threshold if onset is None else onset
     offset = config.threshold if offset is None else offset
 
-    raw: list[tuple[int, int, float]] = []
+    raw: list[tuple[int, int, float, int]] = []
     active_start = None
     active_end = None
     active_scores: list[float] = []
@@ -122,7 +122,8 @@ def frame_probabilities_to_segments(
             raw.append((
                 active_start,
                 active_end,
-                sum(active_scores) / len(active_scores),
+                sum(active_scores),
+                len(active_scores),
             ))
             active_start = None
             active_end = None
@@ -134,7 +135,8 @@ def frame_probabilities_to_segments(
         raw.append((
             active_start,
             active_end,
-            sum(active_scores) / len(active_scores),
+            sum(active_scores),
+            len(active_scores),
         ))
 
     minimum_speech = round(config.min_speech_duration_ms * sampling_rate / 1000)
@@ -149,48 +151,60 @@ def frame_probabilities_to_segments(
         duration_samples if duration_samples is not None else
         (len(scores) - 1) * frame_hop_samples + frame_length_samples)
 
-    filtered = [(start, min(end, audio_end), score) for start, end, score in raw
-                if min(end, audio_end) - start >= minimum_speech]
-    joined: list[tuple[int, int, list[float]]] = []
-    for start, end, score in filtered:
+    clamped = [(start, min(end, audio_end), score_sum, score_count)
+               for start, end, score_sum, score_count in raw if min(end, audio_end) > start]
+    joined: list[tuple[int, int, float, int]] = []
+    for start, end, score_sum, score_count in clamped:
         if joined and start - joined[-1][1] <= minimum_silence:
             joined[-1] = (
                 joined[-1][0],
                 max(joined[-1][1], end),
-                [*joined[-1][2], score],
+                joined[-1][2] + score_sum,
+                joined[-1][3] + score_count,
             )
         else:
-            joined.append((start, end, [score]))
+            joined.append((start, end, score_sum, score_count))
+    joined = [region for region in joined if region[1] - region[0] >= minimum_speech]
 
     padded = []
-    for start, end, region_scores in joined:
+    for start, end, score_sum, score_count in joined:
         start = max(0, start - padding)
         end = min(audio_end, end + padding)
         if padded and start < padded[-1][1]:
             midpoint = (padded[-1][1] + start) // 2
             previous = padded[-1]
-            padded[-1] = (previous[0], midpoint, previous[2])
+            padded[-1] = (
+                previous[0],
+                midpoint,
+                previous[2],
+                previous[3],
+            )
             start = midpoint
-        padded.append((start, end, region_scores))
+        padded.append((start, end, score_sum, score_count))
 
     split = []
-    for start, end, region_scores in padded:
+    for start, end, score_sum, score_count in padded:
         if maximum is None:
-            split.append((start, end, region_scores))
+            split.append((start, end, score_sum, score_count))
             continue
         cursor = start
         while end - cursor > maximum:
-            split.append((cursor, cursor + maximum, region_scores))
+            split.append((
+                cursor,
+                cursor + maximum,
+                score_sum,
+                score_count,
+            ))
             cursor += maximum
         if end > cursor:
-            split.append((cursor, end, region_scores))
+            split.append((cursor, end, score_sum, score_count))
 
     return tuple(
         SpeechSegment(
             start=start / sampling_rate,
             end=end / sampling_rate,
-            score=sum(region_scores) / len(region_scores),
-        ) for start, end, region_scores in split if end > start)
+            score=score_sum / score_count,
+        ) for start, end, score_sum, score_count in split if end > start)
 
 
 def normalize_backend_segments(

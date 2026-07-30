@@ -517,8 +517,8 @@ contract, such as:
 A portable kernel operation needs a Torch reference, forward and backward
 coverage where training uses it, fake/meta registration for compilation, and
 Triton or CUDA implementations selected before graph capture. It must not add
-parameters, buffers, or state-dict keys. `kernel_backend="auto"` may fall
-back to Torch; `triton` or `cuda_extension` is a strict request.
+parameters, buffers, or state-dict keys. `kernel_backend="auto"` retains
+Torch; `triton` or `cuda_extension` is a strict, benchmark-driven request.
 
 Do not label all nine architectures `custom-kernels` merely because a generic
 kernel exists. An architecture opts in only after its active module implements

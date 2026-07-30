@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
+from voicehub.models.chatterbox.inference import ChatterboxForTextToSpeech
 from voicehub.models.f5tts.inference import F5TTSForTextToSpeech
 from voicehub.models.gptsovits.inference import GPTSoVITSForTextToSpeech
 from voicehub.models.inflecttts.inference import InflectTTSForTextToSpeech
@@ -127,6 +128,9 @@ class PreloadValidationTests(unittest.TestCase):
 
     def test_backend_numeric_ranges_are_checked_before_loading(self):
         cases = (
+            (ChatterboxForTextToSpeech(), {
+                "max_new_tokens": 0
+            }, "max_new_tokens"),
             (KokoroForTextToSpeech(), {
                 "split_pattern": "["
             }, "split_pattern"),
@@ -308,6 +312,25 @@ class PreloadValidationTests(unittest.TestCase):
 
 
 class InferenceHelperTests(unittest.TestCase):
+
+    def test_chatterbox_forwards_configurable_generation_limit(self):
+        runtime = SimpleNamespace(generate=Mock(return_value=np.ones(32, dtype=np.float32)), )
+        model = ChatterboxForTextToSpeech(device="cpu")
+        model.model = runtime
+        model.config.sample_rate = 24_000
+
+        output = model._generate(
+            "hello",
+            max_new_tokens=1234,
+            seed=7,
+        )
+
+        self.assertEqual(output.sample_rate, 24_000)
+        runtime.generate.assert_called_once_with(
+            "hello",
+            audio_prompt_path=None,
+            max_new_tokens=1234,
+        )
 
     def test_stochastic_wrappers_expose_the_common_seed_option(self):
         wrappers = (

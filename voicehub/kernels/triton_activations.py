@@ -232,6 +232,8 @@ def _fused_bias_gelu_forward(
     output_pointer,
     size,
     hidden_size,
+    GELU_COEFFICIENT: tl.constexpr,
+    GELU_CUBIC: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
 ):
     offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
@@ -239,7 +241,7 @@ def _fused_bias_gelu_forward(
     value = tl.load(input_pointer + offsets, mask=mask).to(tl.float32)
     bias_offsets = offsets % hidden_size
     value += tl.load(bias_pointer + bias_offsets, mask=mask).to(tl.float32)
-    inner = _GELU_COEFFICIENT * (value + _GELU_CUBIC * value * value * value)
+    inner = GELU_COEFFICIENT * (value + GELU_CUBIC * value * value * value)
     output = 0.5 * value * (1.0 + _tanh(inner))
     tl.store(output_pointer + offsets, output, mask=mask)
 
@@ -563,6 +565,8 @@ def fused_bias_gelu_triton(
         output,
         output.numel(),
         inputs.shape[-1],
+        GELU_COEFFICIENT=_GELU_COEFFICIENT,
+        GELU_CUBIC=_GELU_CUBIC,
         BLOCK_SIZE=_BLOCK_SIZE,
     )
     return output

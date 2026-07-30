@@ -149,6 +149,14 @@ class _FakeSpeakerEncoder:
 
 class NativeChatterboxTests(unittest.TestCase):
 
+    def test_generation_limit_rejects_values_beyond_t3_capacity(self):
+        from voicehub.models.chatterbox.tts import ChatterboxTTS
+
+        runtime = ChatterboxTTS.__new__(ChatterboxTTS)
+        runtime.t3 = SimpleNamespace(hp=SimpleNamespace(max_speech_tokens=16), )
+        with self.assertRaisesRegex(ValueError, "checkpoint limit"):
+            runtime.generate("hello", max_new_tokens=17)
+
     def test_native_architecture_declaration_is_complete_and_lazy(self):
         spec = create_chatterbox_architecture_spec()
 

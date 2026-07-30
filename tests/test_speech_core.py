@@ -459,6 +459,27 @@ class SpeechArtifactLifecycleTests(unittest.TestCase):
 
 class VADUtilityValidationTests(unittest.TestCase):
 
+    def test_short_regions_are_joined_before_minimum_duration_filtering(self):
+        config = VADInferenceConfig(
+            min_speech_duration_ms=350,
+            min_silence_duration_ms=100,
+            speech_pad_ms=0,
+        )
+
+        segments = frame_probabilities_to_segments(
+            [0.9, 0.8, 0.7, 0.1, 0.6],
+            sampling_rate=1_000,
+            frame_hop_samples=100,
+            frame_length_samples=100,
+            config=config,
+        )
+
+        self.assertEqual(
+            [(segment.start, segment.end) for segment in segments],
+            [(0.0, 0.5)],
+        )
+        self.assertAlmostEqual(segments[0].score, 0.75)
+
     def test_frame_geometry_requires_integral_sample_counts(self):
         invalid_values = (
             {

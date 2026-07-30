@@ -9,7 +9,7 @@ from importlib import import_module
 import torch
 
 from voicehub.kernel_operations import DIFFUSION_FUSED_MODULATE
-from voicehub.kernels.activations import fused_modulate, fused_modulate_reference
+from voicehub.kernels.activations import fused_modulate, fused_modulate_reference, load_tts_activation_triton_kernels
 from voicehub.kernels.registry import KernelBackend
 
 
@@ -78,21 +78,9 @@ class DiffusionModulationKernelOptimizable:
         requested = KernelBackend.coerce(backend)
         selected = requested
         if requested is KernelBackend.AUTO:
-            if device.partition(":")[0] != "cuda":
-                selected = KernelBackend.TORCH
-            else:
-                from voicehub.kernels.activations import ACTIVATION_CUDA_EXTENSION_NAME
-                from voicehub.kernels.cuda_extensions import CUDA_EXTENSIONS
-
-                if CUDA_EXTENSIONS.is_loaded(ACTIVATION_CUDA_EXTENSION_NAME):
-                    selected = KernelBackend.CUDA_EXTENSION
-                else:
-                    from voicehub.kernels.capabilities import triton_capability
-
-                    selected = (
-                        KernelBackend.TRITON if triton_capability(device).available else KernelBackend.TORCH)
+            selected = KernelBackend.TORCH
         if selected is KernelBackend.TRITON:
-            import_module("voicehub.kernels.triton_activations")
+            load_tts_activation_triton_kernels(device)
         elif selected is KernelBackend.CUDA_EXTENSION:
             _ = torch.ops.voicehub_kernels.fused_modulate
         return selected

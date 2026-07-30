@@ -5,7 +5,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
@@ -17,6 +19,7 @@ from voicehub.kernels import (
     CUDA_EXTENSIONS,
     DIFFUSION_FUSED_BIAS_GELU,
     DIFFUSION_FUSED_MODULATE,
+    KERNEL_REGISTRY,
     LLM_GATED_SILU,
     VITS_FUSED_ADD_TANH_SIGMOID,
     VITS_TANH_SIGMOID_GATE,
@@ -43,6 +46,8 @@ from voicehub.kernels import (
     gated_silu,
     gated_silu_reference,
     load_tts_activation_cuda_extension,
+    load_tts_activation_triton_kernels,
+    register_kernel,
     resolve_kernel,
     tanh_sigmoid_gate,
     tanh_sigmoid_gate_reference,
@@ -122,6 +127,34 @@ class KernelRegistryTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(KernelDispatchError, "probe failed"):
             registry.dispatch("test.operation")
+
+    def test_conditional_replacement_is_atomic_and_preserves_a_racing_writer(self):
+        registry = KernelRegistry()
+
+        def original():
+            return "original"
+
+        def first():
+            return "first"
+
+        def second():
+            return "second"
+
+        registry.register("test.operation", "triton", original)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = tuple(
+                executor.map(
+                    lambda replacement: registry.replace_implementation_if_current(
+                        "test.operation",
+                        "triton",
+                        expected=original,
+                        replacement=replacement,
+                    ),
+                    (first, second),
+                ))
+
+        self.assertEqual(sorted(outcomes), [False, True])
+        self.assertIn(registry.dispatch("test.operation"), {"first", "second"})
 
 
 class NativeActivationKernelTests(unittest.TestCase):
@@ -228,6 +261,88 @@ print(json.dumps({
 
         torch.testing.assert_close(output, gated_silu_reference(gate, up))
         optional_import.assert_not_called()
+
+    def test_public_auto_fast_path_is_fullgraph_compilable(self):
+        compiled = torch.compile(
+            lambda gate, up: gated_silu(gate, up, backend="auto"),
+            backend="aot_eager",
+            fullgraph=True,
+        )
+        gate = torch.randn(2, 3)
+        up = torch.randn(2, 3)
+
+        torch.testing.assert_close(
+            compiled(gate, up),
+            gated_silu_reference(gate, up),
+        )
+
+    def test_public_dispatch_honors_a_registered_backend_replacement(self):
+        gate = torch.randn(2, 3)
+        up = torch.randn(2, 3)
+        original = resolve_kernel(
+            LLM_GATED_SILU,
+            gate,
+            up,
+            backend=KernelBackend.TORCH,
+        )
+
+        def replacement(left, right):
+            return left + right
+
+        register_kernel(
+            LLM_GATED_SILU,
+            KernelBackend.TORCH,
+            replacement,
+            priority=original.priority,
+            support_check=original.support_check,
+            replace=True,
+        )
+        try:
+            torch.testing.assert_close(
+                gated_silu(gate, up, backend=KernelBackend.TORCH),
+                gate + up,
+            )
+        finally:
+            register_kernel(
+                LLM_GATED_SILU,
+                KernelBackend.TORCH,
+                original.implementation,
+                priority=original.priority,
+                support_check=original.support_check,
+                replace=True,
+            )
+
+    def test_public_auto_honors_a_higher_priority_application_backend(self):
+        gate = torch.randn(2, 3)
+        up = torch.randn(2, 3)
+        original = next(
+            candidate for candidate in KERNEL_REGISTRY.implementations(LLM_GATED_SILU)
+            if candidate.backend is KernelBackend.TRITON)
+
+        def replacement(left, right):
+            return left + right
+
+        register_kernel(
+            LLM_GATED_SILU,
+            KernelBackend.TRITON,
+            replacement,
+            priority=1,
+            replace=True,
+        )
+        try:
+            torch.testing.assert_close(
+                gated_silu(gate, up, backend=KernelBackend.AUTO),
+                gate + up,
+            )
+        finally:
+            register_kernel(
+                LLM_GATED_SILU,
+                KernelBackend.TRITON,
+                original.implementation,
+                priority=original.priority,
+                support_check=original.support_check,
+                replace=True,
+            )
 
     def test_triton_bridge_uses_compile_composable_library_contracts(self):
         source = (PROJECT_ROOT / "voicehub" / "kernels" / "triton_activations.py").read_text(encoding="utf-8")
@@ -370,6 +485,20 @@ print(json.dumps([
 
 
 class CudaExtensionInfrastructureTests(unittest.TestCase):
+
+    def test_capability_rejects_a_toolchain_without_ninja(self):
+        cpp_extension = SimpleNamespace(
+            CUDA_HOME="/opt/cuda",
+            is_ninja_available=lambda: False,
+        )
+        with patch(
+                "voicehub.kernels.capabilities.import_module",
+                return_value=cpp_extension,
+        ):
+            capability = cuda_extension_capability(require_runtime=False)
+
+        self.assertFalse(capability.available)
+        self.assertIn("Ninja", capability.reason)
 
     def test_registered_extension_points_to_real_cpp_and_cuda_sources(self):
         spec = CUDA_EXTENSIONS.get(ACTIVATION_CUDA_EXTENSION_NAME)
@@ -763,6 +892,210 @@ class TritonActivationKernelTests(unittest.TestCase):
                 torch.rand(257, device=device) + 0.5,
             ),
         )
+
+    def test_all_public_triton_calls_are_fullgraph_compilable(self):
+        device = torch.device("cuda")
+        load_tts_activation_triton_kernels(device)
+
+        def triton_composite(
+            gate,
+            up,
+            activation,
+            vits_input,
+            vits_condition,
+            inputs,
+            bias,
+            hidden_states,
+            shift,
+            scale,
+            codec_inputs,
+            alpha,
+            beta,
+        ):
+            return (
+                gated_silu(gate, up, backend=KernelBackend.TRITON),
+                tanh_sigmoid_gate(
+                    activation,
+                    gate,
+                    backend=KernelBackend.TRITON,
+                ),
+                fused_add_tanh_sigmoid(
+                    vits_input,
+                    vits_condition,
+                    4,
+                    backend=KernelBackend.TRITON,
+                ),
+                fused_bias_gelu(
+                    inputs,
+                    bias,
+                    backend=KernelBackend.TRITON,
+                ),
+                fused_modulate(
+                    hidden_states,
+                    shift,
+                    scale,
+                    backend=KernelBackend.TRITON,
+                ),
+                codec_snake(
+                    codec_inputs,
+                    alpha,
+                    backend=KernelBackend.TRITON,
+                ),
+                codec_snake_beta(
+                    codec_inputs,
+                    alpha,
+                    beta,
+                    backend=KernelBackend.TRITON,
+                ),
+            )
+
+        def reference_composite(
+            gate,
+            up,
+            activation,
+            vits_input,
+            vits_condition,
+            inputs,
+            bias,
+            hidden_states,
+            shift,
+            scale,
+            codec_inputs,
+            alpha,
+            beta,
+        ):
+            return (
+                gated_silu_reference(gate, up),
+                tanh_sigmoid_gate_reference(activation, gate),
+                fused_add_tanh_sigmoid_reference(
+                    vits_input,
+                    vits_condition,
+                    4,
+                ),
+                fused_bias_gelu_reference(inputs, bias),
+                fused_modulate_reference(hidden_states, shift, scale),
+                codec_snake_reference(codec_inputs, alpha),
+                codec_snake_beta_reference(
+                    codec_inputs,
+                    alpha,
+                    beta,
+                ),
+            )
+
+        arguments = (
+            torch.randn(2, 32, device=device),
+            torch.randn(2, 32, device=device),
+            torch.randn(2, 32, device=device),
+            torch.randn(2, 8, 16, device=device),
+            torch.randn(2, 8, 1, device=device),
+            torch.randn(2, 4, 32, device=device),
+            torch.randn(32, device=device),
+            torch.randn(2, 4, 32, device=device),
+            torch.randn(2, 1, 32, device=device),
+            torch.randn(2, 1, 32, device=device),
+            torch.randn(2, 8, 16, device=device),
+            torch.rand(8, device=device) + 0.5,
+            torch.rand(8, device=device) + 0.5,
+        )
+        actual_arguments = _clone_kernel_arguments(arguments)
+        expected_arguments = _clone_kernel_arguments(arguments)
+        compiled = torch.compile(
+            triton_composite,
+            backend="inductor",
+            fullgraph=True,
+        )
+
+        actual_outputs = compiled(*actual_arguments)
+        expected_outputs = reference_composite(*expected_arguments)
+        for actual, expected in zip(actual_outputs, expected_outputs):
+            torch.testing.assert_close(
+                actual,
+                expected,
+                rtol=2e-4,
+                atol=2e-5,
+            )
+
+        actual_loss = sum(output.sum() for output in actual_outputs)
+        expected_loss = sum(output.sum() for output in expected_outputs)
+        actual_gradients = torch.autograd.grad(
+            actual_loss,
+            actual_arguments,
+        )
+        expected_gradients = torch.autograd.grad(
+            expected_loss,
+            expected_arguments,
+        )
+        for actual, expected in zip(actual_gradients, expected_gradients):
+            torch.testing.assert_close(
+                actual,
+                expected,
+                rtol=5e-4,
+                atol=5e-5,
+            )
+
+    def test_activated_public_triton_call_is_fullgraph_compilable(self):
+        device = torch.device("cuda")
+        load_tts_activation_triton_kernels(device)
+        gate = torch.randn(
+            4,
+            128,
+            device=device,
+            requires_grad=True,
+        )
+        up = torch.randn_like(gate, requires_grad=True)
+        compiled = torch.compile(
+            lambda left, right: gated_silu(
+                left,
+                right,
+                backend=KernelBackend.TRITON,
+            ),
+            backend="inductor",
+            fullgraph=True,
+        )
+
+        actual = compiled(gate, up)
+        expected = gated_silu_reference(gate, up)
+        torch.testing.assert_close(
+            actual,
+            expected,
+            rtol=2e-4,
+            atol=2e-5,
+        )
+        actual_gradients = torch.autograd.grad(
+            actual.sum(),
+            (gate, up),
+            retain_graph=True,
+        )
+        expected_gradients = torch.autograd.grad(
+            expected.sum(),
+            (gate, up),
+        )
+        for actual_gradient, expected_gradient in zip(
+                actual_gradients,
+                expected_gradients,
+        ):
+            torch.testing.assert_close(
+                actual_gradient,
+                expected_gradient,
+                rtol=5e-4,
+                atol=5e-5,
+            )
+        self.assertIs(
+            resolve_kernel(LLM_GATED_SILU, gate, up).backend,
+            KernelBackend.TORCH,
+        )
+        with self.assertRaisesRegex(KernelDispatchError, "CUDA"):
+            gated_silu(
+                torch.randn(2, 3),
+                torch.randn(2, 3),
+                backend=KernelBackend.TRITON,
+            )
+        with self.assertRaisesRegex(KernelDispatchError, "float16"):
+            gated_silu(
+                torch.randn(2, 3, device=device, dtype=torch.float64),
+                torch.randn(2, 3, device=device, dtype=torch.float64),
+                backend=KernelBackend.TRITON,
+            )
 
 
 @unittest.skipUnless(

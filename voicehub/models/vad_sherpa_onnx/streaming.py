@@ -103,16 +103,14 @@ class NativeSileroScorer:
 
     def __init__(self, model: Any) -> None:
         self.model = model
-        initial = model.initial_state(
+        self.state = model.initial_state(
             1,
             device=next(model.parameters()).device,
         )
-        self.hidden = initial.hidden
-        self.cell = initial.cell
 
     @property
     def window_size(self) -> int:
-        return self.model.config.context_size + self.model.config.frame_size
+        return self.model.config.frame_size
 
     @property
     def window_shift(self) -> int:
@@ -126,20 +124,18 @@ class NativeSileroScorer:
             dtype=torch.float32,
         ).unsqueeze(0)
         with torch.inference_mode():
-            probabilities, _, state = self.model.forward_with_context(
+            output = self.model(
                 values,
-                (self.hidden, self.cell),
+                state=self.state,
             )
-        self.hidden, self.cell = (item.detach() for item in state)
-        return float(probabilities.item())
+        self.state = output.state.detached()
+        return float(output.probabilities.item())
 
     def reset(self) -> None:
-        initial = self.model.initial_state(
+        self.state = self.model.initial_state(
             1,
             device=next(self.model.parameters()).device,
         )
-        self.hidden = initial.hidden
-        self.cell = initial.cell
 
 
 class _SpeechDecision:

@@ -329,7 +329,7 @@ class UniversalTTSOptimizationTests(unittest.TestCase):
                 observed_custom.add(spec.model_type)
                 self.assertEqual(
                     plan.decisions[0].selected,
-                    "cuda_extension/triton/torch",
+                    "torch",
                 )
                 self.assertLess(
                     pass_ids.index("custom-kernels"),

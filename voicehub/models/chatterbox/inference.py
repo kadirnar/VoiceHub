@@ -81,6 +81,7 @@ class ChatterboxForTextToSpeech(PreTrainedTTSModel):
     passthrough_generation_options = frozenset({
         "cfg_weight",
         "exaggeration",
+        "max_new_tokens",
         "min_p",
         "repetition_penalty",
         "temperature",
@@ -172,6 +173,10 @@ class ChatterboxForTextToSpeech(PreTrainedTTSModel):
         if audio_path is not None:
             model_inputs["audio_prompt_path"] = str(audio_path)
 
+        max_new_tokens = model_inputs.get("max_new_tokens", 1000)
+        if (isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or max_new_tokens <= 0):
+            raise ValueError("`max_new_tokens` must be a positive integer.")
+
         constraints = {
             "repetition_penalty": (0.0, None, False),
             "min_p": (0.0, 1.0, True),
@@ -203,6 +208,7 @@ class ChatterboxForTextToSpeech(PreTrainedTTSModel):
         speaker_audio_path: str | None = None,
         audio_prompt_path: str | None = None,
         seed: int | None = None,
+        max_new_tokens: int = 1000,
         **generation_options,
     ) -> TTSOutput:
         if self.model is None:
@@ -216,6 +222,7 @@ class ChatterboxForTextToSpeech(PreTrainedTTSModel):
             waveform = self.model.generate(
                 text,
                 audio_prompt_path=prompt_path,
+                max_new_tokens=max_new_tokens,
                 **generation_options,
             )
         return finish_audio_output(
@@ -224,6 +231,7 @@ class ChatterboxForTextToSpeech(PreTrainedTTSModel):
             output_file=output_file,
             metadata={
                 "voice_cloned": prompt_path is not None,
+                "max_new_tokens": max_new_tokens,
                 "seed": effective_seed,
                 "requested_seed": seed,
             },
