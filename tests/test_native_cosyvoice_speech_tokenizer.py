@@ -250,17 +250,17 @@ class CosyVoiceSpeechTokenizerRuntimeTests(unittest.TestCase):
             )
 
             with (
-                mock.patch(
-                    "voicehub.optimization.torch_compile."
-                    "inspect_torch_compile",
-                    return_value=report,
-                ),
-                mock.patch.object(
-                    torch,
-                    "compile",
-                    side_effect=lambda function, **_kwargs: (
-                        compiled_owners.append(function.__self__) or function),
-                ),
+                    mock.patch(
+                        "voicehub.optimization.torch_compile."
+                        "inspect_torch_compile",
+                        return_value=report,
+                    ),
+                    mock.patch.object(
+                        torch,
+                        "compile",
+                        side_effect=lambda function, **_kwargs:
+                        (compiled_owners.append(function.__self__) or function),
+                    ),
             ):
                 result = wrapper.optimize(
                     TTSOptimizationConfig(
@@ -277,16 +277,12 @@ class CosyVoiceSpeechTokenizerRuntimeTests(unittest.TestCase):
                 tuple(compiled_owners),
                 expected_owners,
             )
-            self.assertTrue(
-                all("forward" in owner.__dict__ for owner in expected_owners),
-            )
+            self.assertTrue(all("forward" in owner.__dict__ for owner in expected_owners), )
             self.assertIs(
                 wrapper.restore_tts_optimization(),
                 runtime,
             )
-            self.assertTrue(
-                all("forward" not in owner.__dict__ for owner in expected_owners),
-            )
+            self.assertTrue(all("forward" not in owner.__dict__ for owner in expected_owners), )
 
     def test_shared_codec_optimizer_discovers_and_compiles_encoder_boundary(self):
         torch.manual_seed(47)

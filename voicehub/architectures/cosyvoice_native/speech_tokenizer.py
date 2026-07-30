@@ -538,12 +538,13 @@ class CosyVoiceSpeechTokenizer(nn.Module):
     ) -> tuple[OptimizationCompileTarget, ...]:
         if mode not in {"inference", "training"}:
             raise ValueError(f"Unsupported optimization mode {mode!r}.")
-        return (OptimizationCompileTarget(
-            "codec.encode.cosyvoice_s3",
-            self,
-            "forward",
-            component="encode",
-        ), )
+        return (
+            OptimizationCompileTarget(
+                "codec.encode.cosyvoice_s3",
+                self,
+                "forward",
+                component="encode",
+            ), )
 
     def forward(
         self,

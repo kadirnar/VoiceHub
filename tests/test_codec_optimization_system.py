@@ -25,6 +25,7 @@ from voicehub.models.chatterbox.models.s3gen.s3gen import S3Token2Wav
 from voicehub.models.chatterbox.models.s3tokenizer.model_v2 import S3TokenizerV2
 from voicehub.models.csm.source.moshi.models.compression import MimiModel
 from voicehub.models.xtts.source.TTS.tts.layers.xtts.hifigan_decoder import HifiDecoder
+from voicehub.optimization.capabilities import OptimizationContext
 from voicehub.optimization.codecs import (
     CodecCompileComponent,
     CodecCUDAGraphCaptureError,
@@ -34,7 +35,6 @@ from voicehub.optimization.codecs import (
     discover_codec_compile_targets,
     resolve_codec_optimization,
 )
-from voicehub.optimization.capabilities import OptimizationContext
 
 
 class _TinyCodec(nn.Module):
@@ -291,18 +291,15 @@ class CodecStructuralProtocolTests(unittest.TestCase):
                 )
 
         self.assertEqual(
-            tuple(
-                target.label
-                for target in discover_codec_compile_targets(
-                    chatterbox,
-                    components="flow",
-                )),
+            tuple(target.label for target in discover_codec_compile_targets(
+                chatterbox,
+                components="flow",
+            )),
             ("codec.flow.chatterbox_s3gen", ),
         )
         self.assertEqual(
             tuple(
-                target.label
-                for target in discover_codec_compile_targets(
+                target.label for target in discover_codec_compile_targets(
                     chatterbox,
                     components="decode",
                 )),
@@ -312,22 +309,18 @@ class CodecStructuralProtocolTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            tuple(
-                target.label
-                for target in discover_codec_compile_targets(
-                    flow,
-                    components="all",
-                )),
+            tuple(target.label for target in discover_codec_compile_targets(
+                flow,
+                components="all",
+            )),
             ("codec.flow.cosyvoice.estimator.forward", ),
         )
         self.assertEqual(
-            {
-                target.component
-                for target in discover_codec_compile_targets(
-                    mimi,
-                    components="all",
-                )
-            },
+            {target.component
+             for target in discover_codec_compile_targets(
+                 mimi,
+                 components="all",
+             )},
             {"decode", "encode", "quantizer"},
         )
 
@@ -349,17 +342,11 @@ class CodecStructuralProtocolTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            tuple(
-                (target.component, target.attribute)
-                for target in tokenizer_targets
-            ),
+            tuple((target.component, target.attribute) for target in tokenizer_targets),
             (("encode", "forward"), ("quantizer", "encode")),
         )
         self.assertEqual(
-            tuple(
-                (target.component, target.attribute)
-                for target in vocoder_targets
-            ),
+            tuple((target.component, target.attribute) for target in vocoder_targets),
             (("vocoder", "forward"), ),
         )
 
@@ -492,18 +479,18 @@ class CodecOptimizationPlanTests(unittest.TestCase):
         )
 
         with (
-            mock.patch(
-                "voicehub.kernels.cuda_extensions."
-                "CUDA_EXTENSIONS.is_loaded",
-                return_value=False,
-            ),
-            mock.patch(
-                "voicehub.kernels.capabilities.triton_capability",
-                return_value=SimpleNamespace(
-                    available=True,
-                    reason="",
+                mock.patch(
+                    "voicehub.kernels.cuda_extensions."
+                    "CUDA_EXTENSIONS.is_loaded",
+                    return_value=False,
                 ),
-            ),
+                mock.patch(
+                    "voicehub.kernels.capabilities.triton_capability",
+                    return_value=SimpleNamespace(
+                        available=True,
+                        reason="",
+                    ),
+                ),
         ):
             plan = resolve_codec_optimization(
                 codec,

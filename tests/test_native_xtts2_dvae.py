@@ -11,11 +11,7 @@ from unittest import mock
 import torch
 from torch import nn
 
-from voicehub.architectures.xtts2.dvae import (
-    XTTS2DVAE,
-    XTTS2DVAEConfig,
-    XTTS2TrainingAudioEncoder,
-)
+from voicehub.architectures.xtts2.dvae import XTTS2DVAE, XTTS2DVAEConfig, XTTS2TrainingAudioEncoder
 from voicehub.architectures.xtts2.dvae_checkpoint import (
     NATIVE_XTTS2_DVAE_FILENAME,
     NATIVE_XTTS2_DVAE_FORMAT,
@@ -406,16 +402,12 @@ class NativeXTTS2DVAETests(unittest.TestCase):
             export_directory = root / "export"
             wrapper.save_pretrained(export_directory)
 
-            portable_config = json.loads(
-                (export_directory / "config.json").read_text(encoding="utf-8"))
+            portable_config = json.loads((export_directory / "config.json").read_text(encoding="utf-8"))
             self.assertIsNone(portable_config["training_dvae_checkpoint"])
             self.assertIsNone(portable_config["training_mel_stats_checkpoint"])
+            self.assertTrue((export_directory / NATIVE_EXPORT_DIR / NATIVE_XTTS2_DVAE_FILENAME).is_file())
             self.assertTrue(
-                (export_directory / NATIVE_EXPORT_DIR /
-                 NATIVE_XTTS2_DVAE_FILENAME).is_file())
-            self.assertTrue(
-                (export_directory / NATIVE_EXPORT_DIR /
-                 NATIVE_XTTS2_DVAE_MEL_STATS_FILENAME).is_file())
+                (export_directory / NATIVE_EXPORT_DIR / NATIVE_XTTS2_DVAE_MEL_STATS_FILENAME).is_file())
 
             original_dvae.unlink()
             original_stats.unlink()
@@ -429,10 +421,8 @@ class NativeXTTS2DVAETests(unittest.TestCase):
             )
             resolved = fresh._training_audio_artifacts()
             expected = (
-                (moved_directory / NATIVE_EXPORT_DIR /
-                 NATIVE_XTTS2_DVAE_FILENAME).resolve(),
-                (moved_directory / NATIVE_EXPORT_DIR /
-                 NATIVE_XTTS2_DVAE_MEL_STATS_FILENAME).resolve(),
+                (moved_directory / NATIVE_EXPORT_DIR / NATIVE_XTTS2_DVAE_FILENAME).resolve(),
+                (moved_directory / NATIVE_EXPORT_DIR / NATIVE_XTTS2_DVAE_MEL_STATS_FILENAME).resolve(),
             )
             self.assertEqual(resolved, expected)
 
