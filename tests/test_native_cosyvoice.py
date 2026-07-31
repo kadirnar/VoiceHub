@@ -215,10 +215,16 @@ class NativeCosyVoiceInventoryTests(unittest.TestCase):
 
     def test_legacy_converter_rejects_every_unaudited_pickle_before_loading(self):
         with tempfile.TemporaryDirectory() as temporary:
-            source = Path(temporary) / "llm.pt"
-            source.write_bytes(b"not an audited checkpoint")
+            root = Path(temporary)
+            blob = root / "checkpoint-blob"
+            blob.write_bytes(b"not an audited checkpoint")
+            source = root / "llm.pt"
+            source.symlink_to(blob.name)
             model = CosyVoiceNativeModel(CosyVoiceArchitectureConfig.tiny()).llm
-            with self.assertRaises(CheckpointIntegrityError):
+            with self.assertRaisesRegex(
+                    CheckpointIntegrityError,
+                    "file size differs",
+            ):
                 convert_audited_cosyvoice_legacy_checkpoint(
                     model,
                     source,

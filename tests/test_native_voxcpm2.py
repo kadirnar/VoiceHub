@@ -377,6 +377,9 @@ class NativeVoxCPMTrainingTests(unittest.TestCase):
                 {"base_lm.embed_tokens.weight": model.base_lm.embed_tokens.weight},
                 Path(directory) / "partial.safetensors",
             )
+            blob = path.with_name("checkpoint-blob")
+            path.rename(blob)
+            path.symlink_to(blob.name)
             with self.assertRaises(CheckpointCompatibilityError):
                 validate_voxcpm_checkpoint(model, path)
 

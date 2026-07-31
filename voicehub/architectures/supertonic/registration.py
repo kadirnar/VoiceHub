@@ -59,6 +59,7 @@ def create_supertonic_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=(
                 "compile",
+                "diffusion-cache",
                 "diffusion-sampling",
             ),
             features=(

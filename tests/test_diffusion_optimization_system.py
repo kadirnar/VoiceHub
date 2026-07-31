@@ -33,6 +33,7 @@ _EXPECTED = {
         "passes": (
             "compile",
             "sdpa",
+            "diffusion-cache",
             "diffusion-sampling",
         ),
         "sampling": (
@@ -145,6 +146,7 @@ _EXPECTED = {
         ),
         "passes": (
             "compile",
+            "diffusion-cache",
             "diffusion-sampling",
         ),
         "sampling": ("schedule", ),
@@ -158,6 +160,7 @@ _EXPECTED = {
         ),
         "passes": (
             "compile",
+            "diffusion-cache",
             "diffusion-sampling",
         ),
         "sampling": ("discrete-step-count", ),
@@ -241,6 +244,9 @@ class DiffusionFamilyInventoryTests(unittest.TestCase):
                     item.diffusion_cache_supported,
                     "diffusion-cache" in expected["passes"],
                 )
+                self.assertEqual(item.diffusion_cache_methods, ("dbcache", "first_block"))
+                self.assertEqual(item.diffusion_cache_predictors, ("reuse", "taylor"))
+                self.assertEqual(item.diffusion_cache_step_policies, ("dynamic", "static"))
                 self.assertEqual(
                     item.diffusion_sampling_supported,
                     "diffusion-sampling" in expected["passes"],

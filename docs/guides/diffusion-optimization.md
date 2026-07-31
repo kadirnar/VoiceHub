@@ -20,13 +20,13 @@ The current public inventory contains exactly nine model types:
 
 | Model type | Active diffusion/flow boundary | Registered formulation | Sampling operations | Declared execution surface |
 | --- | --- | --- | --- | --- |
-| `chatterbox` | S3Gen speech-token-to-mel subgraph after the T3 token model | Conditional flow matching | Classifier-free guidance (CFG), Euler | Compile, SDPA, schedule reduction, prediction cache |
+| `chatterbox` | S3Gen speech-token-to-mel subgraph after the T3 token model | Conditional flow matching | Classifier-free guidance (CFG), Euler | Compile, SDPA, block cache, schedule reduction, prediction cache |
 | `cosyvoice` | Flow estimator between the speech-token LM and HiFT vocoder | Conditional flow matching | CFG, Euler | Compile, fused kernels, schedule/guidance/cache, STORK-2 |
 | `echo` | EchoDiT continuous Fish-codec latent generator | Rectified flow | Independent text/speaker CFG, Euler, optional blockwise generation | Compile, fused kernels, schedule/guidance/cache |
 | `f5tts` | F5 DiT mel generator | Conditional flow matching | CFG, Euler or midpoint | Compile, attention/kernels, schedule/guidance/cache, STORK-2 for Euler |
 | `irodoritts` | RF-DiT continuous DACVAE-latent generator | Rectified flow | Multi-condition CFG, Euler | Compile, SDPA/kernels, schedule/guidance/cache |
-| `styletts2` | Style-vector generator inside a larger adversarial TTS graph | Style diffusion | CFG, ADPM2 with a Karras schedule | Compile, schedule reduction with ADPM2 stages preserved |
-| `supertonic` | Iterative text-to-latent vector-estimator graph | Flow matching | Released iterative estimator | Compile, discrete total-step reduction |
+| `styletts2` | Style-vector generator inside a larger adversarial TTS graph | Style diffusion | CFG, ADPM2 with a Karras schedule | Compile, block cache, schedule reduction with ADPM2 stages preserved |
+| `supertonic` | Iterative text-to-latent vector-estimator graph | Flow matching | Released iterative estimator | Compile, latent-residual cache, discrete total-step reduction |
 | `vibevoice` | Acoustic diffusion head driven by the causal language model | Denoising diffusion | CFG, DPM-Solver++(2M) | Compile, SDPA/kernels, rebuilt DPM schedule, guidance/cache |
 | `voxcpm` | Local DiT inside the outer autoregressive acoustic-frame loop | Conditional flow matching | CFG/CFG-Zero*, Euler | Compile, SDPA, schedule/guidance/cache |
 
@@ -402,8 +402,9 @@ to architecture-owned VoiceHub block lists:
 2. On a required compute step, run the middle blocks and save their aggregate
    residual.
 3. On a cache hit, skip those middle blocks and add either the latest residual
-   (`predictor="reuse"`) or a first-order extrapolation from the two latest
-   fully computed residuals (`predictor="taylor"`).
+   (`predictor="reuse"`) or a first-, second-, or third-order extrapolation
+   from fully computed residuals (`predictor="taylor"`). Predictions are never
+   added to the Taylor history.
 4. Always run the last `back_blocks` (`Bn`) blocks so the approximate state is
    refined before the model's output projection.
 
@@ -429,27 +430,46 @@ optimization = TTSOptimizationConfig(
         back_blocks=1,
         residual_diff_threshold=0.05,
         warmup_steps=3,
+        warmup_interval=1,
         max_cached_steps=-1,
         max_consecutive_cached_steps=2,
         max_accumulated_relative_error=0.12,
         predictor="reuse",
+        taylor_order=1,
         # True means "force a full middle-block evaluation" at that step.
         compute_step_mask=(True, True, False, False, True),
+        compute_step_policy="dynamic",  # or explicit static-mask reuse
+        num_inference_steps=5,
+        force_refresh_step_hint=None,
+        force_refresh_step_policy="once",  # or repeat
+        probe_downsample_factor=1,
+        metrics_history_size=256,
     ),
     compile="auto",
 )
 plan = optimization.resolve("f5tts", mode="inference")
 ```
 
-`warmup_steps` forces early full evaluations. `max_cached_steps` limits cache
-hits across one lane (`-1` means unlimited), while
+`warmup_steps` and `warmup_interval` define the early full-compute cadence.
+`max_cached_steps` limits cache hits across one lane (`-1` means unlimited), while
 `max_consecutive_cached_steps` prevents long runs of predictions.
 `max_accumulated_relative_error` forces refresh after the accepted probe
 scores accumulate beyond its budget. `compute_step_mask` is an SCM-like
-explicit full-compute schedule: `True` forces computation, while `False`
-still permits the threshold and safety limits to reject a hit. Distributed
+explicit full-compute schedule: `True` forces computation. With the default
+`dynamic` policy, `False` still evaluates the threshold; with `static`, it
+reuses a compatible cache entry without calculating the probe score. Static
+mode is faster and more approximate. `num_inference_steps` automatically
+starts a new segment for transformer-only callers, while the refresh hint can
+invalidate once or periodically. `probe_downsample_factor` reduces decision
+work without changing the cached residual. Distributed
 execution takes the maximum probe score across ranks by default so every rank
 makes the same decision.
+
+`DiffusionCacheConfig.from_dict()` also accepts Cache-DiT names such as
+`Fn_compute_blocks`, `Bn_compute_blocks`, `max_warmup_steps`,
+`max_continuous_cached_steps`, `steps_computation_mask`, and
+`taylorseer_order`. Supplying an alias and its VoiceHub name together is an
+error.
 
 Each sampler invalidates its state at request boundaries and when a
 conditioning cache changes. Packed CFG uses its own lane; separate
@@ -460,17 +480,35 @@ block layouts always execute every block. The cache owns no parameters,
 buffers, or child modules, so enabling and restoring it does not change
 checkpoint keys.
 
-The currently declared block adapters are:
+Every cache target reports aggregate and optional per-lane telemetry. The
+summary includes dynamic/static hits, each miss reason, residual-difference
+min/mean/p25/p50/p75/p95/max, Taylor fallback/order counts, executed/skipped
+block evaluations, structural block-compute reduction, active/peak cache
+bytes, and bounded step histories. Public `generate()` calls automatically
+open a request session, including exception-safe cache release.
+
+```python
+from voicehub import diffusion_cache_summary, reset_diffusion_cache_metrics
+
+reset_diffusion_cache_metrics(model.model)
+audio = model.generate("A repeatable benchmark sentence.")
+metrics = diffusion_cache_summary(model.model, details=True)
+```
+
+All nine active diffusion-family models declare an architecture-owned cache
+adapter:
 
 | Model type | Cache boundary | Status |
 | --- | --- | --- |
+| `chatterbox` | Repeated S3Gen `ConditionalDecoder.mid_blocks` with one packed-CFG lane | Supported |
 | `cosyvoice` | Native `DiTEstimator` blocks with separate CFG lanes | Supported |
 | `f5tts` | `F5DiT.transformer_blocks` | Supported |
 | `echo` | `EchoDiT.blocks`, including sampler invalidation | Supported |
 | `irodoritts` | RF-DiT blocks with packed and independent CFG lanes | Supported |
 | `voxcpm` | Local DiT decoder layers inside the outer acoustic loop | Supported |
 | `vibevoice` | Low-level `VibeVoiceDiffusionHead.layers` only | Experimental; the public high-level inference path still fails closed |
-| `chatterbox`, `styletts2`, `supertonic` | No reviewed architecture-owned repeated-block adapter | Unsupported; `auto` stays exact and `required` raises |
+| `styletts2` | `Transformer1d`/`StyleTransformer1d` blocks with independent CFG and ADPM2-stage lanes | Supported |
+| `supertonic` | Flattened ONNX vector-estimator boundary; caches `next_latent - current_latent` from a timestep-tagged current-latent probe | Supported; avoids reusing the absolute next latent |
 
 Architecture registration, not a model-name allowlist, declares
 `diffusion-cache`. Adding another adapter requires sampler-level invalidation,

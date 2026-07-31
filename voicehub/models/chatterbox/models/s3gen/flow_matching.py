@@ -112,6 +112,9 @@ class ConditionalCFM(DiffusionSamplingMixin, BASECFM):
                 shape: (batch_size, spk_emb_dim)
             cond: Not used but kept for future purposes
         """
+        reset_cache = getattr(self.estimator, "reset_diffusion_cache", None)
+        if callable(reset_cache):
+            reset_cache()
         controller = self.diffusion_sampling_controller
         if controller is not None:
             controller.reset()

@@ -70,6 +70,7 @@ def create_chatterbox_architecture_spec() -> ArchitectureSpec:
             optimization_passes=(
                 "compile",
                 "sdpa",
+                "diffusion-cache",
                 "diffusion-sampling",
             ),
             features=(

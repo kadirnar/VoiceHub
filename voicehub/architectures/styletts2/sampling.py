@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any
 
 from torch import Tensor
@@ -50,6 +51,7 @@ class StyleTTS2DiffusionSampler(DiffusionSamplingMixin, DiffusionSampler):
             num_steps=num_steps,
             clamp=clamp,
         )
+        object.__setattr__(self, "_diffusion_cache_target", getattr(diffusion, "net", None))
         self._initialize_diffusion_sampling()
 
     def enable_diffusion_sampling(self, config=None):
@@ -77,43 +79,57 @@ class StyleTTS2DiffusionSampler(DiffusionSamplingMixin, DiffusionSampler):
         **kwargs: Any,
     ) -> Tensor:
         controller = self.diffusion_sampling_controller
-        if controller is None:
-            return super().forward(
-                noise,
-                num_steps=num_steps,
-                **kwargs,
-            )
-
         requested_steps = self.num_steps if num_steps is None else num_steps
         if requested_steps is None:
             raise ValueError("StyleTTS 2 `num_steps` must be provided.")
         if (isinstance(requested_steps, bool) or not isinstance(requested_steps, int) or requested_steps < 2):
             raise ValueError("StyleTTS 2 `num_steps` must be an integer >= 2.")
 
-        controller.reset()
         native_sigmas = self.sigma_schedule(
             requested_steps,
             noise.device,
         )
-        # The released sampler consumes only indices [0, num_steps - 1].
-        # Rebuild that exact active span so an enabled controller with no
-        # target-step reduction remains bit-for-bit on the native path.
-        active_sigmas = native_sigmas[:requested_steps]
-        prepared_sigmas = controller.prepare_schedule(active_sigmas)
-        prepared_steps = int(prepared_sigmas.numel())
-        denoise = lambda *args, **call_kwargs: self.denoise_fn(  # noqa: E731
-            *args,
-            **{
-                **call_kwargs,
-                **kwargs,
-            },
-        )
-        result = self.sampler(
-            noise,
-            fn=denoise,
-            sigmas=prepared_sigmas,
-            num_steps=prepared_steps,
-        )
+        if controller is None:
+            prepared_sigmas = native_sigmas
+            prepared_steps = requested_steps
+        else:
+            controller.reset()
+            # The released sampler consumes only indices [0, num_steps - 1].
+            # Rebuild that exact active span so an enabled controller with no
+            # target-step reduction remains bit-for-bit on the native path.
+            active_sigmas = native_sigmas[:requested_steps]
+            prepared_sigmas = controller.prepare_schedule(active_sigmas)
+            prepared_steps = int(prepared_sigmas.numel())
+        denoise_call = 0
+        cache_target = getattr(self, "_diffusion_cache_target", None)
+        cache_enabled = getattr(cache_target, "diffusion_cache_config", None) is not None
+
+        def denoise(*args, **call_kwargs):
+            nonlocal denoise_call
+            stage = "main" if denoise_call % 2 == 0 else "midpoint"
+            denoise_call += 1
+            cache_kwargs = ({"diffusion_cache_lane": f"adpm2:{stage}"} if cache_enabled else {})
+            return self.denoise_fn(
+                *args,
+                **{
+                    **call_kwargs,
+                    **kwargs,
+                    **cache_kwargs,
+                },
+            )
+
+        reset_cache = getattr(cache_target, "reset_diffusion_cache", None)
+        if callable(reset_cache):
+            reset_cache()
+        cache_session = getattr(cache_target, "diffusion_cache_session", None)
+        session = cache_session() if callable(cache_session) else nullcontext()
+        with session:
+            result = self.sampler(
+                noise,
+                fn=denoise,
+                sigmas=prepared_sigmas,
+                num_steps=prepared_steps,
+            )
         return result.clamp(-1.0, 1.0) if self.clamp else result
 
 

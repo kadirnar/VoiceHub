@@ -281,6 +281,13 @@ class NativeIrodoriTests(unittest.TestCase):
             self.assertEqual(loaded_config.to_dict(), config.to_dict())
             self.assertFalse(any(tensor.is_meta for tensor in loaded.state_dict().values()))
 
+            blob = root / "checkpoint-blob"
+            checkpoint.rename(blob)
+            checkpoint.symlink_to(blob.name)
+            linked, linked_config = load_irodori_safetensors(checkpoint)
+            self.assertEqual(linked_config.to_dict(), config.to_dict())
+            self.assertFalse(any(tensor.is_meta for tensor in linked.state_dict().values()))
+
             incompatible_config = _tiny_config(dropout=0.2)
             with self.assertRaisesRegex(
                     CheckpointCompatibilityError,

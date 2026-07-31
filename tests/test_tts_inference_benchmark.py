@@ -17,22 +17,9 @@ import torch
 import voicehub
 
 PROJECT_ROOT = Path(__file__).parents[1]
-RESULTS = (
-    PROJECT_ROOT
-    / "benchmarks"
-    / "tts_vits_rtx4090_2026-07-31.json"
-)
-VUI_REJECTED_RESULTS = (
-    PROJECT_ROOT
-    / "benchmarks"
-    / "tts_vui_rtx4090_rejected_2026-07-31.json"
-)
-REPORT = (
-    PROJECT_ROOT
-    / "docs"
-    / "guides"
-    / "rtx-4090-speech-benchmarks.md"
-)
+RESULTS = (PROJECT_ROOT / "benchmarks" / "tts_vits_rtx4090_2026-07-31.json")
+VUI_REJECTED_RESULTS = (PROJECT_ROOT / "benchmarks" / "tts_vui_rtx4090_rejected_2026-07-31.json")
+REPORT = (PROJECT_ROOT / "docs" / "guides" / "rtx-4090-speech-benchmarks.md")
 
 
 def _load_benchmark_module():
@@ -69,10 +56,7 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
             "token",
             "use_auth_token",
         )
-        payload = {
-            key: f"private-{key}"
-            for key in aliases
-        }
+        payload = {key: f"private-{key}" for key in aliases}
         payload["source"] = "https://alice:secret@example.com/private/model"
         payload["query_source"] = (
             "https://example.com/model?X-Amz-Credential=user"
@@ -98,13 +82,8 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         )
 
     def test_vui_compile_speedups_remain_rejected_by_the_quality_gate(self):
-        result = json.loads(
-            VUI_REJECTED_RESULTS.read_text(encoding="utf-8"),
-        )
-        profiles = {
-            profile["profile"]: profile
-            for profile in result["results"]
-        }
+        result = json.loads(VUI_REJECTED_RESULTS.read_text(encoding="utf-8"), )
+        profiles = {profile["profile"]: profile for profile in result["results"]}
 
         self.assertEqual(result["status"], "rejected")
         self.assertEqual(
@@ -133,12 +112,13 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         self.assertEqual(
             result["policy"],
             {
-                "inference_torch_compile": "rejected",
-                "training_torch_compile": "available",
+                "inference_torch_compile":
+                "rejected",
+                "training_torch_compile":
+                "available",
                 "reason": (
                     "Measured inference speedups are not reported as usable "
-                    "because both tested shape policies failed the quality gate."
-                ),
+                    "because both tested shape policies failed the quality gate."),
             },
         )
 
@@ -146,10 +126,7 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         result = json.loads(RESULTS.read_text(encoding="utf-8"))
         report = REPORT.read_text(encoding="utf-8")
         checkpoint = result["checkpoint"]
-        matrix = {
-            profile["profile"]: profile
-            for profile in result["clean_candidate_matrix"]
-        }
+        matrix = {profile["profile"]: profile for profile in result["clean_candidate_matrix"]}
         accepted = result["accepted_weight_norm_cache"]["primary"]
 
         self.assertEqual(result["voicehub_version"], voicehub.__version__)
@@ -170,37 +147,29 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
                 "bfloat16-cache",
             },
         )
-        self.assertTrue(
-            all(
-                profile["deterministic_across_repeats"]
-                for profile in matrix.values()
-            ))
+        self.assertTrue(all(profile["deterministic_across_repeats"] for profile in matrix.values()))
         baseline = matrix["baseline"]
         for profile in matrix.values():
             with self.subTest(profile=profile["profile"]):
                 self.assertAlmostEqual(
-                    baseline["mean_latency_seconds"]
-                    / profile["mean_latency_seconds"],
+                    baseline["mean_latency_seconds"] / profile["mean_latency_seconds"],
                     profile["mean_speedup_ratio"],
                 )
                 self.assertAlmostEqual(
-                    baseline["median_latency_seconds"]
-                    / profile["median_latency_seconds"],
+                    baseline["median_latency_seconds"] / profile["median_latency_seconds"],
                     profile["median_speedup_ratio"],
                 )
                 self.assertIn(
                     (
                         f"{profile['mean_latency_seconds'] * 1000:.3f} / "
-                        f"{profile['median_latency_seconds'] * 1000:.3f} ms"
-                    ),
+                        f"{profile['median_latency_seconds'] * 1000:.3f} ms"),
                     report,
                 )
         self.assertTrue(accepted["quality"]["exact"])
         self.assertAlmostEqual(
             (
-                accepted["baseline"]["median_latency_seconds"]
-                / accepted["candidate"]["median_latency_seconds"]
-            ),
+                accepted["baseline"]["median_latency_seconds"] /
+                accepted["candidate"]["median_latency_seconds"]),
             accepted["comparison"]["median_speedup_ratio"],
         )
         self.assertIn(str(RESULTS.relative_to(PROJECT_ROOT)), report)
@@ -259,6 +228,21 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         )
         self.assertEqual(defaulted["requested_revision"], "main")
         self.assertFalse(defaulted["requested_revision_was_explicit"])
+
+    def test_checkpoint_identity_recognizes_local_hugging_face_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            model_root = Path(directory) / "models--owner--model"
+            snapshot = model_root / "snapshots" / ("a" * 40)
+            snapshot.mkdir(parents=True)
+
+            result = benchmark.checkpoint_identity(
+                SimpleNamespace(config=SimpleNamespace(revision=None)),
+                requested_source=snapshot,
+            )
+
+        self.assertEqual(result["resolved_source"], str(model_root.resolve()))
+        self.assertEqual(result["resolved_revision"], "a" * 40)
+        self.assertIsNone(benchmark.checkpoint_identity_comparison_error(result, result), )
 
     def test_profiles_only_select_quality_candidate_execution_changes(self):
         self.assertIsNone(
@@ -323,14 +307,10 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         self.assertFalse(benchmark.profile_uses_weight_norm_cache("baseline"))
         self.assertFalse(benchmark.profile_uses_weight_norm_cache("triton"))
         self.assertFalse(benchmark.profile_uses_weight_norm_cache("compile"))
-        self.assertFalse(
-            benchmark.profile_uses_weight_norm_cache("triton-compile"))
-        self.assertTrue(
-            benchmark.profile_uses_weight_norm_cache("weight-norm-cache"))
-        self.assertTrue(
-            benchmark.profile_uses_weight_norm_cache("float16-cache"))
-        self.assertTrue(
-            benchmark.profile_uses_weight_norm_cache("bfloat16-cache"))
+        self.assertFalse(benchmark.profile_uses_weight_norm_cache("triton-compile"))
+        self.assertTrue(benchmark.profile_uses_weight_norm_cache("weight-norm-cache"))
+        self.assertTrue(benchmark.profile_uses_weight_norm_cache("float16-cache"))
+        self.assertTrue(benchmark.profile_uses_weight_norm_cache("bfloat16-cache"))
         with self.assertRaisesRegex(ValueError, "Unknown benchmark profile"):
             benchmark.profile_uses_weight_norm_cache("unknown")
 
@@ -342,10 +322,8 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
             tuple(default_specs),
             benchmark.DEFAULT_PROFILE_NAMES,
         )
-        self.assertIsNone(
-            default_specs["baseline"]["optimization_config"])
-        self.assertTrue(
-            default_specs["compile"]["optimization_config"]["compile"])
+        self.assertIsNone(default_specs["baseline"]["optimization_config"])
+        self.assertTrue(default_specs["compile"]["optimization_config"]["compile"])
 
         profile_specs = {
             "quality-baseline": {
@@ -398,8 +376,7 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
                 "voice": "M1",
             },
         )
-        self.assertIsNone(
-            effective["quality-baseline"]["optimization_config"])
+        self.assertIsNone(effective["quality-baseline"]["optimization_config"])
         self.assertEqual(
             effective["bf16.compile"]["config_kwargs"]["torch_dtype"],
             "bfloat16",
@@ -418,29 +395,54 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
                 "compile": True,
             },
         )
-        self.assertTrue(
-            effective["bf16.compile"]["weight_norm_cache"])
+        self.assertTrue(effective["bf16.compile"]["weight_norm_cache"])
 
     def test_custom_profile_schema_fails_closed(self):
         invalid_specs = (
             ({}, "at least one"),
-            ({"../escape": {}}, "names must match"),
-            ({"candidate": []}, "must be a JSON object"),
-            ({"candidate": {"unknown": True}}, "unknown field"),
+            ({
+                "../escape": {}
+            }, "names must match"),
+            ({
+                "candidate": []
+            }, "must be a JSON object"),
+            ({
+                "candidate": {
+                    "unknown": True
+                }
+            }, "unknown field"),
             (
-                {"candidate": {"config_kwargs": []}},
+                {
+                    "candidate": {
+                        "config_kwargs": []
+                    }
+                },
                 "config_kwargs",
             ),
             (
-                {"candidate": {"optimization_config": []}},
+                {
+                    "candidate": {
+                        "optimization_config": []
+                    }
+                },
                 "optimization_config",
             ),
             (
-                {"candidate": {"weight_norm_cache": 1}},
+                {
+                    "candidate": {
+                        "weight_norm_cache": 1
+                    }
+                },
                 "true or false",
             ),
             (
-                {"candidate": {"generation_kwargs": {"seed": 4}}},
+                {
+                    "candidate": {
+                        "generation_kwargs": {
+                            "seed": 4
+                        }
+                    }
+                },
                 "benchmark-managed",
             ),
             (
@@ -456,25 +458,25 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         )
         for value, message in invalid_specs:
             with (
-                self.subTest(value=value),
-                self.assertRaisesRegex(
-                    argparse.ArgumentTypeError,
-                    message,
-                ),
+                    self.subTest(value=value),
+                    self.assertRaisesRegex(
+                        argparse.ArgumentTypeError,
+                        message,
+                    ),
             ):
                 benchmark._profile_specs(json.dumps(value))
 
         with self.assertRaisesRegex(
-            argparse.ArgumentTypeError,
-            "benchmark-managed",
+                argparse.ArgumentTypeError,
+                "benchmark-managed",
         ):
             benchmark._generation_mapping('{"seed":12}')
 
     def test_profiles_and_profile_specs_are_mutually_exclusive(self):
         parser = benchmark._parser()
         with (
-            patch("sys.stderr", new=io.StringIO()),
-            self.assertRaises(SystemExit),
+                patch("sys.stderr", new=io.StringIO()),
+                self.assertRaises(SystemExit),
         ):
             parser.parse_args([
                 "--profiles",
@@ -488,12 +490,9 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
 
         def fake_run(command, **kwargs):
             profile = command[command.index("--worker-profile") + 1]
-            result_path = Path(
-                command[command.index("--worker-result") + 1])
-            worker_input_path = Path(
-                command[command.index("--worker-input") + 1])
-            worker_input = json.loads(
-                worker_input_path.read_text(encoding="utf-8"))
+            result_path = Path(command[command.index("--worker-result") + 1])
+            worker_input_path = Path(command[command.index("--worker-input") + 1])
+            worker_input = json.loads(worker_input_path.read_text(encoding="utf-8"))
             effective = worker_input["profile_spec"]
             environment = kwargs["env"]
             calls.append({
@@ -501,8 +500,7 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
                 "effective": effective,
                 "worker_input": worker_input_path,
                 "worker_command": command,
-                "compiler_cache": environment[
-                    "TORCHINDUCTOR_CACHE_DIR"],
+                "compiler_cache": environment["TORCHINDUCTOR_CACHE_DIR"],
                 "triton_cache": environment["TRITON_CACHE_DIR"],
                 "cuda_cache": environment["CUDA_CACHE_PATH"],
             })
@@ -555,12 +553,12 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
                 str(output),
             ])
             with (
-                patch.object(
-                    benchmark.subprocess,
-                    "run",
-                    side_effect=fake_run,
-                ),
-                patch("builtins.print"),
+                    patch.object(
+                        benchmark.subprocess,
+                        "run",
+                        side_effect=fake_run,
+                    ),
+                    patch("builtins.print"),
             ):
                 return_code = benchmark._main_benchmark(args)
             result = json.loads(output.read_text(encoding="utf-8"))
@@ -570,10 +568,7 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
             [call["profile"] for call in calls],
             list(profile_specs),
         )
-        compiler_roots = {
-            str(Path(call["compiler_cache"]).parent)
-            for call in calls
-        }
+        compiler_roots = {str(Path(call["compiler_cache"]).parent) for call in calls}
         self.assertEqual(len(compiler_roots), len(profile_specs))
         for call in calls:
             root = Path(call["compiler_cache"]).parent
@@ -591,14 +586,10 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
             )
         self.assertEqual(result["profile_mode"], "custom")
         self.assertEqual(
-            result["profile_specs"]["compile-fast"][
-                "config_kwargs"]["torch_dtype"],
+            result["profile_specs"]["compile-fast"]["config_kwargs"]["torch_dtype"],
             "bfloat16",
         )
-        self.assertTrue(
-            result["profile_specs"]["compile-fast"][
-                "optimization_config"]["compile"],
-        )
+        self.assertTrue(result["profile_specs"]["compile-fast"]["optimization_config"]["compile"], )
         for profile in result["profiles"]:
             self.assertEqual(
                 profile["effective_profile_spec"],
@@ -618,18 +609,16 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         ])
 
         with self.assertRaisesRegex(
-            ValueError,
-            "require a `baseline` profile",
+                ValueError,
+                "require a `baseline` profile",
         ):
             benchmark._main_benchmark(args)
 
     def test_nonzero_worker_exit_discards_apparently_successful_payload(self):
 
         def fake_run(command, **_kwargs):
-            result_path = Path(
-                command[command.index("--worker-result") + 1])
-            waveform_path = Path(
-                command[command.index("--worker-waveform") + 1])
+            result_path = Path(command[command.index("--worker-result") + 1])
+            waveform_path = Path(command[command.index("--worker-waveform") + 1])
             result_path.write_text(
                 json.dumps({
                     "status": "ok",
@@ -661,12 +650,12 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
                 str(output),
             ])
             with (
-                patch.object(
-                    benchmark.subprocess,
-                    "run",
-                    side_effect=fake_run,
-                ),
-                patch("builtins.print"),
+                    patch.object(
+                        benchmark.subprocess,
+                        "run",
+                        side_effect=fake_run,
+                    ),
+                    patch("builtins.print"),
             ):
                 return_code = benchmark._main_benchmark(args)
             result = json.loads(output.read_text(encoding="utf-8"))
@@ -688,13 +677,10 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         def fake_run(command, **_kwargs):
             nonlocal observed_input
             self.assertNotIn(secret, " ".join(command))
-            input_path = Path(
-                command[command.index("--worker-input") + 1])
+            input_path = Path(command[command.index("--worker-input") + 1])
             self.assertEqual(input_path.stat().st_mode & 0o777, 0o600)
-            observed_input = json.loads(
-                input_path.read_text(encoding="utf-8"))
-            result_path = Path(
-                command[command.index("--worker-result") + 1])
+            observed_input = json.loads(input_path.read_text(encoding="utf-8"))
+            result_path = Path(command[command.index("--worker-result") + 1])
             result_path.write_text(
                 json.dumps({
                     "status": "error",
@@ -730,19 +716,17 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
                 str(output),
             ])
             with (
-                patch.object(
-                    benchmark.subprocess,
-                    "run",
-                    side_effect=fake_run,
-                ),
-                patch("builtins.print"),
+                    patch.object(
+                        benchmark.subprocess,
+                        "run",
+                        side_effect=fake_run,
+                    ),
+                    patch("builtins.print"),
             ):
                 return_code = benchmark._main_benchmark(args)
             output_text = output.read_text(encoding="utf-8")
             artifact_text = "\n".join(
-                path.read_text(encoding="utf-8")
-                for path in artifact_root.rglob("*.json")
-            )
+                path.read_text(encoding="utf-8") for path in artifact_root.rglob("*.json"))
 
         self.assertEqual(return_code, 1)
         self.assertIsNotNone(observed_input)
@@ -757,10 +741,8 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
     def test_nondeterministic_repeats_fail_the_benchmark(self):
 
         def fake_run(command, **_kwargs):
-            result_path = Path(
-                command[command.index("--worker-result") + 1])
-            waveform_path = Path(
-                command[command.index("--worker-waveform") + 1])
+            result_path = Path(command[command.index("--worker-result") + 1])
+            waveform_path = Path(command[command.index("--worker-waveform") + 1])
             torch.save(torch.zeros(160_000), waveform_path)
             result_path.write_text(
                 json.dumps({
@@ -810,12 +792,12 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
                 str(output),
             ])
             with (
-                patch.object(
-                    benchmark.subprocess,
-                    "run",
-                    side_effect=fake_run,
-                ),
-                patch("builtins.print"),
+                    patch.object(
+                        benchmark.subprocess,
+                        "run",
+                        side_effect=fake_run,
+                    ),
+                    patch("builtins.print"),
             ):
                 return_code = benchmark._main_benchmark(args)
 
@@ -830,10 +812,8 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
 
         def fake_run(command, **_kwargs):
             profile = command[command.index("--worker-profile") + 1]
-            result_path = Path(
-                command[command.index("--worker-result") + 1])
-            waveform_path = Path(
-                command[command.index("--worker-waveform") + 1])
+            result_path = Path(command[command.index("--worker-result") + 1])
+            waveform_path = Path(command[command.index("--worker-waveform") + 1])
             sample_rate = 24_000 if profile == "rate-mismatch" else 16_000
             torch.save(torch.zeros(sample_rate * 10), waveform_path)
             result_path.write_text(
@@ -895,12 +875,12 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
                 str(output),
             ])
             with (
-                patch.object(
-                    benchmark.subprocess,
-                    "run",
-                    side_effect=fake_run,
-                ),
-                patch("builtins.print"),
+                    patch.object(
+                        benchmark.subprocess,
+                        "run",
+                        side_effect=fake_run,
+                    ),
+                    patch("builtins.print"),
             ):
                 return_code = benchmark._main_benchmark(args)
             result = json.loads(output.read_text(encoding="utf-8"))
@@ -942,21 +922,17 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
             **mutable,
             "local_weight_sha256": "a" * 64,
         }
-        self.assertIsNone(
-            benchmark.checkpoint_identity_comparison_error(digest, digest),
-        )
+        self.assertIsNone(benchmark.checkpoint_identity_comparison_error(digest, digest), )
 
         revision = {
             **mutable,
             "resolved_source": "owner/model",
             "resolved_revision": "b" * 40,
         }
-        self.assertIsNone(
-            benchmark.checkpoint_identity_comparison_error(
-                revision,
-                revision,
-            ),
-        )
+        self.assertIsNone(benchmark.checkpoint_identity_comparison_error(
+            revision,
+            revision,
+        ), )
 
     def test_waveform_comparison_distinguishes_exact_tolerated_and_shape_change(self):
         reference = torch.tensor([0.0, 0.25, -0.5, 1.0])
@@ -1031,10 +1007,19 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         }
 
         result = benchmark.performance_comparisons(
-            [baseline, candidate, {"status": "error", "profile": "failed"}],
+            [baseline, candidate, {
+                "status": "error",
+                "profile": "failed"
+            }],
             {
-                "baseline": {"within_tolerance": True, "exact": True},
-                "candidate": {"within_tolerance": True, "exact": False},
+                "baseline": {
+                    "within_tolerance": True,
+                    "exact": True
+                },
+                "candidate": {
+                    "within_tolerance": True,
+                    "exact": False
+                },
             },
             reference_profile="baseline",
         )
@@ -1051,9 +1036,7 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
             50.0,
         )
         self.assertEqual(
-            comparison["steady_peak_allocated_memory"][
-                "candidate_minus_baseline_bytes"
-            ],
+            comparison["steady_peak_allocated_memory"]["candidate_minus_baseline_bytes"],
             -200,
         )
         self.assertEqual(
@@ -1070,7 +1053,10 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         baseline = {
             "status": "ok",
             "profile": "baseline",
-            "cold": {"latency_seconds": 0.0, "memory": None},
+            "cold": {
+                "latency_seconds": 0.0,
+                "memory": None
+            },
             "steady": {
                 "mean_latency_seconds": 0.0,
                 "median_latency_seconds": 0.0,
@@ -1079,19 +1065,17 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         }
         result = benchmark.performance_comparisons(
             [baseline],
-            {"baseline": {"within_tolerance": True, "exact": True}},
+            {"baseline": {
+                "within_tolerance": True,
+                "exact": True
+            }},
             reference_profile="baseline",
         )["baseline"]
 
         self.assertIsNone(result["cold_latency"]["speedup_ratio"])
-        self.assertIsNone(
-            result["steady_mean_latency"]["latency_reduction_percent"])
-        self.assertIsNone(
-            result["steady_peak_allocated_memory"]["reduction_percent"])
-        self.assertIsNone(
-            result["steady_peak_reserved_memory"][
-                "candidate_minus_baseline_bytes"
-            ])
+        self.assertIsNone(result["steady_mean_latency"]["latency_reduction_percent"])
+        self.assertIsNone(result["steady_peak_allocated_memory"]["reduction_percent"])
+        self.assertIsNone(result["steady_peak_reserved_memory"]["candidate_minus_baseline_bytes"])
 
     def test_audio_validation_enforces_duration_and_finite_samples(self):
 
@@ -1129,7 +1113,8 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         self.assertEqual(result["provider_count"], 34)
         self.assertEqual(len(result["providers"]), 34)
         self.assertEqual(
-            len({provider["model_type"] for provider in result["providers"]}),
+            len({provider["model_type"]
+                 for provider in result["providers"]}),
             34,
         )
         for provider in result["providers"]:

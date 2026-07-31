@@ -61,6 +61,7 @@ def create_styletts2_architecture_spec() -> ArchitectureSpec:
             export_formats=("safetensors", ),
             optimization_passes=(
                 "compile",
+                "diffusion-cache",
                 "diffusion-sampling",
             ),
             features=(
