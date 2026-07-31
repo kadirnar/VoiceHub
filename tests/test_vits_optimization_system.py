@@ -291,31 +291,19 @@ class VITSStructuralKernelTests(unittest.TestCase):
             )
         self.assertIs(model.kernel_backend, KernelBackend.TORCH)
 
-    def test_native_vits_compile_target_matches_public_inference(self):
+    def test_native_vits_exposes_only_the_training_compile_boundary(self):
         model = VitsModel(_tiny_config())
         inference = model.optimization_compile_targets("inference")
         training = model.optimization_compile_targets("training")
+        self.assertEqual(inference, ())
         self.assertEqual(
-            tuple(target.label for target in inference),
-            (
-                "vits.text_encoder.forward",
-                "vits.flow.forward",
-                "vits.decoder.forward",
-            ),
+            tuple(target.label for target in training),
+            ("vits.forward", ),
         )
-        self.assertEqual(
-            tuple(target.owner for target in inference),
-            (
-                model.text_encoder,
-                model.flow,
-                model.decoder,
-            ),
-        )
-        self.assertTrue(all(target.attribute == "forward" for target in inference))
         self.assertIs(training[0].owner, model)
         self.assertEqual(training[0].attribute, "forward")
 
-    def test_native_vits_regional_compile_preserves_sampling_and_state(self):
+    def test_native_vits_inference_compile_fails_closed(self):
         from voicehub.architectures.vits.modeling import VitsSamplingConfig
 
         torch.manual_seed(43)
@@ -330,22 +318,35 @@ class VITSStructuralKernelTests(unittest.TestCase):
         state_keys = tuple(model.state_dict())
         with torch.inference_mode():
             expected = model.synthesize(input_ids, sampling=sampling)
-        model.cache_weight_norm_for_inference()
-
+        context = OptimizationContext(
+            mode="inference",
+            device="cpu",
+            dtype="float32",
+            persist_result=True,
+        )
+        with self.assertRaisesRegex(
+                OptimizationCompatibilityError,
+                "no compilable execution callable",
+        ):
+            OptimizationPassManager().apply(
+                model,
+                (TorchCompilePass(
+                    backend="aot_eager",
+                    fullgraph=True,
+                    dynamic=True,
+                    requirement="required",
+                ), ),
+                context,
+            )
         result = OptimizationPassManager().apply(
             model,
             (TorchCompilePass(
                 backend="aot_eager",
                 fullgraph=True,
                 dynamic=True,
-                requirement="required",
+                requirement="auto",
             ), ),
-            OptimizationContext(
-                mode="inference",
-                device="cpu",
-                dtype="float32",
-                persist_result=True,
-            ),
+            context,
         )
         with torch.inference_mode():
             actual = model.synthesize(input_ids, sampling=sampling)
@@ -355,12 +356,8 @@ class VITSStructuralKernelTests(unittest.TestCase):
         self.assertEqual(tuple(model.state_dict()), state_keys)
         metadata = result.manifest_metadata()[0]["metadata"]
         self.assertEqual(
-            metadata["execution_targets"],
-            [
-                "vits.text_encoder.forward",
-                "vits.flow.forward",
-                "vits.decoder.forward",
-            ],
+            metadata["outcome"],
+            "eager-fallback",
         )
         result.restore()
         self.assertEqual(tuple(model.state_dict()), state_keys)

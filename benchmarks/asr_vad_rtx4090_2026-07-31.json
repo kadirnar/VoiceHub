@@ -1,0 +1,493 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-07-31",
+  "voicehub_version": "0.3.0",
+  "scope": "ASR and VAD inference audit",
+  "runtime": {
+    "python": "3.11.10",
+    "torch": "2.8.0+cu128",
+    "cuda": "12.8",
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "cpu": "AMD EPYC 7K62 48-Core Processor",
+    "logical_cpu_count": 96,
+    "operating_system": "Linux"
+  },
+  "sample": {
+    "dataset": "hf-internal-testing/librispeech_asr_dummy",
+    "split_row": 2,
+    "duration_seconds": 12.485,
+    "sample_rate_hz": 16000,
+    "pcm_wave_sha256": "5f4d8f7331acffc3d2efbe0f764b9eb3447911dc17f9843e38e1083eb1685b9c",
+    "reference": "HE TELLS US THAT AT THIS FESTIVE SEASON OF THE YEAR WITH CHRISTMAS AND ROAST BEEF LOOMING BEFORE US SIMILES DRAWN FROM EATING AND ITS RESULTS OCCUR MOST READILY TO THE MIND"
+  },
+  "method": {
+    "asr_measured_runs": 15,
+    "asr_discarded_warmups": 5,
+    "wav2vec2_measured_runs": 51,
+    "compiler_caches": "Fresh per profile: TORCHINDUCTOR_CACHE_DIR, TRITON_CACHE_DIR, and CUDA_CACHE_PATH",
+    "gpu_memory_metric": "cuda-max-memory-allocated",
+    "cpu_memory_metric": "process-max-rss",
+    "latency_variability_flag": "population standard deviation / mean >= 0.10",
+    "error_rate_normalization": "NFKC plus casefold; Unicode WER and alphanumeric-code-point CER"
+  },
+  "test_summary": {
+    "registry_lazy_contracts": {
+      "passed": 34,
+      "failed": 0
+    },
+    "targeted_asr_vad_suite": {
+      "passed": 541,
+      "skipped": 13,
+      "warnings": 1,
+      "seconds": 81.25
+    }
+  },
+  "coverage_summary": {
+    "provider_count": 34,
+    "real_checkpoint_or_algorithm": 11,
+    "tiny_native_graph": 20,
+    "external_checkpoint_blocker": 3
+  },
+  "coverage": [
+    {
+      "model_type": "asr_transformers",
+      "verification": "real-checkpoint",
+      "checkpoint": "openai/whisper-tiny",
+      "resolved_revision": "169d4a4341b33bc18d8881c4b69c2e104e1cc0af"
+    },
+    {
+      "model_type": "asr_whisper",
+      "verification": "real-checkpoint",
+      "checkpoint": "openai/whisper-tiny",
+      "resolved_revision": "169d4a4341b33bc18d8881c4b69c2e104e1cc0af"
+    },
+    {
+      "model_type": "asr_tiron",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_asr_tiron.py and tests/test_native_tiron_constraints.py",
+      "default_checkpoint_note": "Trelis/tiron was not cached; its Safetensors weights are about 3.09 GB."
+    },
+    {
+      "model_type": "asr_qwen3",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_qwen3_asr.py",
+      "default_checkpoint_note": "Qwen/Qwen3-ASR-0.6B was not cached; its Safetensors weights are about 1.88 GB."
+    },
+    {
+      "model_type": "asr_vibevoice",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_vibevoice.py",
+      "default_checkpoint_note": "microsoft/VibeVoice-ASR-HF was not cached; eight default shards total about 16.7 GB."
+    },
+    {
+      "model_type": "asr_granite_speech",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_asr_granite_speech.py",
+      "default_checkpoint_note": "ibm-granite/granite-speech-4.1-2b was not cached; three default shards total about 4.83 GB."
+    },
+    {
+      "model_type": "asr_parakeet_tdt",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_parakeet_tdt.py",
+      "default_checkpoint_note": "nvidia/parakeet-tdt-0.6b-v3 was not cached; its Safetensors weights are about 2.51 GB."
+    },
+    {
+      "model_type": "asr_nemotron",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_asr_nemotron_native.py",
+      "default_checkpoint_note": "nvidia/nemotron-3.5-asr-streaming-0.6b was not cached; its Safetensors weights are about 2.55 GB."
+    },
+    {
+      "model_type": "asr_cohere",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_cohere_asr.py",
+      "default_checkpoint_note": "CohereLabs/cohere-transcribe-03-2026 is gated and no authenticated access was supplied."
+    },
+    {
+      "model_type": "asr_medasr",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_medasr.py",
+      "default_checkpoint_note": "google/medasr is gated and no authenticated access was supplied."
+    },
+    {
+      "model_type": "asr_wav2vec2",
+      "verification": "real-checkpoint",
+      "checkpoint": "facebook/wav2vec2-base-960h",
+      "resolved_revision": "22aad52d435eb6dbaf354bdad9b0da84ce7d6156"
+    },
+    {
+      "model_type": "asr_hubert",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_hubert_model.py and tests/test_native_hubert_provider.py",
+      "default_checkpoint_note": "facebook/hubert-large-ls960-ft was not cached."
+    },
+    {
+      "model_type": "asr_wavlm",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_wavlm_model.py and tests/test_native_wavlm_provider.py",
+      "default_checkpoint_note": "patrickvonplaten/wavlm-libri-clean-100h-base-plus was not cached."
+    },
+    {
+      "model_type": "asr_moonshine",
+      "verification": "real-checkpoint",
+      "checkpoint": "UsefulSensors/moonshine-tiny",
+      "resolved_revision": "390624ed33d594443aa4aa221f5b9f283b545b5a"
+    },
+    {
+      "model_type": "asr_seamless_m4t_v2",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_seamless_m4t_v2.py",
+      "default_checkpoint_note": "facebook/seamless-m4t-v2-large was not cached; the repository exposes about 29.9 GB across weight formats."
+    },
+    {
+      "model_type": "asr_faster_whisper",
+      "verification": "real-checkpoint",
+      "checkpoint": "openai/whisper-tiny",
+      "resolved_revision": "169d4a4341b33bc18d8881c4b69c2e104e1cc0af"
+    },
+    {
+      "model_type": "asr_whisperx",
+      "verification": "real-checkpoint",
+      "checkpoint": "openai/whisper-tiny",
+      "resolved_revision": "169d4a4341b33bc18d8881c4b69c2e104e1cc0af",
+      "note": "Base transcription was tested. Optional word alignment needs a separate language-specific CTC checkpoint."
+    },
+    {
+      "model_type": "asr_openai_whisper",
+      "verification": "real-checkpoint",
+      "checkpoint": "openai/whisper-tiny",
+      "resolved_revision": "169d4a4341b33bc18d8881c4b69c2e104e1cc0af"
+    },
+    {
+      "model_type": "asr_nemo",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_nemo_ctc.py",
+      "default_checkpoint_note": "The external NeMo archive was not cached; one-time restricted conversion requires explicit checkpoint trust."
+    },
+    {
+      "model_type": "asr_speechbrain",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_speechbrain_asr.py",
+      "default_checkpoint_note": "The default SpeechBrain checkpoint was not cached; pickle conversion is fail-closed unless trust_pickle_checkpoint=True."
+    },
+    {
+      "model_type": "asr_funasr",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_asr_native_providers.py",
+      "default_checkpoint_note": "iic/SenseVoiceSmall is a ModelScope identifier and was unavailable from the configured Hugging Face resolver."
+    },
+    {
+      "model_type": "asr_espnet",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_espnet.py",
+      "default_checkpoint_note": "The external ESPnet checkpoint was not cached; pickle conversion is fail-closed unless trust_pickle_checkpoint=True."
+    },
+    {
+      "model_type": "asr_wenet",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_wenet_u2pp.py and tests/test_wenet_vendored_runtime.py",
+      "default_checkpoint_note": "wenet/gigaspeech-u2pp-conformer is not a directly resolvable Hugging Face artifact; pickle conversion is fail-closed."
+    },
+    {
+      "model_type": "vad_transformers",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_transformers_vad_provider.py",
+      "default_checkpoint_note": "This generic provider intentionally has no default checkpoint; the user must supply a compatible classifier."
+    },
+    {
+      "model_type": "vad_silero",
+      "verification": "real-checkpoint",
+      "checkpoint": "safestack/silero-vad",
+      "resolved_revision": "8a63e2e86cf654d7ba19fbedbccce5ff55de3c60"
+    },
+    {
+      "model_type": "vad_webrtc",
+      "verification": "real-algorithm",
+      "checkpoint": "voicehub-native fixed-point WebRTC GMM"
+    },
+    {
+      "model_type": "vad_pyannote",
+      "verification": "external-checkpoint-blocker",
+      "checkpoint": "pyannote/voice-activity-detection",
+      "blocker": "Gated checkpoint; authentication and terms acceptance were not supplied."
+    },
+    {
+      "model_type": "vad_speechbrain",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_speechbrain_vad.py",
+      "default_checkpoint_note": "The default checkpoint was not cached; pickle conversion is fail-closed unless trust_pickle_checkpoint=True."
+    },
+    {
+      "model_type": "vad_nemo",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_native_marblenet_vad.py",
+      "default_checkpoint_note": "The external .nemo archive was not converted without explicit checkpoint trust."
+    },
+    {
+      "model_type": "vad_funasr",
+      "verification": "tiny-native-graph",
+      "evidence": "tests/test_vad_funasr.py",
+      "default_checkpoint_note": "The external PyTorch checkpoint was not converted without explicit checkpoint trust."
+    },
+    {
+      "model_type": "vad_auditok",
+      "verification": "real-algorithm",
+      "checkpoint": "voicehub-native short-term-energy detector"
+    },
+    {
+      "model_type": "vad_sherpa_onnx",
+      "verification": "real-checkpoint",
+      "checkpoint": "safestack/silero-vad",
+      "resolved_revision": "8a63e2e86cf654d7ba19fbedbccce5ff55de3c60",
+      "note": "Historical Sherpa API using the VoiceHub-native Silero graph."
+    },
+    {
+      "model_type": "vad_pyannote_segmentation",
+      "verification": "external-checkpoint-blocker",
+      "checkpoint": "pyannote/segmentation-3.0",
+      "blocker": "Gated checkpoint; authentication and terms acceptance were not supplied."
+    },
+    {
+      "model_type": "vad_pyannote_brouhaha",
+      "verification": "external-checkpoint-blocker",
+      "checkpoint": "pyannote/brouhaha",
+      "blocker": "Gated checkpoint; authentication and terms acceptance were not supplied."
+    }
+  ],
+  "asr_measurements": [
+    {
+      "model_type": "asr_moonshine",
+      "checkpoint": "UsefulSensors/moonshine-tiny",
+      "wer": 0.03125,
+      "cer": 0.014184397163120567,
+      "profiles": [
+        {
+          "profile": "fp32",
+          "mean_seconds": 0.3013539372012019,
+          "median_seconds": 0.3015182581730187,
+          "latency_cv": 0.0027954501461345646,
+          "speed_x_realtime_mean": 41.42968934122227,
+          "steady_peak_mib": 134.71533203125
+        },
+        {
+          "profile": "fp16",
+          "mean_seconds": 0.31643495087822276,
+          "median_seconds": 0.31415498489513993,
+          "latency_cv": 0.018152255956203567,
+          "mean_latency_change_percent_vs_fp32": 5.004418995512202,
+          "peak_memory_reduction_percent_vs_fp32": 40.301634305556064,
+          "steady_peak_mib": 80.4228515625,
+          "normalized_transcript_equal": true
+        },
+        {
+          "profile": "bf16",
+          "mean_seconds": 0.32996069953466456,
+          "median_seconds": 0.3325676126405597,
+          "latency_cv": 0.021431903052387215,
+          "mean_latency_change_percent_vs_fp32": 9.492745506876544,
+          "peak_memory_reduction_percent_vs_fp32": 37.262456641427775,
+          "steady_peak_mib": 84.51708984375,
+          "normalized_transcript_equal": true
+        },
+        {
+          "profile": "torch-compile-fp32",
+          "mean_seconds": 0.1762220531391601,
+          "median_seconds": 0.17554410686716437,
+          "latency_cv": 0.010582332591926142,
+          "mean_speedup_ratio_vs_fp32": 1.7100807295851157,
+          "mean_latency_reduction_percent_vs_fp32": 41.523228541227354,
+          "peak_memory_reduction_percent_vs_fp32": 3.333852850882757,
+          "steady_peak_mib": 130.22412109375,
+          "first_compile_and_inference_seconds": 75.2321743038483,
+          "five_run_stabilization_seconds": 75.94625320425257,
+          "estimated_setup_break_even_utterances": 608,
+          "normalized_transcript_equal": true
+        }
+      ]
+    },
+    {
+      "model_type": "asr_whisper",
+      "checkpoint": "openai/whisper-tiny",
+      "wer": 0.03125,
+      "cer": 0.028368794326241134,
+      "profiles": [
+        {
+          "profile": "fp32",
+          "mean_seconds": 0.17358927264188725,
+          "median_seconds": 0.1672905683517456,
+          "steady_peak_mib": 321.24658203125
+        },
+        {
+          "profile": "fp16",
+          "mean_seconds": 0.20017303405329584,
+          "median_seconds": 0.20055396109819412,
+          "mean_latency_change_percent_vs_fp32": 15.31417293639486,
+          "peak_memory_reduction_percent_vs_fp32": 16.25275682347058,
+          "steady_peak_mib": 269.03515625,
+          "normalized_transcript_equal": true
+        },
+        {
+          "profile": "bf16",
+          "mean_seconds": 0.20123343979939817,
+          "median_seconds": 0.19921129941940308,
+          "mean_latency_change_percent_vs_fp32": 15.925043487301505,
+          "peak_memory_reduction_percent_vs_fp32": 16.25275682347058,
+          "steady_peak_mib": 269.03515625,
+          "normalized_transcript_equal": true,
+          "literal_transcript_note": "Only punctuation differed from FP32."
+        }
+      ]
+    },
+    {
+      "model_type": "asr_wav2vec2",
+      "checkpoint": "facebook/wav2vec2-base-960h",
+      "wer": 0.03125,
+      "cer": 0.014184397163120567,
+      "high_latency_variability": true,
+      "note": "All profiles were bimodal. Mean comparisons are reported; median ratios are intentionally omitted.",
+      "profiles": [
+        {
+          "profile": "fp32",
+          "mean_seconds": 0.05111016581455866,
+          "latency_cv": 0.7473933658996534,
+          "steady_peak_mib": 569.224609375
+        },
+        {
+          "profile": "fp16",
+          "mean_seconds": 0.047475066848610546,
+          "latency_cv": 0.776970117204991,
+          "mean_speedup_ratio_vs_fp32": 1.0765685907834484,
+          "peak_memory_reduction_percent_vs_fp32": 44.458865026780536,
+          "steady_peak_mib": 316.15380859375,
+          "normalized_transcript_equal": true
+        },
+        {
+          "profile": "bf16",
+          "mean_seconds": 0.044816180497554,
+          "latency_cv": 0.7905169294554218,
+          "mean_speedup_ratio_vs_fp32": 1.1404400207052043,
+          "peak_memory_reduction_percent_vs_fp32": 44.458865026780536,
+          "steady_peak_mib": 316.15380859375,
+          "normalized_transcript_equal": true
+        }
+      ]
+    }
+  ],
+  "vad_measurements": [
+    {
+      "model_type": "vad_silero",
+      "checkpoint": "safestack/silero-vad",
+      "segments_seconds": [
+        [0.546, 7.07],
+        [7.618, 12.094]
+      ],
+      "profiles": [
+        {
+          "profile": "eager-48-threads",
+          "mean_seconds": 1.5066739811251562,
+          "speed_x_realtime_mean": 8.286464196240008,
+          "process_peak_rss_mib": 517.875
+        },
+        {
+          "profile": "eager-1-thread",
+          "mean_seconds": 0.22469760412350298,
+          "mean_speedup_ratio_vs_48_threads": 6.70534065996105,
+          "process_peak_rss_mib": 520.78125,
+          "segment_boundaries_equal": true,
+          "scores_equal": true
+        },
+        {
+          "profile": "torch-compile-1-thread",
+          "mean_seconds": 0.19153026606266696,
+          "mean_speedup_ratio_vs_eager_1_thread": 1.173170218695274,
+          "mean_latency_reduction_percent_vs_eager_1_thread": 14.760877486973959,
+          "process_peak_rss_increase_percent_vs_eager_1_thread": 64.5154515451545,
+          "process_peak_rss_mib": 856.765625,
+          "estimated_setup_break_even_utterances": 337,
+          "segment_boundaries_equal": true,
+          "maximum_score_absolute_difference": 1.1920928955078125e-07
+        }
+      ]
+    },
+    {
+      "model_type": "vad_webrtc",
+      "profile": "eager",
+      "mean_seconds_after_pcm_fix": 0.41226543188095094,
+      "speed_x_realtime_mean": 30.283887598912894,
+      "segments_seconds": [
+        [0.54, 7.11],
+        [7.26, 12.15]
+      ],
+      "code_change_benchmark": {
+        "runs": 15,
+        "mean_seconds_before": 0.48218385747944315,
+        "median_seconds_before": 0.4774005888029933,
+        "mean_seconds_after": 0.4119882384004692,
+        "median_seconds_after": 0.40829425817355514,
+        "mean_latency_reduction_percent": 14.55785339764647,
+        "mean_speedup_ratio": 1.170382580220023,
+        "median_latency_reduction_percent": 14.47555055334356,
+        "median_speedup_ratio": 1.169253724905779,
+        "segment_boundaries_equal": true
+      }
+    },
+    {
+      "model_type": "vad_auditok",
+      "profiles": [
+        {
+          "profile": "eager-48-threads",
+          "mean_seconds": 0.004009263042141409,
+          "median_seconds": 0.0008920212276279926,
+          "latency_cv": 3.8421165947399247,
+          "high_latency_variability": true
+        },
+        {
+          "profile": "eager-1-thread",
+          "mean_seconds": 0.001357606539100993,
+          "median_seconds": 0.0013567972928285599,
+          "latency_cv": 0.008975686971890204,
+          "mean_speedup_ratio_vs_48_threads": 2.953184834242433,
+          "speed_x_realtime_mean": 9196.331661946448
+        }
+      ],
+      "segments_seconds": [
+        [0.57, 3.93],
+        [4.17, 6.98],
+        [7.62, 11.93]
+      ]
+    },
+    {
+      "model_type": "vad_sherpa_onnx",
+      "checkpoint": "safestack/silero-vad",
+      "profiles": [
+        {
+          "profile": "eager-48-threads",
+          "mean_seconds": 1.6402040142255525,
+          "median_seconds": 1.605458124075085,
+          "process_peak_rss_mib": 518.7578125
+        },
+        {
+          "profile": "eager-1-thread",
+          "mean_seconds": 0.2811166286468506,
+          "median_seconds": 0.2802521768026054,
+          "speed_x_realtime_mean": 44.41217177402953,
+          "mean_speedup_ratio_vs_48_threads": 5.834603317920545,
+          "process_peak_rss_mib": 521.515625
+        }
+      ],
+      "segments_seconds": [
+        [0.52, 7.13],
+        [7.592, 12.154]
+      ]
+    }
+  ],
+  "recommendations": [
+    "Moonshine FP32 eager is the best short-job profile on this RTX 4090. Use FP16 only for memory pressure; it reduced peak allocation by 40.30% but was 5.00% slower on this sample.",
+    "Moonshine torch.compile is useful only for a long-lived high-volume process: steady mean latency improved 41.52%, but setup took about 76 seconds and broke even after about 608 same-length utterances.",
+    "Whisper-tiny FP32 was faster than FP16 and BF16. Reduced precision saved 16.25% peak allocation but increased mean latency by 15-16%.",
+    "Wav2Vec2 BF16 had the best mean and cut peak allocation by 44.46%, but the host timings were highly bimodal; treat the 1.14x mean speedup as checkpoint- and machine-specific.",
+    "For CPU Silero and the Sherpa-compatible Silero wrapper, one intra-op thread was substantially faster than 48 threads with identical segment boundaries.",
+    "Silero torch.compile improved steady one-thread latency by 14.76% but increased process peak RSS by 64.52%; eager one-thread is the default recommendation.",
+    "No precision or compile profile is claimed quality-neutral beyond this single checkpoint-specific sample. Validate WER/CER on the target dataset before deployment."
+  ]
+}

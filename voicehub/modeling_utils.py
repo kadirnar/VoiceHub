@@ -273,6 +273,7 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         resolved = validate_tts_optimization_config(
             self,
             optimization_config,
+            mode="inference",
         )
         with self._lifecycle_lock:
             if self._llm_backend_config is not None:
@@ -354,7 +355,12 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         """
         from dataclasses import replace
 
-        from voicehub.llm_serving import LLMBackend, LLMBackendConfig, LLMServingClient, get_llm_backend_support
+        from voicehub.llm_serving import (
+            LLMBackend,
+            LLMBackendConfig,
+            LLMServingClient,
+            get_llm_backend_support,
+        )
 
         resolved_backend = LLMBackend.coerce(backend)
         if resolved_backend is LLMBackend.NATIVE:
@@ -615,6 +621,7 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
             self._validate_optimization_transition("training" if requested_training else "inference")
             if not requested_training:
                 self._validate_inference_strategy()
+            model_loaded_in_this_call = False
             if self.model is None:
                 self._inference_ready = False
                 self._training_ready = False
@@ -643,34 +650,72 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
                     raise RuntimeError(
                         f"{self.__class__.__name__}._load_pretrained_model() "
                         "completed without assigning `self.model`.")
+                model_loaded_in_this_call = True
             if self._pending_model_state_path is not None:
                 self._restore_voicehub_model_state(training=requested_training, )
             if not requested_training and not self._inference_ready:
                 self._training_ready = False
-                self._prepare_for_inference()
-                if not self._inference_strategy_applied:
-                    prepared_model = self._inference_strategy.prepare(
-                        self.model,
-                        wrapper=self,
-                    )
-                    if prepared_model is None:
-                        raise TypeError(
-                            "InferenceStrategy.prepare() must return the "
-                            "prepared model runtime.")
-                    self.model = prepared_model
-                    self._inference_strategy_applied = True
-                if self._pending_tts_optimization_config is not None:
-                    pending_config = self._pending_tts_optimization_config
-                    try:
-                        self._optimize_loaded_tts_runtime(
-                            pending_config,
-                            mode="inference",
+                native_prepared = False
+                strategy_prepare_started = False
+                try:
+                    self._prepare_for_inference()
+                    native_prepared = True
+                    if not self._inference_strategy_applied:
+                        strategy_prepare_started = True
+                        prepared_model = self._inference_strategy.prepare(
+                            self.model,
+                            wrapper=self,
                         )
-                    except BaseException:
-                        self._pending_tts_optimization_config = (pending_config)
-                        raise
-                    self._pending_tts_optimization_config = None
-                self._inference_ready = True
+                        if prepared_model is None:
+                            raise TypeError(
+                                "InferenceStrategy.prepare() must return the "
+                                "prepared model runtime.")
+                        self.model = prepared_model
+                        self._inference_strategy_applied = True
+                    if self._pending_tts_optimization_config is not None:
+                        pending_config = self._pending_tts_optimization_config
+                        try:
+                            self._optimize_loaded_tts_runtime(
+                                pending_config,
+                                mode="inference",
+                            )
+                        except BaseException:
+                            self._pending_tts_optimization_config = (
+                                pending_config)
+                            raise
+                        self._pending_tts_optimization_config = None
+                    self._inference_ready = True
+                except BaseException:
+                    # A newly allocated runtime may have been partially
+                    # mutated by its native preparation hook and must be
+                    # rebuilt. Preserve a pre-existing training runtime (and
+                    # its optimizer-owned parameters) so serving auxiliaries
+                    # such as a codec can be attached again safely.
+                    discard_runtime = (
+                        not native_prepared and model_loaded_in_this_call
+                    )
+                    if self._inference_strategy_applied:
+                        try:
+                            restored_model = self._inference_strategy.restore_for_training(
+                                self.model,
+                                wrapper=self,
+                            )
+                            self.model = restored_model
+                        # Preserve the original preparation failure even if a
+                        # third-party strategy cannot restore its runtime.
+                        except BaseException:  # noqa: BLE001
+                            discard_runtime = True
+                    elif strategy_prepare_started:
+                        # A strategy that raised before returning may have
+                        # partially mutated its input without providing a
+                        # restorable result.
+                        discard_runtime = True
+                    if discard_runtime:
+                        self.model = None
+                    self._inference_strategy_applied = False
+                    self._inference_ready = False
+                    self._training_ready = False
+                    raise
         return self
 
     def _validate_inference_strategy(self) -> None:

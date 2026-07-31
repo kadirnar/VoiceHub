@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
-from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
+from voicehub.architectures.specifications import (
+    ArchitectureCapabilities,
+    ArchitectureSpec,
+)
 from voicehub.tasks import SpeechTask
 
 DEFAULT_VUI_ALIASES = (
@@ -55,6 +58,7 @@ def create_vui_architecture_spec() -> ArchitectureSpec:
                 "native-vad",
                 "standalone-safetensors-export",
                 "no-external-runtime",
+                "torch-compile-inference-unsafe",
             ),
         ),
         upstream_revision=_SOURCE_REVISION,
@@ -77,6 +81,11 @@ def create_vui_architecture_spec() -> ArchitectureSpec:
             "training_boundary": (
                 "Architecture-consistent delayed-codebook cross-entropy; "
                 "the author dataset and optimization recipe are unpublished."),
+            "compile_boundary": (
+                "Inference torch.compile is rejected because real-checkpoint "
+                "tests changed generated sequences and audio with both "
+                "dynamic=True and compiler-default specialization. Training "
+                "compilation remains available for decoder.forward."),
         },
     )
 

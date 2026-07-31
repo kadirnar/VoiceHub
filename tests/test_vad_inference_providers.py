@@ -9,10 +9,21 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 import numpy as np
+import torch
 
-from voicehub.models.vad_silero import SileroVADConfig, SileroVADForVoiceActivityDetection
-from voicehub.models.vad_transformers import TransformersVADConfig, TransformersVADForVoiceActivityDetection
-from voicehub.models.vad_webrtc import WebRTCVADConfig, WebRTCVADForVoiceActivityDetection
+from voicehub.models.vad_silero import (
+    SileroVADConfig,
+    SileroVADForVoiceActivityDetection,
+)
+from voicehub.models.vad_transformers import (
+    TransformersVADConfig,
+    TransformersVADForVoiceActivityDetection,
+)
+from voicehub.models.vad_webrtc import (
+    WebRTCVADConfig,
+    WebRTCVADForVoiceActivityDetection,
+)
+from voicehub.models.vad_webrtc.modeling_vad_webrtc import _pcm16_samples
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -240,7 +251,9 @@ class SileroVADInferenceTests(unittest.TestCase):
     def test_native_silero_maps_controls_and_returns_frame_scores(self):
         import torch
 
-        from voicehub.architectures.silero_vad.configuration import SileroVADConfig as NativeSileroVADConfig
+        from voicehub.architectures.silero_vad.configuration import (
+            SileroVADConfig as NativeSileroVADConfig,
+        )
 
         captured = {}
 
@@ -288,7 +301,9 @@ class SileroVADInferenceTests(unittest.TestCase):
     def test_native_silero_frame_scores_are_direct_model_probabilities(self):
         import torch
 
-        from voicehub.architectures.silero_vad.configuration import SileroVADConfig as NativeSileroVADConfig
+        from voicehub.architectures.silero_vad.configuration import (
+            SileroVADConfig as NativeSileroVADConfig,
+        )
 
         model = SileroVADForVoiceActivityDetection(
             SileroVADConfig(),
@@ -321,6 +336,39 @@ class SileroVADInferenceTests(unittest.TestCase):
 
 
 class WebRTCVADInferenceTests(unittest.TestCase):
+
+    def test_webrtc_vectorized_pcm_conversion_matches_scalar_reference(self):
+        values = np.array(
+            [
+                -np.inf,
+                -2.0,
+                -1.0,
+                -2.5 / 32767,
+                -1.5 / 32767,
+                -0.5 / 32767,
+                0.0,
+                0.5 / 32767,
+                1.5 / 32767,
+                2.5 / 32767,
+                1.0,
+                2.0,
+                np.inf,
+                np.nan,
+            ],
+            dtype=np.float64,
+        )
+        expected = []
+        for value in values:
+            normalized = float(value)
+            if not np.isfinite(normalized):
+                normalized = 0.0
+            normalized = max(-1.0, min(1.0, normalized))
+            expected.append(round(normalized * 32767.0))
+
+        self.assertEqual(
+            _pcm16_samples(torch.from_numpy(values)),
+            expected,
+        )
 
     def test_webrtc_frames_pcm_and_uses_request_local_native_runtime(self):
         instances = []

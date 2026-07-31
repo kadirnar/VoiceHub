@@ -161,7 +161,10 @@ class BaseSpeechModel(ABC):
         attach_to_model=True,
     ):
         """Apply pre-resolved passes to an already loaded runtime."""
-        from voicehub.optimization import OptimizationPassManager, bind_registered_architecture
+        from voicehub.optimization import (
+            OptimizationPassManager,
+            bind_registered_architecture,
+        )
 
         normalized_mode = self._optimization_mode(mode)
         if runtime is None:
@@ -488,6 +491,7 @@ class BaseTTSModel(BaseSpeechModel):
             resolved_config = validate_tts_optimization_config(
                 self,
                 config,
+                mode=normalized_mode,
             )
             loader_name = ("load_for_training" if normalized_mode.value == "training" else "load")
             loader = getattr(self, loader_name, None)

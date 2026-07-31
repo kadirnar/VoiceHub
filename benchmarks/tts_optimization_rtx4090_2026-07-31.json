@@ -1,0 +1,1603 @@
+{
+  "schema_version": 1,
+  "benchmark": "voicehub-tts-optimization-evidence-matrix",
+  "date_utc": "2026-07-31",
+  "voicehub_version": "0.3.0",
+  "runtime": {
+    "python": "3.11.10",
+    "torch": "2.8.0+cu128",
+    "cuda": "12.8",
+    "cudnn": 91002,
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "gpu_compute_capability": [
+      8,
+      9
+    ],
+    "gpu_total_memory_bytes": 25262096384,
+    "driver": "570.169",
+    "operating_system": "Linux"
+  },
+  "method": {
+    "seed": 1234,
+    "minimum_audio_seconds": 10.0,
+    "process_isolation": "One fresh process per measured profile.",
+    "compiler_caches": "Fresh TORCHINDUCTOR_CACHE_DIR, TRITON_CACHE_DIR, and CUDA_CACHE_PATH per measured profile.",
+    "device_timing": "CUDA synchronized before and after inference.",
+    "gpu_memory_metric": "torch.cuda.max_memory_allocated and torch.cuda.max_memory_reserved",
+    "timing_runs": "Warm-up and measured-run counts are recorded with each reference and candidate; they were not uniform across models.",
+    "harness_fail_closed": "The current harness requires an eager baseline, uses unique run artifact paths, rejects any nonzero worker exit, and rejects nondeterministic repeated output.",
+    "quality_evaluator": {
+      "checkpoint": "openai/whisper-tiny",
+      "resolved_revision": "169d4a4341b33bc18d8881c4b69c2e104e1cc0af",
+      "text_normalization": "NFKC plus casefold",
+      "normalized_value_source": "The checked raw-evidence artifact's pinned post-hoc ASR pass; it supersedes ASR values in earlier summary artifacts.",
+      "scope": "Fixture-level WER/CER is supplementary. It is not a perceptual quality score."
+    },
+    "quality_policy": [
+      "Every real-checkpoint reference and completed candidate produced at least 10 seconds of audio.",
+      "Text, model-specific conditioning, checkpoint, and seed were fixed inside each paired comparison.",
+      "Exact waveform equality is required when an optimization is expected to be numerically invariant.",
+      "A non-exact regional-kernel result can pass only on the measured fixture when duration and transcript metrics do not regress and waveform SNR remains high.",
+      "Reduced precision, fewer sampling steps, or caching is rejected when WER, CER, duration, or the strict waveform gate regresses or is unavailable for a changed waveform.",
+      "A fixture-level pass is not a general perceptual-quality claim."
+    ],
+    "evidence_tier_definitions": {
+      "real-checkpoint-end-to-end": "Released or published weights ran from model inputs through a waveform of at least 10 seconds on the RTX 4090.",
+      "tiny-graph": "A synthetic or tiny local graph executed in tests. It is not public-weight inference and carries no RTX 4090 performance claim.",
+      "static-plan": "Lazy construction and optimization-plan resolution passed without loading or executing weights."
+    },
+    "real_checkpoint_status_definitions": {
+      "measured": "A real checkpoint completed the long-audio RTX 4090 benchmark.",
+      "blocked": "A specific access, artifact, conditioning, or reproducibility requirement prevented a comparable real-checkpoint run.",
+      "not-run": "No real-checkpoint benchmark was attempted in this evidence set.",
+      "unsupported": "The public high-level waveform-generation contract deliberately fails closed."
+    },
+    "candidate_decision_definitions": {
+      "accepted": "Passed the measured quality policy and improved steady performance.",
+      "no-benefit": "Passed the measured quality policy but did not provide a material performance win.",
+      "rejected": "Completed, but failed the quality policy.",
+      "blocked": "Did not complete, so no speed or quality result is claimed."
+    }
+  },
+  "source_reports": [
+    {
+      "name": "tts_vits_rtx4090_2026-07-31.json",
+      "repository_path": "benchmarks/tts_vits_rtx4090_2026-07-31.json",
+      "retention": "checked-in",
+      "sha256": "6a2424b89cacc8124cbc830a439645392296112f037d0efd6278ba8adbaa97f9"
+    },
+    {
+      "name": "tts_vui_rtx4090_rejected_2026-07-31.json",
+      "repository_path": "benchmarks/tts_vui_rtx4090_rejected_2026-07-31.json",
+      "retention": "checked-in",
+      "sha256": "a2fe983f08fcb367366ab3cac302d7a385f7b366269bd1975d15567025ee191e"
+    },
+    {
+      "name": "tts_optimization_rtx4090_raw_evidence_2026-07-31.json",
+      "repository_path": "benchmarks/tts_optimization_rtx4090_raw_evidence_2026-07-31.json",
+      "retention": "checked-in",
+      "sha256": "14b14af8b9955e388e9a9d7be4e4fe9a3f1a64340341c194aedea9ff3a06720a"
+    }
+  ],
+  "summary": {
+    "registered_tts_providers": 34,
+    "provider_rows": 34,
+    "highest_evidence_tier_counts": {
+      "real-checkpoint-end-to-end": 5,
+      "tiny-graph": 28,
+      "static-plan": 1
+    },
+    "real_checkpoint_status_counts": {
+      "measured": 5,
+      "blocked": 6,
+      "not-run": 22,
+      "unsupported": 1
+    },
+    "measured_candidate_decision_counts": {
+      "accepted": 2,
+      "no-benefit": 6,
+      "rejected": 13,
+      "blocked": 1
+    },
+    "models_with_real_checkpoint_measurements": [
+      "vui",
+      "f5tts",
+      "neutts",
+      "supertonic",
+      "vits"
+    ],
+    "models_with_an_accepted_fixture_result": [
+      "f5tts",
+      "vits"
+    ],
+    "models_without_real_checkpoint_performance_claims": 29
+  },
+  "recommendations": {
+    "vits": {
+      "profile": "weight-norm-cache",
+      "scope": "accepted",
+      "reason": "Bit-exact output and a 1.047830x mean speedup in the primary paired run; peak allocated memory increased by 53.92 MiB."
+    },
+    "f5tts": {
+      "profile": "compile-regional",
+      "scope": "accepted-on-this-fixture",
+      "reason": "1.111493x steady mean speedup and 4.009862% lower peak allocated memory with unchanged fixture WER and 51.31 dB SNR.",
+      "cold_start_warning": "Cold inference was 130.160340 seconds versus 6.329852 seconds. The exact crossover is after about 205.45 subsequent requests, so whole-request workloads need 206 additional requests (207 total)."
+    },
+    "neutts": {
+      "profile": null,
+      "scope": "no-recommendation",
+      "reason": "SDPA was already native and slower on the mean; regional compile changed duration and doubled CER."
+    },
+    "supertonic": {
+      "profile": null,
+      "scope": "no-recommendation",
+      "reason": "Compile was exact but slower, while both step reductions increased WER."
+    },
+    "vui": {
+      "profile": null,
+      "scope": "no-recommendation",
+      "reason": "Both compile policies changed sequence length or transcript quality and inference compile now fails closed."
+    }
+  },
+  "real_checkpoint_results": [
+    {
+      "model_type": "vui",
+      "checkpoint": {
+        "source": "vui-abraham-100m.pt",
+        "resolved_revision": "8dc2bd9993a8118b6e2b71f3d9d92d1deb80e5f7",
+        "weight_sha256": "28353f13788c353160efbfc4fa5f5db56844746d3de9a92531dfee704cc394ff",
+        "vocoder_weight_sha256": "04d1ee6567b5eaade6720bf7cc0241fbbd3c0aaeca00ac37cd1656afa08f3c96"
+      },
+      "sample": {
+        "text_sha256": "9381a14b8d3ca69df1b5da1293d20985571d87eae445c3aefe7c7a507e797970",
+        "text_status": "Retained in the checked raw-evidence artifact.",
+        "seed": 1234,
+        "minimum_audio_seconds": 10.0
+      },
+      "references": {
+        "dynamic-pair": {
+          "warmup_runs": 2,
+          "measured_runs": 5,
+          "metrics": {
+            "audio_duration_seconds": 21.826757369614512,
+            "cold_latency_seconds": 9.250155724119395,
+            "steady_mean_latency_seconds": 8.523196676466615,
+            "steady_median_latency_seconds": 8.575962907169014,
+            "peak_allocated_bytes": 1989947904,
+            "peak_reserved_bytes": 2789212160
+          },
+          "quality": {
+            "wer": 0.515625,
+            "cer": 0.42016806722689076
+          }
+        },
+        "specialized-pair": {
+          "warmup_runs": 2,
+          "measured_runs": 5,
+          "metrics": {
+            "audio_duration_seconds": 21.826757369614512,
+            "cold_latency_seconds": 9.492043634876609,
+            "steady_mean_latency_seconds": 8.380800201464444,
+            "steady_median_latency_seconds": 8.346633771900088,
+            "peak_allocated_bytes": 1989947904,
+            "peak_reserved_bytes": 2789212160
+          },
+          "quality": {
+            "wer": 0.515625,
+            "cer": 0.42016806722689076
+          }
+        }
+      },
+      "candidates": [
+        {
+          "profile": "compile-dynamic",
+          "reference": "dynamic-pair",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 25.541950113378686,
+            "cold_latency_seconds": 44.47736875992268,
+            "steady_mean_latency_seconds": 5.265870999079198,
+            "steady_median_latency_seconds": 5.226613026112318,
+            "peak_allocated_bytes": 2131629056,
+            "peak_reserved_bytes": 3162505216
+          },
+          "comparison": {
+            "mean_speedup_ratio": 1.6185730106105904,
+            "latency_reduction_percent": 38.2171830714785,
+            "peak_allocated_reduction_percent": -7.119842268996404,
+            "peak_reserved_reduction_percent": -13.383458646616543
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": null,
+            "duration_delta_seconds": 3.715192743764174,
+            "wer": 2.359375,
+            "cer": 1.0252100840336134
+          },
+          "reason": "A severe repetition loop changed sequence length and WER."
+        },
+        {
+          "profile": "compile-specialized",
+          "reference": "specialized-pair",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 21.687437641723356,
+            "cold_latency_seconds": 34.06064927019179,
+            "steady_mean_latency_seconds": 4.315943105705083,
+            "steady_median_latency_seconds": 4.323868962936103,
+            "peak_allocated_bytes": 1985595904,
+            "peak_reserved_bytes": 2575302656
+          },
+          "comparison": {
+            "mean_speedup_ratio": 1.941823605224587,
+            "latency_reduction_percent": 48.50201649061,
+            "peak_allocated_reduction_percent": 0.21869919263976875,
+            "peak_reserved_reduction_percent": 7.669172932330827
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": null,
+            "duration_delta_seconds": -0.139319727891156,
+            "wer": 0.578125,
+            "cer": 0.4789915966386555
+          },
+          "reason": "The output sequence and transcript changed."
+        }
+      ],
+      "policy": "Inference torch.compile fails closed; training compile remains available."
+    },
+    {
+      "model_type": "f5tts",
+      "checkpoint": {
+        "source": "F5TTS_v1_Base",
+        "repository": "SWivid/F5-TTS",
+        "resolved_revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+        "weight_sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38"
+      },
+      "sample": {
+        "text_sha256": "bf408db500e8470ee8b268051fae7da0e9433adce8069f41988da82b0e48ce26",
+        "seed": 1234,
+        "minimum_audio_seconds": 10.0
+      },
+      "references": {
+        "main": {
+          "warmup_runs": 1,
+          "measured_runs": 3,
+          "metrics": {
+            "audio_duration_seconds": 14.207333333333333,
+            "cold_latency_seconds": 6.22984027909115,
+            "steady_mean_latency_seconds": 5.836318955135842,
+            "steady_median_latency_seconds": 5.820849334355444,
+            "peak_allocated_bytes": 1678306816,
+            "peak_reserved_bytes": 1925185536
+          },
+          "quality": {
+            "wer": 0.48484848484848486,
+            "cer": 0.2658959537572254
+          }
+        },
+        "compile-pair": {
+          "warmup_runs": 1,
+          "measured_runs": 3,
+          "metrics": {
+            "audio_duration_seconds": 14.207333333333333,
+            "cold_latency_seconds": 6.329851617105305,
+            "steady_mean_latency_seconds": 6.00874748857071,
+            "steady_median_latency_seconds": 5.974554328713566,
+            "peak_allocated_bytes": 1678306816,
+            "peak_reserved_bytes": 1925185536
+          },
+          "quality": {
+            "wer": 0.48484848484848486,
+            "cer": 0.2658959537572254
+          }
+        }
+      },
+      "candidates": [
+        {
+          "profile": "bfloat16",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 14.207333333333333,
+            "cold_latency_seconds": 2.7053574440069497,
+            "steady_mean_latency_seconds": 2.0417142707544067,
+            "steady_median_latency_seconds": 2.029231428168714,
+            "peak_allocated_bytes": 844812800,
+            "peak_reserved_bytes": 1419771904
+          },
+          "comparison": {
+            "mean_speedup_ratio": 2.8585385520077407,
+            "latency_reduction_percent": 65.01708891427636,
+            "peak_allocated_reduction_percent": 49.66279157386202,
+            "peak_reserved_reduction_percent": 26.252723311546838
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": -1.725205624631083,
+            "duration_delta_seconds": 0.0,
+            "wer": 1.4545454545454546,
+            "cer": 0.8670520231213873
+          },
+          "reason": "WER regressed sharply. BF16 inference now fails closed unless the caller explicitly acknowledges the unvalidated path."
+        },
+        {
+          "profile": "sdpa",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "no-benefit",
+          "quality_passed": true,
+          "metrics": {
+            "audio_duration_seconds": 14.207333333333333,
+            "cold_latency_seconds": 6.346835304051638,
+            "steady_mean_latency_seconds": 5.916223459877074,
+            "steady_median_latency_seconds": 5.919420959893614,
+            "peak_allocated_bytes": 1678306816,
+            "peak_reserved_bytes": 1925185536
+          },
+          "comparison": {
+            "mean_speedup_ratio": 0.9864940015732786,
+            "latency_reduction_percent": -1.3690907806009738,
+            "peak_allocated_reduction_percent": 0.0,
+            "peak_reserved_reduction_percent": 0.0
+          },
+          "quality": {
+            "waveform_exact": true,
+            "waveform_snr_db": null,
+            "duration_delta_seconds": 0.0,
+            "wer": 0.48484848484848486,
+            "cer": 0.2658959537572254
+          },
+          "reason": "Bit-exact, but slower than the native attention path."
+        },
+        {
+          "profile": "triton",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "no-benefit",
+          "quality_passed": true,
+          "metrics": {
+            "audio_duration_seconds": 14.207333333333333,
+            "cold_latency_seconds": 8.486794858239591,
+            "steady_mean_latency_seconds": 5.813890500925481,
+            "steady_median_latency_seconds": 5.813786297105253,
+            "peak_allocated_bytes": 1678306816,
+            "peak_reserved_bytes": 1881145344
+          },
+          "comparison": {
+            "mean_speedup_ratio": 1.0038577359182788,
+            "latency_reduction_percent": 0.38429109825507335,
+            "peak_allocated_reduction_percent": 0.0,
+            "peak_reserved_reduction_percent": 2.287581699346405
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": 54.0734108642916,
+            "duration_delta_seconds": 0.0,
+            "wer": 0.48484848484848486,
+            "cer": 0.2658959537572254
+          },
+          "reason": "Fixture quality passed, but the 0.386% speedup was not material."
+        },
+        {
+          "profile": "sdpa-triton",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "no-benefit",
+          "quality_passed": true,
+          "metrics": {
+            "audio_duration_seconds": 14.207333333333333,
+            "cold_latency_seconds": 8.557323515880853,
+            "steady_mean_latency_seconds": 5.86034536967054,
+            "steady_median_latency_seconds": 5.870835297275335,
+            "peak_allocated_bytes": 1678306816,
+            "peak_reserved_bytes": 1881145344
+          },
+          "comparison": {
+            "mean_speedup_ratio": 0.9959001708911144,
+            "latency_reduction_percent": -0.4116706903682067,
+            "peak_allocated_reduction_percent": 0.0,
+            "peak_reserved_reduction_percent": 2.287581699346405
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": 54.0734108642916,
+            "duration_delta_seconds": 0.0,
+            "wer": 0.48484848484848486,
+            "cer": 0.2658959537572254
+          },
+          "reason": "The waveform matched Triton's high-SNR result, but steady mean latency regressed."
+        },
+        {
+          "profile": "nfe-16",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 14.207333333333333,
+            "cold_latency_seconds": 3.6080040261149406,
+            "steady_mean_latency_seconds": 3.088185262711098,
+            "steady_median_latency_seconds": 3.1084490339271724,
+            "peak_allocated_bytes": 1655533568,
+            "peak_reserved_bytes": 1889533952
+          },
+          "comparison": {
+            "mean_speedup_ratio": 1.8898862790414896,
+            "latency_reduction_percent": 47.08676331005594,
+            "peak_allocated_reduction_percent": 1.3569180428091643,
+            "peak_reserved_reduction_percent": 1.8518518518518516
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": -0.24595729459191235,
+            "duration_delta_seconds": 0.0,
+            "wer": 0.6060606060606061,
+            "cer": 0.31213872832369943
+          },
+          "reason": "Reducing flow evaluations increased WER."
+        },
+        {
+          "profile": "dbcache-0.05",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "no-benefit",
+          "quality_passed": true,
+          "metrics": {
+            "audio_duration_seconds": 14.207333333333333,
+            "cold_latency_seconds": 6.658980974927545,
+            "steady_mean_latency_seconds": 5.996962572758396,
+            "steady_median_latency_seconds": 6.001533688977361,
+            "peak_allocated_bytes": 1745678336,
+            "peak_reserved_bytes": 1977614336
+          },
+          "comparison": {
+            "mean_speedup_ratio": 0.9732125028839952,
+            "latency_reduction_percent": -2.7524818101517767,
+            "peak_allocated_reduction_percent": -4.014255281437169,
+            "peak_reserved_reduction_percent": -2.7233115468409586
+          },
+          "quality": {
+            "waveform_exact": true,
+            "waveform_snr_db": null,
+            "duration_delta_seconds": 0.0,
+            "wer": 0.48484848484848486,
+            "cer": 0.2658959537572254,
+            "cache_hit_rate_percent": 0.0
+          },
+          "reason": "No cache hits occurred; latency and memory both regressed."
+        },
+        {
+          "profile": "dbcache-0.12",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 14.207333333333333,
+            "cold_latency_seconds": 3.527686211746186,
+            "steady_mean_latency_seconds": 2.9037599000148475,
+            "steady_median_latency_seconds": 2.901604662183672,
+            "peak_allocated_bytes": 1745678336,
+            "peak_reserved_bytes": 1977614336
+          },
+          "comparison": {
+            "mean_speedup_ratio": 2.009917884431836,
+            "latency_reduction_percent": 50.24672362260808,
+            "peak_allocated_reduction_percent": -4.014255281437169,
+            "peak_reserved_reduction_percent": -2.7233115468409586
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": null,
+            "duration_delta_seconds": 0.0,
+            "wer": 0.48484848484848486,
+            "cer": 0.2254335260115607,
+            "waveform_comparison_status": "No valid cross-run SNR comparison was retained; the raw run's self-comparison is not used.",
+            "cache_hit_rate_percent": 56.25
+          },
+          "reason": "The higher cache threshold improved speed and did not regress post-hoc WER/CER, but its waveform changed, no valid cross-run SNR or listening comparison was retained, and memory increased. It fails the strict cache quality gate."
+        },
+        {
+          "profile": "compile-outer",
+          "reference": "main",
+          "execution_status": "blocked",
+          "decision": "blocked",
+          "quality_passed": null,
+          "metrics": null,
+          "comparison": null,
+          "quality": null,
+          "observed_elapsed_seconds_lower_bound": 376.0,
+          "reason": "Whole-sampler compilation was terminated. The compile boundary was then narrowed to the repeated DiT region."
+        },
+        {
+          "profile": "compile-regional",
+          "reference": "compile-pair",
+          "execution_status": "ok",
+          "decision": "accepted",
+          "quality_passed": true,
+          "metrics": {
+            "audio_duration_seconds": 14.207333333333333,
+            "cold_latency_seconds": 130.16034040087834,
+            "steady_mean_latency_seconds": 5.406013230017076,
+            "steady_median_latency_seconds": 5.419606369920075,
+            "peak_allocated_bytes": 1611009024,
+            "peak_reserved_bytes": 1763704832
+          },
+          "comparison": {
+            "mean_speedup_ratio": 1.1114933006835668,
+            "latency_reduction_percent": 10.030946710609816,
+            "peak_allocated_reduction_percent": 4.0098622825351145,
+            "peak_reserved_reduction_percent": 8.387799564270153,
+            "additional_requests_to_amortize_cold_start": 205.45,
+            "total_calls_to_amortize_cold_start": 206.45
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": 51.30770169327426,
+            "duration_delta_seconds": 0.0,
+            "wer": 0.48484848484848486,
+            "cer": 0.2658959537572254
+          },
+          "reason": "Accepted on this fixed fixture: WER and duration were unchanged and waveform SNR was 51.31 dB. The large cold compile cost requires a long-lived workload."
+        }
+      ]
+    },
+    {
+      "model_type": "neutts",
+      "checkpoint": {
+        "source": "neuphonic/neutts-2e",
+        "resolved_revision": "412aaab11c6b727c6c0fe2552db305c234e568da",
+        "weight_sha256": "c86c35dfbc0a722566201bb2393868a738bb137ba9b431e077e9b5a73b999c88",
+        "codec_revision": "30c1fdd19e68aee65d542cf043750d4c0165893e"
+      },
+      "sample": {
+        "text_sha256": "bf408db500e8470ee8b268051fae7da0e9433adce8069f41988da82b0e48ce26",
+        "conditioning_fixture": "Official Emily reference audio and transcript",
+        "seed": 1234,
+        "minimum_audio_seconds": 10.0
+      },
+      "references": {
+        "main": {
+          "warmup_runs": 1,
+          "measured_runs": 3,
+          "metrics": {
+            "audio_duration_seconds": 12.44,
+            "cold_latency_seconds": 21.595731656998396,
+            "steady_mean_latency_seconds": 20.269906068065513,
+            "steady_median_latency_seconds": 20.24245125800371,
+            "peak_allocated_bytes": 3656462848,
+            "peak_reserved_bytes": 4303355904
+          },
+          "quality": {
+            "wer": 0.030303030303030304,
+            "cer": 0.005780346820809248
+          }
+        },
+        "compile-pair": {
+          "warmup_runs": 1,
+          "measured_runs": 3,
+          "metrics": {
+            "audio_duration_seconds": 12.44,
+            "cold_latency_seconds": 21.815102313645184,
+            "steady_mean_latency_seconds": 20.435109249626596,
+            "steady_median_latency_seconds": 20.359753964934498,
+            "peak_allocated_bytes": 3656462848,
+            "peak_reserved_bytes": 4303355904
+          },
+          "quality": {
+            "wer": 0.030303030303030304,
+            "cer": 0.005780346820809248
+          }
+        }
+      },
+      "candidates": [
+        {
+          "profile": "sdpa",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "no-benefit",
+          "quality_passed": true,
+          "metrics": {
+            "audio_duration_seconds": 12.44,
+            "cold_latency_seconds": 21.109447727911174,
+            "steady_mean_latency_seconds": 20.48611264737944,
+            "steady_median_latency_seconds": 20.21192943211645,
+            "peak_allocated_bytes": 3656462848,
+            "peak_reserved_bytes": 4303355904
+          },
+          "comparison": {
+            "mean_speedup_ratio": 0.9894461881062836,
+            "latency_reduction_percent": -1.0666382892348563,
+            "peak_allocated_reduction_percent": 0.0,
+            "peak_reserved_reduction_percent": 0.0
+          },
+          "quality": {
+            "waveform_exact": true,
+            "waveform_snr_db": null,
+            "duration_delta_seconds": 0.0,
+            "wer": 0.030303030303030304,
+            "cer": 0.005780346820809248
+          },
+          "reason": "The built-in path already uses SDPA; the explicit profile did not improve mean latency or memory."
+        },
+        {
+          "profile": "compile-regional",
+          "reference": "compile-pair",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 11.98,
+            "cold_latency_seconds": 34.35884880973026,
+            "steady_mean_latency_seconds": 15.225246542909494,
+            "steady_median_latency_seconds": 15.210647740866989,
+            "peak_allocated_bytes": 3656508416,
+            "peak_reserved_bytes": 4605345792
+          },
+          "comparison": {
+            "mean_speedup_ratio": 1.3421857696710582,
+            "latency_reduction_percent": 25.494665299194818,
+            "peak_allocated_reduction_percent": -0.0012462317243268214,
+            "peak_reserved_reduction_percent": -7.017543859649122,
+            "cold_latency_reduction_percent": -57.500287258515655
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": null,
+            "duration_delta_seconds": -0.46,
+            "wer": 0.030303030303030304,
+            "cer": 0.011560693641618496,
+            "transcript_change": "'hiding changes in audio' became 'hiding changes and audio'"
+          },
+          "reason": "WER tied, but duration changed and CER doubled. Compile remains explicit opt-in and is not recommended."
+        }
+      ]
+    },
+    {
+      "model_type": "supertonic",
+      "checkpoint": {
+        "source": "Supertone/supertonic-3",
+        "resolved_revision": "3cadd1ee6394adea1bd021217a0e650ede09a323",
+        "weight_sha256": null
+      },
+      "sample": {
+        "text_sha256": "9381a14b8d3ca69df1b5da1293d20985571d87eae445c3aefe7c7a507e797970",
+        "seed": 1234,
+        "minimum_audio_seconds": 10.0
+      },
+      "references": {
+        "main": {
+          "warmup_runs": 3,
+          "measured_runs": 10,
+          "metrics": {
+            "audio_duration_seconds": 28.36875283446712,
+            "cold_latency_seconds": 1.318639581091702,
+            "steady_mean_latency_seconds": 0.4780901056248695,
+            "steady_median_latency_seconds": 0.47775718406774104,
+            "peak_allocated_bytes": 454793728,
+            "peak_reserved_bytes": 517996544
+          },
+          "quality": {
+            "wer": 0.03125,
+            "cer": 0.014005602240896359
+          }
+        }
+      },
+      "candidates": [
+        {
+          "profile": "compile",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "no-benefit",
+          "quality_passed": true,
+          "metrics": {
+            "audio_duration_seconds": 28.36875283446712,
+            "cold_latency_seconds": 20.70124038401991,
+            "steady_mean_latency_seconds": 0.8110316135454922,
+            "steady_median_latency_seconds": 0.8101972592994571,
+            "peak_allocated_bytes": 453925376,
+            "peak_reserved_bytes": 490733568
+          },
+          "comparison": {
+            "mean_speedup_ratio": 0.5894839333510796,
+            "latency_reduction_percent": -69.6399076248324,
+            "peak_allocated_reduction_percent": 0.1909331520068808,
+            "peak_reserved_reduction_percent": 5.263157894736842
+          },
+          "quality": {
+            "waveform_exact": true,
+            "waveform_snr_db": null,
+            "duration_delta_seconds": 0.0,
+            "wer": 0.03125,
+            "cer": 0.014005602240896359
+          },
+          "reason": "Bit-exact, but steady mean latency was 69.64% slower."
+        },
+        {
+          "profile": "steps-3",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 28.36875283446712,
+            "cold_latency_seconds": 1.1778395138680935,
+            "steady_mean_latency_seconds": 0.3569971884600818,
+            "steady_median_latency_seconds": 0.3556950017809868,
+            "peak_allocated_bytes": 454794752,
+            "peak_reserved_bytes": 517996544
+          },
+          "comparison": {
+            "mean_speedup_ratio": 1.3391985177449872,
+            "latency_reduction_percent": 25.328471712778445,
+            "peak_allocated_reduction_percent": -0.00022515701887603867,
+            "peak_reserved_reduction_percent": 0.0
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": -3.2446378600702417,
+            "duration_delta_seconds": 0.0,
+            "wer": 0.0625,
+            "cer": 0.014005602240896359
+          },
+          "reason": "WER doubled relative to the five-step reference."
+        },
+        {
+          "profile": "steps-2",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 28.36875283446712,
+            "cold_latency_seconds": 1.0983935510739684,
+            "steady_mean_latency_seconds": 0.2966067622415721,
+            "steady_median_latency_seconds": 0.29617372690699995,
+            "peak_allocated_bytes": 454794752,
+            "peak_reserved_bytes": 517996544
+          },
+          "comparison": {
+            "mean_speedup_ratio": 1.611865157799362,
+            "latency_reduction_percent": 37.960070967395666,
+            "peak_allocated_reduction_percent": -0.00022515701887603867,
+            "peak_reserved_reduction_percent": 0.0
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": -7.649588742576952,
+            "duration_delta_seconds": 0.0,
+            "wer": 0.265625,
+            "cer": 0.14565826330532214
+          },
+          "reason": "WER regressed from 0.03125 to 0.265625."
+        }
+      ]
+    },
+    {
+      "model_type": "vits",
+      "checkpoint": {
+        "source": "facebook/mms-tts-eng",
+        "resolved_revision": "c71de0fe7204c83f1c10820a7d696d0b450048ba",
+        "weight_sha256": "69cf8b651c1493f1801dfd2311c298d694a38357bc9a1e41f410491ea6f0e1be"
+      },
+      "sample": {
+        "text_sha256": "9381a14b8d3ca69df1b5da1293d20985571d87eae445c3aefe7c7a507e797970",
+        "seed": 1234,
+        "minimum_audio_seconds": 10.0
+      },
+      "references": {
+        "main": {
+          "warmup_runs": 5,
+          "measured_runs": 15,
+          "metrics": {
+            "audio_duration_seconds": 27.312,
+            "cold_latency_seconds": 0.6767810159362853,
+            "steady_mean_latency_seconds": 0.06418337539459268,
+            "steady_median_latency_seconds": 0.06415396509692073,
+            "peak_allocated_bytes": 511418368,
+            "peak_reserved_bytes": 884998144
+          },
+          "quality": {
+            "wer": null,
+            "cer": null
+          }
+        },
+        "cache-primary": {
+          "warmup_runs": 3,
+          "measured_runs": 30,
+          "metrics": {
+            "audio_duration_seconds": 27.312,
+            "cold_latency_seconds": 0.7751833852380514,
+            "steady_mean_latency_seconds": 0.07160929941261808,
+            "steady_median_latency_seconds": 0.0641192200127989,
+            "peak_allocated_bytes": 511418368,
+            "peak_reserved_bytes": 884998144
+          },
+          "quality": {
+            "wer": null,
+            "cer": null
+          }
+        }
+      },
+      "candidates": [
+        {
+          "profile": "weight-norm-cache",
+          "reference": "cache-primary",
+          "execution_status": "ok",
+          "decision": "accepted",
+          "quality_passed": true,
+          "metrics": {
+            "audio_duration_seconds": 27.312,
+            "cold_latency_seconds": 0.740411541890353,
+            "steady_mean_latency_seconds": 0.06834057069694002,
+            "steady_median_latency_seconds": 0.06240655039437115,
+            "peak_allocated_bytes": 567958528,
+            "peak_reserved_bytes": 954204160
+          },
+          "comparison": {
+            "mean_speedup_ratio": 1.0478299885755038,
+            "latency_reduction_percent": 4.5646707096565775,
+            "median_speedup_ratio": 1.0274437476131069,
+            "median_latency_reduction_percent": 2.671070574604441,
+            "peak_allocated_reduction_percent": -11.055559115154816,
+            "peak_reserved_reduction_percent": -7.819905213270142,
+            "independent_replication_median_speedup_ratio": 1.0473864400941488
+          },
+          "quality": {
+            "waveform_exact": true,
+            "waveform_snr_db": null,
+            "duration_delta_seconds": 0.0,
+            "wer": null,
+            "cer": null
+          },
+          "reason": "Bit-exact and faster in two independent 30-run measurements, with a 53.92 MiB peak-allocated memory cost."
+        },
+        {
+          "profile": "triton",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 27.312,
+            "cold_latency_seconds": 2.3813248248770833,
+            "steady_mean_latency_seconds": 0.06421670593942205,
+            "steady_median_latency_seconds": 0.06405430100858212,
+            "peak_allocated_bytes": 511418368,
+            "peak_reserved_bytes": 884998144
+          },
+          "comparison": {
+            "mean_speedup_ratio": 0.9994809676961504,
+            "latency_reduction_percent": -0.05193018382791718,
+            "peak_allocated_reduction_percent": 0.0,
+            "peak_reserved_reduction_percent": 0.0
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": 45.066451496218846,
+            "duration_delta_seconds": 0.0,
+            "wer": null,
+            "cer": null
+          },
+          "reason": "Failed the strict bit-exact waveform gate."
+        },
+        {
+          "profile": "compile",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 27.312,
+            "cold_latency_seconds": 26.60956679098308,
+            "steady_mean_latency_seconds": 0.07019596919417381,
+            "steady_median_latency_seconds": 0.05419172905385494,
+            "peak_allocated_bytes": 677370880,
+            "peak_reserved_bytes": 989855744
+          },
+          "comparison": {
+            "mean_speedup_ratio": 0.9143455974950743,
+            "latency_reduction_percent": -9.36783670633764,
+            "peak_allocated_reduction_percent": -32.44946258950168,
+            "peak_reserved_reduction_percent": -11.848341232227487
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": 31.946277347182335,
+            "duration_delta_seconds": 0.0,
+            "wer": null,
+            "cer": null
+          },
+          "reason": "Failed the strict waveform gate and increased mean latency and memory."
+        },
+        {
+          "profile": "triton-compile",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 27.312,
+            "cold_latency_seconds": 27.4690224500373,
+            "steady_mean_latency_seconds": 0.05839166383569439,
+            "steady_median_latency_seconds": 0.05100772809237242,
+            "peak_allocated_bytes": 677370880,
+            "peak_reserved_bytes": 989855744
+          },
+          "comparison": {
+            "mean_speedup_ratio": 1.099187301379103,
+            "latency_reduction_percent": 9.023694256170621,
+            "peak_allocated_reduction_percent": -32.44946258950168,
+            "peak_reserved_reduction_percent": -11.848341232227487
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": 32.135724443716754,
+            "duration_delta_seconds": 0.0,
+            "wer": null,
+            "cer": null
+          },
+          "reason": "The speedup did not pass the strict waveform gate."
+        },
+        {
+          "profile": "float16-cache",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 27.296,
+            "cold_latency_seconds": 1.06326256506145,
+            "steady_mean_latency_seconds": 0.055025135570516186,
+            "steady_median_latency_seconds": 0.042264515068382025,
+            "peak_allocated_bytes": 314754560,
+            "peak_reserved_bytes": 480247808
+          },
+          "comparison": {
+            "mean_speedup_ratio": 1.1664373877341923,
+            "latency_reduction_percent": 14.268865991812666,
+            "peak_allocated_reduction_percent": 38.45458440788736,
+            "peak_reserved_reduction_percent": 45.734597156398106
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": null,
+            "duration_delta_seconds": -0.016,
+            "wer": null,
+            "cer": null
+          },
+          "reason": "The duration and waveform changed despite the memory reduction."
+        },
+        {
+          "profile": "bfloat16-cache",
+          "reference": "main",
+          "execution_status": "ok",
+          "decision": "rejected",
+          "quality_passed": false,
+          "metrics": {
+            "audio_duration_seconds": 27.312,
+            "cold_latency_seconds": 0.7349633621051908,
+            "steady_mean_latency_seconds": 0.043844316216806574,
+            "steady_median_latency_seconds": 0.043796808924525976,
+            "peak_allocated_bytes": 314775552,
+            "peak_reserved_bytes": 480247808
+          },
+          "comparison": {
+            "mean_speedup_ratio": 1.46389272162921,
+            "latency_reduction_percent": 31.688983405350214,
+            "peak_allocated_reduction_percent": 38.450479744990304,
+            "peak_reserved_reduction_percent": 45.734597156398106
+          },
+          "quality": {
+            "waveform_exact": false,
+            "waveform_snr_db": -2.5974132542746835,
+            "duration_delta_seconds": 0.0,
+            "wer": null,
+            "cer": null
+          },
+          "reason": "The large memory and speed gains were rejected because waveform quality changed substantially."
+        }
+      ],
+      "policy": "AUTO inference stays eager because measured inference compile failed the quality gate. FP32 weight-normalization caching is the only recommended inference optimization; training compile remains available."
+    }
+  ],
+  "providers": [
+    {
+      "model_type": "orpheustts",
+      "architecture": "causal-lm",
+      "default_checkpoint": "canopylabs/orpheus-3b-0.1-ft",
+      "checkpoint_revision": "4206a56e5a68cf6cf96900a8a78acd3370c02eb6",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "blocked",
+      "optimization_status": "blocked",
+      "evidence": "tests/test_native_orpheus_provider.py",
+      "note": "Tiny inference/training/export round trip only. The real checkpoint is gated and a voice fixture is required."
+    },
+    {
+      "model_type": "dia",
+      "architecture": "dia",
+      "default_checkpoint": "nari-labs/Dia-1.6B-0626",
+      "checkpoint_revision": "ef2795fcc29c5abe6ffc91fd33808588b49bbc66",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_dia_training.py",
+      "note": "Tiny local-checkpoint generation, training, export, and reload; no public-weight timing."
+    },
+    {
+      "model_type": "vui",
+      "architecture": "vui",
+      "default_checkpoint": "vui-abraham-100m.pt",
+      "checkpoint_revision": "8dc2bd9993a8118b6e2b71f3d9d92d1deb80e5f7",
+      "source_revision": null,
+      "highest_evidence_tier": "real-checkpoint-end-to-end",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph",
+        "real-checkpoint-end-to-end"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "measured",
+      "optimization_status": "rejected",
+      "evidence": "#/real_checkpoint_results/0",
+      "note": "Long-audio eager and compile inference; both compile candidates were rejected."
+    },
+    {
+      "model_type": "chatterbox",
+      "architecture": "chatterbox",
+      "default_checkpoint": "ResembleAI/chatterbox",
+      "checkpoint_revision": "5bb1f6ee58e50c3b8d408bc82a6d3740c2db6e18",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_chatterbox.py",
+      "note": "Tiny T3 inference and component-training graphs only."
+    },
+    {
+      "model_type": "kokoro",
+      "architecture": "kokoro",
+      "default_checkpoint": "hexgrad/Kokoro-82M",
+      "checkpoint_revision": "cbc78411372edb46f7e42030b241834a55fe0cb6",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_kokoro_runtime.py",
+      "note": "Tiny acoustic/frontend graph and checkpoint tests only."
+    },
+    {
+      "model_type": "echo",
+      "architecture": "echo-dit",
+      "default_checkpoint": "jordand/echo-tts-base",
+      "checkpoint_revision": null,
+      "source_revision": "2ed95fce62d33bf7b56f835fd9ec0f0b6fb9155e",
+      "highest_evidence_tier": "static-plan",
+      "evidence_layers": [
+        "static-plan"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "blocked",
+      "optimization_status": "blocked",
+      "evidence": "tests/test_native_echo_runtime.py",
+      "note": "Only construction/state boundaries were exercised; no immutable default-checkpoint revision is recorded."
+    },
+    {
+      "model_type": "conversationtts",
+      "architecture": "conversationtts",
+      "default_checkpoint": "AudioFoundation/SpeechFoundation",
+      "checkpoint_revision": "b0f6f30e123da06dd15672ddbfc7781b323ea599",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_conversationtts_decoder.py",
+      "note": "Tiny cached decoder and training graphs only."
+    },
+    {
+      "model_type": "llasa",
+      "architecture": "llasa",
+      "default_checkpoint": "HKUSTAudio/Llasa-1B-Multilingual",
+      "checkpoint_revision": "7f094cb62b0a9779b334c60d039a61c5a6e04456",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_llasa.py",
+      "note": "Tiny codec, generation, training, and export graphs only."
+    },
+    {
+      "model_type": "cosyvoice",
+      "architecture": "cosyvoice-native",
+      "default_checkpoint": "FunAudioLLM/Fun-CosyVoice3-0.5B-2512",
+      "checkpoint_revision": "29e01c4e8d000f4bcd70751be16fa94bf3d85a18",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "blocked",
+      "optimization_status": "blocked",
+      "evidence": "tests/test_native_cosyvoice.py",
+      "note": "Tiny graph only. A comparable real run needs a precomputed speaker embedding and prompt-token fixture."
+    },
+    {
+      "model_type": "f5tts",
+      "architecture": "f5tts",
+      "default_checkpoint": "F5TTS_v1_Base",
+      "checkpoint_revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+      "source_revision": null,
+      "highest_evidence_tier": "real-checkpoint-end-to-end",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph",
+        "real-checkpoint-end-to-end"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "measured",
+      "optimization_status": "mixed",
+      "evidence": "#/real_checkpoint_results/1",
+      "note": "Long-audio baseline plus precision, attention, kernel, sampler, cache, and regional compile profiles."
+    },
+    {
+      "model_type": "gptsovits",
+      "architecture": "gptsovits",
+      "default_checkpoint": "lj1995/GPT-SoVITS",
+      "checkpoint_revision": "336b2ec4e8d4ac74740798dd40af44e74659ecaf",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_gptsovits.py",
+      "note": "Prepared-input native graph tests only; no public-weight timing."
+    },
+    {
+      "model_type": "melotts",
+      "architecture": "melotts",
+      "default_checkpoint": "EN",
+      "checkpoint_revision": "bb4fb7346d566d277ba8c8c7dbfdf6786139b8ef",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_melotts.py",
+      "note": "Tiny inference/export/training graph only; no public-weight timing."
+    },
+    {
+      "model_type": "openvoice",
+      "architecture": "openvoice-v2-converter",
+      "default_checkpoint": "myshell-ai/OpenVoiceV2",
+      "checkpoint_revision": "f36e7edfe1684461a8343844af60babc2efbb727",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "blocked",
+      "optimization_status": "blocked",
+      "evidence": "tests/test_native_openvoice.py",
+      "note": "Converter graph only. A real run needs matched base audio and target-speaker audio."
+    },
+    {
+      "model_type": "outetts",
+      "architecture": "outetts",
+      "default_checkpoint": "OuteAI/Llama-OuteTTS-1.0-1B",
+      "checkpoint_revision": "f445d0d301c7fc9e47fd545eb9f9d2912afe7a77",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_outetts.py",
+      "note": "Tiny language-model objective and export graph only."
+    },
+    {
+      "model_type": "parlertts",
+      "architecture": "parlertts",
+      "default_checkpoint": "parler-tts/parler-tts-mini-v1",
+      "checkpoint_revision": "0392b9451a601e528fd863bbb0598431fee810d9",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_parlertts.py",
+      "note": "Tiny acoustic-token generation, DAC, and training graphs only."
+    },
+    {
+      "model_type": "styletts2",
+      "architecture": "styletts2",
+      "default_checkpoint": "",
+      "checkpoint_revision": null,
+      "source_revision": "5cedc71c333f8d8b8551ca59378bdcc7af4c9529",
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "blocked",
+      "optimization_status": "blocked",
+      "evidence": "tests/test_native_styletts2.py",
+      "note": "No default checkpoint is registered; a reviewed artifact and explicit phoneme fixture are required."
+    },
+    {
+      "model_type": "mosstts",
+      "architecture": "moss-tts",
+      "default_checkpoint": "OpenMOSS-Team/MOSS-TTS-v1.5",
+      "checkpoint_revision": "cdd3b911b1585e3f2dbc7775ef10f9926f58850a",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_mosstts.py",
+      "note": "Tiny codec, buffered generation, and training graphs only."
+    },
+    {
+      "model_type": "qwen3tts",
+      "architecture": "qwen3-tts",
+      "default_checkpoint": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+      "checkpoint_revision": "0c0e3051f131929182e2c023b9537f8b1c68adfe",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_qwen3_tts.py",
+      "note": "Tiny talker, codec, cache, SDPA, export, and LoRA graphs only."
+    },
+    {
+      "model_type": "irodoritts",
+      "architecture": "irodoritts-rf-dit",
+      "default_checkpoint": "Aratako/Irodori-TTS-500M-v3",
+      "checkpoint_revision": "236c1e56591279fc24e3c1bf6609fc06e48dde28",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_irodoritts.py",
+      "note": "Tiny RF-DiT, duration, and export graphs only."
+    },
+    {
+      "model_type": "zonos",
+      "architecture": "zonos",
+      "default_checkpoint": "Zyphra/Zonos-v0.1-transformer",
+      "checkpoint_revision": "9d8331fc49cb5ba8aad2bb56cafd809c66598f4e",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_zonos.py",
+      "note": "Tiny sampling, codec, training, and export graphs only."
+    },
+    {
+      "model_type": "zonos2",
+      "architecture": "zonos2",
+      "default_checkpoint": "Zyphra/ZONOS2",
+      "checkpoint_revision": "65f1e80f94b599d474bb6af9094a803dc52f60bd",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_zonos2.py",
+      "note": "Tiny dense/MoE sampling and training graphs only."
+    },
+    {
+      "model_type": "voxcpm",
+      "architecture": "voxcpm2",
+      "default_checkpoint": "openbmb/VoxCPM2",
+      "checkpoint_revision": "bffb3df5a29440629464e5e839f4d214c8714c3d",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_voxcpm2.py",
+      "note": "Tiny native generation, full-SFT, LoRA, and export graphs only."
+    },
+    {
+      "model_type": "omnivoice",
+      "architecture": "omnivoice",
+      "default_checkpoint": "k2-fsa/OmniVoice",
+      "checkpoint_revision": "c5fdb5ccb189668d56333f77ba2629f4cd7535f4",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_omnivoice.py",
+      "note": "Tiny iterative token generation, codec, training, and export graphs only."
+    },
+    {
+      "model_type": "higgstts",
+      "architecture": "higgs_audio_v2",
+      "default_checkpoint": "bosonai/higgs-tts-2-3b-base",
+      "checkpoint_revision": "d80c511612b3040ff2877ce3d408747df1739f11",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_higgs_audio_v2.py",
+      "note": "Tiny constrained generation, codec, training, and export graphs only."
+    },
+    {
+      "model_type": "xtts",
+      "architecture": "xtts2",
+      "default_checkpoint": "coqui/XTTS-v2",
+      "checkpoint_revision": "6c2b0d75eae4b7047358e3b6bd9325f857d43f77",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_xtts2.py",
+      "note": "Tiny token-generation, conditioning, training, and export graphs only."
+    },
+    {
+      "model_type": "vibevoice",
+      "architecture": "vibevoice-tts",
+      "default_checkpoint": "microsoft/VibeVoice-Realtime-0.5B",
+      "checkpoint_revision": "6bce5f06044837fe6d2c5d7a71a84f0416bd57e4",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "unsupported",
+      "optimization_status": "unsupported",
+      "evidence": "tests/test_native_vibevoice.py",
+      "note": "Low-level realtime stages are tested, but high-level waveform generation fails closed pending parity."
+    },
+    {
+      "model_type": "fishtts",
+      "architecture": "fish-s2",
+      "default_checkpoint": "fishaudio/s2-pro",
+      "checkpoint_revision": "1de9996b6be38b745688de084d87a5633f714e4e",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_fishtts.py",
+      "note": "Tiny semantic/cache, codec, training, and export graphs only."
+    },
+    {
+      "model_type": "csm",
+      "architecture": "csm",
+      "default_checkpoint": "sesame/csm-1b",
+      "checkpoint_revision": "c92a71e1c419772e25be7dc14d952c2521a740ab",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "blocked",
+      "optimization_status": "blocked",
+      "evidence": "tests/test_native_csm.py",
+      "note": "Tiny generation/training graph only. The real checkpoint is gated and access was unavailable."
+    },
+    {
+      "model_type": "neutts",
+      "architecture": "neutts",
+      "default_checkpoint": "neuphonic/neutts-2e",
+      "checkpoint_revision": "412aaab11c6b727c6c0fe2552db305c234e568da",
+      "source_revision": null,
+      "highest_evidence_tier": "real-checkpoint-end-to-end",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph",
+        "real-checkpoint-end-to-end"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "measured",
+      "optimization_status": "rejected",
+      "evidence": "#/real_checkpoint_results/2",
+      "note": "Long-audio official Emily fixture with baseline, SDPA, and regional compile."
+    },
+    {
+      "model_type": "supertonic",
+      "architecture": "supertonic",
+      "default_checkpoint": "Supertone/supertonic-3",
+      "checkpoint_revision": "3cadd1ee6394adea1bd021217a0e650ede09a323",
+      "source_revision": null,
+      "highest_evidence_tier": "real-checkpoint-end-to-end",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph",
+        "real-checkpoint-end-to-end"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "measured",
+      "optimization_status": "rejected",
+      "evidence": "#/real_checkpoint_results/3",
+      "note": "Long-audio baseline, compile, and reduced-step profiles."
+    },
+    {
+      "model_type": "inflecttts",
+      "architecture": "inflecttts",
+      "default_checkpoint": "owensong/Inflect-Micro-v2",
+      "checkpoint_revision": "132edf8700da8e0d3fa81cdc0fd8844926fc6582",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_inflecttts.py",
+      "note": "Tiny VITS/frontend, training, and export graphs only."
+    },
+    {
+      "model_type": "bark",
+      "architecture": "bark",
+      "default_checkpoint": "suno/bark-small",
+      "checkpoint_revision": "1dbd7a128513b8ae4a4e2130fed57b7ac9da5bcd",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_bark.py",
+      "note": "Tiny end-to-end generation, codec, training, and export graphs only."
+    },
+    {
+      "model_type": "speecht5",
+      "architecture": "speecht5",
+      "default_checkpoint": "microsoft/speecht5_tts",
+      "checkpoint_revision": "30fcde30f19b87502b8435427b5f5068e401d5f6",
+      "source_revision": null,
+      "highest_evidence_tier": "tiny-graph",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "not-run",
+      "optimization_status": "not-run",
+      "evidence": "tests/test_native_speecht5.py",
+      "note": "Tiny acoustic, vocoder, generation, training, and export graphs only."
+    },
+    {
+      "model_type": "vits",
+      "architecture": "vits",
+      "default_checkpoint": "facebook/mms-tts-eng",
+      "checkpoint_revision": "c71de0fe7204c83f1c10820a7d696d0b450048ba",
+      "source_revision": null,
+      "highest_evidence_tier": "real-checkpoint-end-to-end",
+      "evidence_layers": [
+        "static-plan",
+        "tiny-graph",
+        "real-checkpoint-end-to-end"
+      ],
+      "static_plan_status": "passed",
+      "real_checkpoint_status": "measured",
+      "optimization_status": "mixed",
+      "evidence": "#/real_checkpoint_results/4",
+      "note": "Long-audio baseline, six optimization profiles, and checked one-step fine-tuning evidence."
+    }
+  ],
+  "limitations": [
+    "Only five of 34 registered TTS providers have real-checkpoint, long-audio RTX 4090 measurements in this artifact.",
+    "Tiny-graph and static-plan evidence must not be interpreted as downloaded-weight inference, quality, speed, or memory validation.",
+    "The checked raw-evidence artifact retains the measured-run inputs, commands, profile configurations, checkpoint identities, timings, memory metrics, waveform hashes, and ASR evaluator identity.",
+    "WER and CER use one fixed ASR evaluator and fixture; listening tests and broader text/speaker sets remain necessary.",
+    "The five real-checkpoint results cover one fixed fixture per model; broader text, speaker, language, and listening evaluations remain necessary."
+  ]
+}

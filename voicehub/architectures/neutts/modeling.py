@@ -25,7 +25,11 @@ from voicehub.architectures.neutts.tokenization import (
     normalize_neutts_text,
 )
 from voicehub.generation import GenerationConfig
-from voicehub.generation.engine import AutoregressiveGenerator, GenerationStepInput, GenerationStepOutput
+from voicehub.generation.engine import (
+    AutoregressiveGenerator,
+    GenerationStepInput,
+    GenerationStepOutput,
+)
 from voicehub.neural.rotary import RotaryEmbedding
 from voicehub.optimization.protocols import OptimizationCompileTarget
 from voicehub.processing.waveform import load_native_audio
@@ -182,20 +186,15 @@ class NeuTTSRuntime(nn.Module):
         self,
         mode: str,
     ) -> tuple[OptimizationCompileTarget, ...]:
-        """Declare the backbone and codec calls reached by NeuTTS."""
+        """Expose only the quality-safe NeuTTS training boundary.
+
+        Real-checkpoint inference validation changed generated audio and
+        transcript content after compiling the autoregressive backbone.
+        Training keeps the full-sequence backbone boundary because it does
+        not perform stochastic token generation or waveform reconstruction.
+        """
         if mode == "inference":
-            return (
-                OptimizationCompileTarget(
-                    "backbone.forward",
-                    self.backbone,
-                    "forward",
-                ),
-                OptimizationCompileTarget(
-                    "codec.decode_code",
-                    self.codec,
-                    "decode_code",
-                ),
-            )
+            return ()
         if mode == "training":
             return (OptimizationCompileTarget(
                 "backbone.forward",

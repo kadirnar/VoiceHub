@@ -10,8 +10,14 @@ from typing import Any
 import torch
 
 from voicehub.architectures.f5tts.artifacts import resolve_f5tts_artifacts
-from voicehub.architectures.f5tts.checkpoint import load_f5tts_checkpoint, load_vocos_checkpoint
-from voicehub.architectures.f5tts.configuration import F5TTSArchitectureConfig, f5tts_architecture_config
+from voicehub.architectures.f5tts.checkpoint import (
+    load_f5tts_checkpoint,
+    load_vocos_checkpoint,
+)
+from voicehub.architectures.f5tts.configuration import (
+    F5TTSArchitectureConfig,
+    f5tts_architecture_config,
+)
 from voicehub.architectures.f5tts.frontend import F5Vocabulary, NativeF5TextFrontend
 from voicehub.architectures.f5tts.modeling import F5ConditionalFlowMatcher
 from voicehub.architectures.f5tts.runtime import NativeF5TTSRuntime
@@ -36,6 +42,7 @@ class F5TTSConfig(VoiceHubConfig):
         architecture: Mapping[str, Any] | None = None,
         ode_method: str = "euler",
         torch_dtype: str = "float32",
+        allow_unvalidated_reduced_precision_inference: bool = False,
         use_ema: bool = True,
         ema_decay: float = 0.9999,
         ema_update_after_step: int = 0,
@@ -56,6 +63,8 @@ class F5TTSConfig(VoiceHubConfig):
         self.architecture = dict(architecture or {})
         self.ode_method = ode_method
         self.torch_dtype = torch_dtype
+        self.allow_unvalidated_reduced_precision_inference = (
+            allow_unvalidated_reduced_precision_inference)
         self.use_ema = use_ema
         self.ema_decay = ema_decay
         self.ema_update_after_step = ema_update_after_step
@@ -88,6 +97,7 @@ class F5TTSConfig(VoiceHubConfig):
                 raise ValueError(f"`{name}` must be an integer greater than or equal to "
                                  f"{minimum}.")
         for name in (
+                "allow_unvalidated_reduced_precision_inference",
                 "use_ema",
                 "local_files_only",
                 "verify_artifacts",
@@ -150,6 +160,22 @@ class F5TTSForTextToSpeech(PreTrainedTTSModel):
 
     def _load_pretrained_model(self) -> None:
         architecture = self.config.architecture_config()
+        dtype = resolve_torch_dtype(
+            torch,
+            self.config.torch_dtype,
+            self.device,
+        )
+        if (
+                not self._loading_for_training
+                and dtype != torch.float32
+                and not self.config.allow_unvalidated_reduced_precision_inference
+        ):
+            raise RuntimeError(
+                "F5-TTS reduced-precision inference is disabled by default "
+                f"for {str(dtype).removeprefix('torch.')}. Use "
+                "`torch_dtype=\"float32\"`, or set "
+                "`allow_unvalidated_reduced_precision_inference=True` only "
+                "after checkpoint-level quality validation.")
         checkpoint_path = str(self.config.checkpoint_path).strip() or None
         vocabulary_path = str(self.config.vocabulary_path).strip() or None
         artifacts = resolve_f5tts_artifacts(
@@ -170,11 +196,6 @@ class F5TTSForTextToSpeech(PreTrainedTTSModel):
             raise ValueError(
                 f"F5-TTS vocabulary contains {len(vocabulary)} tokens, but "
                 f"the configured graph expects {architecture.text_num_embeds}.")
-        dtype = resolve_torch_dtype(
-            torch,
-            self.config.torch_dtype,
-            self.device,
-        )
         with torch.device(self.device):
             flow_model = F5ConditionalFlowMatcher(
                 architecture,
@@ -204,6 +225,8 @@ class F5TTSForTextToSpeech(PreTrainedTTSModel):
             flow_model=flow_model,
             vocoder=vocoder,
             frontend=NativeF5TextFrontend(vocabulary),
+            allow_unvalidated_reduced_precision_inference=(
+                self.config.allow_unvalidated_reduced_precision_inference),
         )
         runtime.to(device=self.device)
         self.artifacts = artifacts

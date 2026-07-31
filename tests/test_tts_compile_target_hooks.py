@@ -310,7 +310,7 @@ class CompileTargetHookTests(unittest.TestCase):
             ),
             (
                 neutts,
-                ("backbone.forward", "codec.decode_code"),
+                (),
                 ("backbone.forward", ),
             ),
             (
@@ -338,7 +338,7 @@ class CompileTargetHookTests(unittest.TestCase):
             ),
             (
                 vui,
-                ("decoder.forward", "codec.from_indices"),
+                (),
                 ("decoder.forward", ),
             ),
             (
@@ -351,6 +351,42 @@ class CompileTargetHookTests(unittest.TestCase):
             with self.subTest(runtime=type(runtime).__name__):
                 self._assert_targets(runtime, "inference", inference)
                 self._assert_targets(runtime, "training", training)
+
+    def test_neutts_exposes_only_the_training_compile_region(self):
+        _, _, neutts, *_ = self._local_runtime_hooks()
+
+        inference = self._assert_targets(
+            neutts,
+            "inference",
+            (),
+        )
+        training = self._assert_targets(
+            neutts,
+            "training",
+            ("backbone.forward", ),
+        )
+
+        self.assertEqual(inference, ())
+        self.assertIs(training[0].owner, neutts.backbone)
+        self.assertTrue(callable(neutts.codec.decode_code))
+
+    def test_vui_exposes_only_the_training_compile_region(self):
+        *_, vui, _ = self._local_runtime_hooks()
+
+        inference = self._assert_targets(
+            vui,
+            "inference",
+            (),
+        )
+        training = self._assert_targets(
+            vui,
+            "training",
+            ("decoder.forward", ),
+        )
+
+        self.assertEqual(inference, ())
+        self.assertIs(training[0].owner, vui.decoder)
+        self.assertTrue(callable(vui.codec.from_indices))
 
 
 if __name__ == "__main__":

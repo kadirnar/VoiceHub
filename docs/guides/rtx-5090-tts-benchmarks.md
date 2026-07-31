@@ -70,8 +70,8 @@ request logic eager.
 
 | Graph | Change | Baseline | Optimized | Speedup | Decision |
 | --- | --- | ---: | ---: | ---: | --- |
-| Native VITS, tiny BF16 | Regional `torch.compile`, dynamic default | 4.792 ms | 3.990 ms | 1.20x | Keep as the default compile boundary; 19.56 s fresh compile |
-| Native VITS, tiny BF16 | Regional max-autotune, no CUDA graphs | 4.792 ms | 3.965 ms | 1.21x | Opt in only; 29.11 s first call and about 90 s process autotuning |
+| Native VITS, tiny BF16 | Regional `torch.compile`, dynamic default | 4.792 ms | 3.990 ms | 1.20x | Tiny-graph result only; rejected as an inference default after the real-checkpoint quality gate |
+| Native VITS, tiny BF16 | Regional max-autotune, no CUDA graphs | 4.792 ms | 3.965 ms | 1.21x | Tiny-graph result only; 29.11 s first call and about 90 s process autotuning |
 | MeloTTS released-dimension synthetic graph, BF16 | Reversible eval weight-normalization cache | 19.107 ms | 18.309 ms | 1.04x | Keep; maximum BF16 delta `9.77e-4` |
 | OpenVoice released topology | Reversible eval weight-normalization cache | 10.994 ms | 9.601 ms | 1.15x | Keep; bit-exact |
 | InflectTTS Nano topology | Reversible eval weight-normalization cache | 8.029 ms | 7.113 ms | 1.13x | Keep; bit-exact |
@@ -80,7 +80,9 @@ request logic eager.
 Compiling the complete request wrapper was rejected: the first call took
 91.09 seconds and steady state improved only 5.1%. Fixed-shape CUDA graphs
 remain an explicit bucketed-serving option; predicted durations make them an
-unsafe general default.
+unsafe general default. A later long-audio real-checkpoint run also changed
+the fixed-seed waveform, so current VITS inference plans stay eager and retain
+compilation only for training.
 
 ## LLM-TTS
 
@@ -192,7 +194,7 @@ single-GPU inference switches.
 | --- | --- | --- | --- | --- |
 | BF16/FP16 autocast | Supported | Supported per checkpoint/codec | Measured BF16 | Keep with numerically sensitive FP32 boundaries |
 | Weight-normalization materialization | Measured | Not applicable | Not applicable | Reversible eval cache added |
-| Regional `torch.compile` | Measured | Graph-specific | Measured | Opt in where cold cost is amortized |
+| Regional `torch.compile` | Rejected for inference | Graph-specific | Measured | Architecture-specific; keep only after the checkpoint quality gate |
 | CUDA graphs | Static buckets only | Static cache/buckets only | Static buckets only | Never automatic for dynamic requests |
 | SDPA/FlashAttention kernel dispatch | Not attention-bound | Measured fused GQA | Existing selectable SDPA | Fused unmasked causal path added |
 | Dynamic KV cache | Not applicable | Existing | Outer LMs only | Keep |

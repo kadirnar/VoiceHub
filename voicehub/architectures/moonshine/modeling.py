@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -760,6 +759,34 @@ class MoonshineForConditionalGeneration(nn.Module):
 
     def get_output_embeddings(self) -> nn.Embedding:
         return self.model.decoder.embed_tokens
+
+    def optimization_compile_targets(self, mode: str):
+        """Return the execution boundaries used by each runtime phase."""
+        from voicehub.optimization.protocols import OptimizationCompileTarget
+
+        if mode == "inference":
+            # Generation encodes once outside ``forward`` and then calls the
+            # outer module for every growing decoder prefix.
+            return (
+                OptimizationCompileTarget(
+                    label="encoder",
+                    owner=self.model.encoder,
+                    attribute="forward",
+                ),
+                OptimizationCompileTarget(
+                    label="conditional-generation",
+                    owner=self,
+                    attribute="forward",
+                ),
+            )
+        if mode == "training":
+            return (
+                OptimizationCompileTarget(
+                    label="conditional-generation",
+                    owner=self,
+                    attribute="forward",
+                ), )
+        raise ValueError("Moonshine compile mode must be 'inference' or 'training'.")
 
     def forward(
         self,

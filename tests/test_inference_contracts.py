@@ -86,6 +86,15 @@ class FlakyLoadModel(LifecycleModel):
             raise RuntimeError("transient load failure")
 
 
+class FlakyPrepareModel(LifecycleModel):
+
+    def _prepare_for_inference(self) -> None:
+        self.inference_prepare_count += 1
+        if self.inference_prepare_count == 1:
+            raise RuntimeError("transient preparation failure")
+        PreTrainedTTSModel._prepare_for_inference(self)
+
+
 class FailedTrainingTransitionModel(LifecycleModel):
 
     def __init__(self, config=None, **kwargs):
@@ -308,6 +317,24 @@ class InferenceLifecycleTests(unittest.TestCase):
 
         self.assertEqual(output.metadata["text"], "second attempt")
         self.assertEqual(model.load_count, 2)
+        self.assertTrue(model.is_loaded)
+
+    def test_failed_inference_preparation_discards_runtime_for_retry(self):
+        model = FlakyPrepareModel()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "transient preparation failure",
+        ):
+            model.generate("first attempt")
+        self.assertIsNone(model.model)
+        self.assertFalse(model.is_loaded)
+
+        output = model.generate("second attempt")
+
+        self.assertEqual(output.metadata["text"], "second attempt")
+        self.assertEqual(model.load_count, 2)
+        self.assertEqual(model.inference_prepare_count, 2)
         self.assertTrue(model.is_loaded)
 
     def test_failed_training_transition_invalidates_inference_state(self):

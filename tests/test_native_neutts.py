@@ -226,6 +226,10 @@ class NativeNeuTTSTests(unittest.TestCase):
             "neutts-air",
         )
         self.assertIn(
+            "torch-compile-inference-unsafe",
+            spec.capabilities.features,
+        )
+        self.assertIn(
             "Nano and 2E objectives fail closed",
             spec.metadata["training_boundary"],
         )

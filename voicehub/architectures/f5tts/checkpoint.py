@@ -11,7 +11,10 @@ from typing import Any
 import torch
 from torch import nn
 
-from voicehub.architectures.f5tts.metadata import F5TTS_NATIVE_FORMAT, VOCOS_NATIVE_FORMAT
+from voicehub.architectures.f5tts.metadata import (
+    F5TTS_NATIVE_FORMAT,
+    VOCOS_NATIVE_FORMAT,
+)
 from voicehub.checkpointing import SafeTensorReader, save_safetensors
 
 
@@ -65,10 +68,12 @@ def _resolve_prefix(
     preferred_prefix: str,
 ) -> str:
     candidates = (preferred_prefix, "", "model.", "ema_model.")
+    checkpoint_names = reader.keys()
     for prefix in dict.fromkeys(candidates):
         names = {
             name.removeprefix(prefix)
-            for name in reader.keys() if (not prefix or name.startswith(prefix))
+            for name in checkpoint_names
+            if not prefix or name.startswith(prefix)
         }
         if set(expected).issubset(names):
             return prefix
@@ -85,11 +90,12 @@ def load_f5tts_checkpoint(
     device: torch.device | str = "cpu",
 ) -> F5CheckpointLoadReport:
     """Load a native or official F5 Safetensors checkpoint."""
-    source = Path(path).expanduser().resolve()
-    if source.suffix.lower() != ".safetensors":
+    logical_source = Path(path).expanduser()
+    if logical_source.suffix.lower() != ".safetensors":
         raise ValueError(
             "Native F5-TTS loads Safetensors only. Convert legacy weights "
             "once with `convert_legacy_f5tts_checkpoint`.")
+    source = logical_source.resolve()
     targets = model.state_dict(keep_vars=True)
     expected = {name: tuple(tensor.shape) for name, tensor in targets.items()}
     with SafeTensorReader(source) as reader:
@@ -111,7 +117,12 @@ def load_f5tts_checkpoint(
                     f"{actual_shape}, expected {shape}.")
         selected = {f"{prefix}{name}" for name in expected}
         ignored = {"step", "initted"}
-        unexpected = tuple(name for name in reader.keys() if name not in selected and name not in ignored)
+        checkpoint_names = reader.keys()
+        unexpected = tuple(
+            name
+            for name in checkpoint_names
+            if name not in selected and name not in ignored
+        )
     if strict and (missing or unexpected):
         raise ValueError(
             "F5-TTS checkpoint namespace mismatch: "
@@ -238,14 +249,18 @@ def load_vocos_checkpoint(
     *,
     device: torch.device | str = "cpu",
 ) -> F5CheckpointLoadReport:
-    source = Path(path).expanduser().resolve()
-    if source.suffix.lower() != ".safetensors":
+    logical_source = Path(path).expanduser()
+    if logical_source.suffix.lower() != ".safetensors":
         raise ValueError("Native Vocos loads converted Safetensors only.")
+    source = logical_source.resolve()
     targets = model.state_dict(keep_vars=True)
     expected = {name: tuple(tensor.shape) for name, tensor in targets.items()}
     with SafeTensorReader(source) as reader:
         missing = tuple(name for name in expected if name not in reader)
-        unexpected = tuple(name for name in reader.keys() if name not in expected)
+        checkpoint_names = reader.keys()
+        unexpected = tuple(
+            name for name in checkpoint_names if name not in expected
+        )
         if missing or unexpected:
             raise ValueError(
                 "Vocos checkpoint namespace mismatch: "

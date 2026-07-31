@@ -79,6 +79,16 @@ EXPECTED_TRAINING_REQUIREMENTS = (
     "pyworld",
     "wandb>=0.19",
 )
+REQUIRED_DISTRIBUTION_FILES = (
+    "voicehub/py.typed",
+    "voicehub/architectures/outetts/default_speaker.json",
+    "voicehub/models/conversationtts/source/conversationtts/llama3_2/tokenizer.json",
+    (
+        "voicehub/models/chatterbox/source/perth/perth_net/pretrained/implicit/"
+        "perth_net_250000.pth.tar"
+    ),
+    "voicehub/kernels/csrc/activations.cpp",
+)
 
 
 def _read_optional_dependencies() -> dict[str, list[str]]:
@@ -119,7 +129,7 @@ def _read_optional_dependencies() -> dict[str, list[str]]:
                 f"could not parse: {raw_line!r}")
         value = ast.literal_eval(line[:-1])
         if not isinstance(value, str):
-            raise AssertionError(f"Optional dependency entries must be strings: {raw_line!r}")
+            raise TypeError(f"Optional dependency entries must be strings: {raw_line!r}")
         current_values.append(value)
 
     if current_name is not None:
@@ -142,7 +152,7 @@ def _read_project_dependencies() -> list[str]:
                 f"with trailing commas; could not parse: {raw_line!r}")
         value = ast.literal_eval(line[:-1])
         if not isinstance(value, str):
-            raise AssertionError(f"Project dependency entries must be strings: {raw_line!r}")
+            raise TypeError(f"Project dependency entries must be strings: {raw_line!r}")
         dependencies.append(value)
     return dependencies
 
@@ -239,6 +249,7 @@ class PackagingMetadataTests(unittest.TestCase):
 
     def test_test_extra_does_not_install_an_external_trainer(self):
         distributions = {_distribution_name(requirement) for requirement in self.extras["test"]}
+        self.assertIn("build", distributions)
         self.assertNotIn(
             "trainer",
             distributions,
@@ -252,6 +263,29 @@ class PackagingMetadataTests(unittest.TestCase):
 
         self.assertNotIn("wandb", inference_distributions)
         self.assertIn("wandb", training_distributions)
+
+    def test_pep517_build_configuration_supports_wheels_and_sdists(self):
+        source = (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('build-backend = "setuptools.build_meta"', source)
+        self.assertIn('requires = ["setuptools>=77", "wheel"]', source)
+        self.assertIn('name = "voicehub"', source)
+        self.assertIn('where = ["."]', source)
+        self.assertIn('include = ["voicehub*"]', source)
+        self.assertIn("include-package-data = true", source)
+
+    def test_manifest_includes_required_runtime_data(self):
+        manifest = (REPOSITORY_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+        self.assertIn("graft voicehub", manifest)
+        for relative_path in REQUIRED_DISTRIBUTION_FILES:
+            with self.subTest(relative_path=relative_path):
+                self.assertTrue((REPOSITORY_ROOT / relative_path).is_file())
+
+    def test_distribution_check_covers_all_install_modes(self):
+        source = (REPOSITORY_ROOT / "scripts" / "check_distribution.py").read_text(
+            encoding="utf-8")
+        self.assertIn('"wheel": install_and_probe(', source)
+        self.assertIn('"sdist": install_and_probe(', source)
+        self.assertIn('"editable": install_and_probe(', source)
 
 
 if __name__ == "__main__":

@@ -59,6 +59,7 @@ training = [
   "wandb>=0.19",
 ]
 test = [
+  "build>=1.2",
   "coqpit>=0.0.16",
   "einops",
   "librosa>=0.10",

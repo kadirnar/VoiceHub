@@ -107,6 +107,7 @@ class MoonshineConfigurationAndCheckpointTests(unittest.TestCase):
             "voicehub.architectures.moonshine.checkpoint:"
             "HuggingFaceMoonshineCheckpointAdapter",
         )
+        self.assertTrue(spec.capabilities.supports_optimization("compile"))
 
 
 class MoonshineModelTests(unittest.TestCase):
@@ -179,6 +180,27 @@ class MoonshineModelTests(unittest.TestCase):
                 self.attention_mask[:1],
                 do_sample=True,
             )
+
+    def test_compile_targets_match_generation_execution_boundaries(self):
+        inference_targets = self.model.optimization_compile_targets(
+            "inference",
+        )
+        training_targets = self.model.optimization_compile_targets(
+            "training",
+        )
+
+        self.assertEqual(
+            tuple(target.label for target in inference_targets),
+            ("encoder", "conditional-generation"),
+        )
+        self.assertIs(inference_targets[0].owner, self.model.model.encoder)
+        self.assertIs(inference_targets[1].owner, self.model)
+        self.assertEqual(
+            tuple(target.label for target in training_targets),
+            ("conditional-generation", ),
+        )
+        with self.assertRaisesRegex(ValueError, "inference.*training"):
+            self.model.optimization_compile_targets("export")
 
     def test_invalid_masks_and_cache_modes_are_rejected(self):
         invalid_mask = self.attention_mask.clone()

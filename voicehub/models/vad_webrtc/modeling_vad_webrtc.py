@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +12,29 @@ from voicehub.inference_configuration import VADInferenceConfig
 from voicehub.modeling_outputs import SpeechSegment, VADOutput
 from voicehub.models.vad_webrtc.configuration_vad_webrtc import WebRTCVADConfig
 from voicehub.vad_utils import frame_probabilities_to_segments
+
+
+def _pcm16_samples(waveform: Any) -> list[int]:
+    """Convert normalized audio with the reference scalar rounding rules."""
+    import torch
+
+    values = waveform.detach().to(
+        device="cpu",
+        dtype=torch.float64,
+    )
+    values = torch.nan_to_num(
+        values,
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    )
+    return (
+        values.clamp(-1.0, 1.0)
+        .mul(32767.0)
+        .round()
+        .to(torch.int32)
+        .tolist()
+    )
 
 
 class WebRTCVADForVoiceActivityDetection(PreTrainedVADModel):
@@ -82,15 +104,7 @@ class WebRTCVADForVoiceActivityDetection(PreTrainedVADModel):
             raise ValueError(
                 "WebRTC requires the configured 10/20/30 ms frame size; "
                 f"expected {frame_samples} samples.")
-        waveform = materialized.waveform
-        values = waveform.tolist() if hasattr(waveform, "tolist") else list(waveform)
-        pcm = []
-        for value in values:
-            normalized = float(value)
-            if not math.isfinite(normalized):
-                normalized = 0.0
-            normalized = max(-1.0, min(1.0, normalized))
-            pcm.append(round(normalized * 32767.0))
+        pcm = _pcm16_samples(materialized.waveform)
         vad = NativeWebRTCVAD(self.config.aggressiveness)
         flags = []
         for start in range(0, len(pcm), frame_samples):

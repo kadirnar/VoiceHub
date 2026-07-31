@@ -13,13 +13,16 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from numbers import Integral, Real
-from typing import Literal
 
 import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
-from voicehub.architectures.vits.alignment import generate_path, maximum_path, sequence_mask
+from voicehub.architectures.vits.alignment import (
+    generate_path,
+    maximum_path,
+    sequence_mask,
+)
 from voicehub.architectures.vits.configuration import VitsConfig
 from voicehub.kernels.vits import VITSKernelOptimizable
 from voicehub.optimization.protocols import OptimizationCompileTarget
@@ -1494,31 +1497,11 @@ class VitsModel(nn.Module):
         self,
         mode: str,
     ) -> tuple[OptimizationCompileTarget, ...]:
-        """Compile stable tensor regions while keeping request logic eager."""
+        """Expose only the quality-safe full-sequence training boundary."""
         if mode == "inference":
-            # Full synthesis contains intentionally eager input validation,
-            # request-local Generator construction, and data-dependent
-            # duration/alignment control flow. Compiling that wrapper creates
-            # dozens of graph fragments and can take minutes even for a tiny
-            # model. These three regions contain the expensive, shape-stable
-            # tensor work without changing sampling or validation semantics.
-            return (
-                OptimizationCompileTarget(
-                    "vits.text_encoder.forward",
-                    self.text_encoder,
-                    "forward",
-                ),
-                OptimizationCompileTarget(
-                    "vits.flow.forward",
-                    self.flow,
-                    "forward",
-                ),
-                OptimizationCompileTarget(
-                    "vits.decoder.forward",
-                    self.decoder,
-                    "forward",
-                ),
-            )
+            # The regional inference graph passed tiny-graph tests but changed
+            # the fixed-seed waveform for the pinned MMS-TTS checkpoint.
+            return ()
         if mode == "training":
             return (OptimizationCompileTarget(
                 "vits.forward",
@@ -1664,7 +1647,7 @@ class VitsModel(nn.Module):
             output_hidden_states=output_hidden_states,
         )
         if not isinstance(output, VitsInferenceOutput):
-            raise AssertionError("VITS synthesis returned a training output.")
+            raise TypeError("VITS synthesis returned a training output.")
         return output
 
     def _synthesize(

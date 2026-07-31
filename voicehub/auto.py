@@ -228,8 +228,26 @@ class _BaseAutoModel:
         model_type: str | None = None,
         config: VoiceHubConfig | None = None,
         inference_strategy: str | InferenceStrategy | None = None,
+        config_kwargs: Mapping[str, object] | None = None,
         **kwargs,
     ):
+        if config_kwargs is None:
+            config_values = {}
+        elif isinstance(config_kwargs, Mapping):
+            config_values = dict(config_kwargs)
+        else:
+            raise TypeError("`config_kwargs` must be a mapping or None.")
+        if any(not isinstance(key, str) or not key for key in config_values):
+            raise ValueError("`config_kwargs` keys must be non-empty strings.")
+        if "model_type" in config_values:
+            raise ValueError(
+                "Pass `model_type` as the top-level factory argument, not "
+                "inside `config_kwargs`.")
+        if config is not None and config_values:
+            raise TypeError(
+                "Pass configuration through either `config` or "
+                "`config_kwargs`, not both.")
+
         empty_source = (
             isinstance(pretrained_model_name_or_path, str) and not pretrained_model_name_or_path.strip())
         if config is None:
@@ -244,10 +262,16 @@ class _BaseAutoModel:
                         spec.config_module,
                         spec.config_class,
                     )
-                    config = config_class(name_or_path=spec.default_model_path)
+                    config = config_class(
+                        name_or_path=spec.default_model_path,
+                        **config_values,
+                    )
                 else:
                     try:
-                        config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
+                        config = AutoConfig.from_pretrained(
+                            pretrained_model_name_or_path,
+                            **config_values,
+                        )
                         spec = cls._get_spec(config.model_type)
                     except UnknownModelError:
                         if cls.default_model_type is None:
@@ -257,12 +281,17 @@ class _BaseAutoModel:
                             spec.config_module,
                             spec.config_class,
                         )
-                        config = config_class(name_or_path=pretrained_model_name_or_path)
+                        config = config_class(
+                            name_or_path=pretrained_model_name_or_path,
+                            **config_values,
+                        )
             else:
                 spec = cls._get_spec(model_type)
                 config_class = _load_class(spec.config_module, spec.config_class)
                 config = config_class(
-                    name_or_path=(spec.default_model_path if empty_source else pretrained_model_name_or_path))
+                    name_or_path=(spec.default_model_path if empty_source else pretrained_model_name_or_path),
+                    **config_values,
+                )
                 config.model_type = spec.model_type
         else:
             if model_type is not None and config.model_type == "voicehub":

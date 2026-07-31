@@ -1,5 +1,6 @@
 import ast
 import io
+import json
 import os
 import re
 import tempfile
@@ -34,10 +35,18 @@ GUIDE_PATHS = (
     DOCS_ROOT / "guides" / "inference.md",
     DOCS_ROOT / "guides" / "speech-recognition.md",
     DOCS_ROOT / "guides" / "voice-activity-detection.md",
+    DOCS_ROOT / "guides" / "tts-optimization.md",
     DOCS_ROOT / "guides" / "data-preparation.md",
     DOCS_ROOT / "guides" / "speech-data.md",
     DOCS_ROOT / "guides" / "training.md",
     DOCS_ROOT / "guides" / "notebook.md",
+)
+CONCISE_GUIDE_PATHS = (
+    DOCS_ROOT / "guides" / "inference.md",
+    DOCS_ROOT / "guides" / "speech-recognition.md",
+    DOCS_ROOT / "guides" / "voice-activity-detection.md",
+    DOCS_ROOT / "guides" / "training.md",
+    DOCS_ROOT / "guides" / "tts-optimization.md",
 )
 PROCESS_PAGE_STEPS = (
     (DOCS_ROOT / "guides" / "index.md", 7),
@@ -118,6 +127,11 @@ class DocumentationSiteTests(unittest.TestCase):
                 self.assertGreaterEqual(notebook["nbformat_minor"], 5)
                 cells = notebook["cells"]
                 self.assertTrue(cells)
+                self.assertLessEqual(
+                    len(cells),
+                    16,
+                    f"{path.name} should remain a short top-to-bottom workflow.",
+                )
                 notebook_source = "\n".join(_cell_source(cell) for cell in cells)
                 self.assertIn(
                     "https://colab.research.google.com/github/"
@@ -189,7 +203,7 @@ class DocumentationSiteTests(unittest.TestCase):
                                     "setup",
                                     "optional-colab",
                                 }))
-                            exec(
+                            exec(  # noqa: S102 - execute opt-in notebook smoke cells
                                 compile(
                                     source,
                                     f"{path.name}:{cell['id']}",
@@ -208,69 +222,67 @@ class DocumentationSiteTests(unittest.TestCase):
         self.assertFalse(workflow["RUN_POST_TRAINING_INFERENCE"])
         self.assertEqual(workflow["MODEL_TYPE"], "dia")
         self.assertEqual(workflow["training_spec"].model_type, "dia")
+        self.assertFalse(workflow["manifest_loaded"])
+        self.assertIs(workflow["records"], workflow["template_records"])
         self.assertTrue(workflow["validation_errors"])
         self.assertTrue(workflow["train_records"])
         self.assertTrue(workflow["validation_records"])
         train_sessions = {record["session_id"] for record in workflow["train_records"]}
         validation_sessions = {record["session_id"] for record in workflow["validation_records"]}
         self.assertTrue(train_sessions.isdisjoint(validation_sessions))
-        self.assertNotIn("trainer", workflow)
+        self.assertGreaterEqual(len(workflow["EVALUATION_TEXT"].split()), 55)
+        self.assertNotIn("workflow_trainer", workflow)
         self.assertNotIn("baseline_output", workflow)
         self.assertNotIn("fine_tuned_output", workflow)
 
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "manifest.jsonl"
+            manifest.write_text(
+                '{"id":"one","text":"Authorized","audio":"audio/one.wav"}\n',
+                encoding="utf-8",
+            )
+            loaded = workflow["load_manifest_records"](manifest)
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(
+            loaded[0]["audio"],
+            str((manifest.parent / "audio" / "one.wav").resolve()),
+        )
+
         inference = namespaces["inference.ipynb"]
         self.assertFalse(inference["RUN_TTS"])
+        self.assertFalse(inference["RUN_TTS_OPTIMIZATION"])
         self.assertFalse(inference["RUN_ASR"])
         self.assertFalse(inference["RUN_VAD"])
         self.assertEqual(sum(inference["task_counts"].values()), len(inference["catalog"]))
-        self.assertEqual(inference["tts_preview"].sample_rate, 24_000)
-        self.assertEqual(
-            inference["asr_preview"].text,
-            "VoiceHub normalizes speech outputs.",
+        self.assertEqual(len(inference["TTS_SAMPLES"]), 3)
+        self.assertGreaterEqual(
+            min(len(text.split()) for text in inference["TTS_SAMPLES"]),
+            55,
         )
-        self.assertTrue(inference["vad_preview"].contains(0.25))
         self.assertNotIn("tts_output", inference)
         self.assertNotIn("asr_output", inference)
         self.assertNotIn("vad_output", inference)
 
         data = namespaces["data_preparation.ipynb"]
-        self.assertFalse(data["WRITE_EXAMPLE_MANIFESTS"])
+        self.assertFalse(data["WRITE_MANIFESTS"])
         self.assertFalse(data["RUN_AUDIO_VALIDATION"])
         self.assertFalse(data["RUN_MODEL_PREPARATION"])
         self.assertEqual(len(data["tts_source"]), 4)
         self.assertEqual(len(data["asr_source"]), 4)
         self.assertEqual(len(data["vad_source"]), 2)
-        self.assertTrue(data["tts_train_sessions"].isdisjoint(data["tts_validation_sessions"], ))
-        self.assertTrue(data["asr_train_speakers"].isdisjoint(data["asr_validation_speakers"], ))
-        self.assertEqual(
-            set(data["model_contract_examples"]),
-            {
-                "tts_codec_lm",
-                "tts_sequence",
-                "tts_diffusion",
-                "tts_vits",
-                "asr_ctc",
-                "asr_seq2seq",
-                "asr_transducer",
-            },
-        )
-        self.assertEqual(len(data["tts_architecture_contracts"]), 6)
-        self.assertEqual(len(data["asr_architecture_contracts"]), 7)
+        self.assertTrue(data["tts_train_groups"].isdisjoint(data["tts_validation_groups"], ))
+        self.assertTrue(data["asr_train_groups"].isdisjoint(data["asr_validation_groups"], ))
+        self.assertEqual(data["tts_contract"].model_type, "dia")
+        self.assertEqual(data["asr_contract"].model_type, "asr_wav2vec2")
 
         training = namespaces["training.ipynb"]
-        self.assertFalse(training["RUN_CODEC_LM_TRAINING"])
-        self.assertFalse(training["RUN_DIFFUSION_TRAINING"])
-        self.assertFalse(training["RUN_VITS_TRAINING"])
-        self.assertFalse(training["RUN_ASR_TRAINING"])
-        self.assertFalse(training["RUN_TINY_TRAINER"])
-        self.assertEqual(
-            set(training["profile_summary"]),
-            set(training["SPECIALIZED_PROFILES"]),
-        )
-        self.assertEqual(len(training["asr_training_profiles"]), 23)
+        self.assertFalse(training["RUN_TRAINING"])
+        self.assertFalse(training["RUN_RELOAD"])
+        self.assertEqual(training["MODEL_TYPE"], "dia")
+        self.assertEqual(training["training_spec"].model_type, "dia")
         self.assertEqual(training["smoke_arguments"].max_steps, 1)
-        self.assertIsNone(training["active_trainer"])
-        self.assertIsNone(training["active_model"])
+        self.assertNotIn("active_trainer", training)
+        self.assertNotIn("active_model", training)
 
     def test_site_sources_and_navigation_exist(self):
         config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
@@ -282,6 +294,86 @@ class DocumentationSiteTests(unittest.TestCase):
                 self.assertIn(relative_path, config)
 
         self.assertFalse((DOCS_ROOT / "tts_workflow.md").exists())
+
+    def test_main_workflow_guides_stay_concise(self):
+        for path in CONCISE_GUIDE_PATHS:
+            with self.subTest(path=path):
+                line_count = len(path.read_text(encoding="utf-8").splitlines())
+                self.assertLessEqual(
+                    line_count,
+                    250,
+                    f"{path.name} should remain a concise user workflow.",
+                )
+
+    def test_qwen3_decoding_example_uses_supported_options(self):
+        source = (
+            DOCS_ROOT / "guides" / "speech-recognition.md"
+        ).read_text(encoding="utf-8")
+        section = source.split(
+            "## Decoding configuration",
+            1,
+        )[1].split("## Output", 1)[0]
+
+        self.assertIn('hotwords=("VoiceHub",)', section)
+        self.assertIn("batch_size=1", section)
+        self.assertNotIn("return_timestamps=", section)
+        self.assertNotIn("chunk_length_s=", section)
+        self.assertNotIn("stride_length_s=", section)
+        self.assertNotIn("batch_size=4", section)
+
+    def test_rtx_4090_report_tracks_asr_vad_manifest(self):
+        result_path = (
+            REPOSITORY_ROOT
+            / "benchmarks"
+            / "asr_vad_rtx4090_2026-07-31.json"
+        )
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        report = (
+            DOCS_ROOT
+            / "guides"
+            / "rtx-4090-speech-benchmarks.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(str(result_path.relative_to(REPOSITORY_ROOT)), report)
+        moonshine = next(
+            measurement
+            for measurement in result["asr_measurements"]
+            if measurement["model_type"] == "asr_moonshine"
+        )
+        fp32 = moonshine["profiles"][0]
+        self.assertIn(
+            (
+                f"{fp32['mean_seconds'] * 1000:.2f} / "
+                f"{fp32['median_seconds'] * 1000:.2f} ms"
+            ),
+            report,
+        )
+        whisper = next(
+            measurement
+            for measurement in result["asr_measurements"]
+            if measurement["model_type"] == "asr_whisper"
+        )
+        for profile in whisper["profiles"]:
+            self.assertIn(
+                (
+                    f"{profile['mean_seconds'] * 1000:.2f} / "
+                    f"{profile['median_seconds'] * 1000:.2f} ms"
+                ),
+                report,
+            )
+        sherpa = next(
+            measurement
+            for measurement in result["vad_measurements"]
+            if measurement["model_type"] == "vad_sherpa_onnx"
+        )
+        baseline = sherpa["profiles"][0]
+        self.assertIn(
+            (
+                f"{baseline['mean_seconds'] * 1000:,.2f} / "
+                f"{baseline['median_seconds'] * 1000:,.2f} ms"
+            ),
+            report,
+        )
 
     def test_every_asr_training_profile_is_in_model_and_training_docs(self):
         from voicehub import SpeechTask, list_training_specs
@@ -382,7 +474,7 @@ class DocumentationSiteTests(unittest.TestCase):
         project_metadata = PYPROJECT_PATH.read_text(encoding="utf-8")
         notebook_source = "\n".join(
             _cell_source(cell) for notebook in self.notebooks.values() for cell in notebook["cells"])
-        public_content = "\n".join((readme, project_metadata, notebook_source))
+        public_content = f"{readme}\n{project_metadata}\n{notebook_source}"
 
         for route in PUBLIC_ROUTES:
             with self.subTest(route=route):
@@ -502,6 +594,47 @@ class DocumentationSiteTests(unittest.TestCase):
                 )
 
         self.assertGreaterEqual(example_count, len(GUIDE_PATHS))
+
+    def test_readme_python_examples_compile(self):
+        examples = PYTHON_BLOCK.findall(README_PATH.read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(examples), 5)
+        for index, source in enumerate(examples, start=1):
+            ast.parse(
+                textwrap.dedent(source),
+                filename=f"README.md:python-block-{index}",
+            )
+
+    def test_quickstart_models_construct_lazily_without_downloads(self):
+        from voicehub import (
+            AutoModelForSpeechRecognition,
+            AutoModelForTextToSpeech,
+            AutoModelForVoiceActivityDetection,
+        )
+
+        tts_model = AutoModelForTextToSpeech.from_pretrained(
+            "parler-tts/parler-tts-mini-v1",
+            model_type="parlertts",
+            device="cpu",
+            lazy_load=True,
+        )
+        asr_model = AutoModelForSpeechRecognition.from_pretrained(
+            "Qwen/Qwen3-ASR-0.6B",
+            model_type="asr_qwen3",
+            device="cpu",
+            lazy_load=True,
+        )
+        vad_model = AutoModelForVoiceActivityDetection.from_pretrained(
+            model_type="vad_silero",
+            device="cpu",
+            lazy_load=True,
+        )
+
+        self.assertFalse(tts_model.is_loaded)
+        self.assertFalse(asr_model.is_loaded)
+        self.assertFalse(vad_model.is_loaded)
+        self.assertEqual(tts_model.config.name_or_path, "parler-tts/parler-tts-mini-v1")
+        self.assertEqual(asr_model.config.name_or_path, "Qwen/Qwen3-ASR-0.6B")
+        self.assertEqual(vad_model.config.name_or_path, "safestack/silero-vad")
 
 
 if __name__ == "__main__":

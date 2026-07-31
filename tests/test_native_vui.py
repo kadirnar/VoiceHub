@@ -152,6 +152,10 @@ class NativeVuiTests(unittest.TestCase):
             ("pytorch", "safetensors"),
         )
         self.assertEqual(capabilities.export_formats, ("safetensors", ))
+        self.assertIn(
+            "torch-compile-inference-unsafe",
+            capabilities.features,
+        )
         self.assertIn("safetensors", get_model_spec("vui").capabilities)
         self.assertIn(
             "standalone-safetensors-export",

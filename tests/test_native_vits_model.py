@@ -96,6 +96,10 @@ print(spec.metadata["full_finetuning_ready"])
             "full-adversarial-fine-tuning",
             spec.capabilities.features,
         )
+        self.assertIn(
+            "torch-compile-inference-unsafe",
+            spec.capabilities.features,
+        )
         self.assertEqual(
             spec.capabilities.optimization_passes,
             ("compile", "custom-kernels"),
