@@ -291,10 +291,11 @@ def convert_audited_cosyvoice_legacy_checkpoint(
         expected = COSYVOICE3_LEGACY_FILES[component]
     except KeyError as error:
         raise ValueError("Legacy conversion component must be llm, flow, or hift.") from error
-    source = Path(source).expanduser().resolve()
-    if source.name != expected["filename"]:
+    requested = Path(source).expanduser()
+    if requested.name != expected["filename"]:
         raise CheckpointIntegrityError(
-            f"Expected audited file {expected['filename']!r}, found {source.name!r}.")
+            f"Expected audited file {expected['filename']!r}, found {requested.name!r}.")
+    source = requested.resolve()
     stat = source.stat()
     if stat.st_size != expected["size"]:
         raise CheckpointIntegrityError(f"Legacy {component} file size differs from the audited artifact.")

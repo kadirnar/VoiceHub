@@ -17,6 +17,7 @@ from voicehub.architectures.supertonic.frontend import SupertonicStyle, Superton
 from voicehub.checkpointing import ONNXModel
 from voicehub.hub import read_json_file
 from voicehub.neural.onnx import NativeONNXGraph
+from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
 from voicehub.optimization.diffusion_sampling import (
     DiffusionGuidanceStrategy,
     DiffusionPredictionCacheMethod,
@@ -72,7 +73,11 @@ class SupertonicFineTuningOutput:
     waveform: Tensor | None = None
 
 
-class NativeSupertonicRuntime(DiffusionSamplingMixin, nn.Module):
+class NativeSupertonicRuntime(
+        DiffusionCacheMixin,
+        DiffusionSamplingMixin,
+        nn.Module,
+):
     """Own all four released graphs as trainable PyTorch modules.
 
     The public release omits the audio/style encoders and original
@@ -105,6 +110,7 @@ class NativeSupertonicRuntime(DiffusionSamplingMixin, nn.Module):
         self.text_encoder = NativeONNXGraph(text_encoder)
         self.vector_estimator = NativeONNXGraph(vector_estimator)
         self.vocoder = NativeONNXGraph(vocoder)
+        self._initialize_diffusion_cache()
         self._initialize_diffusion_sampling()
         self._validate_graph_contracts()
 
@@ -265,6 +271,63 @@ class NativeSupertonicRuntime(DiffusionSamplingMixin, nn.Module):
         )
         return duration, text_embedding, text_mask, style.ttl
 
+    def _cached_vector_step(
+        self,
+        noisy_latent: Tensor,
+        *,
+        text_embedding: Tensor,
+        style_ttl: Tensor,
+        latent_mask: Tensor,
+        text_mask: Tensor,
+        current_step: Tensor,
+        total_step: Tensor,
+    ) -> Tensor:
+        """Run or predict the released estimator's latent residual.
+
+        Supertonic's ONNX export flattens the estimator graph, so it has no
+        stable ``ModuleList`` boundary. A timestep-tagged current latent is
+        the probe and the cached quantity is ``next_latent - current_latent``;
+        caching the absolute output would stall the recurrence.
+        """
+        step_marker = (current_step / total_step.clamp_min(1)).to(
+            device=noisy_latent.device,
+            dtype=noisy_latent.dtype,
+        )
+        while step_marker.ndim < noisy_latent.ndim:
+            step_marker = step_marker.unsqueeze(-1)
+        latent_channels = noisy_latent.shape[1]
+        cache_state = torch.cat(
+            (noisy_latent, noisy_latent + step_marker),
+            dim=1,
+        )
+
+        def apply_stage(stage: str, value: Tensor) -> Tensor:
+            if stage == "probe":
+                return value
+            if stage == "estimator":
+                output = self.vector_estimator(
+                    noisy_latent=value[:, :latent_channels],
+                    text_emb=text_embedding,
+                    style_ttl=style_ttl,
+                    latent_mask=latent_mask,
+                    text_mask=text_mask,
+                    current_step=current_step,
+                    total_step=total_step,
+                )
+                return torch.cat(
+                    (output, value[:, latent_channels:]),
+                    dim=1,
+                )
+            return value[:, :latent_channels]
+
+        return self._run_diffusion_blocks(
+            ("probe", "estimator", "tail"),
+            cache_state,
+            apply_stage,
+            cache_lane="vector-estimator",
+            valid_mask=latent_mask,
+        )
+
     def infer_batch(
         self,
         texts: tuple[str, ...] | list[str],
@@ -314,22 +377,24 @@ class NativeSupertonicRuntime(DiffusionSamplingMixin, nn.Module):
             device=self.device,
             dtype=self.dtype,
         )
-        for step in range(effective_steps):
-            current = torch.full(
-                (len(texts), ),
-                float(step),
-                device=self.device,
-                dtype=self.dtype,
-            )
-            latent = self.vector_estimator(
-                noisy_latent=latent,
-                text_emb=text_embedding,
-                style_ttl=style_ttl,
-                latent_mask=latent_mask.to(dtype=self.dtype),
-                text_mask=text_mask,
-                current_step=current,
-                total_step=total,
-            )
+        self.reset_diffusion_cache()
+        with self.diffusion_cache_session():
+            for step in range(effective_steps):
+                current = torch.full(
+                    (len(texts), ),
+                    float(step),
+                    device=self.device,
+                    dtype=self.dtype,
+                )
+                latent = self._cached_vector_step(
+                    latent,
+                    text_embedding=text_embedding,
+                    style_ttl=style_ttl,
+                    latent_mask=latent_mask.to(dtype=self.dtype),
+                    text_mask=text_mask,
+                    current_step=current,
+                    total_step=total,
+                )
         waveform = self.vocoder(latent=latent)
         return waveform, duration
 

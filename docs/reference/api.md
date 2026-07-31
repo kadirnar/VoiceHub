@@ -786,11 +786,19 @@ DiffusionCacheConfig(
     back_blocks=0,
     residual_diff_threshold=0.08,
     warmup_steps=2,
+    warmup_interval=1,
     max_cached_steps=-1,
     max_consecutive_cached_steps=3,
     max_accumulated_relative_error=None,
     predictor="reuse",
+    taylor_order=1,
     compute_step_mask=(),
+    compute_step_policy="dynamic",
+    num_inference_steps=None,
+    force_refresh_step_hint=None,
+    force_refresh_step_policy="once",
+    probe_downsample_factor=1,
+    metrics_history_size=256,
     synchronize_distributed=True,
     epsilon=1e-6,
 )
@@ -801,11 +809,15 @@ DiffusionCachePass(config=None)
 ```
 
 `front_blocks` and `back_blocks` are the DBCache `Fn` and `Bn` boundaries.
-Predictors are `reuse` and `taylor`; the latter performs first-order
-extrapolation from two fully computed residuals and never chains predicted
-residuals. `compute_step_mask[index] is True` forces a full middle-block
-evaluation at that step. Warm-up, total/consecutive cache-hit limits, and the
-optional accumulated-error budget also force refreshes.
+Predictors are `reuse` and `taylor`; the latter supports orders 1-3 using only
+fully computed residuals. `compute_step_mask[index] is True` forces a full
+middle-block evaluation. A `False` entry uses threshold-based reuse under the
+`dynamic` policy and unconditional compatible reuse under `static`. Warm-up
+cadence, total/consecutive cache-hit limits, inference-step segmentation,
+forced refreshes, and the optional accumulated-error budget provide additional
+safety controls. Cache-DiT spellings such as `Fn_compute_blocks`,
+`Bn_compute_blocks`, `max_warmup_steps`, `steps_computation_mask`, and
+`taylorseer_order` are accepted by `from_dict()`.
 
 `TTSOptimizationConfig(diffusion_cache="auto", ...)` is an explicit,
 non-strict request. It retains exact inference when the architecture does not
@@ -817,10 +829,14 @@ applied.
 The resolved pass is reversible and runs after architecture kernel/attention
 selection but before `torch.compile`. Its application manifest records
 `fidelity="approximate"`, the adapted module labels, and live hit/miss and
-invalidation statistics. Supported block surfaces are CosyVoice, F5-TTS,
-Echo, Irodori-TTS, and VoxCPM. VibeVoice exposes only its low-level diffusion
-head experimentally; its public high-level inference remains unsupported.
-Chatterbox, StyleTTS 2, and Supertonic fail closed for this cache.
+invalidation statistics. All nine registered diffusion-family model types
+declare a cache surface: Chatterbox, CosyVoice, Echo, F5-TTS, Irodori-TTS,
+StyleTTS 2, Supertonic, VibeVoice, and VoxCPM. Most cache repeated native
+transformer/DiT blocks. Supertonic's flattened ONNX graph instead caches the
+predicted `next_latent - current_latent` residual so the recurrence cannot
+stall by reusing an absolute output. VibeVoice's cache remains limited to its
+low-level diffusion head while its public high-level inference path is
+unsupported.
 
 Adapted modules expose the following request-control surface:
 
@@ -828,14 +844,24 @@ Adapted modules expose the following request-control surface:
 module.enable_diffusion_cache(config=None) -> DiffusionCacheConfig
 module.disable_diffusion_cache() -> DiffusionCacheConfig | None
 module.reset_diffusion_cache(*, lane=None)
+module.reset_diffusion_cache_stats()
 module.diffusion_cache_session()
-module.diffusion_cache_stats() -> dict[str, int | float | None]
+module.diffusion_cache_stats(*, details=False) -> dict[str, object]
+
+diffusion_cache_request(model)
+diffusion_cache_summary(model, *, details=False)
+reset_diffusion_cache_metrics(model) -> int
 ```
 
 Use `diffusion_cache_session()` or the architecture sampler's built-in reset
 to isolate requests. Separate CFG modes use distinct lane names. Shape,
 dtype, device, and block-layout mismatches bypass or invalidate cached
 tensors.
+
+The summary reports cache/miss counts and reasons, dynamic versus static hits,
+residual-difference percentiles, predictor usage, executed and skipped block
+evaluations, estimated block-compute reduction, active/peak cache bytes, and
+per-lane totals. `details=True` adds bounded residual and step histories.
 
 ### Diffusion serving capabilities
 

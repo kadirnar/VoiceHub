@@ -7,6 +7,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor, einsum
 
+from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
+
 
 class _ChannelsFirst(nn.Module):
     def forward(self, value: Tensor) -> Tensor:
@@ -39,7 +41,7 @@ class AdaLayerNorm(nn.Module):
         x = (1 + gamma) * x + beta
         return x.transpose(1, -1).transpose(-1, -2)
 
-class StyleTransformer1d(nn.Module):
+class StyleTransformer1d(DiffusionCacheMixin, nn.Module):
     def __init__(
         self,
         num_layers: int,
@@ -118,6 +120,7 @@ class StyleTransformer1d(nn.Module):
         self.fixed_embedding = FixedEmbedding(
             max_length=embedding_max_length, features=context_embedding_features
         )
+        self._initialize_diffusion_cache()
         
 
     def get_mapping(
@@ -143,15 +146,18 @@ class StyleTransformer1d(nn.Module):
 
         return mapping
             
-    def run(self, x, time, embedding, features):
+    def run(self, x, time, embedding, features, *, diffusion_cache_lane="conditional"):
         
         mapping = self.get_mapping(time, features)
         x = torch.cat([x.expand(-1, embedding.size(1), -1), embedding], axis=-1)
         mapping = mapping.unsqueeze(1).expand(-1, embedding.size(1), -1)
         
-        for block in self.blocks:
-            x = x + mapping
-            x = block(x, features)
+        x = self._run_diffusion_blocks(
+            self.blocks,
+            x,
+            lambda block, value: block(value + mapping, features),
+            cache_lane=diffusion_cache_lane,
+        )
         
         x = x.mean(axis=1).unsqueeze(1)
         x = self.to_out(x)
@@ -164,7 +170,8 @@ class StyleTransformer1d(nn.Module):
                 embedding_mask_proba: float = 0.0,
                 embedding: Optional[Tensor] = None, 
                 features: Optional[Tensor] = None,
-               embedding_scale: float = 1.0) -> Tensor:
+                embedding_scale: float = 1.0,
+                diffusion_cache_lane: str = "conditional") -> Tensor:
         
         b, device = embedding.shape[0], embedding.device
         fixed_embedding = self.fixed_embedding(embedding)
@@ -177,12 +184,30 @@ class StyleTransformer1d(nn.Module):
 
         if embedding_scale != 1.0:
             # Compute both normal and fixed embedding outputs
-            out = self.run(x, time, embedding=embedding, features=features)
-            out_masked = self.run(x, time, embedding=fixed_embedding, features=features)
+            out = self.run(
+                x,
+                time,
+                embedding=embedding,
+                features=features,
+                diffusion_cache_lane=f"{diffusion_cache_lane}:conditional",
+            )
+            out_masked = self.run(
+                x,
+                time,
+                embedding=fixed_embedding,
+                features=features,
+                diffusion_cache_lane=f"{diffusion_cache_lane}:unconditional",
+            )
             # Scale conditional output using classifier-free guidance
             return out_masked + (out - out_masked) * embedding_scale
         else:
-            return self.run(x, time, embedding=embedding, features=features)
+            return self.run(
+                x,
+                time,
+                embedding=embedding,
+                features=features,
+                diffusion_cache_lane=diffusion_cache_lane,
+            )
         
         return x
 
@@ -282,7 +307,7 @@ class StyleAttention(nn.Module):
         # Compute and return attention
         return self.attention(q, k, v)
         
-class Transformer1d(nn.Module):
+class Transformer1d(DiffusionCacheMixin, nn.Module):
     def __init__(
         self,
         num_layers: int,
@@ -360,6 +385,7 @@ class Transformer1d(nn.Module):
         self.fixed_embedding = FixedEmbedding(
             max_length=embedding_max_length, features=context_embedding_features
         )
+        self._initialize_diffusion_cache()
         
 
     def get_mapping(
@@ -385,15 +411,18 @@ class Transformer1d(nn.Module):
 
         return mapping
             
-    def run(self, x, time, embedding, features):
+    def run(self, x, time, embedding, features, *, diffusion_cache_lane="conditional"):
         
         mapping = self.get_mapping(time, features)
         x = torch.cat([x.expand(-1, embedding.size(1), -1), embedding], axis=-1)
         mapping = mapping.unsqueeze(1).expand(-1, embedding.size(1), -1)
         
-        for block in self.blocks:
-            x = x + mapping
-            x = block(x)
+        x = self._run_diffusion_blocks(
+            self.blocks,
+            x,
+            lambda block, value: block(value + mapping),
+            cache_lane=diffusion_cache_lane,
+        )
         
         x = x.mean(axis=1).unsqueeze(1)
         x = self.to_out(x)
@@ -406,7 +435,8 @@ class Transformer1d(nn.Module):
                 embedding_mask_proba: float = 0.0,
                 embedding: Optional[Tensor] = None, 
                 features: Optional[Tensor] = None,
-               embedding_scale: float = 1.0) -> Tensor:
+                embedding_scale: float = 1.0,
+                diffusion_cache_lane: str = "conditional") -> Tensor:
         
         b, device = embedding.shape[0], embedding.device
         fixed_embedding = self.fixed_embedding(embedding)
@@ -419,12 +449,30 @@ class Transformer1d(nn.Module):
 
         if embedding_scale != 1.0:
             # Compute both normal and fixed embedding outputs
-            out = self.run(x, time, embedding=embedding, features=features)
-            out_masked = self.run(x, time, embedding=fixed_embedding, features=features)
+            out = self.run(
+                x,
+                time,
+                embedding=embedding,
+                features=features,
+                diffusion_cache_lane=f"{diffusion_cache_lane}:conditional",
+            )
+            out_masked = self.run(
+                x,
+                time,
+                embedding=fixed_embedding,
+                features=features,
+                diffusion_cache_lane=f"{diffusion_cache_lane}:unconditional",
+            )
             # Scale conditional output using classifier-free guidance
             return out_masked + (out - out_masked) * embedding_scale
         else:
-            return self.run(x, time, embedding=embedding, features=features)
+            return self.run(
+                x,
+                time,
+                embedding=embedding,
+                features=features,
+                diffusion_cache_lane=diffusion_cache_lane,
+            )
         
         return x
 

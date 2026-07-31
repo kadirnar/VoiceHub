@@ -168,11 +168,12 @@ def load_irodori_safetensors(
     model_id: str | None = None,
     revision: str | None = None,
 ) -> tuple[TextToLatentRFDiT, IrodoriModelConfig]:
-    resolved = Path(path).expanduser().resolve()
-    if resolved.suffix.lower() != ".safetensors":
+    requested = Path(path).expanduser()
+    if requested.suffix.lower() != ".safetensors":
         raise CheckpointCompatibilityError(
             "Irodori model weights must use Safetensors; pickle, GGUF, MLX, and "
             "quantized provider artifacts are rejected.")
+    resolved = requested.resolve()
     if dtype is not None and dtype not in {
             torch.float16,
             torch.bfloat16,

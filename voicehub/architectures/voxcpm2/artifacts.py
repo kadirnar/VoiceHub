@@ -191,10 +191,10 @@ def resolve_voxcpm2_artifacts(
     return VoxCPM2Artifacts(
         source=source_name,
         revision=resolved_revision,
-        checkpoint=checkpoint.resolve(),
+        checkpoint=checkpoint.absolute(),
         config=config.resolve(),
         tokenizer=tokenizer_path.resolve(),
-        codec_checkpoint=codec.resolve(),
+        codec_checkpoint=codec.absolute(),
         legacy_codec=legacy_codec,
         official=official,
     )

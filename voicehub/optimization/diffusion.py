@@ -115,6 +115,27 @@ class DiffusionModelOptimizationSupport:
         """Whether sampler-level NFE/guidance acceleration is exposed."""
         return "diffusion-sampling" in self.optimization_passes
 
+    @property
+    def diffusion_cache_methods(self) -> tuple[str, ...]:
+        """Cache-DiT-style methods exposed by every cache-capable graph."""
+        if not self.diffusion_cache_supported:
+            return ()
+        return ("dbcache", "first_block")
+
+    @property
+    def diffusion_cache_predictors(self) -> tuple[str, ...]:
+        """Residual predictors exposed by every cache-capable graph."""
+        if not self.diffusion_cache_supported:
+            return ()
+        return ("reuse", "taylor")
+
+    @property
+    def diffusion_cache_step_policies(self) -> tuple[str, ...]:
+        """Dynamic-threshold and explicit static-mask decision policies."""
+        if not self.diffusion_cache_supported:
+            return ()
+        return ("dynamic", "static")
+
     def supports_optimization_pass(self, optimization_pass: str) -> bool:
         """Return whether an optimization pass is declared compatible."""
         if not isinstance(optimization_pass, str):
@@ -134,6 +155,9 @@ class DiffusionModelOptimizationSupport:
             "distributed_training": self.distributed_training,
             "compile_supported": self.compile_supported,
             "diffusion_cache_supported": self.diffusion_cache_supported,
+            "diffusion_cache_methods": list(self.diffusion_cache_methods),
+            "diffusion_cache_predictors": list(self.diffusion_cache_predictors),
+            "diffusion_cache_step_policies": list(self.diffusion_cache_step_policies),
             "diffusion_sampling_supported": self.diffusion_sampling_supported,
             "sampling_techniques": list(self.sampling_techniques),
             "optimization_passes": list(self.optimization_passes),

@@ -12,6 +12,7 @@ from voicehub.models.chatterbox.models.s3gen.matcha.decoder import (
 )
 from voicehub.models.chatterbox.models.s3gen.matcha.transformer import BasicTransformerBlock
 from voicehub.models.chatterbox.models.s3gen.utils.mask import add_optional_chunk_mask
+from voicehub.optimization.diffusion_cache import DiffusionCacheMixin
 
 
 def mask_to_bias(mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
@@ -107,7 +108,7 @@ class CausalConv1d(torch.nn.Conv1d):
         return x
 
 
-class ConditionalDecoder(nn.Module):
+class ConditionalDecoder(DiffusionCacheMixin, nn.Module):
     """U-Net style 1D conditional decoder with transformer blocks for CFM-based
     mel generation."""
 
@@ -219,6 +220,7 @@ class ConditionalDecoder(nn.Module):
         self.final_block = CausalBlock1D(channels[-1], channels[-1]) if self.causal else Block1D(
             channels[-1], channels[-1])
         self.final_proj = nn.Conv1d(channels[-1], self.out_channels, 1)
+        self._initialize_diffusion_cache()
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -286,20 +288,36 @@ class ConditionalDecoder(nn.Module):
         masks = masks[:-1]
         mask_mid = masks[-1]
 
-        for resnet, transformer_blocks in self.mid_blocks:
-            x = resnet(x, mask_mid, t)
-            x = x.transpose(1, 2).contiguous()
+        def apply_mid_block(block, hidden_states):
+            resnet, transformer_blocks = block
+            hidden_states = resnet(hidden_states, mask_mid, t)
+            hidden_states = hidden_states.transpose(1, 2).contiguous()
             # attn_mask = torch.matmul(mask_mid.transpose(1, 2).contiguous(), mask_mid)
             attn_mask = add_optional_chunk_mask(
-                x, mask_mid.bool(), False, False, 0, self.static_chunk_size, -1)
-            attn_mask = mask_to_bias(attn_mask == 1, x.dtype)
+                hidden_states,
+                mask_mid.bool(),
+                False,
+                False,
+                0,
+                self.static_chunk_size,
+                -1,
+            )
+            attn_mask = mask_to_bias(attn_mask == 1, hidden_states.dtype)
             for transformer_block in transformer_blocks:
-                x = transformer_block(
-                    hidden_states=x,
+                hidden_states = transformer_block(
+                    hidden_states=hidden_states,
                     attention_mask=attn_mask,
                     timestep=t,
                 )
-            x = x.transpose(1, 2).contiguous()
+            return hidden_states.transpose(1, 2).contiguous()
+
+        x = self._run_diffusion_blocks(
+            self.mid_blocks,
+            x,
+            apply_mid_block,
+            cache_lane="packed-cfg",
+            valid_mask=mask_mid,
+        )
 
         for resnet, transformer_blocks, upsample in self.up_blocks:
             mask_up = masks.pop()

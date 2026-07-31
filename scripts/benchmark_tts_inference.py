@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Benchmark real VoiceHub TTS checkpoints in isolated processes.
 
-Preset execution profiles keep the model, generation arguments, text, and
-seed fixed, then test waveform equivalence. Explicitly named float16 and
-bfloat16 profiles measure their memory trade-off under the same quality gate.
-Custom JSON profile specifications can vary model configuration, generation
-arguments, and optimization policy for heterogeneous TTS providers. Every
-effective profile is recorded so those intentional differences remain
-auditable.
+Preset execution profiles keep the model, generation arguments, text,
+and seed fixed, then test waveform equivalence. Explicitly named float16
+and bfloat16 profiles measure their memory trade-off under the same
+quality gate. Custom JSON profile specifications can vary model
+configuration, generation arguments, and optimization policy for
+heterogeneous TTS providers. Every effective profile is recorded so
+those intentional differences remain auditable.
 """
 
 from __future__ import annotations
@@ -35,8 +35,7 @@ DEFAULT_TEXT = (
     "of clear spoken audio. It measures the complete text tokenizer, acoustic "
     "model, normalizing flow, and neural vocoder pipeline on one graphics "
     "processor. The same sentence and random seed are used for every benchmark "
-    "so that baseline and optimized runs remain directly comparable."
-)
+    "so that baseline and optimized runs remain directly comparable.")
 
 PROFILE_NAMES = (
     "baseline",
@@ -98,11 +97,7 @@ def _secret_strings(value: Any) -> frozenset[str]:
     def visit(item: Any) -> None:
         if isinstance(item, Mapping):
             for key, nested in item.items():
-                if (
-                        _is_sensitive_key(key)
-                        and isinstance(nested, str)
-                        and nested
-                ):
+                if (_is_sensitive_key(key) and isinstance(nested, str) and nested):
                     secrets.add(nested)
                 else:
                     visit(nested)
@@ -115,26 +110,19 @@ def _secret_strings(value: Any) -> frozenset[str]:
 
 
 def _redact_sensitive(
-    value: Any,
-    *,
-    secrets: frozenset[str] = frozenset(),
+        value: Any,
+        *,
+        secrets: frozenset[str] = frozenset(),
 ) -> Any:
     if isinstance(value, Mapping):
         return {
-            key: (
-                "<redacted>"
-                if _is_sensitive_key(key) else
-                _redact_sensitive(nested, secrets=secrets)
-            )
+            key: ("<redacted>" if _is_sensitive_key(key) else _redact_sensitive(nested, secrets=secrets))
             for key, nested in value.items()
         }
     if isinstance(value, tuple):
-        return tuple(
-            _redact_sensitive(item, secrets=secrets) for item in value)
+        return tuple(_redact_sensitive(item, secrets=secrets) for item in value)
     if isinstance(value, list):
-        return [
-            _redact_sensitive(item, secrets=secrets) for item in value
-        ]
+        return [_redact_sensitive(item, secrets=secrets) for item in value]
     if isinstance(value, str):
         redacted = value
         for secret in sorted(secrets, key=len, reverse=True):
@@ -145,7 +133,7 @@ def _redact_sensitive(
             redacted,
         )
         return re.sub(
-            r"""(?i)(https?://[^\s?#"']+)\?[^\s#"']*""",
+            r'(?i)(https?://[^\s?#"\']+)\?[^\s#"\']*',
             r"\1?<redacted>",
             redacted,
         )
@@ -225,8 +213,7 @@ def _normalize_profile_spec(
 ) -> dict[str, Any]:
     _profile_name(profile, option="Custom profile")
     if not isinstance(value, Mapping):
-        raise argparse.ArgumentTypeError(
-            f"--profile-specs profile {profile!r} must be a JSON object.")
+        raise argparse.ArgumentTypeError(f"--profile-specs profile {profile!r} must be a JSON object.")
     unknown = sorted(set(value) - PROFILE_SPEC_FIELDS)
     if unknown:
         raise argparse.ArgumentTypeError(
@@ -245,8 +232,7 @@ def _normalize_profile_spec(
     )
     _validate_generation_kwargs(
         generation_kwargs,
-        location=(
-            f"--profile-specs profile {profile!r} generation_kwargs"),
+        location=(f"--profile-specs profile {profile!r} generation_kwargs"),
     )
     optimization_value = value.get("optimization_config")
     if optimization_value is None:
@@ -273,8 +259,7 @@ def _normalize_profile_spec(
 def _profile_specs(value: str) -> dict[str, dict[str, Any]]:
     decoded = _json_mapping(value, name="--profile-specs")
     if not decoded:
-        raise argparse.ArgumentTypeError(
-            "--profile-specs must contain at least one named profile.")
+        raise argparse.ArgumentTypeError("--profile-specs must contain at least one named profile.")
     return {
         _profile_name(profile, option="Custom profile"): _normalize_profile_spec(
             spec,
@@ -406,15 +391,18 @@ def effective_profile_spec(
         elif profile == "bfloat16-cache":
             profile_config["torch_dtype"] = "bfloat16"
         normalized = {
-            "config_kwargs": profile_config,
+            "config_kwargs":
+            profile_config,
             "generation_kwargs": {},
-            "optimization_config": profile_optimization_config(
+            "optimization_config":
+            profile_optimization_config(
                 profile,
                 compile_backend=compile_backend,
                 compile_mode=compile_mode,
                 compile_dynamic=compile_dynamic,
             ),
-            "weight_norm_cache": profile_uses_weight_norm_cache(profile),
+            "weight_norm_cache":
+            profile_uses_weight_norm_cache(profile),
         }
     else:
         normalized = _normalize_profile_spec(
@@ -427,25 +415,20 @@ def effective_profile_spec(
     return {
         "config_kwargs": base_config,
         "generation_kwargs": base_generation,
-        "optimization_config": copy.deepcopy(
-            normalized["optimization_config"]),
+        "optimization_config": copy.deepcopy(normalized["optimization_config"]),
         "weight_norm_cache": normalized["weight_norm_cache"],
     }
 
 
-def benchmark_profile_specs(
-    args: argparse.Namespace,
-) -> dict[str, dict[str, Any]]:
+def benchmark_profile_specs(args: argparse.Namespace, ) -> dict[str, dict[str, Any]]:
     """Return ordered, effective profiles for one parent benchmark process."""
     custom_specs = getattr(args, "profile_specs", None)
     if custom_specs is None:
         selected = (
-            args.profiles
-            if args.profiles is not None else
-            _profiles(",".join(DEFAULT_PROFILE_NAMES))
-        )
+            args.profiles if args.profiles is not None else _profiles(",".join(DEFAULT_PROFILE_NAMES)))
         return {
-            profile: effective_profile_spec(
+            profile:
+            effective_profile_spec(
                 profile,
                 config_kwargs=args.config_kwargs,
                 generation_kwargs=args.generation_kwargs,
@@ -456,7 +439,8 @@ def benchmark_profile_specs(
             for profile in selected
         }
     return {
-        profile: effective_profile_spec(
+        profile:
+        effective_profile_spec(
             profile,
             config_kwargs=args.config_kwargs,
             generation_kwargs=args.generation_kwargs,
@@ -469,9 +453,7 @@ def benchmark_profile_specs(
     }
 
 
-def _effective_worker_profile_spec(
-    args: argparse.Namespace,
-) -> dict[str, Any]:
+def _effective_worker_profile_spec(args: argparse.Namespace, ) -> dict[str, Any]:
     supplied = getattr(args, "worker_profile_spec", None)
     if supplied is not None:
         return _normalize_profile_spec(
@@ -509,10 +491,7 @@ def _load_worker_input(args: argparse.Namespace) -> None:
         "text",
     }
     if set(payload) != expected:
-        raise ValueError(
-            "Worker input fields must be exactly: "
-            + ", ".join(sorted(expected))
-            + ".")
+        raise ValueError("Worker input fields must be exactly: " + ", ".join(sorted(expected)) + ".")
     if payload["profile"] != args.worker_profile:
         raise ValueError("Worker input profile does not match --worker-profile.")
     if payload["model"] is not None and not isinstance(payload["model"], str):
@@ -544,6 +523,19 @@ def _load_worker_input(args: argparse.Namespace) -> None:
 def _synchronize(torch: Any, device: Any) -> None:
     if device.type == "cuda":
         torch.cuda.synchronize(device)
+
+
+def _percentile(values: list[float], quantile: float) -> float:
+    if not values:
+        raise ValueError("Latency percentiles require at least one value.")
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * quantile
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return ordered[lower]
+    weight = position - lower
+    return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
 
 
 def _memory_snapshot(torch: Any, device: Any) -> dict[str, int] | None:
@@ -589,6 +581,21 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _hugging_face_snapshot_anchor(source: str | Path, ) -> tuple[str, str] | None:
+    """Resolve an immutable local Hugging Face snapshot directory."""
+    try:
+        path = Path(source).expanduser()
+    except TypeError:
+        return None
+    if not path.is_dir():
+        return None
+    path = path.resolve()
+    revision = path.name
+    if (path.parent.name != "snapshots" or re.fullmatch(r"[0-9a-fA-F]{40,64}", revision) is None):
+        return None
+    return str(path.parent.parent), revision
+
+
 def checkpoint_identity(
     model: Any,
     *,
@@ -612,12 +619,16 @@ def checkpoint_identity(
 
     resolved_source = getattr(artifacts, "source", None)
     resolved_revision = getattr(artifacts, "revision", None)
+    snapshot_anchor = _hugging_face_snapshot_anchor(requested_source)
+    if snapshot_anchor is not None:
+        snapshot_source, snapshot_revision = snapshot_anchor
+        if resolved_source is None:
+            resolved_source = snapshot_source
+        if resolved_revision is None:
+            resolved_revision = snapshot_revision
     revision_was_explicit = requested_revision is not None
-    if (
-            requested_revision is None
-            and getattr(config, "model_type", None) == "vits"
-            and resolved_revision is not None
-    ):
+    if (requested_revision is None and getattr(config, "model_type", None) == "vits" and
+            resolved_revision is not None):
         requested_revision = "main"
     checkpoint_value = getattr(artifacts, "checkpoint", None)
     checkpoint_path = None
@@ -627,27 +638,22 @@ def checkpoint_identity(
             checkpoint_path = candidate_path.resolve()
     weight_path = (
         checkpoint_path
-        if checkpoint_path is not None
-        and not checkpoint_path.name.endswith(".index.json")
-        else None
-    )
+        if checkpoint_path is not None and not checkpoint_path.name.endswith(".index.json") else None)
     return {
-        "requested_source": str(requested_source),
-        "requested_revision": requested_revision,
-        "requested_revision_was_explicit": revision_was_explicit,
-        "resolved_source": (
-            None if resolved_source is None else str(resolved_source)),
-        "resolved_revision": resolved_revision,
-        "local_checkpoint_path": (
-            None if checkpoint_path is None else str(checkpoint_path)),
-        "local_weight_sha256": (
-            None if weight_path is None else _sha256_file(weight_path)),
+        "requested_source":
+        str(requested_source),
+        "requested_revision":
+        requested_revision,
+        "requested_revision_was_explicit":
+        revision_was_explicit,
+        "resolved_source": (None if resolved_source is None else str(resolved_source)),
+        "resolved_revision":
+        resolved_revision,
+        "local_checkpoint_path": (None if checkpoint_path is None else str(checkpoint_path)),
+        "local_weight_sha256": (None if weight_path is None else _sha256_file(weight_path)),
         "weight_digest_status": (
-            "sha256"
-            if weight_path is not None else
-            "checkpoint-index-only"
-            if checkpoint_path is not None else
-            "not-exposed"),
+            "sha256" if weight_path is not None else
+            "checkpoint-index-only" if checkpoint_path is not None else "not-exposed"),
     }
 
 
@@ -711,39 +717,33 @@ def _model_statistics(model: Any) -> dict[str, Any]:
     parameters = tuple(parameters_method())
     return {
         "parameters": sum(parameter.numel() for parameter in parameters),
-        "trainable_parameters": sum(
-            parameter.numel() for parameter in parameters if parameter.requires_grad),
-        "parameter_bytes": sum(
-            parameter.numel() * parameter.element_size() for parameter in parameters),
-        "dtypes": sorted({str(parameter.dtype).removeprefix("torch.") for parameter in parameters}),
+        "trainable_parameters": sum(parameter.numel() for parameter in parameters if parameter.requires_grad),
+        "parameter_bytes": sum(parameter.numel() * parameter.element_size() for parameter in parameters),
+        "dtypes": sorted({str(parameter.dtype).removeprefix("torch.")
+                          for parameter in parameters}),
     }
 
 
 def _benchmark_worker(args: argparse.Namespace) -> dict[str, Any]:
     import torch
 
-    from voicehub import (
-        AutoModelForTextToSpeech,
-        get_model_spec,
-    )
+    from voicehub import AutoModelForTextToSpeech
     from voicehub import __version__ as voicehub_version
+    from voicehub import diffusion_cache_summary, get_model_spec, reset_diffusion_cache_metrics
 
     effective_spec = _effective_worker_profile_spec(args)
     config_kwargs = copy.deepcopy(effective_spec["config_kwargs"])
-    profile_generation_kwargs = copy.deepcopy(
-        effective_spec["generation_kwargs"])
+    profile_generation_kwargs = copy.deepcopy(effective_spec["generation_kwargs"])
     _validate_generation_kwargs(
         profile_generation_kwargs,
         location=f"Profile {args.worker_profile!r}",
     )
-    optimization_config = copy.deepcopy(
-        effective_spec["optimization_config"])
+    optimization_config = copy.deepcopy(effective_spec["optimization_config"])
     weight_norm_cache = effective_spec["weight_norm_cache"]
     spec = get_model_spec(args.model_type)
     source = args.model or spec.default_model_path
     if not source:
-        raise ValueError(
-            f"Model type {args.model_type!r} has no default checkpoint; pass `--model`.")
+        raise ValueError(f"Model type {args.model_type!r} has no default checkpoint; pass `--model`.")
     generation_kwargs = copy.deepcopy(profile_generation_kwargs)
     generation_kwargs["seed"] = args.seed
     torch.manual_seed(args.seed)
@@ -782,6 +782,7 @@ def _benchmark_worker(args: argparse.Namespace) -> dict[str, Any]:
     model_statistics = _model_statistics(model)
     optimization = model.tts_optimization_result(mode="inference")
 
+    reset_diffusion_cache_metrics(model.model)
     _reset_peak_memory(torch, device)
     cold_audio, cold_metadata, cold_seconds = _timed_generate(
         model,
@@ -792,6 +793,10 @@ def _benchmark_worker(args: argparse.Namespace) -> dict[str, Any]:
         minimum_audio_seconds=args.minimum_audio_seconds,
     )
     cold_memory = _memory_snapshot(torch, device)
+    cold_diffusion_cache = diffusion_cache_summary(
+        model.model,
+        details=True,
+    )
     torch.save(cold_audio, args.worker_waveform)
     if args.worker_audio is not None:
         model.save_audio(
@@ -800,6 +805,7 @@ def _benchmark_worker(args: argparse.Namespace) -> dict[str, Any]:
             cold_metadata["sample_rate"],
         )
 
+    reset_diffusion_cache_metrics(model.model)
     warmup_hashes = []
     for _ in range(args.warmup):
         _audio, metadata, _elapsed = _timed_generate(
@@ -812,11 +818,15 @@ def _benchmark_worker(args: argparse.Namespace) -> dict[str, Any]:
         )
         warmup_hashes.append(metadata["sha256_float32"])
         if metadata["sample_rate"] != cold_metadata["sample_rate"]:
-            raise RuntimeError(
-                "Warm-up generation changed the output sample rate.")
+            raise RuntimeError("Warm-up generation changed the output sample rate.")
         if metadata["samples"] != cold_metadata["samples"]:
             raise RuntimeError("Warm-up generation changed the output waveform length.")
+    warmup_diffusion_cache = diffusion_cache_summary(
+        model.model,
+        details=True,
+    )
 
+    reset_diffusion_cache_metrics(model.model)
     _reset_peak_memory(torch, device)
     latencies = []
     repeat_hashes = []
@@ -830,14 +840,18 @@ def _benchmark_worker(args: argparse.Namespace) -> dict[str, Any]:
             minimum_audio_seconds=args.minimum_audio_seconds,
         )
         if metadata["sample_rate"] != cold_metadata["sample_rate"]:
-            raise RuntimeError(
-                "Measured generation changed the output sample rate.")
+            raise RuntimeError("Measured generation changed the output sample rate.")
         if metadata["samples"] != cold_metadata["samples"]:
             raise RuntimeError("Measured generation changed the output waveform length.")
         latencies.append(elapsed)
         repeat_hashes.append(metadata["sha256_float32"])
     steady_memory = _memory_snapshot(torch, device)
+    steady_diffusion_cache = diffusion_cache_summary(
+        model.model,
+        details=True,
+    )
     mean_seconds = statistics.fmean(latencies)
+    latency_stdev = statistics.stdev(latencies) if len(latencies) > 1 else 0.0
 
     gpu = None
     if device.type == "cuda":
@@ -872,8 +886,7 @@ def _benchmark_worker(args: argparse.Namespace) -> dict[str, Any]:
         "config_kwargs": config_kwargs,
         "generation_kwargs": generation_kwargs,
         "optimization_config": optimization_config,
-        "optimization_manifest": (
-            None if optimization is None else optimization.manifest()),
+        "optimization_manifest": (None if optimization is None else optimization.manifest()),
         "weight_norm_cache": {
             "supported": callable(cache_method) and callable(clear_cache_method),
             "enabled": cache_enabled,
@@ -885,23 +898,48 @@ def _benchmark_worker(args: argparse.Namespace) -> dict[str, Any]:
         "cold": {
             **cold_metadata,
             "latency_seconds": cold_seconds,
+            "end_to_end_latency_seconds": cold_seconds,
+            "time_to_first_audio_seconds": cold_seconds,
             "real_time_factor": cold_seconds / cold_metadata["duration_seconds"],
+            "audio_seconds_per_second": cold_metadata["duration_seconds"] / cold_seconds,
             "memory": cold_memory,
+            "diffusion_cache": cold_diffusion_cache,
         },
+        "warmup_diffusion_cache": warmup_diffusion_cache,
         "steady": {
-            "warmup_runs_after_cold": args.warmup,
-            "repeats": args.repeats,
-            "latency_seconds": latencies,
-            "mean_latency_seconds": mean_seconds,
-            "median_latency_seconds": statistics.median(latencies),
-            "minimum_latency_seconds": min(latencies),
-            "maximum_latency_seconds": max(latencies),
-            "mean_real_time_factor": mean_seconds / cold_metadata["duration_seconds"],
-            "memory": steady_memory,
-            "deterministic_across_repeats": (
-                all(value == cold_metadata["sha256_float32"]
-                    for value in (*warmup_hashes, *repeat_hashes))),
-            "sha256_float32": repeat_hashes,
+            "warmup_runs_after_cold":
+            args.warmup,
+            "repeats":
+            args.repeats,
+            "latency_seconds":
+            latencies,
+            "mean_latency_seconds":
+            mean_seconds,
+            "median_latency_seconds":
+            statistics.median(latencies),
+            "p95_latency_seconds":
+            _percentile(latencies, 0.95),
+            "latency_stdev_seconds":
+            latency_stdev,
+            "latency_coefficient_of_variation": (latency_stdev / mean_seconds if mean_seconds else 0.0),
+            "minimum_latency_seconds":
+            min(latencies),
+            "maximum_latency_seconds":
+            max(latencies),
+            "mean_time_to_first_audio_seconds":
+            mean_seconds,
+            "mean_real_time_factor":
+            mean_seconds / cold_metadata["duration_seconds"],
+            "mean_audio_seconds_per_second":
+            cold_metadata["duration_seconds"] / mean_seconds,
+            "memory":
+            steady_memory,
+            "diffusion_cache":
+            steady_diffusion_cache,
+            "deterministic_across_repeats":
+            (all(value == cold_metadata["sha256_float32"] for value in (*warmup_hashes, *repeat_hashes))),
+            "sha256_float32":
+            repeat_hashes,
         },
     }
 
@@ -924,8 +962,7 @@ def compare_waveforms(
         "same_length": same_length,
         "reference_samples": int(reference.numel()),
         "candidate_samples": int(candidate.numel()),
-        "duration_delta_seconds": (
-            (candidate.numel() - reference.numel()) / sample_rate),
+        "duration_delta_seconds": ((candidate.numel() - reference.numel()) / sample_rate),
         "exact": False,
         "within_tolerance": False,
         "max_absolute_error": None,
@@ -984,11 +1021,7 @@ def _speedup_ratio(
     baseline_seconds: float | None,
     candidate_seconds: float | None,
 ) -> float | None:
-    if (
-            baseline_seconds is None
-            or candidate_seconds is None
-            or candidate_seconds == 0
-    ):
+    if (baseline_seconds is None or candidate_seconds is None or candidate_seconds == 0):
         return None
     return float(baseline_seconds / candidate_seconds)
 
@@ -1057,10 +1090,7 @@ def performance_comparisons(
     reference_profile: str,
 ) -> dict[str, dict[str, Any]]:
     """Calculate candidate deltas against one successful reference profile."""
-    successful = {
-        result["profile"]: result
-        for result in results if result.get("status") == "ok"
-    }
+    successful = {result["profile"]: result for result in results if result.get("status") == "ok"}
     baseline = successful.get(reference_profile)
     if baseline is None:
         return {}
@@ -1071,24 +1101,31 @@ def performance_comparisons(
         if waveform is None:
             continue
         comparisons[profile] = {
-            "reference_profile": reference_profile,
-            "candidate_profile": profile,
-            "waveform_equivalence_passed": bool(
-                waveform.get("within_tolerance", False)),
-            "waveform_exact": bool(waveform.get("exact", False)),
-            "cold_latency": _latency_comparison(
+            "reference_profile":
+            reference_profile,
+            "candidate_profile":
+            profile,
+            "waveform_equivalence_passed":
+            bool(waveform.get("within_tolerance", False)),
+            "waveform_exact":
+            bool(waveform.get("exact", False)),
+            "cold_latency":
+            _latency_comparison(
                 baseline["cold"]["latency_seconds"],
                 candidate["cold"]["latency_seconds"],
             ),
-            "steady_mean_latency": _latency_comparison(
+            "steady_mean_latency":
+            _latency_comparison(
                 baseline["steady"]["mean_latency_seconds"],
                 candidate["steady"]["mean_latency_seconds"],
             ),
-            "steady_median_latency": _latency_comparison(
+            "steady_median_latency":
+            _latency_comparison(
                 baseline["steady"]["median_latency_seconds"],
                 candidate["steady"]["median_latency_seconds"],
             ),
-            "steady_peak_allocated_memory": _memory_comparison(
+            "steady_peak_allocated_memory":
+            _memory_comparison(
                 _peak_memory_value(
                     baseline,
                     phase="steady",
@@ -1100,7 +1137,8 @@ def performance_comparisons(
                     key="peak_allocated_bytes",
                 ),
             ),
-            "steady_peak_reserved_memory": _memory_comparison(
+            "steady_peak_reserved_memory":
+            _memory_comparison(
                 _peak_memory_value(
                     baseline,
                     phase="steady",
@@ -1128,12 +1166,8 @@ def checkpoint_identity_comparison_error(
     candidate_digest = candidate.get("local_weight_sha256")
     if reference_digest is not None and candidate_digest is not None:
         digest_pattern = re.compile(r"^[0-9a-fA-F]{64}$")
-        if (
-                not isinstance(reference_digest, str)
-                or not digest_pattern.fullmatch(reference_digest)
-                or not isinstance(candidate_digest, str)
-                or not digest_pattern.fullmatch(candidate_digest)
-        ):
+        if (not isinstance(reference_digest, str) or not digest_pattern.fullmatch(reference_digest) or
+                not isinstance(candidate_digest, str) or not digest_pattern.fullmatch(candidate_digest)):
             return "Checkpoint weight digests must be 64 hexadecimal characters."
         if reference_digest != candidate_digest:
             return "Checkpoint identity differs from baseline in local_weight_sha256."
@@ -1145,25 +1179,15 @@ def checkpoint_identity_comparison_error(
     candidate_revision = candidate.get("resolved_revision")
     revision_pattern = re.compile(r"^[0-9a-fA-F]{40,64}$")
     reference_has_revision = (
-        isinstance(reference_source, str)
-        and bool(reference_source)
-        and isinstance(reference_revision, str)
-        and revision_pattern.fullmatch(reference_revision) is not None
-    )
+        isinstance(reference_source, str) and bool(reference_source) and
+        isinstance(reference_revision, str) and revision_pattern.fullmatch(reference_revision) is not None)
     candidate_has_revision = (
-        isinstance(candidate_source, str)
-        and bool(candidate_source)
-        and isinstance(candidate_revision, str)
-        and revision_pattern.fullmatch(candidate_revision) is not None
-    )
+        isinstance(candidate_source, str) and bool(candidate_source) and
+        isinstance(candidate_revision, str) and revision_pattern.fullmatch(candidate_revision) is not None)
     if reference_has_revision and candidate_has_revision:
-        if (
-                reference_source != candidate_source
-                or reference_revision != candidate_revision
-        ):
-            return (
-                "Checkpoint resolved source or immutable revision differs "
-                "from baseline.")
+        if (reference_source != candidate_source or reference_revision != candidate_revision):
+            return ("Checkpoint resolved source or immutable revision differs "
+                    "from baseline.")
         return None
 
     return (
@@ -1172,7 +1196,8 @@ def checkpoint_identity_comparison_error(
 
 
 def audit_registry() -> dict[str, Any]:
-    """Exercise lazy construction and static optimization for every TTS provider."""
+    """Exercise lazy construction and static optimization for every TTS
+    provider."""
     from voicehub import AutoModelForTextToSpeech
     from voicehub import __version__ as voicehub_version
     from voicehub.registry import list_model_specs
@@ -1186,7 +1211,8 @@ def audit_registry() -> dict[str, Any]:
             "default_checkpoint": spec.default_model_path,
             "coverage": "lazy-construction-and-static-plan",
             "real_weights": {
-                "status": "not-attempted",
+                "status":
+                "not-attempted",
                 "reason": (
                     "The registry audit is intentionally offline and does not "
                     "download or allocate checkpoint weights."),
@@ -1248,13 +1274,17 @@ def audit_registry() -> dict[str, Any]:
             }
         providers.append(item)
     return {
-        "audit": "tts-registry",
-        "voicehub_version": voicehub_version,
-        "provider_count": len(providers),
+        "audit":
+        "tts-registry",
+        "voicehub_version":
+        voicehub_version,
+        "provider_count":
+        len(providers),
         "coverage_definition": (
             "Lazy wrapper construction plus baseline and automatic static "
             "optimization-plan resolution. This does not claim real-weight inference."),
-        "providers": providers,
+        "providers":
+        providers,
     }
 
 
@@ -1327,22 +1357,24 @@ def _worker_entry(args: argparse.Namespace) -> int:
             "voicehub_version": voicehub_version,
             "effective_profile_spec": effective_spec,
             "checkpoint_identity": {
-                "requested_source": args.model,
+                "requested_source":
+                args.model,
                 "requested_revision": (
                     args.config_kwargs.get("revision")
-                    if effective_spec is None else
-                    effective_spec["config_kwargs"].get("revision")),
-                "requested_revision_was_explicit": (
-                    (
-                        args.config_kwargs.get("revision")
-                        if effective_spec is None else
-                        effective_spec["config_kwargs"].get("revision")
-                    ) is not None),
-                "resolved_source": None,
-                "resolved_revision": None,
-                "local_checkpoint_path": None,
-                "local_weight_sha256": None,
-                "weight_digest_status": "unresolved",
+                    if effective_spec is None else effective_spec["config_kwargs"].get("revision")),
+                "requested_revision_was_explicit": ((
+                    args.config_kwargs.get("revision") if effective_spec is None else
+                    effective_spec["config_kwargs"].get("revision")) is not None),
+                "resolved_source":
+                None,
+                "resolved_revision":
+                None,
+                "local_checkpoint_path":
+                None,
+                "local_weight_sha256":
+                None,
+                "weight_digest_status":
+                "unresolved",
             },
             "coverage": "real-checkpoint-attempted",
             "error_type": type(error).__name__,
@@ -1383,30 +1415,19 @@ def _main_benchmark(args: argparse.Namespace) -> int:
         raise ValueError(
             "TTS benchmarks require a `baseline` profile so optimized "
             "profiles cannot become their own reference.")
-    if (
-            baseline_spec["optimization_config"] is not None
-            or baseline_spec["weight_norm_cache"]
-    ):
+    if (baseline_spec["optimization_config"] is not None or baseline_spec["weight_norm_cache"]):
         raise ValueError(
             "The `baseline` profile must use eager inference without an "
             "optimization policy or weight-normalization cache.")
-    profile_mode = (
-        "custom"
-        if getattr(args, "profile_specs", None) is not None else
-        "preset"
-    )
+    profile_mode = ("custom" if getattr(args, "profile_specs", None) is not None else "preset")
     command_path = Path(__file__).resolve()
     artifact_context = (
-        tempfile.TemporaryDirectory(prefix="voicehub-tts-benchmark-")
-        if args.artifact_dir is None else None)
-    artifact_root = (
-        Path(artifact_context.name) if artifact_context is not None else args.artifact_dir)
+        tempfile.TemporaryDirectory(prefix="voicehub-tts-benchmark-") if args.artifact_dir is None else None)
+    artifact_root = (Path(artifact_context.name) if artifact_context is not None else args.artifact_dir)
     artifact_root.mkdir(parents=True, exist_ok=True)
     artifact_run_root = (
-        artifact_root
-        if artifact_context is not None else
-        Path(tempfile.mkdtemp(prefix="run-", dir=artifact_root))
-    )
+        artifact_root if artifact_context is not None else Path(
+            tempfile.mkdtemp(prefix="run-", dir=artifact_root)))
     if args.audio_dir is not None:
         args.audio_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1429,8 +1450,7 @@ def _main_benchmark(args: argparse.Namespace) -> int:
                 },
             )
             audio_path = (
-                None if args.audio_dir is None else
-                (args.audio_dir / f"{args.model_type}-{profile}.wav"))
+                None if args.audio_dir is None else (args.audio_dir / f"{args.model_type}-{profile}.wav"))
             worker_command = [
                 sys.executable,
                 str(command_path),
@@ -1468,11 +1488,9 @@ def _main_benchmark(args: argparse.Namespace) -> int:
                 worker_command.extend(("--worker-audio", str(audio_path)))
             environment = dict(os.environ)
             environment.setdefault("PYTHONHASHSEED", str(args.seed))
-            with tempfile.TemporaryDirectory(
-                    prefix=f"voicehub-{profile}-compiler-cache-") as compiler_cache:
+            with tempfile.TemporaryDirectory(prefix=f"voicehub-{profile}-compiler-cache-") as compiler_cache:
                 compiler_cache_path = Path(compiler_cache)
-                environment["TORCHINDUCTOR_CACHE_DIR"] = str(
-                    compiler_cache_path / "torchinductor")
+                environment["TORCHINDUCTOR_CACHE_DIR"] = str(compiler_cache_path / "torchinductor")
                 environment["TRITON_CACHE_DIR"] = str(compiler_cache_path / "triton")
                 environment["CUDA_CACHE_PATH"] = str(compiler_cache_path / "cuda")
                 try:
@@ -1497,45 +1515,59 @@ def _main_benchmark(args: argparse.Namespace) -> int:
                 else:
                     if not result_path.is_file():
                         result = {
-                            "status": "error",
-                            "profile": profile,
-                            "model_type": args.model_type,
-                            "checkpoint": args.model,
-                            "coverage": "real-checkpoint-attempted",
-                            "error_type": "WorkerProcessError",
+                            "status":
+                            "error",
+                            "profile":
+                            profile,
+                            "model_type":
+                            args.model_type,
+                            "checkpoint":
+                            args.model,
+                            "coverage":
+                            "real-checkpoint-attempted",
+                            "error_type":
+                            "WorkerProcessError",
                             "error": (
                                 f"Worker exited with status {completed.returncode} "
                                 "without writing a result."),
                         }
                     else:
                         try:
-                            result = json.loads(
-                                result_path.read_text(encoding="utf-8"))
+                            result = json.loads(result_path.read_text(encoding="utf-8"))
                         except (json.JSONDecodeError, OSError) as error:
                             result = {
-                                "status": "error",
-                                "profile": profile,
-                                "model_type": args.model_type,
-                                "checkpoint": args.model,
-                                "coverage": "real-checkpoint-attempted",
-                                "error_type": "InvalidWorkerResult",
-                                "error": (
-                                    "Worker wrote an unreadable result: "
-                                    f"{type(error).__name__}: {error}"),
+                                "status":
+                                "error",
+                                "profile":
+                                profile,
+                                "model_type":
+                                args.model_type,
+                                "checkpoint":
+                                args.model,
+                                "coverage":
+                                "real-checkpoint-attempted",
+                                "error_type":
+                                "InvalidWorkerResult",
+                                "error":
+                                ("Worker wrote an unreadable result: "
+                                 f"{type(error).__name__}: {error}"),
                             }
                         else:
-                            if (
-                                    not isinstance(result, Mapping)
-                                    or result.get("profile") != profile
-                                    or result.get("status") not in {"ok", "error"}
-                            ):
+                            if (not isinstance(result, Mapping) or result.get("profile") != profile or
+                                    result.get("status") not in {"ok", "error"}):
                                 result = {
-                                    "status": "error",
-                                    "profile": profile,
-                                    "model_type": args.model_type,
-                                    "checkpoint": args.model,
-                                    "coverage": "real-checkpoint-attempted",
-                                    "error_type": "InvalidWorkerResult",
+                                    "status":
+                                    "error",
+                                    "profile":
+                                    profile,
+                                    "model_type":
+                                    args.model_type,
+                                    "checkpoint":
+                                    args.model,
+                                    "coverage":
+                                    "real-checkpoint-attempted",
+                                    "error_type":
+                                    "InvalidWorkerResult",
                                     "error": (
                                         "Worker result must be an object with "
                                         "the requested profile and status "
@@ -1543,17 +1575,24 @@ def _main_benchmark(args: argparse.Namespace) -> int:
                                 }
                     if completed.returncode != 0 and result["status"] == "ok":
                         result = {
-                            "status": "error",
-                            "profile": profile,
-                            "model_type": args.model_type,
-                            "checkpoint": args.model,
-                            "coverage": "real-checkpoint-attempted",
-                            "error_type": "WorkerProcessError",
+                            "status":
+                            "error",
+                            "profile":
+                            profile,
+                            "model_type":
+                            args.model_type,
+                            "checkpoint":
+                            args.model,
+                            "coverage":
+                            "real-checkpoint-attempted",
+                            "error_type":
+                            "WorkerProcessError",
                             "error": (
                                 f"Worker exited with status "
                                 f"{completed.returncode} after writing an "
                                 "apparently successful result."),
-                            "discarded_worker_result": result,
+                            "discarded_worker_result":
+                            result,
                         }
                     if completed.stderr.strip():
                         result["worker_stderr"] = completed.stderr.strip()
@@ -1573,10 +1612,7 @@ def _main_benchmark(args: argparse.Namespace) -> int:
 
         successful = [result for result in results if result["status"] == "ok"]
         reference_result = next(
-            (
-                result for result in successful
-                if result["profile"] == "baseline"
-            ),
+            (result for result in successful if result["profile"] == "baseline"),
             None,
         )
         comparisons = {}
@@ -1634,50 +1670,62 @@ def _main_benchmark(args: argparse.Namespace) -> int:
                     comparison["candidate_profile"] = profile
                     comparisons[profile] = comparison
 
-        reference_profile = (
-            None if reference_result is None else reference_result["profile"])
-        measured_comparisons = (
-            {} if reference_profile is None else
-            performance_comparisons(
-                results,
-                comparisons,
-                reference_profile=reference_profile,
-            ))
+        reference_profile = (None if reference_result is None else reference_result["profile"])
+        measured_comparisons = ({} if reference_profile is None else performance_comparisons(
+            results,
+            comparisons,
+            reference_profile=reference_profile,
+        ))
         aggregate_identity = (
-            reference_result.get("checkpoint_identity", {})
-            if reference_result is not None else
-            {
-                "requested_source": args.model,
-                "requested_revision": next(
-                    iter(effective_specs.values()),
-                )["config_kwargs"].get("revision"),
-                "requested_revision_was_explicit": (
-                    next(
-                        iter(effective_specs.values()),
-                    )["config_kwargs"].get("revision") is not None),
-                "resolved_source": None,
-                "resolved_revision": None,
-                "local_checkpoint_path": None,
-                "local_weight_sha256": None,
-                "weight_digest_status": "unresolved",
-            }
-        )
+            reference_result.get("checkpoint_identity", {}) if reference_result is not None else {
+                "requested_source":
+                args.model,
+                "requested_revision":
+                next(iter(effective_specs.values()), )["config_kwargs"].get("revision"),
+                "requested_revision_was_explicit":
+                (next(iter(effective_specs.values()), )["config_kwargs"].get("revision") is not None),
+                "resolved_source":
+                None,
+                "resolved_revision":
+                None,
+                "local_checkpoint_path":
+                None,
+                "local_weight_sha256":
+                None,
+                "weight_digest_status":
+                "unresolved",
+            })
         benchmark = {
-            "benchmark": "voicehub-tts-real-checkpoint",
-            "command": sys.argv,
-            "model_type": args.model_type,
-            "checkpoint": args.model,
-            "voicehub_version": voicehub_version,
-            "checkpoint_identity": aggregate_identity,
-            "text": text,
-            "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-            "minimum_audio_seconds": args.minimum_audio_seconds,
-            "profile_mode": profile_mode,
-            "profile_specs": effective_specs,
-            "profiles": results,
-            "performance_comparisons": measured_comparisons,
-            "waveform_comparisons": comparisons,
-            "comparison_errors": comparison_errors,
+            "benchmark":
+            "voicehub-tts-real-checkpoint",
+            "command":
+            sys.argv,
+            "model_type":
+            args.model_type,
+            "checkpoint":
+            args.model,
+            "voicehub_version":
+            voicehub_version,
+            "checkpoint_identity":
+            aggregate_identity,
+            "text":
+            text,
+            "text_sha256":
+            hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "minimum_audio_seconds":
+            args.minimum_audio_seconds,
+            "profile_mode":
+            profile_mode,
+            "profile_specs":
+            effective_specs,
+            "profiles":
+            results,
+            "performance_comparisons":
+            measured_comparisons,
+            "waveform_comparisons":
+            comparisons,
+            "comparison_errors":
+            comparison_errors,
             "quality_scope": (
                 "Waveform equality/tolerance at fixed text and benchmark-managed "
                 "seed. Presets keep generation arguments fixed; custom profiles "
@@ -1695,20 +1743,13 @@ def _main_benchmark(args: argparse.Namespace) -> int:
             sort_keys=True,
         ))
         failed = any(result["status"] != "ok" for result in results)
-        nondeterministic = any(
-            not result["steady"]["deterministic_across_repeats"]
-            for result in successful
-        )
+        nondeterministic = any(not result["steady"]["deterministic_across_repeats"] for result in successful)
         inequivalent = any(
-            not comparison["within_tolerance"]
-            for profile, comparison in comparisons.items() if profile != reference_result["profile"]
-        ) if reference_result is not None else False
+            not comparison["within_tolerance"] for profile, comparison in comparisons.items()
+            if profile != reference_result["profile"]) if reference_result is not None else False
         return int(
-            failed
-            or bool(comparison_errors)
-            or nondeterministic
-            or (args.require_waveform_equivalence and inequivalent)
-        )
+            failed or bool(comparison_errors) or nondeterministic or
+            (args.require_waveform_equivalence and inequivalent))
     finally:
         if artifact_context is not None:
             artifact_context.cleanup()
@@ -1718,8 +1759,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Benchmark one real TTS checkpoint with isolated preset or "
-            "custom execution profiles."),
-    )
+            "custom execution profiles."), )
     parser.add_argument("--audit-registry", action="store_true")
     parser.add_argument("--model-type")
     parser.add_argument("--model")
@@ -1731,9 +1771,8 @@ def _parser() -> argparse.ArgumentParser:
         "--profiles",
         type=_profiles,
         default=_profiles(",".join(DEFAULT_PROFILE_NAMES)),
-        help=(
-            "Comma-separated preset profiles. Defaults to "
-            f"{','.join(DEFAULT_PROFILE_NAMES)}."),
+        help=("Comma-separated preset profiles. Defaults to "
+              f"{','.join(DEFAULT_PROFILE_NAMES)}."),
     )
     profile_group.add_argument(
         "--profile-specs",
@@ -1815,12 +1854,9 @@ def main() -> int:
         print(json.dumps(result, allow_nan=False, indent=2, sort_keys=True))
         return int(
             any(
-                provider["lazy_construction"]["status"] != "ok"
-                or provider["baseline_plan"] is None
-                or provider["baseline_plan"]["status"] != "ok"
-                or provider["optimized_plan"] is None
-                or provider["optimized_plan"]["status"] != "ok"
-                for provider in result["providers"]))
+                provider["lazy_construction"]["status"] != "ok" or provider["baseline_plan"] is None or
+                provider["baseline_plan"]["status"] != "ok" or provider["optimized_plan"] is None or
+                provider["optimized_plan"]["status"] != "ok" for provider in result["providers"]))
     return _main_benchmark(args)
 
 

@@ -325,7 +325,7 @@ print("ok")
             inference_condition = T3Cond(
                 speaker_emb=torch.randn(1, 4),
                 cond_prompt_speech_tokens=torch.tensor([[3, 4]]),
-                emotion_adv=0.5,
+                emotion_adv=torch.tensor([[[0.5]]]),
             )
             generated = model.inference(
                 t3_cond=inference_condition,

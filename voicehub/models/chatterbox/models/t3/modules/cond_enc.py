@@ -99,7 +99,7 @@ class T3CondEnc(nn.Module):
                 dtype=cond_spkr.dtype,
             )
             if emotion.numel() == 1:
-                emotion = emotion.expand(cond_spkr.shape[0])
+                emotion = emotion.reshape(()).expand(cond_spkr.shape[0])
             if emotion.numel() != cond_spkr.shape[0]:
                 raise ValueError(
                     "Chatterbox emotion conditioning must contain one value "

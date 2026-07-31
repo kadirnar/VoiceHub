@@ -355,12 +355,7 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         """
         from dataclasses import replace
 
-        from voicehub.llm_serving import (
-            LLMBackend,
-            LLMBackendConfig,
-            LLMServingClient,
-            get_llm_backend_support,
-        )
+        from voicehub.llm_serving import LLMBackend, LLMBackendConfig, LLMServingClient, get_llm_backend_support
 
         resolved_backend = LLMBackend.coerce(backend)
         if resolved_backend is LLMBackend.NATIVE:
@@ -680,8 +675,7 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
                                 mode="inference",
                             )
                         except BaseException:
-                            self._pending_tts_optimization_config = (
-                                pending_config)
+                            self._pending_tts_optimization_config = (pending_config)
                             raise
                         self._pending_tts_optimization_config = None
                     self._inference_ready = True
@@ -691,9 +685,7 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
                     # rebuilt. Preserve a pre-existing training runtime (and
                     # its optimizer-owned parameters) so serving auxiliaries
                     # such as a codec can be attached again safely.
-                    discard_runtime = (
-                        not native_prepared and model_loaded_in_this_call
-                    )
+                    discard_runtime = (not native_prepared and model_loaded_in_this_call)
                     if self._inference_strategy_applied:
                         try:
                             restored_model = self._inference_strategy.restore_for_training(
@@ -970,7 +962,10 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
                 self.load()
             else:
                 self.load()
-                output = self._generate(**model_inputs)
+                from voicehub.optimization import diffusion_cache_request
+
+                with diffusion_cache_request(self.model):
+                    output = self._generate(**model_inputs)
         if uses_speech_backend:
             output = backend_client.synthesize(
                 self.config.model_type,
@@ -978,7 +973,10 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
                 default_sample_rate=self.sample_rate,
             )
         elif uses_token_backend:
-            output = self._generate(**model_inputs)
+            from voicehub.optimization import diffusion_cache_request
+
+            with diffusion_cache_request(self.model):
+                output = self._generate(**model_inputs)
         if not isinstance(output, TTSOutput):
             raise TypeError(
                 f"{self.__class__.__name__}._generate() must return a "

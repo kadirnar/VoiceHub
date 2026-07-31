@@ -143,7 +143,7 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
     def _resolve_checkpoint(self) -> Path:
         source = Path(self.config.name_or_path).expanduser()
         if source.is_file():
-            return source.resolve()
+            return source.absolute()
         revision = self.config.model_revision
         if revision is None:
             from voicehub.architectures.irodoritts.metadata import IRODORI_CHECKPOINTS
@@ -163,7 +163,7 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
             checkpoint = model_directory / self.config.checkpoint_filename
             if not checkpoint.is_file():
                 raise FileNotFoundError(f"Irodori checkpoint not found: {checkpoint}.")
-            return checkpoint.resolve()
+            return checkpoint.absolute()
 
         candidates = [
             path for pattern in ("*.safetensors", ) for path in sorted(model_directory.glob(pattern))
@@ -173,7 +173,7 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
         if not candidates:
             raise FileNotFoundError(f"No Irodori checkpoint found in {model_directory}.")
         if len(candidates) == 1:
-            return candidates[0].resolve()
+            return candidates[0].absolute()
 
         preferred_names = (
             "model.safetensors",
@@ -183,7 +183,7 @@ class IrodoriTTSForTextToSpeech(PreTrainedTTSModel):
         )
         preferred = [model_directory / name for name in preferred_names if (model_directory / name).is_file()]
         if len(preferred) == 1:
-            return preferred[0].resolve()
+            return preferred[0].absolute()
         names = ", ".join(path.name for path in candidates)
         raise ValueError(
             "Multiple Irodori checkpoints were found "

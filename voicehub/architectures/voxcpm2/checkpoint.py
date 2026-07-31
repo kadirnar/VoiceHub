@@ -54,9 +54,10 @@ class VoxCPMCheckpointReport:
 
 
 def inspect_voxcpm_checkpoint(path: str | Path) -> VoxCPMCheckpointReport:
-    source = Path(path).expanduser().resolve()
-    if source.suffix.lower() != ".safetensors":
+    requested = Path(path).expanduser()
+    if requested.suffix.lower() != ".safetensors":
         raise ValueError("Native VoxCPM checkpoints must use Safetensors.")
+    source = requested.resolve()
     with SafeTensorReader(source) as reader:
         inventory = {
             name: (
@@ -247,9 +248,10 @@ def convert_legacy_voxcpm_codec(
         raise PermissionError(
             "The official VoxCPM2 AudioVAE is a legacy pickle archive. "
             "Set `trust_legacy_pickle=True` only after reviewing its provenance.")
-    source = Path(legacy_path).expanduser().resolve()
-    if source.suffix.lower() not in {".pth", ".pt", ".ckpt"}:
+    requested = Path(legacy_path).expanduser()
+    if requested.suffix.lower() not in {".pth", ".pt", ".ckpt"}:
         raise ValueError("Legacy VoxCPM AudioVAE input must be a PyTorch archive.")
+    source = requested.resolve()
     if verify_official_integrity:
         if source.stat().st_size != VOXCPM2_CODEC_LEGACY_SIZE:
             raise ValueError("Official VoxCPM AudioVAE size verification failed.")
