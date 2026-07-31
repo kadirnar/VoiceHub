@@ -5,9 +5,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from torch import Tensor
+from torch import Tensor, nn
 
 from voicehub.models.vui.config import Config
 from voicehub.models.vui.fluac import Fluac, FluacConfig
@@ -102,8 +101,7 @@ class MHA(nn.Module):
         input_pos: Tensor | None = None,
         attn_mask: Tensor | None = None,
     ):
-        B, T, d = x.size()
-        x.dtype
+        B, T, _ = x.size()
 
         dropout_p = self.dropout if self.training else 0.0
 
@@ -410,7 +408,14 @@ class Vui(nn.Module):
         self,
         mode: str,
     ) -> tuple[OptimizationCompileTarget, ...]:
-        """Expose the decoder and codec boundaries reached by Vui TTS."""
+        """Expose only quality-safe Vui compile boundaries.
+
+        Real-checkpoint tests changed autoregressive generation for both
+        compiler-default and explicit dynamic inference policies. Inference
+        therefore exposes no compile target. Training retains its full-
+        sequence decoder boundary, which does not use mutable generation
+        caches or waveform reconstruction.
+        """
         if mode == "training":
             return (OptimizationCompileTarget(
                 "decoder.forward",
@@ -418,18 +423,7 @@ class Vui(nn.Module):
                 "forward",
             ), )
         if mode == "inference":
-            return (
-                OptimizationCompileTarget(
-                    "decoder.forward",
-                    self.decoder,
-                    "forward",
-                ),
-                OptimizationCompileTarget(
-                    "codec.from_indices",
-                    self.codec,
-                    "from_indices",
-                ),
-            )
+            return ()
         raise ValueError("Vui compile targets require 'inference' or 'training' mode.")
 
     def _init_weights(self, module):
@@ -469,7 +463,10 @@ class Vui(nn.Module):
             is_native_checkpoint = (
                 direct_checkpoint.is_file() and direct_checkpoint.suffix.lower() == ".safetensors")
             if is_native_directory or is_native_checkpoint:
-                from voicehub.models.vui.checkpoint import load_vui_safetensors, resolve_native_vui_artifact
+                from voicehub.models.vui.checkpoint import (
+                    load_vui_safetensors,
+                    resolve_native_vui_artifact,
+                )
 
                 native_artifact = resolve_native_vui_artifact(direct_checkpoint, )
                 if (is_native_checkpoint and direct_checkpoint.resolve() != native_artifact.model_checkpoint):
@@ -514,7 +511,11 @@ class Vui(nn.Module):
             raise TypeError("Pass either `codec` or `codec_path`, not both.")
         if codec is None:
             if codec_path is None:
-                from voicehub.models.vui.artifacts import VUI_CODEC_FILENAME, VUI_REPO_ID, VUI_REVISION
+                from voicehub.models.vui.artifacts import (
+                    VUI_CODEC_FILENAME,
+                    VUI_REPO_ID,
+                    VUI_REVISION,
+                )
 
                 codec = Fluac.from_pretrained(
                     VUI_CODEC_FILENAME,

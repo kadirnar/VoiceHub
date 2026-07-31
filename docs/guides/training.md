@@ -1,985 +1,250 @@
 ---
-description: Fine-tune supported TTS and ASR families with native objectives, exact resume, and portable exports.
+description: Fine-tune supported speech models with one-step validation, exact resume, and portable exports.
 ---
 
 # Training
 
-VoiceHub provides shared orchestration only after a model integration exposes
-a valid differentiable graph, native objective, and batch contract. It does
-not pretend that every inference backend can be fine-tuned.
+VoiceHub provides shared orchestration only when an integration exposes a
+differentiable graph, objective, and dataset contract. It does not assign a
+generic loss to an inference model.
 
-Training coverage evolves with each model adapter. Query the registry instead
-of relying on a copied count:
+Read the [training matrix](../models/training-support.md) before choosing a
+checkpoint. It records the exact support level, objective, required fields,
+frozen components, and artifact boundary for every model.
 
-```python
-from collections import Counter
+## Support levels
 
-from voicehub.training import list_training_specs
+| Level | Meaning |
+| --- | --- |
+| `native` | Integrated differentiable objective and trainer route |
+| `preprocessed` | Executable objective; caller supplies model-shaped tensors |
+| `custom` | Model-specific phases or orchestration are required |
+| `inference-only` | No verified gradient path; training fails closed |
 
-coverage = Counter(spec.support.value for spec in list_training_specs())
-print(coverage)
-```
+Support is checkpoint-aware. A trainable architecture does not make an ONNX,
+GGUF, quantized, fused, or inference-pruned artifact trainable.
 
-`native` and `preprocessed` are turnkey trainer routes, `custom` records a
-specialized upstream or multi-phase boundary, and `inference-only` fails
-closed. Read the [model-by-model matrix](../models/training-support.md) before
-choosing a checkpoint or dataset format.
-
-This page's counts and examples describe TTS integrations. ASR and VAD use the
-same trainer orchestration with additional CTC, speech-seq2seq, RNN-T, TDT,
-audio-classification, frame-classification, native-ASR-dispatch, and
-upstream-native adapters. ASR fine-tuning records use `ASRDataset`, which
-loads mappings or JSON/JSONL/CSV/TSV manifests, imports WAV/transcript
-sidecars or portable Kaldi directories, validates each model's raw/prepared
-contract, and supplies safe homogeneous batches for Cohere and Seamless.
-Inspect a profile before loading weights through
-`get_training_spec(model_type).dataset_spec` or
-`get_asr_dataset_spec(model_type)`. See
-the [ASR/VAD matrix](../models/asr-vad-support.md) and
-[speech data guide](speech-data.md).
-
-Once a one-step baseline is correct, use the
-[TTS optimization guide](tts-optimization.md) to choose between two separate
-layers. `TTSOptimizationConfig` selects execution backends for every
-registered TTS architecture. Source-specific VITS, codec/LLM, and
-diffusion/flow training profiles select optimizer, batching, precision, and
-memory policies only for the recipes that justify them.
-
-## Understand the support levels
-
-| Level            | Guarantee                                                                                                                |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `native`         | The integrated runtime exposes a differentiable backend-native loss that VoiceHub can execute.                           |
-| `preprocessed`   | The objective is integrated, but callers must provide backend-shaped tensors. Raw source-record preparation is not included. |
-| `custom`         | A model-specific adapter and orchestration path are required; a family label alone is insufficient.                      |
-| `inference-only` | The current runtime has no verified gradient path, often because it is fused, compiled, quantized, or inference-pruned.  |
-
-Support is checkpoint-aware. A model family may be trainable upstream while
-the selected VoiceHub backend or artifact remains inference-only.
-
-## Install the training runtime
-
-The default package already supplies every built-in inference runtime. Add the
-single training feature extra for fine-tuning, evaluation, and reporting:
+## Install
 
 ```bash
 python -m pip install "voicehub[training]"
 ```
 
-No model-specific or task-specific inference extra is required.
+The extra adds dataset, evaluation, and reporting tools. Built-in inference
+models remain part of the default package.
 
-## Select a differentiable checkpoint
+## Inspect the selected profile
 
-Build a fresh lazy wrapper for training. Do not reuse an object already loaded
-through an optimized serving path:
+Do this before loading weights:
 
 ```python
-from voicehub import AutoModelForTextToSpeech
+from voicehub import get_training_spec
 
-training_model = AutoModelForTextToSpeech.from_pretrained(
-    "nari-labs/Dia-1.6B-0626",
+spec = get_training_spec("dia")
+print(spec.support.value)
+print(spec.family_name)
+print(spec.dataset_spec.architecture)
+print([phase.name for phase in spec.phases])
+```
+
+Query the registry rather than relying on copied model counts:
+
+```python
+from collections import Counter
+
+from voicehub import list_training_specs
+
+print(Counter(item.support.value for item in list_training_specs()))
+```
+
+## Prepare data
+
+Keep stable IDs, exact transcripts, speaker/session groups, consent, license,
+and provenance in the source manifest. Split before model preprocessing:
+
+```python
+from voicehub import TTSDataset
+
+source = TTSDataset.from_manifest(
+    "data/dia/manifest.jsonl",
     model_type="dia",
-    backend="native",
-    compute_dtype="bfloat16",
-    device="cuda",
-    lazy_load=True,
+    validate_files=True,
 )
-
-training_spec = training_model.validate_training_support()
-print(training_spec.support.value)
-print(training_spec.family_name)
-print([phase.name for phase in training_spec.phases])
-```
-
-Validation runs before weights are allocated. For Dia:
-
-- `nari-labs/Dia-1.6B-0626` selects VoiceHub's complete native graph;
-- every public tensor name and shape is validated before assignment;
-- the native DAC is frozen while it constructs codec targets; and
-- the original `nari-labs/Dia-1.6B` pickle/JAX layout and non-native backend
-  selections are rejected.
-
-GGUF, ONNX, TensorRT, JIT, vLLM, fused, quantized, or inference-pruned
-artifacts are not automatically trainable. Safetensors are suitable only when
-they reconstruct the differentiable graph required by the adapter.
-
-## Build the model-specific dataset
-
-For an integrated raw-data recipe:
-
-```python
-train_dataset = training_model.create_training_dataset(train_records)
-validation_dataset = training_model.create_training_dataset(
-    validation_records
+train_source, validation_source = source.train_test_split(
+    validation_fraction=0.1,
+    seed=42,
+    group_by="session_id",
 )
 ```
 
-VoiceHub automatically uses a callable `train_dataset.collate_fn` unless an
-explicit `data_collator` is supplied.
+Use `ASRDataset` for speech recognition. The
+[data preparation guide](data-preparation.md) and
+[speech data guide](speech-data.md) describe aliases, audio validation, and
+leakage-safe groups.
 
-Models on a preprocessed route expect tensors, masks, codes, or source records
-described in the [data preparation guide](data-preparation.md) and training
-matrix. The generic trainer does not silently synthesize:
-
-- codec delays or codebook offsets;
-- flow noise, sampled time, or velocity targets;
-- VITS alignments, spectrograms, or adversarial pairs; or
-- phase-specific detach boundaries.
-
-### Fine-tune native Fish Speech S2
-
-Fish S2-Pro trains the complete semantic model with the source-aligned
-base-token and residual-codebook losses. Its ModifiedDAC remains frozen.
-Point the wrapper at a previously converted safe codec directory so the final
-artifact can include a fresh-inference runtime without reopening the official
-pickle:
-
-```python
-from voicehub import AutoModelForTextToSpeech
-
-training_model = AutoModelForTextToSpeech.from_pretrained(
-    "fishaudio/s2-pro",
-    model_type="fishtts",
-    codec_name_or_path="/models/fish-s2-codec-safetensors",
-    training_max_length=4096,
-    device="cuda",
-)
-train_dataset = training_model.create_training_dataset(
-    [
-        {
-            "tokens": prepared_inputs,  # [11, time], integer IDs
-            "labels": prepared_labels,  # [11, time], same-position targets
-        }
-    ]
-)
-```
-
-Do not shift the labels again. Channel zero supervises text and the first
-semantic code; channels 1 through 10 supervise the fast residual-codebook
-decoder only at semantic positions. Raw audio and legacy Fish protobuf paths
-are deliberately outside this adapter—encode and validate them offline.
-`save_pretrained()` writes semantic weights, tokenizer assets, and the frozen
-codec as Safetensors, with the Fish license and required notice. Fine-tuned
-artifacts remain non-commercial derivatives unless Fish Audio grants a
-separate written license.
-
-### Fine-tune native OuteTTS from V3 profiles
-
-OuteTTS exposes the author-verified completion-only causal-LM objective without
-importing Transformers or a provider runtime. Its native adapter trains
-`model.language_model` and keeps the 24 kHz DAC frozen. Records contain either
-prepared `input_ids` plus `labels`, or a validated V3 profile:
-
-```python
-from voicehub import AutoModelForTextToSpeech
-
-training_model = AutoModelForTextToSpeech.from_pretrained(
-    "OuteAI/Llama-OuteTTS-1.0-1B",
-    model_type="outetts",
-    backend="native",
-    interface_version="v3",
-    device="cuda",
-)
-
-train_dataset = training_model.create_training_dataset(
-    [
-        {
-            "speaker_profile": {
-                "interface_version": 3,
-                "text": "Hello.",
-                "words": [
-                    {
-                        "word": "Hello.",
-                        "duration": 0.32,
-                        "c1": [101, 231],
-                        "c2": [77, 912],
-                        "features": {
-                            "energy": 28,
-                            "spectral_centroid": 42,
-                            "pitch": 51,
-                        },
-                    }
-                ],
-                "global_features": {
-                    "energy": 28,
-                    "spectral_centroid": 42,
-                    "pitch": 51,
-                },
-            }
-        }
-    ],
-    completion_only=True,
-    max_length=4096,
-)
-```
-
-The two codebooks must have equal length for every word. Feature values are
-integers from 0 through 100, code values are integers from 0 through 1024, and
-text must exactly match the aligned profile. Use `prompt_word_count` to mask an
-explicit profile prefix, or provide labels with `-100` at every non-trainable
-position. The adapter rejects raw audio because the published recipe depends
-on author-equivalent word alignment and feature extraction.
-
-`save_pretrained()` writes a fresh-inference bundle containing strict
-Safetensors LM and DAC weights, tokenizer files, the default speaker, and an
-integrity manifest. Quantized/GGUF and external serving backends are rejected
-for training. The default Llama 1B checkpoint is CC-BY-NC-SA-4.0; select the
-Apache-2.0 Qwen 0.6B checkpoint when its license and capacity fit the project.
-
-### Fine-tune native F5-TTS
-
-F5-TTS exposes the complete released conditional-flow objective. A batch may
-provide `inp` as raw mono waveforms or model-ready mel frames, `text` as
-vocabulary IDs padded with `-1`, and optional `lens` in mel frames:
-
-```python
-import torch
-
-from voicehub import AutoModelForTextToSpeech
-
-training_model = AutoModelForTextToSpeech.from_pretrained(
-    "F5TTS_v1_Base",
-    model_type="f5tts",
-    device="cuda",
-)
-training_model.load_for_training()
-
-batch = {
-    "inp": waveforms,  # [batch, samples], or [batch, frames, 100]
-    "text": token_ids,  # [batch, tokens], -1 is padding
-    "lens": mel_lengths,
-}
-```
-
-VoiceHub samples the masked span, Gaussian endpoint, flow time, audio/text CFG
-drops, and velocity target inside the differentiable model. The trainer owns
-optimizer-coupled EMA; `save_pretrained()` exports EMA flow weights,
-`vocab.txt`, and configuration as a fresh-inference Safetensors directory.
-The separately pinned Vocos decoder is frozen. The upstream source is MIT, but
-the released `SWivid/F5-TTS` model weights are CC-BY-NC-4.0.
-
-### Fine-tune native VITS with the complete adversarial recipe
-
-VoiceHub owns the differentiable VITS acoustic frontend, generator, and
-scale-plus-five-period discriminator. Full fine-tuning accepts aligned raw
-waveforms and runs separate discriminator and generator optimizers:
-
-```python
-import torch
-
-from voicehub import AutoModelForTextToSpeech
-
-training_model = AutoModelForTextToSpeech.from_pretrained(
-    "facebook/mms-tts-eng",
-    model_type="vits",
-    device="cuda",
-    enable_native_adversarial_training=True,
-    training_acoustic_config={
-        # Copy these values from the checkpoint's source training recipe.
-        # VoiceHub deliberately does not infer unpublished settings.
-        "sampling_rate": 16_000,
-        "filter_length": 1_024,
-        "hop_length": 256,
-        "win_length": 1_024,
-        "num_mel_channels": 80,
-        "mel_fmin": 0.0,
-        "mel_fmax": 8_000.0,
-        "segment_size": 8_192,
-    },
-)
-
-train_dataset = training_model.create_training_dataset(
-    [
-        {
-            # The tokenizer may also derive IDs from a `text` field.
-            "input_ids": torch.tensor([0, 26, 0, 19, 0]),
-            # [samples], aligned with the text.
-            "audio_values": waveform,
-            "sampling_rate": 16_000,
-        }
-    ]
-)
-```
-
-The discriminator phase sees detached generated audio. The generator phase
-freezes the discriminator and combines mel reconstruction, duration, KL,
-feature-matching, and least-squares adversarial losses. Optional `durations`
-bypass monotonic alignment search, and multi-speaker checkpoints additionally
-require `speaker_id`. Exact trainer resumes retain the discriminator and
-optimizer states; `save_pretrained()` exports the generator needed by fresh
-inference.
-
-The acoustic configuration is a deliberate provenance boundary. MMS-TTS
-checkpoint metadata contains the generator topology but omits the original
-FFT, hop, window, mel, and segment settings. VoiceHub validates supplied
-values against the checkpoint and fails closed when they are missing or
-incompatible.
-
-For controlled compatibility work, set
-`enable_native_generator_training=True` instead and provide an exact
-checkpoint-compatible linear `spectrogram` with each `audio_values` tensor.
-That legacy route trains the posterior, alignment, duration, flow, and decoder
-objectives but has no discriminator phase; its artifact metadata records
-`full_vits_fine_tuning=False`.
-
-### Fine-tune native MeloTTS from exact linguistic features
-
-MeloTTS exposes the complete published VITS2 recipe, including independent
-generator, waveform-discriminator, and duration-discriminator optimizer
-phases. Start from a converted native Safetensors directory and explicitly
-acknowledge the preprocessed feature boundary:
+The selected model owns final preparation:
 
 ```python
 from voicehub import AutoModelForTextToSpeech
 
 model = AutoModelForTextToSpeech.from_pretrained(
-    "/models/melotts-native",
-    model_type="melotts",
+    "nari-labs/Dia-1.6B-0626",
+    model_type="dia",
     device="cuda",
-    enable_native_finetuning=True,
+    lazy_load=True,
 )
-dataset = model.create_training_dataset(
-    [
-        {
-            "input_ids": phone_ids,                    # [text]
-            "tone_ids": tone_ids,                      # [text]
-            "language_ids": language_ids,              # [text]
-            "bert_features": bert_features,            # [1024, text]
-            "ja_bert_features": ja_bert_features,      # [768, text]
-            "spectrogram": magnitude_spectrogram,      # [n_fft // 2 + 1, frames]
-            "audio_values": waveform,                  # [samples]
-            "speaker_id": speaker_id,
-        }
-    ]
-)
+model.validate_training_support()
+train_dataset = model.create_training_dataset(train_source)
+validation_dataset = model.create_training_dataset(validation_source)
 ```
 
-The MeloTTS collator right-pads every sequence and supplies exact text,
-spectrogram, and waveform lengths. For each item,
-`floor(audio_length / hop_length)` must equal the spectrogram length, and
-there must be at least one acoustic frame per valid text token. The generator
-phase applies the published duration, KL, mel, LSGAN, feature-matching, and
-duration-adversarial terms; the other two phases update only their respective
-fresh discriminators. The alignment-noise schedule follows the trainer's
-global step. Native export saves the seven deployable generator components
-for fresh inference; discriminator, optimizer, scheduler, scaler, RNG, and
-sampler state belong to an exact VoiceHub training checkpoint instead.
-
-### Fine-tune Kokoro from prepared supervision
-
-Kokoro exposes two VoiceHub-native phases over the exact released inference
-graph. It is opt-in because the author repository does not publish the
-raw-audio alignment, style-encoder/diffusion, discriminator, and optimizer
-recipe:
+Inspect one collated batch before training:
 
 ```python
-import torch
-
-from voicehub import AutoModelForTextToSpeech
-
-training_model = AutoModelForTextToSpeech.from_pretrained(
-    "hexgrad/Kokoro-82M",
-    model_type="kokoro",
-    device="cuda",
-    enable_preprocessed_training=True,
-)
-
-train_dataset = training_model.create_training_dataset(
-    [
-        {
-            # Use caller-prepared author-compatible phonemes, or provide
-            # input_ids directly. Training never applies fallback G2P.
-            "phonemes": "həlˈoʊ",
-            # [text_tokens + 2] integer frame counts, including boundaries.
-            "durations": torch.tensor([1, 18, 2, 2, 2, 3, 3, 13]),
-            # [256]: decoder style followed by predictor style.
-            "ref_s": style_vector,
-            # Required by the acoustic phase: [samples] at 24 kHz.
-            "audio_values": aligned_waveform,
-            # Recommended for padded batches so waveform/spectral losses
-            # ignore padding.
-            "audio_lengths": torch.tensor(aligned_waveform.shape[-1]),
-            # Optional source-compatible auxiliary targets.
-            "f0_targets": aligned_f0,
-            "energy_targets": aligned_energy,
-        }
-    ]
-)
+features = [train_dataset[0]]
+batch = train_dataset.collate_fn(features)
+for name, value in batch.items():
+    print(name, getattr(value, "shape", type(value).__name__))
 ```
 
-The `duration` phase updates PL-BERT, the projection, and duration predictor.
-The `acoustic` phase also runs the convolutional text encoder, F0/energy
-predictor, and iSTFTNet waveform decoder. A caller-supplied dense
-`alignment` may replace the alignment constructed from integer `durations`.
-Every exported runtime uses strict Safetensors. The official `.pth` checkpoint
-and `.pt` voice packs are accepted only by the restricted one-time
-`torch.load(weights_only=True)` converter; pickle is never part of the
-steady-state runtime.
+The generic trainer does not invent codec delays, flow targets, alignments,
+adversarial pairs, transducer durations, or detach boundaries. A
+`preprocessed` profile must receive exactly the fields listed in its contract.
 
-### Fine-tune the OpenVoice V2 converter
+## Run one optimizer step
 
-OpenVoice's public release contains the complete converter graph but no
-training loop, discriminator, dataset, or loss. VoiceHub therefore requires an
-explicit opt-in to its reconstructed paired-waveform objective:
-
-```python
-from voicehub import AutoModelForTextToSpeech
-
-training_model = AutoModelForTextToSpeech.from_pretrained(
-    "/models/openvoice-v2-native",
-    model_type="openvoice",
-    enable_reconstructed_finetuning=True,
-    device="cuda",
-)
-train_dataset = training_model.create_training_dataset(
-    [
-        {
-            "source_audio": "speaker-a/content-001.wav",
-            "target_audio": "speaker-b/content-001.wav",
-            "source_reference_audio": "speaker-a/reference.wav",
-            "target_reference_audio": "speaker-b/reference.wav",
-            "sampling_rate": 22_050,
-            "tau": 0.3,
-        }
-    ]
-)
-```
-
-`source_audio` and `target_audio` must contain the same linguistic content and
-be aligned closely enough for sample-domain reconstruction. The model-owned
-collator preserves variable waveform lengths until native resampling and STFT
-processing. References may instead be supplied as `[256, 1]` speaker
-embeddings. When raw references are used, the reference encoder remains
-inside autograd, so the posterior encoder, flow, decoder, and reference
-encoder all receive gradients.
-
-The loss is a length-masked smooth-L1 reconstruction over the common generated
-and target samples. It is a transparent full-graph adaptation path, but it is
-not the unpublished author recipe and does not establish improved speaker
-similarity or audio quality. Keep an unmodified validation set and compare
-both reconstruction loss and listening/speaker metrics appropriate to your
-use case.
-
-## Configure a one-step smoke run
+Keep `max_steps=1` until the loss is finite, intended parameters receive
+gradients, frozen components remain frozen, and save/reload works:
 
 ```python
 from voicehub import Trainer, TrainingArguments
 
 arguments = TrainingArguments(
-    output_dir="runs/dia-finetune",
+    output_dir="runs/dia-smoke",
     max_steps=1,
-    num_train_epochs=1,
     per_device_train_batch_size=1,
     per_device_eval_batch_size=1,
     gradient_accumulation_steps=1,
     learning_rate=5e-5,
-    warmup_ratio=0.03,
-    max_grad_norm=1.0,
-    bf16=True,
     logging_steps=1,
     eval_strategy="steps",
     eval_steps=1,
     save_strategy="steps",
     save_steps=1,
-    save_total_limit=2,
-    load_best_model_at_end=True,
-    metric_for_best_model="loss",
-    dataloader_num_workers=0,
+    report_to="none",
     seed=42,
     data_seed=42,
 )
-
 trainer = Trainer(
-    model=training_model,
+    model=model,
     args=arguments,
     train_dataset=train_dataset,
     eval_dataset=validation_dataset,
 )
+result = trainer.train(resume_from_checkpoint=False)
+print(result.training_loss, result.metrics)
 ```
 
-## Track the run with Weights & Biases
+Increase steps, epochs, batch size, workers, mixed precision, or distributed
+scope only after this smoke run passes.
 
-The `training` extra includes the W&B SDK. Enable it without constructing a
-callback manually:
-
-```python
-arguments = TrainingArguments(
-    output_dir="runs/dia-finetune",
-    report_to="wandb",
-    run_name="dia-speaker-adaptation",
-    wandb_project="voicehub-finetuning",
-    wandb_entity="your-team",
-    wandb_group="dia-ablation",
-    wandb_tags=["tts", "dia", "speaker-adaptation"],
-    wandb_notes="Baseline learning-rate and frozen-codec run.",
-    wandb_mode="online",
-    wandb_log_model="checkpoint",
-)
-```
-
-`logging_steps` controls metric cadence. Training, evaluation, and test
-metrics are grouped under `train/`, `eval/`, and `test/`. The integration:
-
-- imports W&B only when a reported run begins;
-- logs only from `TrainerState.is_world_process_zero`;
-- stores the W&B run ID in exact-resume checkpoint state;
-- reuses a run created explicitly with `wandb.init()` without finishing it;
-- supports `wandb_mode="offline"` for later synchronization; and
-- uploads only complete VoiceHub checkpoints when
-  `wandb_log_model="checkpoint"`, or one portable final model when set to
-  `"end"`.
-
-Authentication stays outside serializable training arguments. Use
-`wandb login` or the `WANDB_API_KEY` environment variable rather than putting
-an API key in source code or a checkpoint.
-
-!!! note "Choose precision from hardware"
-
-    `bf16=True` is appropriate only on BF16-capable hardware. Use `fp16=True`
-    where supported, or disable both flags for float32. Keep the model
-    `compute_dtype` and trainer precision consistent.
-
-Before increasing `max_steps`, verify:
-
-1. the dataset and collator produce a complete batch;
-2. the native loss is finite and scalar;
-3. the loss requires gradients;
-4. intended parameters receive gradients;
-5. frozen codecs, vocoders, and encoders do not receive gradients; and
-6. the run writes a reloadable artifact.
-
-Dia 1.6B plus gradients and AdamW optimizer state can exceed a free Colab
-runtime. Measure one-step memory use before choosing batch size, accumulation,
-precision, sharding strategy, and checkpoint cadence.
-
-## Start a new run
-
-Use a new or checkpoint-free `output_dir`:
-
-```python
-train_output = trainer.train()
-print(train_output.global_step)
-print(train_output.training_loss)
-```
-
-If the output directory already contains a numeric checkpoint, VoiceHub
-requires an explicit resume or `overwrite_output_dir=True`.
-
-## Evaluate
+## Evaluate, save, and resume
 
 ```python
 metrics = trainer.evaluate()
-print(metrics)
+artifact = trainer.save_model("runs/dia-smoke/final")
+print(metrics, artifact)
 ```
 
-Evaluation uses the same adapter, recipe, precision strategy, and model-owned
-loss contract. For generative listening tests, save a separate fixed prompt
-set and use identical decoding settings before and after training.
-
-## Resume exactly
-
-Resume the newest complete checkpoint:
+`checkpoint-N/` is an exact Trainer resume artifact containing optimizer,
+scheduler, random state, callbacks, sampler, strategy, and recipe topology.
+Resume only from a complete compatible checkpoint:
 
 ```python
-train_output = trainer.train(resume_from_checkpoint=True)
+trainer.train(resume_from_checkpoint=True)
 ```
 
-Or choose one explicitly:
+`trainer.save_model()` writes a portable final artifact. A standalone
+Safetensors file is a weight container, not proof of exact resume state.
+
+Reload the portable artifact in a fresh model:
 
 ```python
-train_output = trainer.train(
-    resume_from_checkpoint="runs/dia-finetune/checkpoint-1000"
-)
-```
-
-Exact resume validates:
-
-- model type, adapter, and recipe identity;
-- optimizer names and strategy;
-- precision and scaler mode;
-- batch size, accumulation, and schedule;
-- dataset class and length;
-- declared dataset and collator fingerprints;
-- callback, sampler, and random state; and
-- multi-phase optimizer topology.
-
-`TTSDataset.resume_fingerprint()` hashes normalized record content and order.
-If the dataset uses a lazy `transform`, supply a stable
-`transform_fingerprint` when constructing it; exact-resume fingerprinting
-rejects an unversioned transform.
-Model-owned datasets may expose a narrower fingerprint; keep immutable source
-manifests and persist their content hash with every run.
-
-Generic exact mid-epoch resume requires:
-
-- a stable, sized dataset or dataloader; and
-- `dataloader_num_workers=0`.
-
-Worker prefetch queues and arbitrary iterable cursors cannot be reconstructed
-portably.
-
-## Save the right artifact
-
-Save the final portable VoiceHub artifact:
-
-```python
-artifact_directory = trainer.save_model(
-    "runs/dia-finetune/final"
-)
-```
-
-Typical layout:
-
-```text
-runs/dia-finetune/final/
-  config.json
-  generation_config.json
-  processor_config.json
-  model_state.pt
-  training_args.json
-  training_recipe.json
-  native_export/
-```
-
-Periodic `checkpoint-N/` directories additionally contain optimizer,
-scheduler, optional precision-scaler, trainer, RNG, sampler, callback, and
-strategy state.
-
-| Artifact                  | Use                                                                 |
-| ------------------------- | ------------------------------------------------------------------- |
-| `checkpoint-N/`           | Exact continuation of the same training plan                        |
-| Portable VoiceHub folder  | Reload, inference, or weight-only warm start                         |
-| `native_export/`          | Source-native use when its recipe declares a complete export        |
-| Standalone safetensors    | Weight container, never complete optimizer-bearing resume state      |
-
-Do not serve `optimizer.pt`, rename one safetensors file as a full checkpoint,
-or pass an arbitrary periodic checkpoint to an upstream inference loader.
-
-## Compare post-training inference
-
-Reuse the same prompt and decoding configuration used for the baseline:
-
-```python
-from voicehub import AutoModelForTextToSpeech, TTSGenerationConfig
-
-BASELINE_TEXT = (
-    "[S1] VoiceHub keeps inference, data preparation, and training "
-    "on one explicit lifecycle."
-)
-
-fine_tuned_model = AutoModelForTextToSpeech.from_pretrained(
-    artifact_directory,
+reloaded = AutoModelForTextToSpeech.from_pretrained(
+    "runs/dia-smoke/final",
     device="cuda",
     lazy_load=True,
 )
-
-fine_tuned_output = fine_tuned_model.generate(
-    BASELINE_TEXT,
-    generation_config=TTSGenerationConfig(
-        seed=42,
-        temperature=1.0,
-        max_new_tokens=2048,
-        output_file="artifacts/dia-finetuned.wav",
-    ),
-)
 ```
 
-Human evaluation should be blinded and cover:
+Compare pre- and post-training inference with the same prompt, seed, decoding
+settings, and conditioning. Listen for intelligibility, artifacts, speaker
+similarity, prosody, and memorization.
 
-- intelligibility;
-- speaker similarity where applicable;
-- prosody and style;
-- clicks, noise, collapse, or other artifacts;
-- memorization and leakage; and
-- safety and authorization requirements.
+## Specialized objectives
 
-Automated metrics complement listening tests; they do not replace them.
+VoiceHub has distinct adapters for:
 
-## Adapt the run to another family
+- codec/LLM and completion-only TTS;
+- diffusion and flow matching;
+- VITS adversarial generator/discriminator phases;
+- CTC and speech sequence-to-sequence ASR;
+- RNN-T and TDT;
+- frame and audio classification; and
+- model-specific multi-phase recipes.
 
-| Family                  | Training boundary                                                                                                                         |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Causal/codec LM         | Completion masks, codebook order, frozen codecs, and token-normalized cross-entropy must match the source implementation.                 |
-| Encoder-decoder LM      | Processor-owned decoder shifts, delay patterns, attention masks, and teacher-forced labels remain authoritative.                         |
-| Flow matching/diffusion | Noise schedule, sampled time, conditioning dropout, target parameterization, EMA, and solver/export state are recipe-owned.              |
-| VITS/GAN                | Generator and discriminator losses, feature matching, KL/duration/mel terms, detach boundaries, and update cadence remain distinct.      |
-| Hybrid/composite        | Each named component owns its optimizer, loss, frequency, checkpoint state, and native export semantics.                                 |
+Do not substitute one family objective for another. Use the
+[training matrix](../models/training-support.md) and the selected
+`training_spec.phases`.
 
-VoiceHub's `ModelTrainingSpec` declares phase ownership, optimizer routes,
-frequency, detach boundaries, and native losses. Do not pass one generic
-optimizer over every reachable parameter.
+The repository VITS smoke utility is a **preprocessed generator warm-start**,
+not a full adversarial MMS reproduction:
 
-For exact qualifications—such as CosyVoice component training, XTTS GPT-only
-fine-tuning, or experimental Higgs Audio reconstruction—read the
-[training support matrix](../models/training-support.md).
+```bash
+python scripts/smoke_finetune_vits.py --output-dir runs/vits-smoke
+```
 
-## Build specialized TTS objectives explicitly
+## Training optimization
 
-VoiceHub exposes strict, model-agnostic objective primitives for source
-adapters. They import PyTorch lazily and reject ambiguous shapes.
+Execution optimization and recipe optimization are separate:
 
-For codec/LLM TTS, use exact multi-codebook alignment rather than flattening
-unknown axes:
+- `TTSOptimizationConfig` selects attention, kernels, and compilation;
+- source-specific training profiles select optimizer, precision, batching,
+  checkpointing, and EMA only where verified.
+
+Start from the correct eager objective, then follow
+[TTS optimization](tts-optimization.md). A serving-optimized model object
+should not be reused as a fresh training graph.
+
+## Optional W&B reporting
 
 ```python
-from voicehub import multi_codebook_cross_entropy
-
-loss = multi_codebook_cross_entropy(
-    logits,                 # labels.shape + (vocabulary_size,)
-    labels,
-    loss_mask=codec_mask,
-    causal_shift=True,
-    sequence_dim=2,
-    codebook_dim=1,
-    codebook_weights=weights,
+arguments = TrainingArguments(
+    output_dir="runs/dia",
+    max_steps=100,
+    report_to="wandb",
+    wandb_project="voicehub-finetuning",
+    wandb_mode="offline",
 )
 ```
 
-For diffusion or flow matching, sample randomness during training instead of
-storing it in the manifest:
+Authenticate outside the notebook or script. Credentials are never serialized
+into training arguments.
 
-```python
-from voicehub import (
-    build_flow_matching_training_pair,
-    masked_diffusion_regression_loss,
-)
+## Failure checklist
 
-pair = build_flow_matching_training_pair(
-    clean_latents,
-    generator=generator,
-    prediction_type="velocity",
-)
-prediction = model(
-    pair.noisy_inputs,
-    timesteps=pair.timesteps,
-    conditioning=conditioning,
-)
-loss = masked_diffusion_regression_loss(
-    prediction,
-    pair.targets,
-    mask=latent_mask,
-)
-```
+- Training validation fails: wrong support level, backend, or artifact type.
+- Missing/detached/non-finite loss: inspect the model-owned batch and objective.
+- Out of memory: reduce batch size or use a verified memory technique; do not
+  silently quantize or lower precision.
+- Resume signature mismatch: use the original complete checkpoint and
+  unchanged recipe topology.
+- Poor validation: verify group-disjoint splits, transcripts, conditioning,
+  preprocessing revision, and evaluation policy.
 
-`build_diffusion_training_pair()` accepts an explicit coefficient function for
-the recipe's alpha/sigma schedule and supports epsilon, velocity, or clean
-sample prediction. The caller still owns the model's scheduler, conditioning,
-codec/latent extractor, SNR weighting policy, and EMA configuration.
+Always record code, checkpoint, and dataset revisions; seeds; device;
+precision; arguments; split fingerprints; and licenses. Use only recordings
+whose rights and consent permit training.
 
-For a VITS-family source adapter, the shared primitives cover least-squares
-discriminator and generator loss, discriminator feature matching, and masked
-diagonal-Gaussian KL:
-
-```python
-from voicehub import (
-    vits_discriminator_loss,
-    vits_feature_matching_loss,
-    vits_generator_adversarial_loss,
-    vits_kl_loss,
-)
-```
-
-These functions do not turn an inference synthesizer into a full VITS graph.
-The model integration must still expose the posterior encoder, monotonic
-alignment/duration path, generator, waveform/duration discriminators, mel and
-duration losses, and compatible checkpoint state.
-For discriminator updates, detach generated audio before its discriminator
-forward; do not detach the resulting fake score, because that would remove the
-discriminator's fake-branch gradient.
-
-An adversarial `TrainingPhaseSpec` may set
-`optimizer_step_after_phase=True`. With separate named optimizers, the trainer
-then steps that phase immediately before running the next phase. This supports
-the source-faithful sequence “discriminator forward/backward/step, then
-recomputed generator forward/backward/step.” Every scheduled phase in that
-scheduled recipe must use the policy consistently. Exact phase boundaries
-currently require `gradient_accumulation_steps=1`.
-
-## Training strategies
-
-The built-in strategy is single-process PyTorch. Distributed, FSDP,
-DeepSpeed, Accelerate, TPU, or quantization-aware execution requires a
-registered `TrainingStrategy`. The model recipe and dataset contract remain
-separate from execution:
-
-```text
-model integration  -> differentiable components
-training recipe    -> phases, losses, ownership
-Trainer            -> dataloaders, scheduling, checkpoints
-strategy           -> device, precision, backward, optimizer execution
-```
-
-This boundary lets future execution engines optimize training without
-rewriting every model adapter. See the [trainer architecture](../concepts/trainer.md).
-
-### Configure universal TTS execution
-
-`Trainer(optimization_config=...)` uses the same capability resolver as
-`BaseTTSModel.optimize()`. The policy is available for all 34 current TTS
-registry entries; architecture capabilities decide whether attention remains
-native, uses built-in SDPA, or exposes the selectable FlashAttention-4 path,
-and whether architecture-owned fused activations are available.
-
-```python
-from voicehub import Trainer, TTSOptimizationConfig
-
-execution_optimization = TTSOptimizationConfig(
-    attn_implementation="auto",
-    kernel_backend="auto",
-    compile="auto",
-    compile_config={
-        "backend": "inductor",
-        "mode": "max-autotune-no-cudagraphs",
-        "fullgraph": False,
-        "dynamic": True,
-    },
-)
-
-trainer = Trainer(
-    model=model,
-    args=training_arguments,
-    train_dataset=train_dataset,
-    eval_dataset=validation_dataset,
-    optimization_config=execution_optimization,
-)
-trainer.train()
-```
-
-Trainer derives device, dtype, distributed state, and persistent-checkpoint
-requirements from its training configuration. It resolves the policy after
-the differentiable graph is moved to its device and before strategy wrapping
-or optimizer creation. Checkpoints retain both the resolution decisions and
-the applied pass manifest:
-
-```python
-print(trainer.tts_optimization_plan)
-print(trainer.optimization_manifest())
-```
-
-Automatic settings are safe fallbacks, not promises that an accelerator will
-run. They retain exact SDPA/native attention, registered Torch kernels, or
-eager execution when the architecture or runtime cannot satisfy a faster
-path. Explicit `flash_attention_4`, `triton`, `cuda_extension`, and
-`compile="required"` requests fail closed. Pass
-`optimization_config` or `optimization_plan`, never both. If an explicit
-`OptimizationContext` is supplied, it must use training mode and
-`persist_result=True`.
-
-Execution optimization does not choose learning rates, GAN phase ordering,
-batch-length budgets, checkpointing, or EMA. Resolve those separately for the
-four source-verified recipes:
-
-```python
-from voicehub import get_tts_training_optimization_profile
-
-profile = get_tts_training_optimization_profile("f5tts")
-train_dataset = profile.prepare_dataset(train_dataset)
-training_arguments = profile.training_arguments("runs/f5tts-optimized")
-
-trainer = Trainer(
-    model=model,
-    args=training_arguments,
-    train_dataset=train_dataset,
-    optimization_config=execution_optimization,
-)
-```
-
-The return type is `TTSTrainingOptimizationProfile`, a union of
-`VITSOptimizationConfig`, `LLMTTSOptimizationConfig`, and
-`DiffusionTTSOptimizationConfig`. The compatibility alias
-`TTSOptimizationProfile` denotes that same training union; the constructible
-universal runtime class is `TTSOptimizationConfig`.
-
-For smaller, composable transformations, pass an explicit optimization plan
-to `Trainer`:
-
-```python
-from voicehub import Trainer
-from voicehub.optimization import (
-    OPTIMIZATION_PASSES,
-    OptimizationContext,
-)
-
-OPTIMIZATION_PASSES.register("vendor-training-pass", VendorTrainingPass)
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    optimization_plan=("vendor-training-pass", configured_pass),
-    optimization_context=OptimizationContext(
-        mode="training",
-        device=training_args.device,
-        dtype="bfloat16",
-        distributed=False,
-        persist_result=True,
-    ),
-)
-```
-
-The strategy first places the unwrapped differentiable runtime through
-`prepare_device()`. The plan then runs before `prepare_model()` or
-`prepare_training_adapter()` may create a strategy proxy and before Trainer
-creates optimizers. Named factories stay lazy, and no plan runs unless the
-caller supplies `optimization_plan`.
-
-Trainer requires `persist_result=True` and rejects nonpersistent passes before
-application. Checkpoints store the exact mode, canonical architecture, and an
-immutable snapshot of each pass's ID, compatibility kind, version,
-capabilities, configuration, and result metadata. Pass configuration must be
-a strict JSON string-key tree and must include effective defaults. An
-architecture's compatible pass kinds do not register executable factories.
-Resume requires the same explicit plan and configuration and rejects a
-mismatch before loading model or optimizer state.
-
-For a recipe with separate optimizers, a topology/name-changing pass must
-implement complete post-transform parameter routing for every named optimizer.
-Trainer rejects missing, stale, duplicate, or incomplete routes. Exact
-checkpoints may retain persistent transformed state. Public and final saves
-require such a pass to export canonical state that a fresh unoptimized runtime
-can load; otherwise portable save fails closed.
-
-## Troubleshooting
-
-### Training validation fails
-
-Read the complete error. It normally identifies an incompatible checkpoint,
-legacy backend, GGUF/ONNX/compiled runtime, quantization option, or missing
-specialized adapter.
-
-### Loss is missing, detached, or non-finite
-
-Stop the run. Confirm that the training runtime exposes the native objective,
-labels reach it, and intended parameters require gradients. An inference
-waveform is not a training loss.
-
-### CUDA out of memory
-
-Reduce per-device batch size, increase gradient accumulation, shorten or
-bucket sequences, use supported mixed precision, and ensure frozen codecs are
-excluded from optimizer state. Do not silently enable quantization unless the
-adapter explicitly supports quantized training.
-
-### Exact resume signature mismatch
-
-Restore the original batch, schedule, precision, strategy,
-dataset/collator, callback, and optimizer topology. If the plan intentionally
-changed, start a new run from a portable artifact as a weight warm start.
-
-## Reproducibility checklist
-
-Record:
-
-- VoiceHub version and Git revision;
-- checkpoint ID and revision;
-- model license and dataset permissions;
-- immutable train/evaluation manifests and hashes;
-- preprocessing code and version;
-- tokenizer, processor, and codec revisions;
-- complete `TrainingArguments`;
-- model-specific recipe configuration;
-- random and data seeds;
-- training strategy and world size;
-- checkpoint manifest; and
-- the inference configuration used for comparison.
-
-The [end-to-end notebook](notebook.md) implements this lifecycle with Dia.
+See the [Trainer concepts](../concepts/trainer.md),
+[API reference](../reference/api.md), and [training notebook](notebook.md).

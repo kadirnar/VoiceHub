@@ -28,6 +28,7 @@ from voicehub.inference_configuration import ASRInferenceConfig, SpeechInference
 from voicehub.inference_strategy import (
     EagerInferenceStrategy,
     InferenceStrategy,
+    TorchCompileInferenceStrategy,
     get_inference_strategy,
     list_inference_strategies,
     register_inference_strategy,
@@ -347,6 +348,7 @@ __all__ = [
     "LLMBackendTransport",
     "LLMTTSOptimizationConfig",
     "InferenceStrategy",
+    "TorchCompileInferenceStrategy",
     "ModelLicenseSpec",
     "ModelSpec",
     "OptimizationCompileTarget",

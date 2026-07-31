@@ -15,7 +15,10 @@ from voicehub.architectures.f5tts.metadata import (
     VOCOS_SOURCE_REVISION,
 )
 from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
-from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
+from voicehub.architectures.specifications import (
+    ArchitectureCapabilities,
+    ArchitectureSpec,
+)
 from voicehub.tasks import SpeechTask
 
 DEFAULT_F5TTS_ALIASES = (
@@ -130,6 +133,14 @@ def create_f5tts_architecture_spec() -> ArchitectureSpec:
                 "Vocos remains frozen during flow fine-tuning."),
             "full_finetuning_ready":
             True,
+            "quality_validated_inference_dtypes": (
+                "float32",
+            ),
+            "reduced_precision_inference_policy": (
+                "Explicit opt-in is required because whole-model BF16 and "
+                "mixed DiT-BF16 inference failed the end-to-end quality "
+                "gate; FP16 has no retained quality validation."
+            ),
         },
     )
 

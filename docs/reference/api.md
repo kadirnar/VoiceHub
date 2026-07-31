@@ -31,7 +31,7 @@ python -m pip install "voicehub[training]"
 | TTS inference | `AutoModelForTextToSpeech`, `TTSGenerationConfig`, `TTSOutput` |
 | ASR inference | `AutoModelForSpeechRecognition`, `ASRInferenceConfig`, `ASROutput` |
 | VAD inference | `AutoModelForVoiceActivityDetection`, `VADInferenceConfig`, `VADOutput` |
-| Inference execution | `InferenceStrategy`, `EagerInferenceStrategy` |
+| Inference execution | `InferenceStrategy`, `EagerInferenceStrategy`, `TorchCompileInferenceStrategy` |
 | LLM TTS serving | `LLMBackendConfig`, `list_llm_backend_support()`, token and Omni speech transports |
 | Diffusion serving | `list_diffusion_serving_capabilities()`, fail-closed vLLM-Omni and SGLang modality resolution |
 | Training discovery | `get_training_spec()`, `list_training_specs()`, `ModelTrainingSpec` |
@@ -246,6 +246,7 @@ AutoModelForTextToSpeech.from_pretrained(
     model_type: str | None = None,
     config: VoiceHubConfig | None = None,
     inference_strategy: str | InferenceStrategy | None = None,
+    config_kwargs: Mapping[str, object] | None = None,
     **kwargs,
 )
 ```
@@ -262,6 +263,12 @@ AutoModelForTextToSpeech.from_config(
 `model_type` can be omitted when a VoiceHub artifact contains `config.json`.
 For a Hub repository that does not publish VoiceHub metadata, supply the
 registry key explicitly.
+
+Use `config_kwargs` for configuration fields such as `torch_dtype`, decoding
+defaults, or model-family settings. Its keys must be non-empty strings. Pass
+either a complete `config` object or `config_kwargs`, not both. The
+`model_type` field is reserved for the top-level factory argument and cannot
+be overridden inside `config_kwargs`.
 
 ```python
 from voicehub import AutoModelForTextToSpeech
@@ -531,6 +538,9 @@ be handled.
 
 `InferenceStrategy` separates runtime optimization from model-family generation.
 The built-in `EagerInferenceStrategy` is named `"eager"` and is a no-op.
+`TorchCompileInferenceStrategy` is named `"torch-compile"` and applies
+reversible `torch.compile` preparation to the execution boundaries declared
+by the loaded speech model.
 
 ```python
 class InferenceStrategy:
@@ -548,6 +558,27 @@ class InferenceStrategy:
 
 Both returning methods must return a runtime; returning `None` is an error.
 
+The compile strategy is opt-in and compiles lazily on the first real request:
+
+```python
+TorchCompileInferenceStrategy(
+    *,
+    backend: str = "inductor",
+    mode: str | None = None,
+    fullgraph: bool = False,
+    dynamic: bool | None = True,
+    options: dict[str, object] | None = None,
+    requirement: str = "required",
+)
+```
+
+It supports CPU and CUDA runtimes while preserving canonical state-dict keys.
+The default `requirement="required"` fails when the compiler cannot be
+prepared or executed. Set `requirement="auto"` only when an eager fallback is
+acceptable. `runtime_metadata(wrapper)` reports whether the active runtime was
+compiled or selected an eager fallback, and `restore_for_training()` restores
+the original callables before a training transition.
+
 Registry functions:
 
 ```python
@@ -558,8 +589,8 @@ unregister_inference_strategy(name) -> None
 ```
 
 Factories must be zero-argument callables returning an `InferenceStrategy`.
-Names are stripped and lowercased. The built-in `"eager"` entry cannot be
-replaced or removed.
+Names are stripped and lowercased. The built-in `"eager"` and
+`"torch-compile"` entries cannot be replaced or removed.
 
 ```python
 from voicehub import (

@@ -12,7 +12,10 @@ from voicehub.architectures.neutts.metadata import (
     NEUTTS_VARIANTS,
 )
 from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
-from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
+from voicehub.architectures.specifications import (
+    ArchitectureCapabilities,
+    ArchitectureSpec,
+)
 from voicehub.tasks import SpeechTask
 
 DEFAULT_NEUTTS_ALIASES = (
@@ -77,6 +80,7 @@ def create_neutts_architecture_spec() -> ArchitectureSpec:
                 "qwen2-qwen3-llama-backbones",
                 "raw-audio-fine-tuning",
                 "strict-safetensors-reload",
+                "torch-compile-inference-unsafe",
                 "voice-cloning",
             ),
         ),

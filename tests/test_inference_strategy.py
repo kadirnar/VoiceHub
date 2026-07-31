@@ -1,12 +1,24 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import torch
+
+from voicehub import AutoModelForTextToSpeech
 from voicehub.inference_strategy import (
     EagerInferenceStrategy,
     InferenceStrategy,
+    TorchCompileInferenceStrategy,
     get_inference_strategy,
     list_inference_strategies,
     register_inference_strategy,
     unregister_inference_strategy,
+)
+from voicehub.optimization import OptimizationCompatibilityError
+from voicehub.optimization.protocols import OptimizationCompileTarget
+from voicehub.optimization.torch_compile import (
+    TorchCompileCapabilityReport,
+    TorchCompileUnavailableError,
 )
 
 
@@ -61,6 +73,147 @@ class InferenceStrategyHooksTest(unittest.TestCase):
             ],
         )
 
+    def test_torch_compile_strategy_patches_and_restores_declared_targets(self):
+
+        class Runtime(torch.nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 2)
+
+            def forward(self, values):
+                return self.linear(values)
+
+            def optimization_compile_targets(self, mode):
+                self.compile_mode = mode
+                return (
+                    OptimizationCompileTarget(
+                        label="runtime",
+                        owner=self,
+                        attribute="forward",
+                    ), )
+
+        runtime = Runtime().eval()
+        wrapper = SimpleNamespace(device="cpu")
+        strategy = TorchCompileInferenceStrategy(
+            backend="eager",
+            dynamic=True,
+        )
+        expected_keys = tuple(runtime.state_dict())
+        eager = runtime(torch.ones(1, 3))
+
+        strategy.validate(wrapper)
+        prepared = strategy.prepare(runtime, wrapper=wrapper)
+        actual = prepared(torch.ones(1, 3))
+
+        self.assertIs(prepared, runtime)
+        self.assertEqual(runtime.compile_mode, "inference")
+        self.assertIn("forward", runtime.__dict__)
+        self.assertEqual(tuple(runtime.state_dict()), expected_keys)
+        torch.testing.assert_close(actual, eager)
+        self.assertEqual(
+            strategy.runtime_metadata(wrapper)["outcome"],
+            "compiled",
+        )
+
+        restored = strategy.restore_for_training(
+            prepared,
+            wrapper=wrapper,
+        )
+        self.assertIs(restored, runtime)
+        self.assertNotIn("forward", runtime.__dict__)
+        self.assertIsNone(strategy.runtime_metadata(wrapper))
+
+    def test_required_torch_compile_strategy_fails_before_model_loading(self):
+        report = TorchCompileCapabilityReport(
+            available=False,
+            backend="missing",
+            backend_available=False,
+            torch_version=torch.__version__,
+            available_backends=(),
+            reason="unit-test backend is unavailable",
+        )
+        strategy = TorchCompileInferenceStrategy(
+            backend="missing",
+            requirement="required",
+        )
+
+        with (
+            patch(
+                "voicehub.optimization.torch_compile.inspect_torch_compile",
+                return_value=report,
+            ),
+            self.assertRaisesRegex(
+                TorchCompileUnavailableError,
+                "unit-test backend is unavailable",
+            ),
+        ):
+            strategy.validate(SimpleNamespace(device="cpu"))
+
+    def test_quality_rejected_tts_compile_strategies_fail_before_loading(self):
+        for model_type in ("neutts", "vits", "vui"):
+            with self.subTest(model_type=model_type):
+                model = AutoModelForTextToSpeech.from_pretrained(
+                    "",
+                    model_type=model_type,
+                    device="cpu",
+                    lazy_load=True,
+                    inference_strategy=TorchCompileInferenceStrategy(
+                        backend="eager",
+                        requirement="required",
+                    ),
+                )
+                with self.assertRaisesRegex(
+                    OptimizationCompatibilityError,
+                    rf"{model_type}.*real-checkpoint",
+                ):
+                    model.load()
+                self.assertIsNone(model.model)
+
+    def test_runtime_context_binds_the_registered_architecture(self):
+        wrapper = SimpleNamespace(
+            config=SimpleNamespace(model_type="vits"),
+            device="cpu",
+        )
+        context = TorchCompileInferenceStrategy._runtime_context(
+            torch.nn.Linear(2, 2),
+            wrapper,
+        )
+
+        self.assertEqual(context.architecture, "vits")
+
+    def test_optional_torch_compile_strategy_reports_eager_fallback(self):
+        report = TorchCompileCapabilityReport(
+            available=False,
+            backend="missing",
+            backend_available=False,
+            torch_version=torch.__version__,
+            available_backends=(),
+            reason="unit-test backend is unavailable",
+        )
+        runtime = torch.nn.Linear(2, 2)
+        wrapper = SimpleNamespace(device="cpu")
+        strategy = TorchCompileInferenceStrategy(
+            backend="missing",
+            requirement="auto",
+        )
+
+        with patch(
+            "voicehub.optimization.torch_compile.inspect_torch_compile",
+            return_value=report,
+        ):
+            strategy.validate(wrapper)
+            prepared = strategy.prepare(runtime, wrapper=wrapper)
+
+        self.assertIs(prepared, runtime)
+        metadata = strategy.runtime_metadata(wrapper)
+        self.assertEqual(metadata["outcome"], "eager-fallback")
+        self.assertIn("unavailable", metadata["reason"])
+        self.assertIs(
+            strategy.restore_for_training(prepared, wrapper=wrapper),
+            runtime,
+        )
+
 
 class InferenceStrategyRegistryTest(unittest.TestCase):
 
@@ -85,6 +238,12 @@ class InferenceStrategyRegistryTest(unittest.TestCase):
         self.assertIsInstance(default, EagerInferenceStrategy)
         self.assertIsInstance(named, EagerInferenceStrategy)
         self.assertIsNot(default, named)
+
+    def test_named_torch_compile_strategy_is_opt_in_and_required(self):
+        strategy = get_inference_strategy("torch-compile")
+
+        self.assertIsInstance(strategy, TorchCompileInferenceStrategy)
+        self.assertEqual(strategy.config.requirement.value, "required")
 
     def test_existing_strategy_instance_is_returned_unchanged(self):
         strategy = RecordingInferenceStrategy()
@@ -149,6 +308,14 @@ class InferenceStrategyRegistryTest(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "cannot be unregistered"):
             unregister_inference_strategy(" eager ")
+        with self.assertRaisesRegex(ValueError, "cannot be replaced"):
+            register_inference_strategy(
+                "torch-compile",
+                RecordingInferenceStrategy,
+                exist_ok=True,
+            )
+        with self.assertRaisesRegex(ValueError, "cannot be unregistered"):
+            unregister_inference_strategy("torch-compile")
 
     def test_unregister_removes_custom_registration(self):
         self.register("unit-test-remove", RecordingInferenceStrategy)

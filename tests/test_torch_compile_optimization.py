@@ -355,6 +355,109 @@ class TorchCompileOptimizationTests(unittest.TestCase):
         result.restore()
         self.assertNotIn("infer", runtime.__dict__)
 
+    def test_vui_rejects_inference_compile_and_restores_training_compile(self):
+        from voicehub.models.vui.model import Vui
+
+        class TinyDecoder(nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.tensor(2.0))
+
+            def forward(self, value):
+                return value * self.weight
+
+        class TinyCodec(nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.tensor(1.0))
+                self.calls = 0
+
+            def from_indices(self, value):
+                self.calls += 1
+                return value + self.weight
+
+        runtime = object.__new__(Vui)
+        nn.Module.__init__(runtime)
+        runtime.decoder = TinyDecoder()
+        runtime.codec = TinyCodec()
+        original_keys = tuple(runtime.state_dict())
+        inference_context = self._context(architecture="vui")
+
+        for dynamic in (None, False, True):
+            with (
+                    self.subTest(dynamic=dynamic),
+                    self.assertRaisesRegex(
+                        OptimizationCompatibilityError,
+                        r"vui.*inference.*real-checkpoint",
+                    ),
+            ):
+                OptimizationPassManager().apply(
+                    runtime,
+                    (TorchCompilePass(
+                        backend="eager",
+                        dynamic=dynamic,
+                        requirement="required",
+                    ), ),
+                    inference_context,
+                )
+        self.assertNotIn("forward", runtime.decoder.__dict__)
+        self.assertNotIn("from_indices", runtime.codec.__dict__)
+
+        fallback = OptimizationPassManager().apply(
+            runtime,
+            (TorchCompilePass(
+                backend="eager",
+                requirement="auto",
+            ), ),
+            inference_context,
+        )
+        self.assertEqual(
+            fallback.manifest_metadata()[0]["metadata"]["outcome"],
+            "eager-fallback",
+        )
+        self.assertIn(
+            "real-checkpoint validation",
+            fallback.manifest_metadata()[0]["metadata"]["reason"],
+        )
+        self.assertIs(fallback.restore(), runtime)
+
+        training_context = self._context(
+            "training",
+            architecture="vui",
+        )
+        result = OptimizationPassManager().apply(
+            runtime,
+            (TorchCompilePass(
+                backend="eager",
+                requirement="required",
+            ), ),
+            training_context,
+        )
+
+        self.assertIn("forward", runtime.decoder.__dict__)
+        self.assertNotIn("from_indices", runtime.codec.__dict__)
+        self.assertEqual(
+            result.manifest_metadata()[0]["metadata"]["execution_targets"],
+            ["decoder.forward"],
+        )
+        torch.testing.assert_close(
+            runtime.decoder(torch.tensor(3.0)),
+            torch.tensor(6.0),
+        )
+        torch.testing.assert_close(
+            runtime.codec.from_indices(torch.tensor(3.0)),
+            torch.tensor(4.0),
+        )
+        self.assertEqual(runtime.codec.calls, 1)
+        self.assertEqual(tuple(runtime.state_dict()), original_keys)
+
+        self.assertIs(result.restore(), runtime)
+        self.assertNotIn("forward", runtime.decoder.__dict__)
+        self.assertNotIn("from_indices", runtime.codec.__dict__)
+        self.assertEqual(tuple(runtime.state_dict()), original_keys)
+
     def test_runtime_binding_is_part_of_immutable_application_identity(self):
 
         class Runtime(nn.Module):
@@ -512,6 +615,7 @@ class TorchCompileOptimizationTests(unittest.TestCase):
             def __init__(self):
                 super().__init__()
                 self.weight = nn.Parameter(torch.ones(()))
+                self.transformer = nn.Identity()
                 self.config = SimpleNamespace(
                     sample_rate=24_000,
                     hop_length=2,
@@ -533,6 +637,7 @@ class TorchCompileOptimizationTests(unittest.TestCase):
                 **kwargs,
             ):
                 del token_ids, kwargs
+                self.transformer(reference)
                 return (
                     torch.ones(
                         reference.shape[0],
@@ -549,8 +654,10 @@ class TorchCompileOptimizationTests(unittest.TestCase):
                 super().__init__()
                 self.weight = nn.Parameter(torch.ones(()))
                 self.backbone = SimpleNamespace(input_channels=4)
+                self.decode_calls = 0
 
             def decode(self, features):
+                self.decode_calls += 1
                 return features.mean(dim=1) * self.weight
 
         class Frontend:
@@ -575,6 +682,7 @@ class TorchCompileOptimizationTests(unittest.TestCase):
             vocoder=vocoder,
             frontend=Frontend(),
         )
+        original_keys = tuple(runtime.state_dict())
         compile_calls = []
 
         def compile_method(function, **kwargs):
@@ -598,6 +706,15 @@ class TorchCompileOptimizationTests(unittest.TestCase):
                     return_value=(torch.ones(8), 0.1),
                 ),
         ):
+            inference_kwargs = {
+                "ref_file": "unused.wav",
+                "ref_text": (1, ),
+                "gen_text": (2, ),
+                "nfe_step": 1,
+                "cross_fade_duration": 0.0,
+            }
+            expected_waveform, expected_rate, expected_spectrogram = (
+                runtime.infer(**inference_kwargs))
             result = OptimizationPassManager().apply(
                 runtime,
                 (TorchCompilePass(
@@ -612,26 +729,125 @@ class TorchCompileOptimizationTests(unittest.TestCase):
                 ),
             )
             waveform, sample_rate, spectrogram = runtime.infer(
-                ref_file="unused.wav",
-                ref_text=(1, ),
-                gen_text=(2, ),
-                nfe_step=1,
-                cross_fade_duration=0.0,
-            )
+                **inference_kwargs)
 
+        self.assertEqual(sample_rate, expected_rate)
         self.assertEqual(sample_rate, 24_000)
         self.assertTrue(waveform.numel())
         self.assertTrue(spectrogram.numel())
-        self.assertEqual(compile_calls, ["sample", "decode"])
+        torch.testing.assert_close(waveform, expected_waveform)
+        torch.testing.assert_close(spectrogram, expected_spectrogram)
+        self.assertEqual(compile_calls, ["forward"])
+        self.assertEqual(vocoder.decode_calls, 2)
         self.assertEqual(
             result.manifest()["passes"][0]["metadata"]["execution_targets"],
-            ["flow_model.sample", "vocoder.decode"],
+            ["flow_model.transformer.forward"],
         )
-        self.assertIn("sample", flow.__dict__)
-        self.assertIn("decode", vocoder.__dict__)
-        result.restore()
+        self.assertIn("forward", flow.transformer.__dict__)
         self.assertNotIn("sample", flow.__dict__)
         self.assertNotIn("decode", vocoder.__dict__)
+        self.assertEqual(tuple(runtime.state_dict()), original_keys)
+        result.restore()
+        self.assertNotIn("forward", flow.transformer.__dict__)
+        self.assertNotIn("sample", flow.__dict__)
+        self.assertNotIn("decode", vocoder.__dict__)
+        self.assertEqual(tuple(runtime.state_dict()), original_keys)
+
+    def test_neutts_rejects_inference_compile_and_keeps_training_compile(self):
+        from voicehub.architectures.neutts.modeling import NeuTTSRuntime
+
+        class Backbone(nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.tensor(2.0))
+
+            def forward(self, value):
+                return value * self.weight
+
+        class Codec(nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.bias = nn.Parameter(torch.tensor(1.0))
+                self.decode_calls = 0
+
+            def decode_code(self, value):
+                self.decode_calls += 1
+                return value + self.bias
+
+        runtime = object.__new__(NeuTTSRuntime)
+        nn.Module.__init__(runtime)
+        runtime.backbone = Backbone()
+        runtime.codec = Codec()
+        original_keys = tuple(runtime.state_dict())
+        compile_calls = []
+
+        def compile_method(function, **kwargs):
+            del kwargs
+
+            def compiled(*args, **call_kwargs):
+                compile_calls.append(function.__name__)
+                return function(*args, **call_kwargs)
+
+            return compiled
+
+        with patch.object(
+                torch,
+                "compile",
+                side_effect=compile_method,
+        ):
+            with self.assertRaisesRegex(
+                    OptimizationCompatibilityError,
+                    r"neutts.*inference.*real-checkpoint",
+            ):
+                OptimizationPassManager().apply(
+                    runtime,
+                    (TorchCompilePass(
+                        backend="eager",
+                        requirement="required",
+                    ), ),
+                    self._context(architecture="neutts"),
+                )
+            fallback = OptimizationPassManager().apply(
+                runtime,
+                (TorchCompilePass(
+                    backend="eager",
+                    requirement="auto",
+                ), ),
+                self._context(architecture="neutts"),
+            )
+            result = OptimizationPassManager().apply(
+                runtime,
+                (TorchCompilePass(
+                    backend="eager",
+                    requirement="required",
+                ), ),
+                self._context("training", architecture="neutts"),
+            )
+            actual = runtime.codec.decode_code(
+                runtime.backbone(runtime.backbone(torch.tensor(3.0))))
+
+        torch.testing.assert_close(actual, torch.tensor(13.0))
+        self.assertEqual(compile_calls, ["forward", "forward"])
+        self.assertEqual(runtime.codec.decode_calls, 1)
+        self.assertEqual(
+            fallback.manifest_metadata()[0]["metadata"]["outcome"],
+            "eager-fallback",
+        )
+        self.assertEqual(
+            result.manifest()["passes"][0]["metadata"]["execution_targets"],
+            ["backbone.forward"],
+        )
+        self.assertIn("forward", runtime.backbone.__dict__)
+        self.assertNotIn("decode_code", runtime.codec.__dict__)
+        self.assertEqual(tuple(runtime.state_dict()), original_keys)
+
+        result.restore()
+
+        self.assertNotIn("forward", runtime.backbone.__dict__)
+        self.assertNotIn("decode_code", runtime.codec.__dict__)
+        self.assertEqual(tuple(runtime.state_dict()), original_keys)
 
     def test_qwen_runtime_routes_selectors_and_compile_into_synthesis(self):
         from voicehub.architectures.qwen3_tts.runtime import NativeQwen3TTSRuntime

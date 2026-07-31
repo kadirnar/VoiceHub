@@ -1,114 +1,104 @@
 ---
-description: Install VoiceHub, discover a TTS backend, and generate your first sample.
+description: Install VoiceHub and run simple TTS, ASR, and VAD examples.
 ---
 
 # Quickstart
 
-VoiceHub provides one lazy, discoverable API across open text-to-speech
-architectures. The default package includes every built-in TTS, ASR, and VAD
-inference runtime; implementations and checkpoints are still loaded lazily.
-
 ## Install
 
-The repository version used by these guides can be installed directly:
-
 ```bash
-python -m pip install \
-  "voicehub @ git+https://github.com/kadirnar/voicehub.git@main"
+python -m pip install voicehub
 ```
 
-For development from a clone:
+GPU users should install the correct PyTorch build first. See
+[Installation](installation.md) for CPU, CUDA, Git, wheel, and editable
+setups.
 
-```bash
-python -m pip install -e ".[test]"
-```
+## Discover models
 
-Training is the only separate runtime feature:
-
-```bash
-python -m pip install -e ".[training]"
-```
-
-!!! note "Installed does not mean initialized"
-
-    Installing `voicehub` supplies every built-in inference dependency, but
-    importing the package does not initialize every framework. A selected
-    model runtime and its checkpoint are loaded only on first use.
-
-## Discover available models
-
-Registry discovery does not load PyTorch, Transformers, or model weights:
+Discovery is lazy: it does not load checkpoints.
 
 ```python
-from voicehub import AutoInferenceModel
+from voicehub import list_model_specs
 
-for model_spec in AutoInferenceModel.available_models():
-    print(
-        model_spec.model_type,
-        model_spec.capabilities,
-        model_spec.training.support.value,
-    )
+for spec in list_model_specs(task=None):
+    print(spec.model_type, spec.task.value, spec.default_model_path)
 ```
 
-Use the [model catalog](../models/index.md) to select a backend, then read its
-model-specific guide or wrapper contract for conditioning fields. The
-[training matrix](../models/training-support.md) records the current
-fine-tuning boundary.
+## Generate at least 10 seconds of speech
 
-## Generate speech
+The sample is deliberately long, but speaking rate varies. Always calculate
+the duration of the returned waveform.
 
 ```python
 from voicehub import AutoModelForTextToSpeech, TTSGenerationConfig
+
+text = (
+    "VoiceHub keeps speech experiments easy to inspect and repeat. This "
+    "long sample checks pronunciation, pacing, pauses, and consistency "
+    "across several complete sentences. The same prompt and seed can then "
+    "be reused to compare eager inference with each supported optimization. "
+    "Listen for stable volume, natural pauses, clear endings, and consistent "
+    "tone throughout the complete generated recording."
+)
 
 model = AutoModelForTextToSpeech.from_pretrained(
     "parler-tts/parler-tts-mini-v1",
     model_type="parlertts",
     device="cuda",
-    lazy_load=True,
 )
-
 output = model.generate(
-    "VoiceHub keeps the public lifecycle consistent.",
-    description="A warm, clear speaker at a relaxed pace.",
+    text,
+    description="A clear speaker talks at a steady, natural pace.",
     generation_config=TTSGenerationConfig(
         seed=42,
         output_file="artifacts/quickstart.wav",
     ),
 )
 
-print(output.sample_rate)
-print(output.file_path)
+sample_count = output.audio.shape[-1] if hasattr(output.audio, "shape") else len(output.audio)
+duration = sample_count / output.sample_rate
+if duration < 10:
+    raise RuntimeError(f"Expected at least 10 seconds, got {duration:.2f}")
+print(output.file_path, output.sample_rate, f"{duration:.2f}s")
 ```
 
-Construction is cheap. The first generation call loads the selected runtime;
-call `model.load()` explicitly when a service should warm the model during
-startup.
-
-## Understand the result
-
-Every backend returns `TTSOutput`:
-
-| Field         | Meaning                                                       |
-| ------------- | ------------------------------------------------------------- |
-| `audio`       | Materialized waveform                                         |
-| `sample_rate` | Sample rate for that waveform                                 |
-| `file_path`   | Written path when `output_file` was supplied                  |
-| `metadata`    | Backend-specific generation and conditioning details          |
-
-Save or unpack the output later:
+## Transcribe audio
 
 ```python
-output.save("artifacts/quickstart-copy.wav")
-audio, sample_rate = output.to_tuple()
+from voicehub import AutoModelForSpeechRecognition
+
+model = AutoModelForSpeechRecognition.from_pretrained(
+    "Qwen/Qwen3-ASR-0.6B",
+    model_type="asr_qwen3",
+    device="cuda",
+)
+result = model.transcribe("speech.wav", language="English")
+print(result.text)
 ```
 
-## Choose the next guide
+## Detect speech regions
 
-- [Inference](../guides/inference.md) explains conditioning, deterministic
-  generation, local artifacts, and optimization strategies.
-- [Data preparation](../guides/data-preparation.md) covers manifests, audio
-  validation, split leakage, raw-data adapters, and preprocessed tensors.
-- [Training](../guides/training.md) covers native objectives, one-step smoke
-  tests, exact resume, and portable exports.
-- The [notebook gallery](../guides/notebook.md) provides focused inference,
-  data, and training notebooks plus the complete Dia workflow.
+```python
+from voicehub import AutoModelForVoiceActivityDetection
+
+model = AutoModelForVoiceActivityDetection.from_pretrained(
+    model_type="vad_silero",
+)
+result = model.detect("speech.wav", threshold=0.55)
+for segment in result.segments:
+    print(segment.start, segment.end, segment.score)
+```
+
+## Next steps
+
+- [Inference](../guides/inference.md): conditioning, local artifacts, and
+  reproducible requests.
+- [TTS optimization](../guides/tts-optimization.md): inspect support, apply
+  quality-preserving passes, and benchmark correctly.
+- [Speech recognition](../guides/speech-recognition.md) and
+  [voice activity detection](../guides/voice-activity-detection.md): model
+  inputs and normalized outputs.
+- [Training](../guides/training.md): data contracts, one-step smoke tests,
+  resume, and export.
+- [Notebooks](../guides/notebook.md): short Colab workflows.

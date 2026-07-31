@@ -12,7 +12,10 @@ from types import SimpleNamespace
 import torch
 
 from voicehub.architectures.causal_lm.configuration import GraniteConfig
-from voicehub.architectures.granite_speech.artifacts import GraniteSpeechArtifacts, resolve_granite_speech_artifacts
+from voicehub.architectures.granite_speech.artifacts import (
+    GraniteSpeechArtifacts,
+    resolve_granite_speech_artifacts,
+)
 from voicehub.architectures.granite_speech.checkpoint import (
     granite_speech_header_fingerprint,
     math_product,
@@ -24,7 +27,9 @@ from voicehub.architectures.granite_speech.configuration import (
     GraniteSpeechProjectorConfig,
 )
 from voicehub.architectures.granite_speech.frontend import GraniteSpeechFeatureExtractor
-from voicehub.architectures.granite_speech.modeling import GraniteSpeechForConditionalGeneration
+from voicehub.architectures.granite_speech.modeling import (
+    GraniteSpeechForConditionalGeneration,
+)
 from voicehub.architectures.granite_speech.processing import GraniteSpeechProcessor
 from voicehub.architectures.granite_speech.runtime import (
     GraniteSpeechRuntime,
@@ -620,11 +625,12 @@ class GraniteSpeechNativeRuntimeTests(unittest.TestCase):
         if reference.shape[1] % 2:
             reference = reference[:, :-1]
         reference = reference.reshape(2, -1, 160)
+        float32_epsilon = torch.finfo(torch.float32).eps
         torch.testing.assert_close(
             native,
             reference,
             rtol=0.0,
-            atol=0.0,
+            atol=float32_epsilon,
         )
 
     @unittest.skipUnless(

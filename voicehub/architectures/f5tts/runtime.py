@@ -10,11 +10,18 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from voicehub.architectures.f5tts.audio import cross_fade, normalize_reference_rms, trim_silence
+from voicehub.architectures.f5tts.audio import (
+    cross_fade,
+    normalize_reference_rms,
+    trim_silence,
+)
 from voicehub.architectures.f5tts.frontend import NativeF5TextFrontend, TokenSequence
 from voicehub.architectures.f5tts.modeling import F5ConditionalFlowMatcher
 from voicehub.architectures.f5tts.vocoder import NativeVocos
-from voicehub.optimization.protocols import OptimizationCompileTarget, OptimizationModuleRoot
+from voicehub.optimization.protocols import (
+    OptimizationCompileTarget,
+    OptimizationModuleRoot,
+)
 from voicehub.processing.waveform import load_native_audio
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[;:,.!?])\s+|(?<=[；：，。！？])")
@@ -66,11 +73,18 @@ class NativeF5TTSRuntime(nn.Module):
         flow_model: F5ConditionalFlowMatcher,
         vocoder: NativeVocos | None,
         frontend: NativeF5TextFrontend,
+        allow_unvalidated_reduced_precision_inference: bool = False,
     ) -> None:
         super().__init__()
+        if not isinstance(allow_unvalidated_reduced_precision_inference, bool):
+            raise TypeError(
+                "`allow_unvalidated_reduced_precision_inference` must be a "
+                "boolean.")
         self.ema_model = flow_model
         self.vocoder = vocoder
         self.frontend = frontend
+        self.allow_unvalidated_reduced_precision_inference = (
+            allow_unvalidated_reduced_precision_inference)
         self.target_sample_rate = flow_model.config.sample_rate
         self.hop_length = flow_model.config.hop_length
         self.seed: int | None = None
@@ -105,20 +119,14 @@ class NativeF5TTSRuntime(nn.Module):
             ), )
         if mode != "inference":
             raise ValueError(f"Unsupported optimization mode {mode!r}.")
-        targets = [
-            OptimizationCompileTarget(
-                "flow_model.sample",
-                self.ema_model,
-                "sample",
-            ),
-        ]
-        if self.vocoder is not None:
-            targets.append(OptimizationCompileTarget(
-                "vocoder.decode",
-                self.vocoder,
-                "decode",
-            ))
-        return tuple(targets)
+        # Keep dynamic duration, RNG, solver control flow, and the one-shot
+        # vocoder eager. The DiT is the stable tensor region repeated at every
+        # flow evaluation.
+        return (OptimizationCompileTarget(
+            "flow_model.transformer.forward",
+            self.ema_model.transformer,
+            "forward",
+        ), )
 
     def prepare_for_training(self) -> None:
         self.ema_model.train()
@@ -126,7 +134,53 @@ class NativeF5TTSRuntime(nn.Module):
             self.vocoder.eval()
 
     def prepare_for_inference(self) -> None:
+        self._validate_inference_precision()
         self.eval()
+
+    def _validate_inference_precision(self) -> None:
+        """Require an acknowledgement for unvalidated inference precision."""
+        if self.allow_unvalidated_reduced_precision_inference:
+            return
+        components = {
+            "DiT": self.ema_model,
+            "Vocos": self.vocoder,
+        }
+        reduced_precision_components = tuple(
+            (
+                name,
+                tuple(sorted({
+                    str(parameter.dtype).removeprefix("torch.")
+                    for parameter in component.parameters()
+                    if (
+                        parameter.is_floating_point()
+                        and parameter.dtype != torch.float32
+                    )
+                })),
+            )
+            for name, component in components.items()
+            if component is not None
+            and any(
+                parameter.is_floating_point()
+                and parameter.dtype != torch.float32
+                for parameter in component.parameters()
+            )
+        )
+        if not reduced_precision_components:
+            return
+        joined = " and ".join(
+            f"{name} ({', '.join(dtypes)})"
+            for name, dtypes in reduced_precision_components
+        )
+        raise RuntimeError(
+            "F5-TTS reduced-precision inference is disabled by default "
+            "because the "
+            f"{joined} graph has not passed the end-to-end speech-quality "
+            "gate. Keeping only the frontend, ODE accumulator, or Vocos in "
+            "FP32 is also not yet quality-validated. Use `torch_dtype="
+            "\"float32\"`, or set "
+            "`allow_unvalidated_reduced_precision_inference=True` only after "
+            "validating intelligibility and speaker similarity for your "
+            "checkpoint.")
 
     def _prepare_reference(
         self,
@@ -174,6 +228,7 @@ class NativeF5TTSRuntime(nn.Module):
         if self.vocoder is None:
             raise RuntimeError("F5-TTS waveform inference requires a loaded native Vocos "
                                "decoder.")
+        self._validate_inference_precision()
         reference_text = (
             normalize_reference_text(ref_text) if isinstance(ref_text, str) else tuple(ref_text))
         if isinstance(gen_text, str):

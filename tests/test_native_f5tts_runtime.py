@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
@@ -15,6 +16,7 @@ from voicehub.architectures.f5tts.checkpoint import (
     convert_legacy_f5tts_checkpoint,
     export_f5tts_checkpoint,
     load_f5tts_checkpoint,
+    load_vocos_checkpoint,
 )
 from voicehub.architectures.f5tts.configuration import F5TTSArchitectureConfig
 from voicehub.architectures.f5tts.frontend import F5Vocabulary, NativeF5TextFrontend
@@ -28,10 +30,14 @@ from voicehub.architectures.f5tts.metadata import (
     VOCOS_SOURCE_REVISION,
 )
 from voicehub.architectures.f5tts.modeling import F5ConditionalFlowMatcher
-from voicehub.architectures.f5tts.modules import RotaryEmbedding, apply_rotary_position_embedding
+from voicehub.architectures.f5tts.modules import (
+    RotaryEmbedding,
+    apply_rotary_position_embedding,
+)
 from voicehub.architectures.f5tts.registration import create_f5tts_architecture_spec
 from voicehub.architectures.f5tts.runtime import NativeF5TTSRuntime
 from voicehub.architectures.f5tts.vocoder import ISTFTHead, NativeVocos
+from voicehub.checkpointing import save_safetensors
 from voicehub.models.f5tts.inference import F5TTSConfig, F5TTSForTextToSpeech
 from voicehub.trainer import Trainer
 from voicehub.training.recipes import F5TTSTrainingAdapter
@@ -86,6 +92,14 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
         spec = create_f5tts_architecture_spec()
         self.assertTrue(spec.capabilities.training)
         self.assertTrue(spec.metadata["full_finetuning_ready"])
+        self.assertEqual(
+            spec.metadata["quality_validated_inference_dtypes"],
+            ("float32", ),
+        )
+        self.assertIn(
+            "Explicit opt-in",
+            spec.metadata["reduced_precision_inference_policy"],
+        )
         self.assertEqual(len(F5TTS_SOURCE_REVISION), 40)
         self.assertEqual(len(F5TTS_CHECKPOINT_REVISION), 40)
         self.assertEqual(len(VOCOS_SOURCE_REVISION), 40)
@@ -238,6 +252,149 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
         self.assertEqual(stats["solver_startup_steps"], 1)
         self.assertEqual(stats["solver_stabilized_steps"], 1)
 
+    def test_compile_targets_keep_sampler_and_vocoder_eager_for_inference(self):
+
+        class TinyVocoder(torch.nn.Module):
+
+            def __init__(self, input_channels: int):
+                super().__init__()
+                self.backbone = SimpleNamespace(input_channels=input_channels)
+
+            @staticmethod
+            def decode(features):
+                return features
+
+        flow = F5ConditionalFlowMatcher(_tiny_config())
+        vocoder = TinyVocoder(flow.num_channels)
+        runtime = NativeF5TTSRuntime(
+            flow_model=flow,
+            vocoder=vocoder,
+            frontend=NativeF5TextFrontend(_tiny_vocabulary()),
+        )
+
+        inference = runtime.optimization_compile_targets("inference")
+        training = runtime.optimization_compile_targets("training")
+
+        self.assertEqual(
+            tuple(target.label for target in inference),
+            ("flow_model.transformer.forward", ),
+        )
+        self.assertIs(inference[0].owner, flow.transformer)
+        self.assertEqual(inference[0].attribute, "forward")
+        self.assertNotIn(flow, tuple(target.owner for target in inference))
+        self.assertNotIn(vocoder, tuple(target.owner for target in inference))
+        self.assertEqual(
+            tuple(target.label for target in training),
+            ("flow_model.forward", ),
+        )
+        self.assertIs(training[0].owner, flow)
+        self.assertEqual(training[0].attribute, "forward")
+        with self.assertRaisesRegex(ValueError, "Unsupported optimization mode"):
+            runtime.optimization_compile_targets("export")
+
+    def test_reduced_precision_inference_fails_closed(self):
+
+        class TinyVocoder(torch.nn.Module):
+
+            def __init__(self, input_channels: int):
+                super().__init__()
+                self.backbone = SimpleNamespace(input_channels=input_channels)
+                self.projection = torch.nn.Conv1d(
+                    input_channels,
+                    input_channels,
+                    kernel_size=1,
+                )
+
+            def decode(self, features):
+                return self.projection(features)
+
+        for flow_dtype in (torch.float16, torch.bfloat16):
+            for vocoder_dtype in (torch.float32, flow_dtype):
+                with self.subTest(
+                    flow_dtype=flow_dtype,
+                    vocoder_dtype=vocoder_dtype,
+                ):
+                    flow = F5ConditionalFlowMatcher(_tiny_config()).to(
+                        dtype=flow_dtype)
+                    vocoder = TinyVocoder(flow.num_channels).to(
+                        dtype=vocoder_dtype)
+                    runtime = NativeF5TTSRuntime(
+                        flow_model=flow,
+                        vocoder=vocoder,
+                        frontend=NativeF5TextFrontend(_tiny_vocabulary()),
+                    )
+
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "reduced-precision inference is disabled.*DiT",
+                    ):
+                        runtime.prepare_for_inference()
+
+    def test_reduced_precision_requires_explicit_quality_acknowledgement(self):
+
+        class TinyVocoder(torch.nn.Module):
+
+            def __init__(self, input_channels: int):
+                super().__init__()
+                self.backbone = SimpleNamespace(input_channels=input_channels)
+                self.projection = torch.nn.Conv1d(
+                    input_channels,
+                    input_channels,
+                    kernel_size=1,
+                )
+
+            def decode(self, features):
+                return self.projection(features)
+
+        flow = F5ConditionalFlowMatcher(_tiny_config()).bfloat16()
+        runtime = NativeF5TTSRuntime(
+            flow_model=flow,
+            vocoder=TinyVocoder(flow.num_channels).bfloat16(),
+            frontend=NativeF5TextFrontend(_tiny_vocabulary()),
+            allow_unvalidated_reduced_precision_inference=True,
+        )
+
+        runtime.prepare_for_inference()
+
+        self.assertFalse(runtime.training)
+        self.assertFalse(runtime.ema_model.training)
+        self.assertFalse(runtime.vocoder.training)
+
+    def test_reduced_precision_acknowledgement_is_boolean(self):
+        with self.assertRaisesRegex(
+            TypeError,
+            "allow_unvalidated_reduced_precision_inference.*boolean",
+        ):
+            F5TTSConfig(
+                allow_unvalidated_reduced_precision_inference="yes",
+            )
+
+    def test_reduced_precision_fails_before_checkpoint_resolution(self):
+        model = F5TTSForTextToSpeech(
+            F5TTSConfig(torch_dtype="float16"),
+            device="cpu",
+            lazy_load=True,
+        )
+
+        with (
+            patch(
+                "voicehub.models.f5tts.inference.resolve_f5tts_artifacts",
+            ) as resolver,
+            patch(
+                "voicehub.models.f5tts.inference.resolve_torch_dtype",
+                return_value=torch.float16,
+            ),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "reduced-precision inference is disabled",
+            ),
+        ):
+            model.load()
+
+        resolver.assert_not_called()
+        self.assertIsNone(model.model)
+        self.assertIsNone(model.artifacts)
+
     def test_checkpoint_round_trip_is_strict_and_prefix_compatible(self):
         source = F5ConditionalFlowMatcher(_tiny_config())
         target = F5ConditionalFlowMatcher(_tiny_config())
@@ -260,6 +417,42 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
                 }))
             with self.assertRaisesRegex(ValueError, "shape"):
                 load_f5tts_checkpoint(incompatible, checkpoint)
+
+    def test_f5_checkpoint_accepts_hugging_face_snapshot_symlink(self):
+        source = torch.nn.Linear(3, 2)
+        target = torch.nn.Linear(3, 2)
+        with torch.no_grad():
+            target.weight.zero_()
+            target.bias.zero_()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            blobs = root / "blobs"
+            snapshot = root / "snapshots" / "revision"
+            blobs.mkdir()
+            snapshot.mkdir(parents=True)
+            blob = blobs / ("a" * 64)
+            save_safetensors(
+                {
+                    f"ema_model.{name}": tensor
+                    for name, tensor in source.state_dict().items()
+                },
+                blob,
+            )
+            checkpoint = snapshot / "model.safetensors"
+            checkpoint.symlink_to(Path("../../blobs") / blob.name)
+
+            report = load_f5tts_checkpoint(target, checkpoint)
+
+            self.assertEqual(report.path, blob.resolve())
+            self.assertEqual(report.prefix, "ema_model.")
+            for name, tensor in source.state_dict().items():
+                self.assertTrue(torch.equal(tensor, target.state_dict()[name]))
+
+            unsafe_alias = snapshot / "model.bin"
+            unsafe_alias.symlink_to(Path("../../blobs") / blob.name)
+            with self.assertRaisesRegex(ValueError, "Safetensors only"):
+                load_f5tts_checkpoint(target, unsafe_alias)
 
     def test_legacy_conversion_is_weights_only(self):
         model = F5ConditionalFlowMatcher(_tiny_config())
@@ -296,6 +489,35 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
         waveform = actual.decode(torch.randn(1, 100, 8))
         self.assertEqual(tuple(waveform.shape), (1, 1_792))
         self.assertTrue(torch.isfinite(waveform).all())
+
+    def test_vocos_checkpoint_accepts_hugging_face_snapshot_symlink(self):
+        source = torch.nn.Linear(4, 3)
+        target = torch.nn.Linear(4, 3)
+        with torch.no_grad():
+            target.weight.zero_()
+            target.bias.zero_()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            blobs = root / "blobs"
+            snapshot = root / "snapshots" / "revision"
+            blobs.mkdir()
+            snapshot.mkdir(parents=True)
+            blob = blobs / ("b" * 64)
+            save_safetensors(source.state_dict(), blob)
+            checkpoint = snapshot / "vocos.safetensors"
+            checkpoint.symlink_to(Path("../../blobs") / blob.name)
+
+            report = load_vocos_checkpoint(target, checkpoint)
+
+            self.assertEqual(report.path, blob.resolve())
+            for name, tensor in source.state_dict().items():
+                self.assertTrue(torch.equal(tensor, target.state_dict()[name]))
+
+            unsafe_alias = snapshot / "vocos.bin"
+            unsafe_alias.symlink_to(Path("../../blobs") / blob.name)
+            with self.assertRaisesRegex(ValueError, "converted Safetensors only"):
+                load_vocos_checkpoint(target, unsafe_alias)
 
     def test_frontend_requires_explicit_chinese_normalization(self):
         frontend = NativeF5TextFrontend(_tiny_vocabulary())

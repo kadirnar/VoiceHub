@@ -268,11 +268,27 @@ class UniversalTTSOptimizationTests(unittest.TestCase):
                         plan.decisions[-1].feature,
                         "compile",
                     )
-                    self.assertTrue(plan.passes)
-                    self.assertEqual(
-                        plan.passes[-1].compatibility_kind,
-                        "compile",
-                    )
+                    if mode == "inference":
+                        self.assertNotIn(
+                            "torch.compile",
+                            tuple(item.pass_id for item in plan.passes),
+                        )
+                        self.assertEqual(
+                            plan.decisions[-1].selected,
+                            "eager",
+                        )
+                        expected_reason = (
+                            "real-checkpoint validation"
+                            if spec.model_type in {"neutts", "vits", "vui"}
+                            else "retained real-checkpoint validation"
+                        )
+                        self.assertIn(expected_reason, plan.decisions[-1].reason)
+                    else:
+                        self.assertTrue(plan.passes)
+                        self.assertEqual(
+                            plan.passes[-1].compatibility_kind,
+                            "compile",
+                        )
                     manifest = plan.manifest()
                     self.assertEqual(
                         manifest,
@@ -287,12 +303,27 @@ class UniversalTTSOptimizationTests(unittest.TestCase):
         for spec in list_model_specs(task=SpeechTask.TEXT_TO_SPEECH):
             with self.subTest(model_type=spec.model_type):
                 target = _ArchitectureShapedTarget(spec.model_type)
-                plan = resolve_tts_optimization(
-                    target,
-                    context=_context("inference"),
-                )
-                configuration = (plan.passes[-1].manifest_configuration())
-                self.assertIsNone(configuration["execution_targets"])
+                if spec.model_type in {"neutts", "vits", "vui"}:
+                    plan = resolve_tts_optimization(
+                        target,
+                        context=_context("inference"),
+                    )
+                    self.assertNotIn(
+                        "torch.compile",
+                        tuple(item.pass_id for item in plan.passes),
+                    )
+                else:
+                    plan = resolve_tts_optimization(
+                        target,
+                        TTSOptimizationConfig(
+                            attn_implementation="native",
+                            kernel_backend="native",
+                            compile="required",
+                        ),
+                        context=_context("inference"),
+                    )
+                    configuration = (plan.passes[-1].manifest_configuration())
+                    self.assertIsNone(configuration["execution_targets"])
 
     def test_default_specialization_matrix_is_semantics_driven(self):
         custom_kernel_models = {
@@ -309,11 +340,7 @@ class UniversalTTSOptimizationTests(unittest.TestCase):
             "vibevoice",
             "vits",
         }
-        flash_attention_models = {
-            "conversationtts",
-            "f5tts",
-            "qwen3tts",
-        }
+        flash_attention_models = set()
         specs = list_model_specs(task=SpeechTask.TEXT_TO_SPEECH)
 
         observed_custom = set()
@@ -324,23 +351,16 @@ class UniversalTTSOptimizationTests(unittest.TestCase):
                 context=_context("inference"),
             )
             pass_ids = [item.pass_id for item in plan.passes]
-            self.assertEqual(pass_ids[-1], "torch.compile")
+            self.assertNotIn("torch.compile", pass_ids)
+            self.assertEqual(plan.decisions[-1].selected, "eager")
             if "custom-kernels" in pass_ids:
                 observed_custom.add(spec.model_type)
                 self.assertEqual(
                     plan.decisions[0].selected,
                     "torch",
                 )
-                self.assertLess(
-                    pass_ids.index("custom-kernels"),
-                    pass_ids.index("torch.compile"),
-                )
             if "flash-attention-4" in pass_ids:
                 observed_flash.add(spec.model_type)
-                self.assertLess(
-                    pass_ids.index("flash-attention-4"),
-                    pass_ids.index("torch.compile"),
-                )
 
         self.assertEqual(observed_custom, custom_kernel_models)
         self.assertEqual(observed_flash, flash_attention_models)
@@ -418,6 +438,63 @@ class UniversalTTSOptimizationTests(unittest.TestCase):
                 context=_context("inference", device="mps"),
             )
 
+    def test_vui_rejects_inference_compile_and_preserves_training_compile(self):
+        for dynamic in (None, False, True):
+            with (
+                    self.subTest(dynamic=dynamic),
+                    self.assertRaisesRegex(
+                        TTSOptimizationCompatibilityError,
+                        r"vui.*inference.*real-checkpoint",
+                    ),
+            ):
+                get_tts_optimization_config(
+                    "vui",
+                    compile=True,
+                    compile_config={
+                        "backend": "eager",
+                        "dynamic": dynamic,
+                    },
+                )
+
+        automatic = resolve_tts_optimization(
+            "vui",
+            TTSOptimizationConfig(),
+            context=_context("inference"),
+        )
+        self.assertEqual(automatic.passes, ())
+        self.assertEqual(automatic.decisions[-1].selected, "eager")
+        self.assertIn(
+            "real-checkpoint validation",
+            automatic.decisions[-1].reason,
+        )
+
+        training = resolve_tts_optimization(
+            "vui",
+            TTSOptimizationConfig(
+                compile=True,
+                compile_config={
+                    "backend": "eager",
+                    "dynamic": None,
+                },
+            ),
+            mode="training",
+            context=_context("training"),
+        )
+        self.assertEqual(
+            training.passes[-1].config.dynamic,
+            None,
+        )
+        self.assertEqual(training.decisions[-1].selected, "torch.compile:eager")
+
+        disabled = get_tts_optimization_config(
+            "vui",
+            compile=False,
+            compile_config={
+                "dynamic": True,
+            },
+        )
+        self.assertEqual(disabled.compile.value, "disabled")
+
     def test_mps_auto_policy_produces_an_inspectable_eager_fallback(self):
         plan = resolve_tts_optimization(
             "dia",
@@ -430,7 +507,10 @@ class UniversalTTSOptimizationTests(unittest.TestCase):
         self.assertEqual(decisions["attention"].selected, "native")
         self.assertEqual(decisions["kernels"].selected, "torch")
         self.assertEqual(decisions["compile"].selected, "eager")
-        self.assertIn("device 'mps'", decisions["compile"].reason)
+        self.assertIn(
+            "retained real-checkpoint validation",
+            decisions["compile"].reason,
+        )
         self.assertEqual(
             plan.manifest()["passes"],
             [],
@@ -643,11 +723,9 @@ print(json.dumps({
         self.assertEqual(
             json.loads(completed.stdout),
             {
-                "passes": [
-                    "custom-kernels",
-                    "flash-attention-4",
-                    "torch.compile",
-                ],
+                    "passes": [
+                        "custom-kernels",
+                    ],
                 "optional": [],
             },
         )
@@ -1242,8 +1320,11 @@ print(json.dumps({
             lazy_load=True,
         )
         self.assertFalse(model.is_loaded)
-        self.assertIsNone(
-            model.resolve_optimization().passes[-1].manifest_configuration()["execution_targets"], )
+        self.assertEqual(model.resolve_optimization().passes, ())
+        self.assertEqual(
+            model._pending_tts_optimization_config.compile.value,
+            "required",
+        )
 
         with (
                 mock.patch(

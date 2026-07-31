@@ -1,0 +1,88 @@
+{
+  "benchmark": "voicehub-vui-inference-compile-quality-rejection",
+  "date": "2026-07-31",
+  "status": "rejected",
+  "model_type": "vui",
+  "checkpoint": "vui-abraham-100m.pt",
+  "checkpoint_revision": "8dc2bd9993a8118b6e2b71f3d9d92d1deb80e5f7",
+  "device": {
+    "type": "cuda",
+    "name": "NVIDIA GeForce RTX 4090",
+    "total_memory_bytes": 25262096384
+  },
+  "runtime": {
+    "torch": "2.8.0+cu128",
+    "cuda": "12.8",
+    "compiler": "inductor",
+    "compiled_region": "decoder.forward",
+    "seed": 1234,
+    "warmup_runs": 2,
+    "measured_runs": 5
+  },
+  "quality_gate": {
+    "minimum_audio_seconds": 10.0,
+    "waveform_atol": 0.0,
+    "waveform_rtol": 0.0,
+    "require_waveform_equivalence": true,
+    "asr_model": "openai/whisper-tiny"
+  },
+  "results": [
+    {
+      "profile": "compile-dynamic",
+      "compile_config": {
+        "dynamic": true,
+        "fullgraph": false,
+        "mode": null
+      },
+      "baseline": {
+        "samples": 481280,
+        "duration_seconds": 21.826757369614512,
+        "steady_mean_latency_seconds": 8.523196676466615,
+        "whisper_wer": 0.53125
+      },
+      "candidate": {
+        "samples": 563200,
+        "duration_seconds": 25.541950113378686,
+        "steady_mean_latency_seconds": 5.265870999079198,
+        "speedup_ratio": 1.6185730106105904,
+        "peak_allocated_memory_change_percent": 7.119842268996404,
+        "peak_reserved_memory_change_percent": 13.383458646616543,
+        "whisper_wer": 2.359375
+      },
+      "waveform_equivalent": false,
+      "accepted": false,
+      "rejection_reason": "Generated a severe repetition loop and changed sequence and audio length."
+    },
+    {
+      "profile": "compile-specialized",
+      "compile_config": {
+        "dynamic": null,
+        "fullgraph": false,
+        "mode": null
+      },
+      "baseline": {
+        "samples": 481280,
+        "duration_seconds": 21.826757369614512,
+        "steady_mean_latency_seconds": 8.380800201464444,
+        "whisper_wer": 0.53125
+      },
+      "candidate": {
+        "samples": 478208,
+        "duration_seconds": 21.687437641723356,
+        "steady_mean_latency_seconds": 4.315943105705083,
+        "speedup_ratio": 1.941823605224587,
+        "peak_allocated_memory_change_percent": -0.21869919263976875,
+        "peak_reserved_memory_change_percent": -7.669172932330827,
+        "whisper_wer": 0.578125
+      },
+      "waveform_equivalent": false,
+      "accepted": false,
+      "rejection_reason": "Changed sequence and audio length and truncated the recognized transcript."
+    }
+  ],
+  "policy": {
+    "inference_torch_compile": "rejected",
+    "training_torch_compile": "available",
+    "reason": "Measured inference speedups are not reported as usable because both tested shape policies failed the quality gate."
+  }
+}

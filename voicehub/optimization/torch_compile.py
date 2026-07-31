@@ -11,16 +11,20 @@ unique resolved component is compiled in place.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import update_wrapper
 from importlib import import_module
 from threading import RLock
 from types import MappingProxyType
-from typing import Any, Callable
+from typing import Any
 
-from voicehub.optimization.capabilities import OptimizationCapabilities, OptimizationContext, OptimizationMode
+from voicehub.optimization.capabilities import (
+    OptimizationCapabilities,
+    OptimizationContext,
+    OptimizationMode,
+)
 from voicehub.optimization.passes import (
     OptimizationCompatibilityError,
     OptimizationPass,
@@ -35,6 +39,7 @@ _COMPILE_MODES = frozenset({
     "max-autotune-no-cudagraphs",
     "reduce-overhead",
 })
+INFERENCE_COMPILE_UNSAFE_FEATURE = "torch-compile-inference-unsafe"
 
 
 def _freeze_json_tree(value: Any) -> Any:
@@ -182,6 +187,35 @@ class TorchCompileCapabilityReport:
     reason: str | None = None
 
 
+def torch_compile_architecture_incompatibility(
+    config: TorchCompileConfig,
+    architecture: Any | None,
+    *,
+    mode: OptimizationMode | str,
+) -> str | None:
+    """Return a declared architecture/config incompatibility, if any."""
+    if not isinstance(config, TorchCompileConfig):
+        raise TypeError("`config` must be a TorchCompileConfig.")
+    resolved_mode = OptimizationMode.coerce(mode)
+    if architecture is None or resolved_mode is not OptimizationMode.INFERENCE:
+        return None
+    capabilities = getattr(architecture, "capabilities", None)
+    has_feature = getattr(capabilities, "has_feature", None)
+    if not callable(has_feature) or not has_feature(INFERENCE_COMPILE_UNSAFE_FEATURE):
+        return None
+    architecture_id = getattr(
+        architecture,
+        "architecture_id",
+        type(architecture).__name__,
+    )
+    return (
+        f"Architecture {architecture_id!r} rejects torch.compile during "
+        "inference because real-checkpoint validation changed generated "
+        "tokens or audio under tested compiler policies. Training "
+        "compilation remains available."
+    )
+
+
 def _available_backends(torch: Any) -> tuple[str, ...]:
     dynamo = getattr(torch, "_dynamo", None)
     list_backends = getattr(dynamo, "list_backends", None)
@@ -228,7 +262,9 @@ def inspect_torch_compile(backend: str = "inductor", ) -> TorchCompileCapability
         )
     try:
         backends = _available_backends(torch)
-    except Exception as error:
+    # Backend registries are third-party extension points and may raise
+    # arbitrary exceptions; capability inspection must remain fail-closed.
+    except Exception as error:  # noqa: BLE001
         return TorchCompileCapabilityReport(
             available=False,
             backend=backend,
@@ -675,8 +711,27 @@ class TorchCompilePass(OptimizationPass):
                 label=target.label,
             ) for target in self.execution_targets)
 
+    def _architecture_incompatibility(
+        self,
+        context: OptimizationContext,
+    ) -> str | None:
+        architecture = None
+        if context.architecture is not None:
+            from voicehub.architectures import get_architecture_spec
+
+            architecture = get_architecture_spec(context.architecture)
+        return torch_compile_architecture_incompatibility(
+            self.config,
+            architecture,
+            mode=context.mode,
+        )
+
     def validate(self, model: Any, context: OptimizationContext) -> None:
         super().validate(model, context)
+        architecture_issue = self._architecture_incompatibility(context)
+        if (architecture_issue is not None and
+                self.config.requirement is TorchCompileRequirement.REQUIRED):
+            raise OptimizationCompatibilityError(architecture_issue)
         targets = self._execution_targets(model, context)
         report = inspect_torch_compile(self.config.backend)
         issues = []
@@ -717,6 +772,12 @@ class TorchCompilePass(OptimizationPass):
         )
 
     def apply(self, model: Any, context: OptimizationContext) -> PassResult:
+        architecture_issue = self._architecture_incompatibility(context)
+        if architecture_issue is not None:
+            return self._fallback_or_raise(
+                model,
+                architecture_issue,
+            )
         report = inspect_torch_compile(self.config.backend)
         if not report.available:
             return self._fallback_or_raise(
@@ -738,7 +799,8 @@ class TorchCompilePass(OptimizationPass):
         torch = import_module("torch")
         try:
             before_keys = _state_dict_keys(model)
-        except Exception as error:
+        # Custom state_dict implementations may raise arbitrary exceptions.
+        except Exception as error:  # noqa: BLE001
             return self._fallback_or_raise(
                 model,
                 f"cannot inspect canonical state: {error}",
@@ -751,7 +813,8 @@ class TorchCompilePass(OptimizationPass):
                     target.eager,
                     **self.config.compile_kwargs(),
                 )
-            except Exception as error:
+            # torch.compile and custom backends have no narrow error contract.
+            except Exception as error:  # noqa: BLE001
                 return self._fallback_or_raise(
                     model,
                     f"{type(error).__name__}: {error}",
@@ -812,7 +875,9 @@ class TorchCompilePass(OptimizationPass):
                     setattr(owner, attribute, compiled_call)
                     patches.append(patch)
                     compile_runtimes.append((target.label, compiled_call))
-            except Exception as error:
+            # Targets and compiler backends are extensible and may raise any
+            # exception; restore every installed patch before falling back.
+            except Exception as error:  # noqa: BLE001
                 self._restore_method_patches(patches)
                 return self._fallback_or_raise(
                     model,
@@ -926,6 +991,7 @@ class TorchCompilePass(OptimizationPass):
 
 
 __all__ = [
+    "INFERENCE_COMPILE_UNSAFE_FEATURE",
     "TorchCompileCapabilityReport",
     "TorchCompileConfig",
     "TorchCompileError",
@@ -934,4 +1000,5 @@ __all__ = [
     "TorchCompileRuntimeError",
     "TorchCompileUnavailableError",
     "inspect_torch_compile",
+    "torch_compile_architecture_incompatibility",
 ]
