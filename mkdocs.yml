@@ -72,12 +72,86 @@ nav:
       - RTX 5090 TTS benchmarks: guides/rtx-5090-tts-benchmarks.md
   - Notebooks: guides/notebook.md
   - Models:
-      - Model guides: models/providers/index.md
-      - TTS model catalog: models/index.md
-      - TTS capabilities: models/tts-capabilities.md
-      - ASR and VAD support: models/asr-vad-support.md
-      - TTS training support: models/training-support.md
-      - XTTS v2 native DVAE: models/xtts2.md
+      - Overview: models/providers/index.md
+      # BEGIN GENERATED MODEL GUIDE NAVIGATION
+      - Text to speech:
+          - "bark": models/providers/bark.md
+          - "chatterbox": models/providers/chatterbox.md
+          - "conversationtts": models/providers/conversationtts.md
+          - "cosyvoice": models/providers/cosyvoice.md
+          - "csm": models/providers/csm.md
+          - "dia": models/providers/dia.md
+          - "echo": models/providers/echo.md
+          - "f5tts": models/providers/f5tts.md
+          - "fishtts": models/providers/fishtts.md
+          - "gptsovits": models/providers/gptsovits.md
+          - "higgstts": models/providers/higgstts.md
+          - "inflecttts": models/providers/inflecttts.md
+          - "irodoritts": models/providers/irodoritts.md
+          - "kokoro": models/providers/kokoro.md
+          - "llasa": models/providers/llasa.md
+          - "melotts": models/providers/melotts.md
+          - "mosstts": models/providers/mosstts.md
+          - "neutts": models/providers/neutts.md
+          - "omnivoice": models/providers/omnivoice.md
+          - "openvoice": models/providers/openvoice.md
+          - "orpheustts": models/providers/orpheustts.md
+          - "outetts": models/providers/outetts.md
+          - "parlertts": models/providers/parlertts.md
+          - "qwen3tts": models/providers/qwen3tts.md
+          - "speecht5": models/providers/speecht5.md
+          - "styletts2": models/providers/styletts2.md
+          - "supertonic": models/providers/supertonic.md
+          - "vibevoice": models/providers/vibevoice.md
+          - "vits": models/providers/vits.md
+          - "voxcpm": models/providers/voxcpm.md
+          - "vui": models/providers/vui.md
+          - "xtts": models/providers/xtts.md
+          - "zonos": models/providers/zonos.md
+          - "zonos2": models/providers/zonos2.md
+      - Automatic speech recognition:
+          - "asr_cohere": models/providers/asr_cohere.md
+          - "asr_espnet": models/providers/asr_espnet.md
+          - "asr_faster_whisper": models/providers/asr_faster_whisper.md
+          - "asr_funasr": models/providers/asr_funasr.md
+          - "asr_granite_speech": models/providers/asr_granite_speech.md
+          - "asr_hubert": models/providers/asr_hubert.md
+          - "asr_medasr": models/providers/asr_medasr.md
+          - "asr_moonshine": models/providers/asr_moonshine.md
+          - "asr_nemo": models/providers/asr_nemo.md
+          - "asr_nemotron": models/providers/asr_nemotron.md
+          - "asr_openai_whisper": models/providers/asr_openai_whisper.md
+          - "asr_parakeet_tdt": models/providers/asr_parakeet_tdt.md
+          - "asr_qwen3": models/providers/asr_qwen3.md
+          - "asr_seamless_m4t_v2": models/providers/asr_seamless_m4t_v2.md
+          - "asr_speechbrain": models/providers/asr_speechbrain.md
+          - "asr_tiron": models/providers/asr_tiron.md
+          - "asr_transformers": models/providers/asr_transformers.md
+          - "asr_vibevoice": models/providers/asr_vibevoice.md
+          - "asr_wav2vec2": models/providers/asr_wav2vec2.md
+          - "asr_wavlm": models/providers/asr_wavlm.md
+          - "asr_wenet": models/providers/asr_wenet.md
+          - "asr_whisper": models/providers/asr_whisper.md
+          - "asr_whisperx": models/providers/asr_whisperx.md
+      - Voice activity detection:
+          - "vad_auditok": models/providers/vad_auditok.md
+          - "vad_funasr": models/providers/vad_funasr.md
+          - "vad_nemo": models/providers/vad_nemo.md
+          - "vad_pyannote": models/providers/vad_pyannote.md
+          - "vad_pyannote_brouhaha": models/providers/vad_pyannote_brouhaha.md
+          - "vad_pyannote_segmentation": models/providers/vad_pyannote_segmentation.md
+          - "vad_sherpa_onnx": models/providers/vad_sherpa_onnx.md
+          - "vad_silero": models/providers/vad_silero.md
+          - "vad_speechbrain": models/providers/vad_speechbrain.md
+          - "vad_transformers": models/providers/vad_transformers.md
+          - "vad_webrtc": models/providers/vad_webrtc.md
+      # END GENERATED MODEL GUIDE NAVIGATION
+      - Catalogs and support:
+          - TTS model catalog: models/index.md
+          - TTS capabilities: models/tts-capabilities.md
+          - ASR and VAD support: models/asr-vad-support.md
+          - TTS training support: models/training-support.md
+          - XTTS v2 native DVAE: models/xtts2.md
   - Architecture:
       - Library architecture: concepts/architecture.md
       - Trainer architecture: concepts/trainer.md
