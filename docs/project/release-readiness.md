@@ -21,9 +21,9 @@ contract.
 | Source, docs, benchmark, and PyPI candidate alignment | Local check identified 0.3.0 as a new candidate over PyPI 0.1.6 | Passed |
 | Full CPU-safe suite | Clean macOS runs on Python 3.10, 3.11, and 3.12 each reported 2,343 passed, 25 skipped, 2,593 subtests, and 35 warnings | Passed locally across supported Python versions |
 | Formatting and lint | Repository-wide pre-commit completed after a dedicated 28-file mechanical normalization; a normalized AST audit found no behavior-tree changes | Passed |
-| Documentation | Strict multilingual build completed locally | Passed |
-| Wheel, sdist, and editable installs | All three clean probes reported 68 models, 81 pinned/license-bearing source manifests, 193 installed provenance/legal files, required data present, zero dependency violations, and no eager PyTorch import | Passed |
-| Python 3.10–3.12 on Linux, macOS, and Windows | The committed baseline `03f6884` passed all nine jobs in [CI run 30687784383](https://github.com/kadirnar/voicehub/actions/runs/30687784383); CI and the protected release workflow both define the full 3×3 matrix | Baseline passed; candidate execution pending |
+| Documentation | Strict multilingual build completed locally and in [candidate Docs run 30691669774](https://github.com/kadirnar/voicehub/actions/runs/30691669774) | Passed |
+| Wheel, sdist, and editable installs | All three clean probes reported 68 models, 81 pinned/license-bearing source manifests, 193 installed provenance/legal files, required data present, zero dependency violations, and no eager PyTorch import; [candidate Package CI run 30691669796](https://github.com/kadirnar/voicehub/actions/runs/30691669796) repeated the release and distribution checks | Passed |
+| Python 3.10–3.12 on Linux, macOS, and Windows | Candidate commit `e2bfb4a` passed all nine matrix jobs in [CI run 30691669734](https://github.com/kadirnar/voicehub/actions/runs/30691669734), plus macOS and Windows runtime smokes, default-runtime, training, and lint jobs | Passed |
 | Released-checkpoint TTS, ASR, and VAD evidence | Dated RTX 4090 JSON and guide; see matrix below | Passed for the listed representatives |
 | Tokenless publication workflow | Source contract test verifies separate build/publish jobs, protected environment, and job-scoped OIDC | Passed locally; tagged run pending |
 | Protected `pypi` environment and PyPI publisher | GitHub's environment inventory currently contains only `github-pages`; PyPI publisher settings require maintainer access | Pending maintainer configuration |
@@ -66,8 +66,8 @@ The same full suite also passed in independent clean macOS environments on
 Python 3.10.19 (232.20 seconds), Python 3.11.15 (215.65 seconds), and Python
 3.12.12 (99.72 seconds). The 3.10 and 3.11 environments resolved and installed
 their declared test/runtime dependencies from scratch before execution. These
-runs strengthen version compatibility evidence but do not replace the pending
-Linux and Windows candidate CI jobs.
+runs supplied pre-push evidence; candidate CI subsequently passed the same
+supported Python versions on Linux, macOS, and Windows.
 
 The release workflow first repeats the complete test suite on Linux, macOS,
 and Windows with Python 3.10, 3.11, and 3.12. Its build job cannot begin unless
@@ -93,12 +93,13 @@ manifests must contain a pinned revision/release and explicit license metadata;
 all 193 compliance files plus the project-level Apache-2.0 license must survive
 both wheel and source-distribution builds.
 
-The latest committed `main` baseline also passed Package CI and the strict
-documentation/deployment workflow in
-[runs 30687784386](https://github.com/kadirnar/voicehub/actions/runs/30687784386)
-and [30687784381](https://github.com/kadirnar/voicehub/actions/runs/30687784381).
-Those runs predate the uncommitted release-candidate changes and are recorded
-only as baseline evidence, not as a pass for the candidate.
+Candidate commit `e2bfb4a` passed Continuous Integration, Package CI, and the
+strict documentation build in
+[runs 30691669734](https://github.com/kadirnar/voicehub/actions/runs/30691669734),
+[30691669796](https://github.com/kadirnar/voicehub/actions/runs/30691669796), and
+[30691669774](https://github.com/kadirnar/voicehub/actions/runs/30691669774).
+The pull request intentionally skipped GitHub Pages deployment; deployment is
+not a candidate test gate.
 
 ## One-time publisher configuration
 
