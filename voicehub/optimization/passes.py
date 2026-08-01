@@ -129,6 +129,7 @@ class OptimizationPass(ABC):
     pass_id: str
     pass_version: str
     optimization_kind: str | None = None
+    requires_architecture_support: bool = False
     capabilities: OptimizationCapabilities
 
     @classmethod
@@ -150,6 +151,13 @@ class OptimizationPass(ABC):
             raise TypeError(
                 f"Optimization pass {cls.__name__} must declare "
                 "`optimization_kind` as a non-empty string or None.")
+        if not isinstance(
+                getattr(cls, "requires_architecture_support", None),
+                bool,
+        ):
+            raise TypeError(
+                f"Optimization pass {cls.__name__} must declare "
+                "`requires_architecture_support` as a boolean.")
         capabilities = cls.capabilities
         if capabilities.reversible and cls.restore is OptimizationPass.restore:
             raise TypeError(f"Reversible optimization pass {cls.__name__} must override "
@@ -646,7 +654,8 @@ class OptimizationPassManager:
                 f"Architecture {architecture.architecture_id!r} does not "
                 f"support {', '.join(issues)}.")
         for item in passes:
-            if not capabilities.supports_optimization(item.compatibility_kind):
+            if (item.requires_architecture_support and
+                    not capabilities.supports_optimization(item.compatibility_kind)):
                 raise OptimizationCompatibilityError(
                     f"Architecture {architecture.architecture_id!r} does not "
                     "declare compatibility with optimization kind "
@@ -726,5 +735,59 @@ class OptimizationPassRegistry:
         with self._lock:
             return tuple(sorted(self._factories))
 
+    def unregister(
+        self,
+        name: str,
+        *,
+        missing_ok: bool = False,
+    ) -> OptimizationPassFactory | None:
+        """Remove and return one factory."""
+        if not isinstance(missing_ok, bool):
+            raise TypeError("`missing_ok` must be a boolean.")
+        normalized = self._name(name)
+        with self._lock:
+            try:
+                return self._factories.pop(normalized)
+            except KeyError:
+                if missing_ok:
+                    return None
+                raise KeyError(f"No optimization pass {normalized!r} is registered.") from None
+
 
 OPTIMIZATION_PASSES = OptimizationPassRegistry()
+
+
+def register_optimization_pass(
+    name: str,
+    factory: OptimizationPassFactory | None = None,
+    *,
+    exist_ok: bool = False,
+):
+    """Register a lazy pass factory or decorate one.
+
+    Explicitly registered passes are available to every speech model.
+    The pass's ``validate()`` method remains responsible for checking
+    whether a concrete runtime exposes the structure it needs.
+    """
+    if factory is None:
+
+        def decorator(resolved_factory: OptimizationPassFactory):
+            OPTIMIZATION_PASSES.register(
+                name,
+                resolved_factory,
+                exist_ok=exist_ok,
+            )
+            return resolved_factory
+
+        return decorator
+    OPTIMIZATION_PASSES.register(name, factory, exist_ok=exist_ok)
+    return factory
+
+
+def unregister_optimization_pass(
+    name: str,
+    *,
+    missing_ok: bool = False,
+) -> OptimizationPassFactory | None:
+    """Remove a process-wide optimization pass factory."""
+    return OPTIMIZATION_PASSES.unregister(name, missing_ok=missing_ok)

@@ -245,6 +245,24 @@ def cuda_extension_capability(
     """Probe PyTorch's JIT CUDA-extension toolchain without compiling code."""
     if not isinstance(require_runtime, bool):
         raise TypeError("`require_runtime` must be a boolean.")
+    try:
+        cpp_extension = import_module("torch.utils.cpp_extension")
+    except (ImportError, OSError, RuntimeError) as error:
+        return CapabilityStatus(
+            False,
+            f"torch.utils.cpp_extension could not be imported: {error}",
+        )
+    is_ninja_available = getattr(
+        cpp_extension,
+        "is_ninja_available",
+        None,
+    )
+    if not callable(is_ninja_available) or not is_ninja_available():
+        return CapabilityStatus(
+            False,
+            "the Ninja build system required by PyTorch C++ extensions was "
+            "not found",
+        )
     compiled_version = torch.version.cuda
     if compiled_version is None:
         return CapabilityStatus(
@@ -258,35 +276,12 @@ def cuda_extension_capability(
             f"CUDA extension runtime is unavailable: {runtime.reason}",
             runtime.details,
         )
-    try:
-        cpp_extension = import_module("torch.utils.cpp_extension")
-    except (ImportError, OSError, RuntimeError) as error:
-        return CapabilityStatus(
-            False,
-            f"torch.utils.cpp_extension could not be imported: {error}",
-            {"torch_cuda": compiled_version},
-        )
     cuda_home = getattr(cpp_extension, "CUDA_HOME", None)
     if cuda_home is None:
         return CapabilityStatus(
             False,
             "the CUDA toolkit was not found (CUDA_HOME is unset)",
             {"torch_cuda": compiled_version},
-        )
-    is_ninja_available = getattr(
-        cpp_extension,
-        "is_ninja_available",
-        None,
-    )
-    if not callable(is_ninja_available) or not is_ninja_available():
-        return CapabilityStatus(
-            False,
-            "the Ninja build system required by PyTorch C++ extensions was "
-            "not found",
-            {
-                "cuda_home": str(cuda_home),
-                "torch_cuda": compiled_version,
-            },
         )
     details = {
         "cuda_home": str(cuda_home),

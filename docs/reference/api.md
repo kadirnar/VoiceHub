@@ -235,6 +235,21 @@ begins.
 
 ## Model factories
 
+### `AutoModel`
+
+`AutoModel` reads the registered task and dispatches to the TTS, ASR, or VAD
+factory:
+
+```python
+model = AutoModel.from_pretrained(
+    checkpoint,
+    model_type="asr_qwen3",
+)
+```
+
+Use a task-specific factory when the task is already known. Use `AutoModel`
+for tools that handle several speech tasks.
+
 ### `AutoModelForTextToSpeech`
 
 This is the preferred checkpoint-first factory.
@@ -336,6 +351,22 @@ Audio-input pretrained models provide:
 See the [ASR guide](../guides/speech-recognition.md),
 [VAD guide](../guides/voice-activity-detection.md), and
 [provider matrix](../models/asr-vad-support.md).
+
+### Register a model
+
+Each auto factory provides a Transformers-style registration method:
+
+```python
+AutoModelForTextToSpeech.register(
+    AuroraConfig,
+    AuroraForTextToSpeech,
+    default_model_path="acme/aurora-base",
+    aliases=("aurora-tts",),
+)
+```
+
+The config supplies `model_type`; the factory supplies the task. The registry
+stores lazy import paths. See [Add a model](../project/adding-a-model.md).
 
 ### ASR and VAD outputs
 
@@ -1060,6 +1091,7 @@ class OptimizationPass:
     pass_id: str
     pass_version: str
     optimization_kind: str | None
+    requires_architecture_support: bool = False
     capabilities: OptimizationCapabilities
 
     def manifest_configuration(self) -> Mapping[str, Any]: ...
@@ -1093,11 +1125,13 @@ OptimizationPassManager.apply_plan(
 persistable. Registered wrappers bind the canonical architecture
 automatically; registered model specs with `architecture=None` remain
 agnostic. Before applying any pass, the manager validates pass and architecture
-device/dtype/mode/streaming constraints, distributed-training capability, and
-each `optimization_kind`. Architecture-bound distributed inference is
-explicitly unsupported by the current schema. The manager rolls back earlier
-reversible passes after a failure and returns ordered application state.
-Declaring reversibility requires an actual `restore()` override.
+device/dtype/mode/streaming constraints plus distributed-training capability.
+The pass then validates the loaded runtime structure it needs. A pass may set
+`requires_architecture_support=True` for a manually audited compatibility kind.
+Architecture-bound distributed inference is explicitly unsupported by the
+current schema. The manager rolls back earlier reversible passes after a
+failure and returns ordered application state. Declaring reversibility requires
+an actual `restore()` override.
 
 `manifest_configuration()` is mandatory and must return every effective pass
 option, including defaults, as a strict JSON string-key tree. The manager
@@ -1108,6 +1142,18 @@ declarations do not register executable pass factories. Use
 `OptimizationResult.restore()` only when every pass declares itself
 reversible. `OptimizationResult.portable_state_dict(model=None)` returns
 canonical save state, optionally from a strategy-unwrapped execution handle.
+
+Register extension passes globally with a function or decorator:
+
+```python
+register_optimization_pass("acme-pass", AcmePass)
+unregister_optimization_pass("acme-pass")
+```
+
+The pass becomes available through every speech model's
+`available_optimization_passes()` and `apply_optimization_plan()` methods.
+Compatibility is still checked before mutation. See
+[Add an optimization](../project/adding-an-optimization.md).
 
 Built-in accelerator passes are available from `voicehub.optimization`:
 

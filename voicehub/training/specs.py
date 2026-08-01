@@ -11,7 +11,7 @@ from types import MappingProxyType
 from typing import Any
 
 from voicehub.errors import UnknownModelError
-from voicehub.registry import get_model_spec, normalize_model_type
+from voicehub.models.registry import get_model_spec, normalize_model_type
 from voicehub.tasks import SpeechTask
 from voicehub.training.contracts import (
     TrainingContext,

@@ -200,10 +200,10 @@ LazyComponentRef = LazyComponentReference
 class ArchitectureCapabilities:
     """Execution features guaranteed by one native architecture.
 
-    Devices, dtypes, formats, optimisation passes, and feature flags are
-    open string sets rather than enums. New hardware and execution
-    systems can therefore be represented without changing VoiceHub's
-    core types.
+    Devices, dtypes, formats, verified automatic optimizations, and
+    feature flags are open string sets rather than enums. Explicit
+    optimization extensions validate runtime structure directly, so
+    adding one does not require changing every architecture declaration.
     """
 
     tasks: tuple[SpeechTask | str, ...]
@@ -289,7 +289,7 @@ class ArchitectureCapabilities:
         return normalized in self.export_formats
 
     def supports_optimization(self, optimization_pass: str) -> bool:
-        """Return whether an optimisation pass is declared compatible."""
+        """Return whether an optimization is statically verified here."""
         normalized = normalize_capability_token(
             optimization_pass,
             name="optimization_pass",

@@ -74,6 +74,7 @@ NAVIGATION_PATHS = (
     "concepts/trainer.md",
     "project/adding-a-model.md",
     "project/adding-speech-provider.md",
+    "project/adding-an-optimization.md",
     "project/translations.md",
     "project/model-audit.md",
 )
@@ -306,9 +307,7 @@ class DocumentationSiteTests(unittest.TestCase):
                 )
 
     def test_qwen3_decoding_example_uses_supported_options(self):
-        source = (
-            DOCS_ROOT / "guides" / "speech-recognition.md"
-        ).read_text(encoding="utf-8")
+        source = (DOCS_ROOT / "guides" / "speech-recognition.md").read_text(encoding="utf-8")
         section = source.split(
             "## Decoding configuration",
             1,
@@ -322,56 +321,36 @@ class DocumentationSiteTests(unittest.TestCase):
         self.assertNotIn("batch_size=4", section)
 
     def test_rtx_4090_report_tracks_asr_vad_manifest(self):
-        result_path = (
-            REPOSITORY_ROOT
-            / "benchmarks"
-            / "asr_vad_rtx4090_2026-07-31.json"
-        )
+        result_path = (REPOSITORY_ROOT / "benchmarks" / "asr_vad_rtx4090_2026-07-31.json")
         result = json.loads(result_path.read_text(encoding="utf-8"))
-        report = (
-            DOCS_ROOT
-            / "guides"
-            / "rtx-4090-speech-benchmarks.md"
-        ).read_text(encoding="utf-8")
+        report = (DOCS_ROOT / "guides" / "rtx-4090-speech-benchmarks.md").read_text(encoding="utf-8")
 
         self.assertIn(str(result_path.relative_to(REPOSITORY_ROOT)), report)
         moonshine = next(
-            measurement
-            for measurement in result["asr_measurements"]
-            if measurement["model_type"] == "asr_moonshine"
-        )
+            measurement for measurement in result["asr_measurements"]
+            if measurement["model_type"] == "asr_moonshine")
         fp32 = moonshine["profiles"][0]
         self.assertIn(
-            (
-                f"{fp32['mean_seconds'] * 1000:.2f} / "
-                f"{fp32['median_seconds'] * 1000:.2f} ms"
-            ),
+            (f"{fp32['mean_seconds'] * 1000:.2f} / "
+             f"{fp32['median_seconds'] * 1000:.2f} ms"),
             report,
         )
         whisper = next(
-            measurement
-            for measurement in result["asr_measurements"]
-            if measurement["model_type"] == "asr_whisper"
-        )
+            measurement for measurement in result["asr_measurements"]
+            if measurement["model_type"] == "asr_whisper")
         for profile in whisper["profiles"]:
             self.assertIn(
-                (
-                    f"{profile['mean_seconds'] * 1000:.2f} / "
-                    f"{profile['median_seconds'] * 1000:.2f} ms"
-                ),
+                (f"{profile['mean_seconds'] * 1000:.2f} / "
+                 f"{profile['median_seconds'] * 1000:.2f} ms"),
                 report,
             )
         sherpa = next(
-            measurement
-            for measurement in result["vad_measurements"]
-            if measurement["model_type"] == "vad_sherpa_onnx"
-        )
+            measurement for measurement in result["vad_measurements"]
+            if measurement["model_type"] == "vad_sherpa_onnx")
         baseline = sherpa["profiles"][0]
         self.assertIn(
-            (
-                f"{baseline['mean_seconds'] * 1000:,.2f} / "
-                f"{baseline['median_seconds'] * 1000:,.2f} ms"
-            ),
+            (f"{baseline['mean_seconds'] * 1000:,.2f} / "
+             f"{baseline['median_seconds'] * 1000:,.2f} ms"),
             report,
         )
 
@@ -605,11 +584,7 @@ class DocumentationSiteTests(unittest.TestCase):
             )
 
     def test_quickstart_models_construct_lazily_without_downloads(self):
-        from voicehub import (
-            AutoModelForSpeechRecognition,
-            AutoModelForTextToSpeech,
-            AutoModelForVoiceActivityDetection,
-        )
+        from voicehub import AutoModelForSpeechRecognition, AutoModelForTextToSpeech, AutoModelForVoiceActivityDetection
 
         tts_model = AutoModelForTextToSpeech.from_pretrained(
             "parler-tts/parler-tts-mini-v1",

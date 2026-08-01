@@ -114,6 +114,11 @@ class _PluginCompilePass(OptimizationPass):
         return state["model"]
 
 
+class _NewOptimizationKindPass(_PluginCompilePass):
+    pass_id = "test.new-optimization-kind"
+    optimization_kind = "future-optimization"
+
+
 class _NestedManifestPluginPass(_PluginCompilePass):
     pass_id = "test.nested-plugin-compile"
 
@@ -278,10 +283,8 @@ class UniversalTTSOptimizationTests(unittest.TestCase):
                             "eager",
                         )
                         expected_reason = (
-                            "real-checkpoint validation"
-                            if spec.model_type in {"neutts", "vits", "vui"}
-                            else "retained real-checkpoint validation"
-                        )
+                            "real-checkpoint validation" if spec.model_type in {"neutts", "vits", "vui"} else
+                            "retained real-checkpoint validation")
                         self.assertIn(expected_reason, plan.decisions[-1].reason)
                     else:
                         self.assertTrue(plan.passes)
@@ -723,9 +726,9 @@ print(json.dumps({
         self.assertEqual(
             json.loads(completed.stdout),
             {
-                    "passes": [
-                        "custom-kernels",
-                    ],
+                "passes": [
+                    "custom-kernels",
+                ],
                 "optional": [],
             },
         )
@@ -760,6 +763,33 @@ print(json.dumps({
         self.assertEqual(
             plan.manifest()["passes"][0]["kind"],
             "compile",
+        )
+
+    def test_new_plugin_kind_needs_no_architecture_catalog_edits(self):
+        registry = OptimizationPassRegistry()
+        registry.register("future-optimization", _NewOptimizationKindPass)
+        config = TTSOptimizationConfig(
+            attn_implementation="native",
+            kernel_backend="native",
+            compile=False,
+            optimization_passes=("future-optimization", ),
+        )
+
+        plan = resolve_tts_optimization(
+            "dia",
+            config,
+            mode="training",
+            context=_context("training"),
+            registry=registry,
+        )
+
+        self.assertNotIn(
+            "future-optimization",
+            plan.support.optimization_kinds,
+        )
+        self.assertEqual(
+            plan.manifest()["passes"][0]["kind"],
+            "future-optimization",
         )
 
     def test_plugin_manifests_use_the_generic_strict_json_contract(self):

@@ -9,7 +9,7 @@ from pathlib import Path
 from voicehub.dependencies import import_optional
 from voicehub.inference_strategy import InferenceStrategy
 from voicehub.modeling_utils import PreTrainedTTSModel
-from voicehub.registry import MODEL_REGISTRY, ModelSpec, get_model_spec, list_model_specs
+from voicehub.models.registry import MODEL_REGISTRY, ModelSpec, get_model_spec, list_model_specs
 from voicehub.tasks import SpeechTask
 
 

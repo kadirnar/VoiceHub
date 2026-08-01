@@ -6,6 +6,7 @@ from voicehub.audio import AudioInput, load_audio
 from voicehub.audio_modeling_utils import PreTrainedASRModel, PreTrainedAudioModel, PreTrainedVADModel
 from voicehub.auto import (
     AutoConfig,
+    AutoModel,
     AutoModelForSpeechRecognition,
     AutoModelForTextToSpeech,
     AutoModelForVoiceActivityDetection,
@@ -84,6 +85,8 @@ from voicehub.optimization import (
 from voicehub.policies import ModelLicenseSpec
 from voicehub.processing_utils import AudioProcessor, BatchFeature, VoiceHubProcessor
 from voicehub.registry import (
+    MODEL_CATALOG,
+    ModelRegistry,
     ModelSpec,
     get_model_spec,
     list_model_specs,
@@ -282,6 +285,7 @@ __all__ = [
     "AudioProcessor",
     "AutoConfig",
     "AutoInferenceModel",
+    "AutoModel",
     "AutoModelForSpeechRecognition",
     "AutoModelForTextToSpeech",
     "AutoModelForVoiceActivityDetection",
@@ -357,7 +361,9 @@ __all__ = [
     "InferenceStrategy",
     "TorchCompileInferenceStrategy",
     "ModelLicenseSpec",
+    "ModelRegistry",
     "ModelSpec",
+    "MODEL_CATALOG",
     "OptimizationCompileTarget",
     "OptimizationCompileTargetProvider",
     "OptimizationModuleRoot",

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from voicehub.registry import normalize_model_type
+from voicehub.models.registry import normalize_model_type
 from voicehub.training.adapters import (
     AcousticTrainingAdapter,
     AudioClassificationTrainingAdapter,

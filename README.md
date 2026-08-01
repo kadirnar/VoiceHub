@@ -64,7 +64,9 @@ output = tts_model.generate(
     ),
 )
 
-samples = output.audio.shape[-1] if hasattr(output.audio, "shape") else len(output.audio)
+samples = (
+    output.audio.shape[-1] if hasattr(output.audio, "shape") else len(output.audio)
+)
 duration = samples / output.sample_rate
 if duration < 10:
     raise RuntimeError(f"Expected at least 10 seconds, generated {duration:.2f}")
@@ -157,12 +159,12 @@ cover manifests and leakage-safe splits.
 The notebooks use a short, top-to-bottom workflow: install, configure, run,
 and inspect.
 
-| Notebook | GitHub | Colab |
-| --- | --- | --- |
-| TTS, ASR, and VAD inference | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/inference.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/inference.ipynb) |
-| Data preparation | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/data_preparation.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/data_preparation.ipynb) |
-| Fine-tuning | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/training.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/training.ipynb) |
-| Dia end-to-end workflow | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb) |
+| Notebook                    | GitHub                                                                                  | Colab                                                                                                        |
+| --------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| TTS, ASR, and VAD inference | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/inference.ipynb)        | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/inference.ipynb)        |
+| Data preparation            | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/data_preparation.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/data_preparation.ipynb) |
+| Fine-tuning                 | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/training.ipynb)         | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/training.ipynb)         |
+| Dia end-to-end workflow     | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb)     | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb)     |
 
 Read the [notebook guide](https://kadirnar.github.io/voicehub/guides/notebook/)
 for expected hardware and opt-in execution flags.
@@ -175,6 +177,8 @@ for expected hardware and opt-in execution flags.
 - [Voice activity detection](https://kadirnar.github.io/voicehub/guides/voice-activity-detection/)
 - [Model catalog](https://kadirnar.github.io/voicehub/models/)
 - [Architecture](https://kadirnar.github.io/voicehub/concepts/architecture/)
+- [Add a model](https://kadirnar.github.io/voicehub/project/adding-a-model/)
+- [Add an optimization](https://kadirnar.github.io/voicehub/project/adding-an-optimization/)
 - [API reference](https://kadirnar.github.io/voicehub/reference/api/)
 
 ## Development
