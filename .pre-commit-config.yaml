@@ -3,6 +3,12 @@ ci:
   autofix_prs: true
   autoupdate_commit_msg: '[pre-commit.ci] pre-commit suggestions'
   autoupdate_schedule: monthly
+  # GitHub Actions runs formatters against the changed-file range. Running
+  # them over every historical provider in pre-commit.ci exceeds its timeout.
+  skip:
+    - isort
+    - yapf
+    - docformatter
   # submodules: true
 
 exclude: ^(?:voicehub/models/.*/source/|voicehub/models/asr_native/_wenet/|voicehub/components/(?:audio|neural)/)
