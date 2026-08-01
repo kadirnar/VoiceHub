@@ -1200,6 +1200,7 @@ def audit_registry() -> dict[str, Any]:
     provider."""
     from voicehub import AutoModelForTextToSpeech
     from voicehub import __version__ as voicehub_version
+    from voicehub.optimization import OptimizationContext
     from voicehub.registry import list_model_specs
     from voicehub.tasks import SpeechTask
 
@@ -1241,13 +1242,19 @@ def audit_registry() -> dict[str, Any]:
             providers.append(item)
             continue
         try:
-            baseline = model.resolve_optimization({
-                "attn_implementation": "native",
-                "kernel_backend": "native",
-                "compile": False,
-                "diffusion_cache": False,
-                "diffusion_sampling": False,
-            })
+            baseline = model.resolve_optimization(
+                {
+                    "attn_implementation": "native",
+                    "kernel_backend": "native",
+                    "compile": False,
+                    "diffusion_cache": False,
+                    "diffusion_sampling": False,
+                },
+                context=OptimizationContext(
+                    mode="inference",
+                    device="cpu",
+                ),
+            )
             item["baseline_plan"] = {
                 "status": "ok",
                 "passes": [entry.qualified_id for entry in baseline.passes],
@@ -1260,7 +1267,11 @@ def audit_registry() -> dict[str, Any]:
                 "error": str(error),
             }
         try:
-            optimized = model.resolve_optimization()
+            optimized = model.resolve_optimization(
+                context=OptimizationContext(
+                    mode="inference",
+                    device="cpu",
+                ))
             item["optimized_plan"] = {
                 "status": "ok",
                 "passes": [entry.qualified_id for entry in optimized.passes],

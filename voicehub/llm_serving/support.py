@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from voicehub.errors import LLMBackendCompatibilityError
 from voicehub.llm_serving.configuration import LLMBackend, LLMBackendTransport
-from voicehub.registry import normalize_model_type
+from voicehub.models.registry import normalize_model_type
 
 
 @dataclass(frozen=True, slots=True)

@@ -130,7 +130,7 @@ def bind_registered_architecture(
 
     from voicehub.architectures import get_architecture_spec
     from voicehub.errors import UnknownModelError
-    from voicehub.registry import get_model_spec
+    from voicehub.models.registry import get_model_spec
 
     try:
         model_spec = get_model_spec(model_type)

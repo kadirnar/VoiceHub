@@ -84,6 +84,7 @@ nav:
   - Contributing:
       - Add a TTS model: project/adding-a-model.md
       - Add an ASR or VAD provider: project/adding-speech-provider.md
+      - Add an optimization: project/adding-an-optimization.md
       - Translations: project/translations.md
       - Model audit: project/model-audit.md
 

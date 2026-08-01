@@ -10,8 +10,14 @@ from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.errors import UnknownModelError
 from voicehub.hub import read_json_file, resolve_pretrained_file
 from voicehub.inference_strategy import InferenceStrategy
+from voicehub.models.registry import (
+    MODEL_REGISTRY,
+    ModelSpec,
+    get_model_spec,
+    register_model_spec,
+    unregister_model_spec,
+)
 from voicehub.processing_utils import VoiceHubProcessor
-from voicehub.registry import MODEL_REGISTRY, ModelSpec, get_model_spec
 from voicehub.tasks import SpeechTask
 
 
@@ -129,9 +135,77 @@ class _BaseAutoModel:
     @classmethod
     def available_models(cls) -> tuple[ModelSpec, ...]:
         """List compatible backends without importing their runtimes."""
-        from voicehub.registry import list_model_specs
+        from voicehub.models.registry import list_model_specs
 
         return list_model_specs(task=cls.task)
+
+    @classmethod
+    def register(
+        cls,
+        config_class: type[VoiceHubConfig],
+        model_class: type,
+        *,
+        model_type: str | None = None,
+        default_model_path: str = "",
+        aliases: tuple[str, ...] = (),
+        capabilities: tuple[str, ...] = (),
+        architecture: str | None = None,
+        install_extra: str | None = None,
+        exist_ok: bool = False,
+    ) -> ModelSpec:
+        """Register a model/config pair for this task-specific factory.
+
+        The signature mirrors the extension flow used by Transformers
+        auto classes while retaining VoiceHub's task boundary. The
+        registry stores import paths, not the class objects, so normal
+        discovery stays lazy.
+        """
+        if not isinstance(config_class, type) or not issubclass(
+                config_class,
+                VoiceHubConfig,
+        ):
+            raise TypeError("`config_class` must inherit VoiceHubConfig.")
+        resolved_model_type = model_type or getattr(config_class, "model_type", None)
+        if not isinstance(resolved_model_type, str) or not resolved_model_type.strip():
+            raise ValueError("`model_type` is required when config_class has no model_type.")
+        if resolved_model_type.strip().lower() == "voicehub":
+            raise ValueError("Extension config classes must declare a unique `model_type`.")
+        spec = ModelSpec.from_classes(
+            model_type=resolved_model_type,
+            model_class=model_class,
+            config_class=config_class,
+            default_model_path=default_model_path,
+            install_extra=install_extra,
+            capabilities=capabilities,
+            task=cls.task,
+            architecture=architecture,
+        )
+        register_model_spec(
+            spec,
+            aliases=aliases,
+            exist_ok=exist_ok,
+        )
+        return spec
+
+    @classmethod
+    def unregister(
+        cls,
+        model_type: str,
+        *,
+        missing_ok: bool = False,
+    ) -> ModelSpec | None:
+        """Unregister a model owned by this task-specific factory."""
+        try:
+            spec = get_model_spec(model_type)
+        except UnknownModelError:
+            if missing_ok:
+                return None
+            raise
+        if spec.task is not cls.task:
+            raise ValueError(
+                f"Model {model_type!r} belongs to {spec.task.value!r}, not "
+                f"{cls.task.value!r}.")
+        return unregister_model_spec(model_type, missing_ok=missing_ok)
 
     @classmethod
     def from_config(
@@ -244,9 +318,8 @@ class _BaseAutoModel:
                 "Pass `model_type` as the top-level factory argument, not "
                 "inside `config_kwargs`.")
         if config is not None and config_values:
-            raise TypeError(
-                "Pass configuration through either `config` or "
-                "`config_kwargs`, not both.")
+            raise TypeError("Pass configuration through either `config` or "
+                            "`config_kwargs`, not both.")
 
         empty_source = (
             isinstance(pretrained_model_name_or_path, str) and not pretrained_model_name_or_path.strip())
@@ -335,6 +408,118 @@ class AutoModelForVoiceActivityDetection(_BaseAutoModel):
 
     task = SpeechTask.VOICE_ACTIVITY_DETECTION
     default_model_type = "vad_transformers"
+
+
+_AUTO_MODEL_FACTORY_BY_TASK = {
+    SpeechTask.TEXT_TO_SPEECH: AutoModelForTextToSpeech,
+    SpeechTask.AUTOMATIC_SPEECH_RECOGNITION: AutoModelForSpeechRecognition,
+    SpeechTask.VOICE_ACTIVITY_DETECTION: AutoModelForVoiceActivityDetection,
+}
+
+
+class AutoModel:
+    """Task-aware entry point for every registered speech model."""
+
+    def __init__(self):
+        raise OSError("AutoModel must be created with from_config/from_pretrained.")
+
+    @classmethod
+    def available_models(
+        cls,
+        *,
+        task: SpeechTask | str | None = None,
+    ) -> tuple[ModelSpec, ...]:
+        """List models, optionally filtered by speech task."""
+        del cls
+        from voicehub.models.registry import list_model_specs
+
+        return list_model_specs(task=task)
+
+    @classmethod
+    def from_config(cls, config: VoiceHubConfig, **kwargs):
+        """Dispatch a typed configuration to its task-specific factory."""
+        del cls
+        spec = get_model_spec(config.model_type)
+        return _AUTO_MODEL_FACTORY_BY_TASK[spec.task].from_config(config, **kwargs)
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: str | Path = "",
+        *,
+        model_type: str | None = None,
+        config: VoiceHubConfig | None = None,
+        config_kwargs: Mapping[str, object] | None = None,
+        **kwargs,
+    ):
+        """Load any registered model and dispatch by its declared task."""
+        del cls
+        if config is not None:
+            spec = get_model_spec(config.model_type)
+        elif model_type is not None:
+            spec = get_model_spec(model_type)
+        else:
+            if not str(pretrained_model_name_or_path).strip():
+                raise ValueError(
+                    "AutoModel needs `model_type`, `config`, or a checkpoint "
+                    "containing config.json.")
+            if config_kwargs is None:
+                config_values = {}
+            elif isinstance(config_kwargs, Mapping):
+                config_values = dict(config_kwargs)
+            else:
+                raise TypeError("`config_kwargs` must be a mapping or None.")
+            if "model_type" in config_values:
+                raise ValueError(
+                    "Pass `model_type` as the top-level factory argument, not "
+                    "inside `config_kwargs`.")
+            config = AutoConfig.from_pretrained(
+                pretrained_model_name_or_path,
+                **config_values,
+            )
+            spec = get_model_spec(config.model_type)
+            config_kwargs = None
+        return _AUTO_MODEL_FACTORY_BY_TASK[spec.task].from_pretrained(
+            pretrained_model_name_or_path,
+            model_type=model_type,
+            config=config,
+            config_kwargs=config_kwargs,
+            **kwargs,
+        )
+
+    @classmethod
+    def register(
+        cls,
+        config_class: type[VoiceHubConfig],
+        model_class: type,
+        *,
+        task: SpeechTask | str,
+        **kwargs,
+    ) -> ModelSpec:
+        """Register a model through the factory selected by ``task``."""
+        del cls
+        factory = _AUTO_MODEL_FACTORY_BY_TASK[SpeechTask.coerce(task)]
+        return factory.register(config_class, model_class, **kwargs)
+
+    @classmethod
+    def unregister(
+        cls,
+        model_type: str,
+        *,
+        missing_ok: bool = False,
+    ) -> ModelSpec | None:
+        """Unregister a model through the factory that owns its task."""
+        del cls
+        try:
+            spec = get_model_spec(model_type)
+        except UnknownModelError:
+            if missing_ok:
+                return None
+            raise
+        return _AUTO_MODEL_FACTORY_BY_TASK[spec.task].unregister(
+            model_type,
+            missing_ok=missing_ok,
+        )
 
 
 class AutoProcessor:

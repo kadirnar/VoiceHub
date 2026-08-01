@@ -81,6 +81,19 @@ class BaseSpeechModel(ABC):
             dtype=dtype,
         )
 
+    @classmethod
+    def available_optimization_passes(cls) -> tuple[str, ...]:
+        """List every pass registered for speech-model optimization.
+
+        Availability is global and lazy. Compatibility with one loaded
+        model is checked transactionally by the concrete pass before any
+        mutation.
+        """
+        del cls
+        from voicehub.optimization import OPTIMIZATION_PASSES
+
+        return OPTIMIZATION_PASSES.list()
+
     def apply_optimization_plan(
         self,
         passes,
@@ -161,10 +174,7 @@ class BaseSpeechModel(ABC):
         attach_to_model=True,
     ):
         """Apply pre-resolved passes to an already loaded runtime."""
-        from voicehub.optimization import (
-            OptimizationPassManager,
-            bind_registered_architecture,
-        )
+        from voicehub.optimization import OptimizationPassManager, bind_registered_architecture
 
         normalized_mode = self._optimization_mode(mode)
         if runtime is None:

@@ -23,7 +23,9 @@ from voicehub.optimization.passes import (
     PassResult,
     canonical_json_string,
     canonical_json_tree,
+    register_optimization_pass,
     snapshot_optimization_pass_declaration,
+    unregister_optimization_pass,
 )
 from voicehub.optimization.protocols import (
     OptimizationCompileTarget,
@@ -386,6 +388,7 @@ __all__ = [
     "bind_registered_architecture",
     "canonical_json_string",
     "canonical_json_tree",
+    "register_optimization_pass",
     "capture_codec_cuda_graph",
     "codec_component_view",
     "coerce_codec_optimization_config",
@@ -413,6 +416,7 @@ __all__ = [
     "reset_diffusion_cache_metrics",
     "resolve_tts_optimization",
     "snapshot_optimization_pass_declaration",
+    "unregister_optimization_pass",
     "tts_optimization_config_from_options",
     "validate_tts_optimization_config",
 ]

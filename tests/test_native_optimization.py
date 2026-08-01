@@ -21,6 +21,8 @@ from voicehub.optimization import (
     OptimizationPassManager,
     OptimizationPassRegistry,
     PassResult,
+    register_optimization_pass,
+    unregister_optimization_pass,
 )
 from voicehub.registry import ModelSpec, register_model_spec, unregister_model_spec
 from voicehub.trainer import Trainer
@@ -78,6 +80,7 @@ class _CompileAddPass(_AddPass):
 class _SdpaAddPass(_AddPass):
     pass_id = "test.sdpa-add"
     optimization_kind = "sdpa"
+    requires_architecture_support = True
 
 
 class _RecordingCompilePass(_CompileAddPass):
@@ -221,6 +224,27 @@ class NativeOptimizationTests(unittest.TestCase):
         self.assertIsInstance(registry.create("add"), _AddPass)
         self.assertEqual(created, [True])
 
+    def test_public_pass_registration_supports_decorators(self):
+        name = "test-public-add"
+        removed = None
+        try:
+
+            @register_optimization_pass(name)
+            def create_pass():
+                return _AddPass(3)
+
+            self.assertIn(name, _LifecycleModel.available_optimization_passes())
+            result = OptimizationPassManager().apply_plan(
+                2,
+                name,
+                OptimizationContext(mode="inference"),
+            )
+        finally:
+            removed = unregister_optimization_pass(name, missing_ok=True)
+
+        self.assertEqual(result.model, 5)
+        self.assertIs(create_pass, removed)
+
     def test_named_plan_resolution_and_manifest_are_deterministic(self):
         registry = OptimizationPassRegistry()
         registry.register("add-two", lambda: _AddPass(2))
@@ -300,6 +324,22 @@ class NativeOptimizationTests(unittest.TestCase):
                 ),
             )
         self.assertEqual(incompatible.amount, 1)
+
+    def test_new_pass_kinds_do_not_require_every_architecture_to_change(self):
+        result = OptimizationPassManager().apply(
+            1,
+            (_AddPass(), ),
+            OptimizationContext(
+                mode="inference",
+                architecture="dia",
+            ),
+        )
+
+        self.assertEqual(result.model, 2)
+        self.assertEqual(
+            result.manifest()["passes"][0]["kind"],
+            "test.add",
+        )
 
     def test_compatible_architecture_metadata_does_not_register_a_pass(self):
         with self.assertRaisesRegex(KeyError, "Unknown optimization pass"):

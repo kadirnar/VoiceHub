@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from voicehub.auto import (
     AutoConfig,
+    AutoModel,
     AutoModelForSpeechRecognition,
     AutoModelForTextToSpeech,
     AutoModelForVoiceActivityDetection,
@@ -17,6 +18,7 @@ from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.registry import (
     MODEL_ALIASES,
     MODEL_REGISTRY,
+    ModelRegistry,
     ModelSpec,
     get_model_spec,
     list_model_specs,
@@ -63,6 +65,10 @@ class _FakeASRModel(_FakeSpeechModel):
 
 class _FakeVADModel(_FakeSpeechModel):
     pass
+
+
+class _ExtensionASRConfig(VoiceHubConfig):
+    model_type = "test-auto-register-asr"
 
 
 class SpeechTaskRegistryTests(unittest.TestCase):
@@ -162,6 +168,56 @@ class SpeechTaskRegistryTests(unittest.TestCase):
             {spec.model_type
              for spec in list_model_specs(task="speech-to-text")},
         )
+
+    def test_isolated_model_registry_keeps_live_read_only_views(self):
+        spec = ModelSpec.from_classes(
+            model_type=self.ASR_MODEL_TYPE,
+            model_class=_FakeASRModel,
+            config_class=_ExtensionASRConfig,
+            task="asr",
+        )
+        registry = ModelRegistry()
+        specs = registry.specs
+        aliases = registry.aliases
+
+        registry.register(spec, aliases=(self.ASR_ALIAS, ))
+
+        self.assertIs(specs[self.ASR_MODEL_TYPE], spec)
+        self.assertEqual(aliases[self.ASR_ALIAS], self.ASR_MODEL_TYPE)
+        self.assertIs(registry.get(self.ASR_ALIAS), spec)
+        self.assertEqual(tuple(registry), (self.ASR_MODEL_TYPE, ))
+        with self.assertRaises(TypeError):
+            specs["other"] = spec
+        registry.clear()
+        self.assertEqual(dict(specs), {})
+        self.assertEqual(dict(aliases), {})
+
+    def test_auto_factory_registers_and_dispatches_extension_models(self):
+        model_type = _ExtensionASRConfig.model_type
+        alias = "test-auto-register-stt"
+        try:
+            spec = AutoModelForSpeechRecognition.register(
+                _ExtensionASRConfig,
+                _FakeASRModel,
+                default_model_path="acme/extension-asr",
+                aliases=(alias, ),
+            )
+            model = AutoModel.from_pretrained(
+                "acme/checkpoint",
+                model_type=alias,
+                config_kwargs={"sample_rate": 22_050},
+                marker="extension",
+            )
+        finally:
+            AutoModel.unregister(
+                model_type,
+                missing_ok=True,
+            )
+
+        self.assertEqual(spec.model_type, model_type)
+        self.assertIsInstance(model, _FakeASRModel)
+        self.assertEqual(model.init_kwargs["marker"], "extension")
+        self.assertEqual(model.config.sample_rate, 22_050)
 
     def test_native_filter_resolves_owned_architecture_contracts(self):
         native_asr = list_model_specs(

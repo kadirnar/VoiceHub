@@ -10,8 +10,8 @@ The resolver never assumes that every TTS graph has interchangeable
 attention or activation semantics.  FlashAttention-4 and custom kernels
 are selected only for architectures that explicitly declare the
 corresponding capability; ``torch.compile`` is selected independently
-only when real-checkpoint inference validation explicitly permits automatic
-selection, and always remains reversible.
+only when real-checkpoint inference validation explicitly permits
+automatic selection, and always remains reversible.
 """
 
 from __future__ import annotations
@@ -39,21 +39,14 @@ from voicehub.optimization.torch_compile import (
 )
 from voicehub.tasks import SpeechTask
 
-_INFERENCE_AUTO_COMPILE_VALIDATED_FEATURE = (
-    "torch-compile-inference-auto-validated")
+_INFERENCE_AUTO_COMPILE_VALIDATED_FEATURE = ("torch-compile-inference-auto-validated")
 
 if TYPE_CHECKING:
     from voicehub.architectures.specifications import ArchitectureSpec
-    from voicehub.optimization.diffusion_cache import (
-        DiffusionCacheConfig,
-        DiffusionCachePolicy,
-    )
-    from voicehub.optimization.diffusion_sampling import (
-        DiffusionSamplingConfig,
-        DiffusionSamplingPolicy,
-    )
+    from voicehub.models.registry import ModelSpec
+    from voicehub.optimization.diffusion_cache import DiffusionCacheConfig, DiffusionCachePolicy
+    from voicehub.optimization.diffusion_sampling import DiffusionSamplingConfig, DiffusionSamplingPolicy
     from voicehub.optimization.passes import OptimizationResult
-    from voicehub.registry import ModelSpec
 
 
 class TTSOptimizationError(RuntimeError):
@@ -593,7 +586,7 @@ class TTSOptimizationResult:
 def _resolve_target(target: str | Any, ) -> tuple[ModelSpec | None, ArchitectureSpec | None]:
     from voicehub.architectures import UnknownArchitectureError, get_architecture_spec
     from voicehub.errors import UnknownModelError
-    from voicehub.registry import get_model_spec
+    from voicehub.models.registry import get_model_spec
 
     if isinstance(target, str):
         if not target.strip():
@@ -634,19 +627,11 @@ def _resolve_auto_device() -> str:
     except (ImportError, ModuleNotFoundError):
         return "cpu"
     cuda = getattr(torch, "cuda", None)
-    if (
-        cuda is not None
-        and callable(getattr(cuda, "is_available", None))
-        and cuda.is_available()
-    ):
+    if (cuda is not None and callable(getattr(cuda, "is_available", None)) and cuda.is_available()):
         return "cuda"
     backends = getattr(torch, "backends", None)
     mps = getattr(backends, "mps", None)
-    if (
-        mps is not None
-        and callable(getattr(mps, "is_available", None))
-        and mps.is_available()
-    ):
+    if (mps is not None and callable(getattr(mps, "is_available", None)) and mps.is_available()):
         return "mps"
     return "cpu"
 
@@ -813,7 +798,7 @@ def validate_tts_optimization_config(
 
 def list_tts_optimization_support() -> tuple[TTSOptimizationSupport, ...]:
     """List optimization capabilities for every registered TTS model."""
-    from voicehub.registry import list_model_specs
+    from voicehub.models.registry import list_model_specs
 
     return tuple(
         get_tts_optimization_support(spec.model_type)
@@ -1028,16 +1013,10 @@ def _resolve_compile(
             None,
             architecture_issue + " Automatic policy retained eager execution.",
         )
-    if (
-            policy is TTSCompilePolicy.AUTO
-            and context.mode is OptimizationMode.INFERENCE
-    ):
+    if (policy is TTSCompilePolicy.AUTO and context.mode is OptimizationMode.INFERENCE):
         capabilities = getattr(architecture, "capabilities", None)
         has_feature = getattr(capabilities, "has_feature", None)
-        if (
-                not callable(has_feature)
-                or not has_feature(_INFERENCE_AUTO_COMPILE_VALIDATED_FEATURE)
-        ):
+        if (not callable(has_feature) or not has_feature(_INFERENCE_AUTO_COMPILE_VALIDATED_FEATURE)):
             return None, _pass_decision(
                 "compile",
                 policy.value,
@@ -1251,7 +1230,6 @@ def _resolve_diffusion_sampling(
 
 def _resolve_extra_passes(
     config: TTSOptimizationConfig,
-    support: TTSOptimizationSupport,
     context: OptimizationContext,
     registry: OptimizationPassRegistry,
 ) -> tuple[
@@ -1262,12 +1240,6 @@ def _resolve_extra_passes(
     decisions = []
     for name in config.optimization_passes:
         optimization_pass = registry.create(name)
-        kind = optimization_pass.compatibility_kind
-        if (support.architecture is not None and kind not in support.optimization_kinds):
-            raise TTSOptimizationCompatibilityError(
-                f"Architecture {support.architecture!r} does not declare "
-                f"optimization kind {kind!r} required by registered pass "
-                f"{name!r}.")
         incompatibilities = (optimization_pass.capabilities.incompatibilities(context))
         if incompatibilities:
             raise TTSOptimizationCompatibilityError(
@@ -1281,7 +1253,8 @@ def _resolve_extra_passes(
                 optimization_pass.qualified_id,
                 optimization_pass,
                 "The explicitly registered pass is compatible with the "
-                "architecture declaration and runtime context.",
+                "runtime context; its validate() hook will inspect the "
+                "loaded model before mutation.",
             ))
     return tuple(passes), tuple(decisions)
 
@@ -1341,7 +1314,6 @@ def resolve_tts_optimization(
     )
     extra_passes, extra_decisions = _resolve_extra_passes(
         resolved_config,
-        support,
         resolved_context,
         pass_registry,
     )
@@ -1390,8 +1362,9 @@ def get_tts_optimization_config(
     """Return a validated universal config for one registered TTS target.
 
     The target check catches task/model typos and architecture-declared
-    option constraints immediately. Device and runtime compatibility remain
-    deferred until :meth:`resolve` receives a concrete execution context.
+    option constraints immediately. Device and runtime compatibility
+    remain deferred until :meth:`resolve` receives a concrete execution
+    context.
     """
     return validate_tts_optimization_config(
         target,

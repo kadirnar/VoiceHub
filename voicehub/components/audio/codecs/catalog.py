@@ -1497,7 +1497,7 @@ def list_codec_primitive_manifests(
 def list_registered_llm_tts_codec_model_types() -> tuple[str, ...]:
     """Derive the active codec-LM inventory from architecture traits."""
     from voicehub.architectures import get_architecture_spec
-    from voicehub.registry import list_model_specs
+    from voicehub.models.registry import list_model_specs
     from voicehub.tasks import SpeechTask
 
     output = []

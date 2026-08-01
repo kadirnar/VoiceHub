@@ -255,7 +255,12 @@ def resolve_neutts_artifacts(
     if source_path.exists():
         if not source_path.is_dir():
             raise NotADirectoryError("A local NeuTTS source must be an artifact directory.")
-        root = source_path.resolve()
+        # Preserve the caller's logical snapshot path. On platforms where a
+        # temporary-directory prefix is itself a symlink (for example
+        # /var -> /private/var on macOS), resolving the root would silently
+        # change the public artifact identity before we preserve the logical
+        # model.safetensors symlink below.
+        root = source_path.absolute()
         return NeuTTSArtifacts(
             source=str(root),
             revision=None,

@@ -25,7 +25,7 @@ for item in list_tts_optimization_support():
     print(item.model_type, item.attention_implementations, item.kernel_backends)
 ```
 
-Do not assume every architecture accepts the same optimization.
+This table covers automatic TTS selection. Explicit extensions validate the runtime directly; see [Add an optimization](../project/adding-an-optimization.md).
 
 ## Use a quality-preserving default
 
