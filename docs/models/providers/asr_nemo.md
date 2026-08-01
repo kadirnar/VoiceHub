@@ -1,0 +1,161 @@
+---
+description: Inference, data preparation, and training guide for the asr_nemo integration.
+---
+
+# `asr_nemo` model guide
+
+`asr_nemo` is a VoiceHub **automatic speech recognition**
+integration. This page is generated from the model registry and its executable
+data and training contracts, so the documented support stays aligned with code.
+
+## Model information
+
+| Property | Value |
+| --- | --- |
+| Task | Automatic speech recognition |
+| Default checkpoint | `nvidia/nemo/stt_en_quartznet15x5` |
+| Architecture | `nemo-asr` |
+| Runtime | `VoiceHub-native` |
+| Implementation | `voicehub.models.asr_nemo.NeMoASRForSpeechRecognition` |
+| Capabilities | `automatic-speech-recognition`, `english`, `timestamps`, `safetensors`, `fine-tuning`, `voicehub-native`, `ctc` |
+| Reusable components | — |
+| License | [NVIDIA-NGC-Terms](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/stt_en_quartznet15x5) |
+
+The QuartzNet checkpoint is governed by the NVIDIA NGC Terms of Use; the VoiceHub-owned architecture code is Apache-2.0. Commercial use: **review required**.
+
+## Install
+
+```bash
+python -m pip install voicehub
+```
+
+## Inference
+
+1. Install VoiceHub and the provider extra shown above.
+2. Choose a checkpoint that matches this integration.
+3. Place a supported recording at `speech.wav`.
+4. Transcribe it and inspect both the full text and timed segments.
+
+```python
+from voicehub import AutoModelForSpeechRecognition
+
+model = AutoModelForSpeechRecognition.from_pretrained(
+    'nvidia/nemo/stt_en_quartznet15x5',
+    model_type='asr_nemo',
+    device="cuda",
+    lazy_load=True,
+)
+output = model.transcribe("speech.wav")
+print(output.text)
+for segment in output.segments:
+    print(segment.start, segment.end, segment.text)
+```
+
+Use only authorized recordings for reference voice, transcription, detection,
+or evaluation. Pin a checkpoint revision in production.
+
+## Data preparation
+
+The `asr_nemo` contract is **integrated-raw**. Its
+data architecture is **ctc** and its declared sample rate is
+**16,000 Hz**.
+
+NeMo QuartzNet waveform and CTC transcript records.
+
+| Variant | Required fields | One of | Boundary | Other rules |
+| --- | --- | --- | --- | --- |
+| `raw-audio` | `audio` | text / transcription / transcript | Source | at most one: text / transcription / transcript |
+| `nemo-ctc-waveform-model-ready` | `input_signal`, `input_signal_length`, `labels`, `label_lengths` | — | Prepared | — |
+| `nemo-ctc-feature-model-ready` | `processed_signal`, `processed_signal_length`, `labels`, `label_lengths` | — | Prepared | — |
+
+Follow this process:
+
+1. Keep immutable source audio, exact transcripts or labels, stable IDs, consent,
+   license, speaker, and session metadata.
+2. Split by speaker or recording session before model preprocessing.
+3. Match one of the exact variants above. Source variants are processed by the
+   integration; prepared variants must already contain the listed model inputs.
+4. Validate one collated batch, then persist the preprocessing version and hashes.
+
+```python
+from voicehub import ASRDataset, get_asr_dataset_spec
+
+contract = get_asr_dataset_spec('asr_nemo')
+print(contract.architecture, contract.readiness, contract.sample_rate)
+for variant in contract.variants:
+    print(variant.name, variant.required_fields, variant.one_of)
+
+# Source-record integrations can validate a JSONL manifest directly.
+if contract.accepts_raw_records:
+    records = ASRDataset.from_manifest(
+        "data/manifest.jsonl",
+        model_type='asr_nemo',
+        validate_files=True,
+    )
+    train_records, validation_records = records.train_test_split(
+        validation_fraction=0.1,
+        seed=42,
+        group_by="session_id",
+    )
+```
+
+See the [complete data guide](../../guides/speech-data.md) for manifest aliases, audio validation,
+leakage-safe splits, and model-owned preprocessing.
+
+## Training
+
+| Property | Value |
+| --- | --- |
+| Support | `native` |
+| Family | `ctc` |
+| Recipe | `single-phase` |
+| Default phase | `speech_recognition` |
+| Training checkpoint | `nvidia/nemo/stt_en_quartznet15x5` |
+| Native training graph | `yes` |
+
+| Phase | Kind | Components | Required inputs | Loss keys |
+| --- | --- | --- | --- | --- |
+| `speech_recognition` | objective | `model` | — | `loss` |
+
+The integration accepts its declared source or prepared contract directly. Start with one optimizer step and verify finite loss, intended
+gradients, frozen components, save, and reload before scaling the run.
+
+```python
+from voicehub import AutoModelForSpeechRecognition, Trainer, TrainingArguments
+
+model = AutoModelForSpeechRecognition.from_pretrained(
+    'nvidia/nemo/stt_en_quartznet15x5',
+    model_type='asr_nemo',
+    device="cuda",
+    lazy_load=True,
+)
+model.validate_training_support()
+train_dataset = model.create_training_dataset(
+    "data/train.jsonl",
+    validate_audio_files=True,
+)
+
+arguments = TrainingArguments(
+    output_dir="runs/asr_nemo-smoke",
+    max_steps=1,
+    per_device_train_batch_size=1,
+    learning_rate=5e-5,
+    logging_steps=1,
+    save_steps=1,
+    report_to="none",
+    seed=42,
+)
+trainer = Trainer(model=model, args=arguments, train_dataset=train_dataset)
+result = trainer.train(resume_from_checkpoint=False)
+print(result.training_loss, result.metrics)
+trainer.save_model("runs/asr_nemo-smoke/final")
+```
+
+See the [training guide](../../guides/training.md) for validation datasets,
+checkpoint resume, mixed precision, optimizations, and portable exports.
+
+## Next steps
+
+- [All model guides](index.md)
+- [Shared inference guides](../../guides/index.md)
+- [Model and training support matrices](../training-support.md)

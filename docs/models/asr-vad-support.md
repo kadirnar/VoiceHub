@@ -4,6 +4,9 @@ description: Compare VoiceHub ASR and VAD providers, architecture families, defa
 
 # ASR and VAD support
 
+For runnable inference, model-specific data steps, and the verified training
+path for each provider, open the [model guides](providers/index.md).
+
 VoiceHub covers speech-input models through provider and architecture families.
 One registry entry can load many compatible checkpoints; the table is
 therefore a runtime coverage map, not a finite list of every model repository

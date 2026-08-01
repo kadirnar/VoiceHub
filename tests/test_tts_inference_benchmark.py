@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -172,7 +173,7 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
                 accepted["candidate"]["median_latency_seconds"]),
             accepted["comparison"]["median_speedup_ratio"],
         )
-        self.assertIn(str(RESULTS.relative_to(PROJECT_ROOT)), report)
+        self.assertIn(RESULTS.relative_to(PROJECT_ROOT).as_posix(), report)
         self.assertIn(
             f"{accepted['candidate']['median_latency_seconds'] * 1000:.3f} ms",
             report,
@@ -678,7 +679,8 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
             nonlocal observed_input
             self.assertNotIn(secret, " ".join(command))
             input_path = Path(command[command.index("--worker-input") + 1])
-            self.assertEqual(input_path.stat().st_mode & 0o777, 0o600)
+            if os.name != "nt":
+                self.assertEqual(input_path.stat().st_mode & 0o777, 0o600)
             observed_input = json.loads(input_path.read_text(encoding="utf-8"))
             result_path = Path(command[command.index("--worker-result") + 1])
             result_path.write_text(

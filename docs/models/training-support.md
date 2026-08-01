@@ -1,5 +1,8 @@
 # Training model matrix
 
+Use the [model guides](providers/index.md) for one focused inference, data
+preparation, and training page per registered model.
+
 This table describes what the **current VoiceHub integration** can fine-tune.
 It does not describe whether a model was trainable in its original research
 repository.

@@ -61,4 +61,4 @@ repos:
     rev: v1.7.8
     hooks:
       - id: docformatter
-        exclude: '^scripts/generate_model_notebooks\.py$'
+        exclude: '^scripts/generate_model_(?:notebooks|pages)\.py$'

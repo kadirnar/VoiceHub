@@ -294,13 +294,12 @@ class NativeNeuTTSTests(unittest.TestCase):
             (snapshot / "model.safetensors").symlink_to(blob)
 
             artifacts = resolve_neutts_artifacts(snapshot)
-            reader = open_causal_lm_tensor_source(snapshot / "model.safetensors", )
-
-        self.assertEqual(
-            artifacts.checkpoint,
-            (snapshot / "model.safetensors").absolute(),
-        )
-        self.assertIsInstance(reader, SafeTensorReader)
+            with open_causal_lm_tensor_source(snapshot / "model.safetensors", ) as reader:
+                self.assertEqual(
+                    artifacts.checkpoint,
+                    (snapshot / "model.safetensors").absolute(),
+                )
+                self.assertIsInstance(reader, SafeTensorReader)
 
     def test_published_backbone_graphs_match_checkpoint_counts(self):
         import torch

@@ -26,6 +26,10 @@ TASK_LABELS = {
 TASK_ORDER = tuple(TASK_LABELS)
 
 TTS_GENERATION_OPTIONS = {
+    "f5tts": (
+        '"speaker_audio_path": str(REFERENCE_AUDIO),',
+        '"reference_text": REFERENCE_TEXT,',
+    ),
     "orpheustts": ('"voice": "tara",', ),
     "cosyvoice": (
         '"speaker_embedding": None,',

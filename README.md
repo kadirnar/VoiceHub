@@ -178,6 +178,7 @@ for expected hardware and opt-in execution flags.
 - [TTS inference](https://kadirnar.github.io/voicehub/guides/inference/)
 - [Speech recognition](https://kadirnar.github.io/voicehub/guides/speech-recognition/)
 - [Voice activity detection](https://kadirnar.github.io/voicehub/guides/voice-activity-detection/)
+- [Model guides](https://kadirnar.github.io/voicehub/models/providers/)
 - [Model catalog](https://kadirnar.github.io/voicehub/models/)
 - [Architecture](https://kadirnar.github.io/voicehub/concepts/architecture/)
 - [Add a model](https://kadirnar.github.io/voicehub/project/adding-a-model/)
