@@ -19,6 +19,10 @@ Each notebook follows the same top-to-bottom pattern:
 | Training | Inspect support and start with one optimizer step | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/training.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/training.ipynb) |
 | Dia workflow | Baseline, data, fine-tune, export, and reload | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb) |
 
+Every registry entry with a Hugging Face checkpoint also has a dedicated,
+opt-in notebook. Choose one from the
+[model notebook gallery](https://github.com/kadirnar/voicehub/blob/main/notebooks/models/README.md).
+
 ## Safe defaults
 
 Real inference and training stay off until their flags are changed:

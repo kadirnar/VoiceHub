@@ -49,7 +49,7 @@ repos:
         additional_dependencies:
           - mdformat-gfm
           - mdformat-black
-        exclude: 'docs/.*\.md'
+        exclude: '^(?:docs/.*\.md|notebooks/models/README\.md)$'
 
   - repo: https://github.com/PyCQA/flake8
     rev: 7.3.0
@@ -61,3 +61,4 @@ repos:
     rev: v1.7.8
     hooks:
       - id: docformatter
+        exclude: '^scripts/generate_model_notebooks\.py$'
