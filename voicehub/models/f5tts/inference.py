@@ -10,14 +10,8 @@ from typing import Any
 import torch
 
 from voicehub.architectures.f5tts.artifacts import resolve_f5tts_artifacts
-from voicehub.architectures.f5tts.checkpoint import (
-    load_f5tts_checkpoint,
-    load_vocos_checkpoint,
-)
-from voicehub.architectures.f5tts.configuration import (
-    F5TTSArchitectureConfig,
-    f5tts_architecture_config,
-)
+from voicehub.architectures.f5tts.checkpoint import load_f5tts_checkpoint, load_vocos_checkpoint
+from voicehub.architectures.f5tts.configuration import F5TTSArchitectureConfig, f5tts_architecture_config
 from voicehub.architectures.f5tts.frontend import F5Vocabulary, NativeF5TextFrontend
 from voicehub.architectures.f5tts.modeling import F5ConditionalFlowMatcher
 from voicehub.architectures.f5tts.runtime import NativeF5TTSRuntime
@@ -63,8 +57,7 @@ class F5TTSConfig(VoiceHubConfig):
         self.architecture = dict(architecture or {})
         self.ode_method = ode_method
         self.torch_dtype = torch_dtype
-        self.allow_unvalidated_reduced_precision_inference = (
-            allow_unvalidated_reduced_precision_inference)
+        self.allow_unvalidated_reduced_precision_inference = (allow_unvalidated_reduced_precision_inference)
         self.use_ema = use_ema
         self.ema_decay = ema_decay
         self.ema_update_after_step = ema_update_after_step
@@ -165,11 +158,8 @@ class F5TTSForTextToSpeech(PreTrainedTTSModel):
             self.config.torch_dtype,
             self.device,
         )
-        if (
-                not self._loading_for_training
-                and dtype != torch.float32
-                and not self.config.allow_unvalidated_reduced_precision_inference
-        ):
+        if (not self._loading_for_training and dtype != torch.float32 and
+                not self.config.allow_unvalidated_reduced_precision_inference):
             raise RuntimeError(
                 "F5-TTS reduced-precision inference is disabled by default "
                 f"for {str(dtype).removeprefix('torch.')}. Use "

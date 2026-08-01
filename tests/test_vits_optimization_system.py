@@ -330,12 +330,13 @@ class VITSStructuralKernelTests(unittest.TestCase):
         ):
             OptimizationPassManager().apply(
                 model,
-                (TorchCompilePass(
-                    backend="aot_eager",
-                    fullgraph=True,
-                    dynamic=True,
-                    requirement="required",
-                ), ),
+                (
+                    TorchCompilePass(
+                        backend="aot_eager",
+                        fullgraph=True,
+                        dynamic=True,
+                        requirement="required",
+                    ), ),
                 context,
             )
         result = OptimizationPassManager().apply(

@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, for example v0.3.0
+        required: true
+        type: string
+      confirm_publish:
+        description: Publish the verified artifacts after the protected environment approval
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  tagged-cross-platform-tests:
+    name: Tagged tests (${{ matrix.operating-system }} / Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.operating-system }}
+    strategy:
+      fail-fast: false
+      matrix:
+        operating-system: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout the requested tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install the complete test environment
+        run: |
+          python -m pip install --upgrade pip uv
+          uv pip install --system --torch-backend cpu -e ".[test]"
+
+      - name: Run the complete test suite
+        run: python -m pytest -q
+
+  verify-and-build:
+    name: Verify and build tagged source
+    needs: tagged-cross-platform-tests
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Checkout the requested tag
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install the release environment
+        run: |
+          python -m pip install --upgrade pip uv
+          uv pip install --system --torch-backend cpu -e ".[test,training,docs]"
+
+      - name: Verify source, tag, benchmark, and PyPI candidate state
+        run: >-
+          python scripts/check_release.py
+          --tag "$RELEASE_TAG"
+          --require-tag-at-head
+          --pypi-policy candidate
+
+      - name: Run the complete test suite
+        run: python -m pytest -q
+
+      - name: Run repository-wide formatting and lint checks
+        run: pre-commit run --all-files
+
+      - name: Build strict documentation
+        run: mkdocs build --strict --clean --site-dir site
+
+      - name: Validate wheel, sdist, and editable installations
+        run: python scripts/check_distribution.py
+
+      - name: Build the publication artifacts
+        run: python -m build --outdir release-dist
+
+      - name: Verify publication artifact metadata and size
+        run: >-
+          python scripts/check_release.py
+          --tag "$RELEASE_TAG"
+          --require-tag-at-head
+          --dist-dir release-dist
+
+      - name: Record publication artifact hashes
+        run: sha256sum release-dist/*
+
+      - name: Upload the verified publication artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: voicehub-${{ inputs.tag }}-distributions
+          path: release-dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish verified artifacts to PyPI
+    if: ${{ inputs.confirm_publish }}
+    needs:
+      - tagged-cross-platform-tests
+      - verify-and-build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/voicehub
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download the verified publication artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: voicehub-${{ inputs.tag }}-distributions
+          path: dist
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@ec4db0b4ddc65acdf4bff5fa45ac92d78b56bdf0 # v1.9.0
+        with:
+          packages-dir: dist/

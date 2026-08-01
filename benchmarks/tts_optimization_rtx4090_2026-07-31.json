@@ -70,7 +70,7 @@
       "name": "tts_vui_rtx4090_rejected_2026-07-31.json",
       "repository_path": "benchmarks/tts_vui_rtx4090_rejected_2026-07-31.json",
       "retention": "checked-in",
-      "sha256": "a2fe983f08fcb367366ab3cac302d7a385f7b366269bd1975d15567025ee191e"
+      "sha256": "1d93b7d475da70ed8e05eda7a2369ed65227dc1c79f46592742c79d39f9a7b79"
     },
     {
       "name": "tts_optimization_rtx4090_raw_evidence_2026-07-31.json",

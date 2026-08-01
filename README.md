@@ -8,6 +8,10 @@ VoiceHub provides lazy model loading, normalized outputs, shared optimization
 controls, and a common trainer. Model weights are downloaded only when a
 selected model is loaded.
 
+The 0.3 release line is an evidence-first unified open-speech runtime: its
+existing TTS, ASR, and VAD integrations are being hardened as one installable
+surface before the built-in provider catalogue grows again.
+
 ## Install
 
 VoiceHub supports Python 3.10 through 3.12.

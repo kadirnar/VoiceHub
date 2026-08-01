@@ -157,6 +157,8 @@ nav:
       - Trainer architecture: concepts/trainer.md
   - API Reference: reference/api.md
   - Contributing:
+      - Roadmap: project/roadmap.md
+      - Release readiness: project/release-readiness.md
       - Add a TTS model: project/adding-a-model.md
       - Add an ASR or VAD provider: project/adding-speech-provider.md
       - Add an optimization: project/adding-an-optimization.md

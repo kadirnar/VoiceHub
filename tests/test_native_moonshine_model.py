@@ -182,12 +182,8 @@ class MoonshineModelTests(unittest.TestCase):
             )
 
     def test_compile_targets_match_generation_execution_boundaries(self):
-        inference_targets = self.model.optimization_compile_targets(
-            "inference",
-        )
-        training_targets = self.model.optimization_compile_targets(
-            "training",
-        )
+        inference_targets = self.model.optimization_compile_targets("inference", )
+        training_targets = self.model.optimization_compile_targets("training", )
 
         self.assertEqual(
             tuple(target.label for target in inference_targets),

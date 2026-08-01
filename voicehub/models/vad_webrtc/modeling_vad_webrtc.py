@@ -28,13 +28,7 @@ def _pcm16_samples(waveform: Any) -> list[int]:
         posinf=0.0,
         neginf=0.0,
     )
-    return (
-        values.clamp(-1.0, 1.0)
-        .mul(32767.0)
-        .round()
-        .to(torch.int32)
-        .tolist()
-    )
+    return (values.clamp(-1.0, 1.0).mul(32767.0).round().to(torch.int32).tolist())
 
 
 class WebRTCVADForVoiceActivityDetection(PreTrainedVADModel):

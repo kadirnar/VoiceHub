@@ -323,8 +323,8 @@ class InferenceLifecycleTests(unittest.TestCase):
         model = FlakyPrepareModel()
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "transient preparation failure",
+                RuntimeError,
+                "transient preparation failure",
         ):
             model.generate("first attempt")
         self.assertIsNone(model.model)

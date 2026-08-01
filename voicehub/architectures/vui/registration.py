@@ -5,10 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.tasks import SpeechTask
 
 DEFAULT_VUI_ALIASES = (
