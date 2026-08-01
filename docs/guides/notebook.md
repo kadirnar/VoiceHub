@@ -20,8 +20,8 @@ Each notebook follows the same top-to-bottom pattern:
 | Dia workflow | Baseline, data, fine-tune, export, and reload | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb) | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb) |
 
 Every registry entry with a Hugging Face checkpoint also has a dedicated,
-opt-in notebook. Choose one from the
-[model notebook gallery](https://github.com/kadirnar/voicehub/blob/main/notebooks/models/README.md).
+opt-in notebook. The [model guides](../models/providers/index.md) pair each
+notebook with model information, data preparation, and training steps.
 
 ## Safe defaults
 

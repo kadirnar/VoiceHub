@@ -27,6 +27,9 @@ NOTEBOOKS_README_PATH = REPOSITORY_ROOT / "notebooks" / "README.md"
 MODEL_NOTEBOOK_DIR = REPOSITORY_ROOT / "notebooks" / "models"
 MODEL_NOTEBOOK_GALLERY_PATH = MODEL_NOTEBOOK_DIR / "README.md"
 MODEL_NOTEBOOK_GENERATOR_PATH = REPOSITORY_ROOT / "scripts" / "generate_model_notebooks.py"
+MODEL_PAGE_DIR = DOCS_ROOT / "models" / "providers"
+MODEL_PAGE_INDEX_PATH = MODEL_PAGE_DIR / "index.md"
+MODEL_PAGE_GENERATOR_PATH = REPOSITORY_ROOT / "scripts" / "generate_model_pages.py"
 NOTEBOOK_GALLERY_PATH = DOCS_ROOT / "guides" / "notebook.md"
 README_PATH = REPOSITORY_ROOT / "README.md"
 PYPROJECT_PATH = REPOSITORY_ROOT / "pyproject.toml"
@@ -71,6 +74,7 @@ NAVIGATION_PATHS = (
     "guides/rtx-5090-tts-benchmarks.md",
     "guides/notebook.md",
     "models/index.md",
+    "models/providers/index.md",
     "models/tts-capabilities.md",
     "models/asr-vad-support.md",
     "models/training-support.md",
@@ -93,6 +97,7 @@ PUBLIC_ROUTES = (
     "guides/notebook/",
     "models/asr-vad-support/",
     "models/training-support/",
+    "models/providers/",
 )
 MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 HTML_HREF = re.compile(r"""href=["']([^"']+)["']""")
@@ -230,6 +235,50 @@ class DocumentationSiteTests(unittest.TestCase):
                 self.assertEqual(namespace["CHECKPOINT"], spec.default_model_path)
 
         generator = runpy.run_path(str(MODEL_NOTEBOOK_GENERATOR_PATH))
+        generated_files = generator["generated_files"]()
+        self.assertEqual(generator["check_generated_files"](generated_files), ())
+
+    def test_every_registered_model_has_a_generated_guide(self):
+        from voicehub import list_model_specs
+
+        specs = tuple(list_model_specs(task=None))
+        expected_paths = {MODEL_PAGE_DIR / f"{spec.model_type}.md": spec for spec in specs}
+        self.assertEqual(
+            set(MODEL_PAGE_DIR.glob("*.md")),
+            {*expected_paths, MODEL_PAGE_INDEX_PATH},
+        )
+        self.assertTrue(expected_paths)
+
+        index = MODEL_PAGE_INDEX_PATH.read_text(encoding="utf-8")
+        for path, spec in expected_paths.items():
+            with self.subTest(model_type=spec.model_type):
+                source = path.read_text(encoding="utf-8")
+                self.assertIn(f"# `{spec.model_type}` model guide", source)
+                self.assertIn("## Model information", source)
+                self.assertIn("## Inference", source)
+                self.assertIn("## Data preparation", source)
+                self.assertIn("## Training", source)
+                self.assertIn(spec.task.value.replace("-", " "), source.lower())
+                self.assertIn(spec.training.support.value, source)
+                self.assertIn(f"[`{spec.model_type}`]({path.name})", index)
+                if spec.default_model_path:
+                    self.assertIn(spec.default_model_path, source)
+                if re.fullmatch(r"[^/\s]+/[^/\s]+", spec.default_model_path):
+                    self.assertIn(
+                        "https://colab.research.google.com/github/"
+                        "kadirnar/voicehub/blob/main/notebooks/models/"
+                        f"{spec.model_type}.ipynb",
+                        source,
+                    )
+                examples = PYTHON_BLOCK.findall(source)
+                self.assertTrue(examples)
+                for example_index, example in enumerate(examples, start=1):
+                    ast.parse(
+                        textwrap.dedent(example),
+                        filename=f"{path.name}:python-block-{example_index}",
+                    )
+
+        generator = runpy.run_path(str(MODEL_PAGE_GENERATOR_PATH))
         generated_files = generator["generated_files"]()
         self.assertEqual(generator["check_generated_files"](generated_files), ())
 
@@ -387,7 +436,7 @@ class DocumentationSiteTests(unittest.TestCase):
         result = json.loads(result_path.read_text(encoding="utf-8"))
         report = (DOCS_ROOT / "guides" / "rtx-4090-speech-benchmarks.md").read_text(encoding="utf-8")
 
-        self.assertIn(str(result_path.relative_to(REPOSITORY_ROOT)), report)
+        self.assertIn(result_path.relative_to(REPOSITORY_ROOT).as_posix(), report)
         moonshine = next(
             measurement for measurement in result["asr_measurements"]
             if measurement["model_type"] == "asr_moonshine")
@@ -645,33 +694,28 @@ class DocumentationSiteTests(unittest.TestCase):
                 filename=f"README.md:python-block-{index}",
             )
 
-    def test_quickstart_models_construct_lazily_without_downloads(self):
-        from voicehub import AutoModelForSpeechRecognition, AutoModelForTextToSpeech, AutoModelForVoiceActivityDetection
+    def test_quickstart_models_are_registered_without_runtime_imports(self):
+        from voicehub import get_model_spec
 
-        tts_model = AutoModelForTextToSpeech.from_pretrained(
-            "parler-tts/parler-tts-mini-v1",
-            model_type="parlertts",
-            device="cpu",
-            lazy_load=True,
-        )
-        asr_model = AutoModelForSpeechRecognition.from_pretrained(
-            "Qwen/Qwen3-ASR-0.6B",
-            model_type="asr_qwen3",
-            device="cpu",
-            lazy_load=True,
-        )
-        vad_model = AutoModelForVoiceActivityDetection.from_pretrained(
-            model_type="vad_silero",
-            device="cpu",
-            lazy_load=True,
-        )
-
-        self.assertFalse(tts_model.is_loaded)
-        self.assertFalse(asr_model.is_loaded)
-        self.assertFalse(vad_model.is_loaded)
-        self.assertEqual(tts_model.config.name_or_path, "parler-tts/parler-tts-mini-v1")
-        self.assertEqual(asr_model.config.name_or_path, "Qwen/Qwen3-ASR-0.6B")
-        self.assertEqual(vad_model.config.name_or_path, "safestack/silero-vad")
+        expected = {
+            "parlertts": (
+                "text-to-speech",
+                "parler-tts/parler-tts-mini-v1",
+            ),
+            "asr_qwen3": (
+                "automatic-speech-recognition",
+                "Qwen/Qwen3-ASR-0.6B",
+            ),
+            "vad_silero": (
+                "voice-activity-detection",
+                "safestack/silero-vad",
+            ),
+        }
+        for model_type, (task, checkpoint) in expected.items():
+            with self.subTest(model_type=model_type):
+                spec = get_model_spec(model_type)
+                self.assertEqual(spec.task.value, task)
+                self.assertEqual(spec.default_model_path, checkpoint)
 
 
 if __name__ == "__main__":

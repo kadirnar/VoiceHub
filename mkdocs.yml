@@ -72,6 +72,7 @@ nav:
       - RTX 5090 TTS benchmarks: guides/rtx-5090-tts-benchmarks.md
   - Notebooks: guides/notebook.md
   - Models:
+      - Model guides: models/providers/index.md
       - TTS model catalog: models/index.md
       - TTS capabilities: models/tts-capabilities.md
       - ASR and VAD support: models/asr-vad-support.md

@@ -49,21 +49,16 @@ def _json_dump(value: Any) -> str:
 
 def _word_tokens(text: str) -> tuple[str, ...]:
     normalized = unicodedata.normalize("NFKC", text).casefold()
-    return tuple(
-        re.findall(
-            r"[^\W_]+(?:['’][^\W_]+)*",
-            normalized,
-            flags=re.UNICODE,
-        ))
+    return tuple(re.findall(
+        r"[^\W_]+(?:['’][^\W_]+)*",
+        normalized,
+        flags=re.UNICODE,
+    ))
 
 
 def _character_tokens(text: str) -> tuple[str, ...]:
     normalized = unicodedata.normalize("NFKC", text).casefold()
-    return tuple(
-        character
-        for character in normalized
-        if unicodedata.category(character)[0] in {"L", "N"}
-    )
+    return tuple(character for character in normalized if unicodedata.category(character)[0] in {"L", "N"})
 
 
 def _error_rate(
@@ -80,9 +75,7 @@ def _error_rate(
                 min(
                     current[-1] + 1,
                     previous[column] + 1,
-                    previous[column - 1] + (
-                        expected_word != actual_word
-                    ),
+                    previous[column - 1] + (expected_word != actual_word),
                 ))
         previous = current
     return previous[-1] / len(expected)
@@ -107,9 +100,7 @@ def _latency_statistics(values: list[float]) -> dict[str, Any]:
     deviation = statistics.pstdev(values)
     coefficient = deviation / mean if mean else 0.0
     return {
-        "high_latency_variability": (
-            coefficient >= _HIGH_LATENCY_VARIABILITY_CV
-        ),
+        "high_latency_variability": (coefficient >= _HIGH_LATENCY_VARIABILITY_CV),
         "warm_latency_coefficient_of_variation": coefficient,
         "warm_latency_max_seconds": max(values),
         "warm_latency_mean_seconds": mean,
@@ -131,13 +122,49 @@ def _peak_memory_mib(device: str) -> float:
         import torch
 
         return torch.cuda.max_memory_allocated(device) / 2**20
+    if os.name == "nt":  # pragma: no cover - exercised by Windows CI
+        import ctypes
+        from ctypes import wintypes
+
+        class ProcessMemoryCounters(ctypes.Structure):
+            _fields_ = (
+                ("cb", wintypes.DWORD),
+                ("page_fault_count", wintypes.DWORD),
+                ("peak_working_set_size", ctypes.c_size_t),
+                ("working_set_size", ctypes.c_size_t),
+                ("quota_peak_paged_pool_usage", ctypes.c_size_t),
+                ("quota_paged_pool_usage", ctypes.c_size_t),
+                ("quota_peak_non_paged_pool_usage", ctypes.c_size_t),
+                ("quota_non_paged_pool_usage", ctypes.c_size_t),
+                ("pagefile_usage", ctypes.c_size_t),
+                ("peak_pagefile_usage", ctypes.c_size_t),
+            )
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        psapi.GetProcessMemoryInfo.argtypes = (
+            wintypes.HANDLE,
+            ctypes.POINTER(ProcessMemoryCounters),
+            wintypes.DWORD,
+        )
+        psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+        counters = ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        if not psapi.GetProcessMemoryInfo(
+                kernel32.GetCurrentProcess(),
+                ctypes.byref(counters),
+                counters.cb,
+        ):
+            error = ctypes.get_last_error()
+            raise OSError(error, "GetProcessMemoryInfo failed")
+        return counters.peak_working_set_size / 2**20
     try:
         import resource
     except ImportError as error:  # pragma: no cover - Unix CI/runtime
         raise RuntimeError(
             "CPU peak-memory measurement requires Python's Unix "
-            "`resource` module on this platform."
-        ) from error
+            "`resource` module on this platform.") from error
 
     maximum = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     # Linux reports KiB; macOS reports bytes.
@@ -148,6 +175,8 @@ def _peak_memory_mib(device: str) -> float:
 def _memory_metric(device: str) -> str:
     if device.partition(":")[0].lower() == "cuda":
         return "cuda-max-memory-allocated"
+    if os.name == "nt":
+        return "process-peak-working-set"
     return "process-max-rss"
 
 
@@ -190,11 +219,7 @@ def _runtime_metadata() -> dict[str, Any]:
 def _revision_from(value: Any) -> str | None:
     if value is None:
         return None
-    revision = (
-        value.get("revision")
-        if isinstance(value, Mapping)
-        else getattr(value, "revision", None)
-    )
+    revision = (value.get("revision") if isinstance(value, Mapping) else getattr(value, "revision", None))
     if revision is None:
         return None
     normalized = str(revision).strip()
@@ -204,10 +229,10 @@ def _revision_from(value: Any) -> str | None:
 def _resolved_checkpoint_revision(model: Any, output: Any) -> str | None:
     delegate = getattr(model, "_delegate", None)
     for owner in (
-        model,
-        delegate,
-        getattr(model, "model", None),
-        getattr(delegate, "model", None),
+            model,
+            delegate,
+            getattr(model, "model", None),
+            getattr(delegate, "model", None),
     ):
         if owner is None:
             continue
@@ -225,20 +250,13 @@ def _resolved_checkpoint_revision(model: Any, output: Any) -> str | None:
 
 def audit_registry() -> dict[str, Any]:
     """Lazy-construct every public ASR/VAD provider."""
-    from voicehub import (
-        AutoConfig,
-        AutoModelForSpeechRecognition,
-        AutoModelForVoiceActivityDetection,
-        list_model_specs,
-    )
+    from voicehub import AutoConfig, AutoModelForSpeechRecognition, AutoModelForVoiceActivityDetection, list_model_specs
     from voicehub.tasks import SpeechTask
 
     records = []
     factories = {
-        SpeechTask.AUTOMATIC_SPEECH_RECOGNITION:
-            AutoModelForSpeechRecognition,
-        SpeechTask.VOICE_ACTIVITY_DETECTION:
-            AutoModelForVoiceActivityDetection,
+        SpeechTask.AUTOMATIC_SPEECH_RECOGNITION: AutoModelForSpeechRecognition,
+        SpeechTask.VOICE_ACTIVITY_DETECTION: AutoModelForVoiceActivityDetection,
     }
     for task, factory in factories.items():
         for spec in list_model_specs(task=task):
@@ -261,34 +279,21 @@ def audit_registry() -> dict[str, Any]:
                     device="cpu",
                     lazy_load=True,
                 )
-                method_name = (
-                    "transcribe"
-                    if task is SpeechTask.AUTOMATIC_SPEECH_RECOGNITION
-                    else "detect"
-                )
+                method_name = ("transcribe" if task is SpeechTask.AUTOMATIC_SPEECH_RECOGNITION else "detect")
                 if model.model is not None:
-                    raise RuntimeError(
-                        "lazy construction allocated a model runtime")
+                    raise RuntimeError("lazy construction allocated a model runtime")
                 if not callable(getattr(model, method_name, None)):
-                    raise TypeError(
-                        f"provider does not expose {method_name}()")
+                    raise TypeError(f"provider does not expose {method_name}()")
                 record.update({
-                    "config_class": (
-                        f"{type(config).__module__}:"
-                        f"{type(config).__qualname__}"
-                    ),
+                    "config_class": (f"{type(config).__module__}:"
+                                     f"{type(config).__qualname__}"),
                     "lazy_runtime_allocated": False,
                     "status": "lazy-contract-passed",
                 })
             except Exception as error:  # noqa: BLE001 - retain every provider
-                record["error"] = (
-                    f"{type(error).__name__}: {error}"
-                )
+                record["error"] = (f"{type(error).__name__}: {error}")
             records.append(record)
-    passed = sum(
-        record["status"] == "lazy-contract-passed"
-        for record in records
-    )
+    passed = sum(record["status"] == "lazy-contract-passed" for record in records)
     return {
         "kind": "voicehub-asr-vad-registry-audit",
         "provider_count": len(records),
@@ -324,10 +329,7 @@ def _strategy(args: argparse.Namespace, strategy_name: str | None):
 
 
 def _run_asr_worker(args: argparse.Namespace) -> dict[str, Any]:
-    from voicehub import (
-        AutoConfig,
-        AutoModelForSpeechRecognition,
-    )
+    from voicehub import AutoConfig, AutoModelForSpeechRecognition
 
     dtype, strategy_name = _ASR_PROFILES[args.profile]
     audio = _load_audio(args.audio)
@@ -379,9 +381,7 @@ def _run_asr_worker(args: argparse.Namespace) -> dict[str, Any]:
                 "checkpoint_filename",
                 None,
             ),
-            "local_files_only": bool(
-                getattr(config, "local_files_only", False)
-            ),
+            "local_files_only": bool(getattr(config, "local_files_only", False)),
             "revision": getattr(config, "revision", None),
             "source": args.model_path,
         },
@@ -391,9 +391,7 @@ def _run_asr_worker(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "cold_inference_seconds": latencies[0],
         "cold_peak_memory_mib": peak_memory[0],
-        "compile_backend": (
-            args.compile_backend if strategy is not None else None
-        ),
+        "compile_backend": (args.compile_backend if strategy is not None else None),
         "deterministic_transcript": len(set(transcripts)) == 1,
         "device": args.device,
         "duration_seconds": audio.duration,
@@ -404,20 +402,12 @@ def _run_asr_worker(args: argparse.Namespace) -> dict[str, Any]:
         "peak_memory_mib": max(warm_peak_memory),
         "profile": args.profile,
         "real_time_factor": warm_median / audio.duration,
-        "real_time_factor_mean": (
-            statistics.fmean(warm) / audio.duration
-        ),
+        "real_time_factor_mean": (statistics.fmean(warm) / audio.duration),
         "reference": args.reference,
-        "resolved_checkpoint_revision": (
-            _resolved_checkpoint_revision(model, output)
-        ),
+        "resolved_checkpoint_revision": (_resolved_checkpoint_revision(model, output)),
         "speed_x_realtime": audio.duration / warm_median,
-        "speed_x_realtime_mean": (
-            audio.duration / statistics.fmean(warm)
-        ),
-        "stabilization_seconds": sum(
-            latencies[:args.warmup_runs]
-        ),
+        "speed_x_realtime_mean": (audio.duration / statistics.fmean(warm)),
+        "stabilization_seconds": sum(latencies[:args.warmup_runs]),
         "status": "passed",
         "transcript": transcripts[-1],
         "warmup_latency_seconds": latencies[:args.warmup_runs],
@@ -433,23 +423,17 @@ def _run_asr_worker(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _segments(output: Any) -> list[dict[str, Any]]:
-    return [
-        {
-            "end": segment.end,
-            "score": segment.score,
-            "start": segment.start,
-        }
-        for segment in output.segments
-    ]
+    return [{
+        "end": segment.end,
+        "score": segment.score,
+        "start": segment.start,
+    } for segment in output.segments]
 
 
 def _run_vad_worker(args: argparse.Namespace) -> dict[str, Any]:
     import torch
 
-    from voicehub import (
-        AutoConfig,
-        AutoModelForVoiceActivityDetection,
-    )
+    from voicehub import AutoConfig, AutoModelForVoiceActivityDetection
 
     strategy_name, configured_threads = _VAD_PROFILES[args.profile]
     audio = _load_audio(args.audio)
@@ -496,27 +480,24 @@ def _run_vad_worker(args: argparse.Namespace) -> dict[str, Any]:
         "audio": str(Path(args.audio).expanduser().resolve()),
         "checkpoint": args.model_path,
         "checkpoint_request": {
-            "checkpoint_filename": getattr(
+            "checkpoint_filename":
+            getattr(
                 config,
                 "checkpoint_filename",
                 getattr(config, "model_filename", None),
             ),
-            "local_files_only": bool(
-                getattr(config, "local_files_only", False)
-            ),
-            "revision": getattr(config, "revision", None),
-            "source": args.model_path,
+            "local_files_only":
+            bool(getattr(config, "local_files_only", False)),
+            "revision":
+            getattr(config, "revision", None),
+            "source":
+            args.model_path,
         },
         "cold_inference_seconds": latencies[0],
         "cold_peak_memory_mib": peak_memory[0],
-        "compile_backend": (
-            args.compile_backend if strategy is not None else None
-        ),
+        "compile_backend": (args.compile_backend if strategy is not None else None),
         "configured_cpu_threads": configured_threads,
-        "deterministic_segments": all(
-            segments == segment_runs[0]
-            for segments in segment_runs[1:]
-        ),
+        "deterministic_segments": all(segments == segment_runs[0] for segments in segment_runs[1:]),
         "device": args.device,
         "duration_seconds": audio.duration,
         "load_seconds": load_seconds,
@@ -527,21 +508,13 @@ def _run_vad_worker(args: argparse.Namespace) -> dict[str, Any]:
         "peak_memory_mib": max(warm_peak_memory),
         "profile": args.profile,
         "real_time_factor": warm_median / audio.duration,
-        "real_time_factor_mean": (
-            statistics.fmean(warm) / audio.duration
-        ),
-        "resolved_checkpoint_revision": (
-            _resolved_checkpoint_revision(model, output)
-        ),
+        "real_time_factor_mean": (statistics.fmean(warm) / audio.duration),
+        "resolved_checkpoint_revision": (_resolved_checkpoint_revision(model, output)),
         "segments": segment_runs[-1],
         "speech_duration_seconds": output.speech_duration,
         "speed_x_realtime": audio.duration / warm_median,
-        "speed_x_realtime_mean": (
-            audio.duration / statistics.fmean(warm)
-        ),
-        "stabilization_seconds": sum(
-            latencies[:args.warmup_runs]
-        ),
+        "speed_x_realtime_mean": (audio.duration / statistics.fmean(warm)),
+        "stabilization_seconds": sum(latencies[:args.warmup_runs]),
         "status": "passed",
         "torch_intraop_threads": torch.get_num_threads(),
         "warmup_latency_seconds": latencies[:args.warmup_runs],
@@ -571,18 +544,12 @@ def _profile_comparisons(
     task: str,
     results: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    passed = [
-        result for result in results
-        if result.get("status") == "passed"
-    ]
+    passed = [result for result in results if result.get("status") == "passed"]
     if not passed:
         return []
     preferred = "fp32" if task == "asr" else "eager"
     baseline = next(
-        (
-            result for result in passed
-            if result.get("profile") == preferred
-        ),
+        (result for result in passed if result.get("profile") == preferred),
         passed[0],
     )
     comparisons = []
@@ -590,72 +557,53 @@ def _profile_comparisons(
         baseline_latency = baseline["warm_latency_median_seconds"]
         candidate_latency = candidate["warm_latency_median_seconds"]
         comparison: dict[str, Any] = {
-            "baseline_profile": baseline["profile"],
-            "candidate_profile": candidate["profile"],
-            "mean_latency_reduction_percent": _percent_reduction(
+            "baseline_profile":
+            baseline["profile"],
+            "candidate_profile":
+            candidate["profile"],
+            "mean_latency_reduction_percent":
+            _percent_reduction(
                 baseline["warm_latency_mean_seconds"],
                 candidate["warm_latency_mean_seconds"],
             ),
-            "mean_speedup_ratio": (
-                baseline["warm_latency_mean_seconds"]
-                / candidate["warm_latency_mean_seconds"]
-            ),
-            "median_latency_reduction_percent": _percent_reduction(
+            "mean_speedup_ratio":
+            (baseline["warm_latency_mean_seconds"] / candidate["warm_latency_mean_seconds"]),
+            "median_latency_reduction_percent":
+            _percent_reduction(
                 baseline_latency,
                 candidate_latency,
             ),
-            "peak_memory_reduction_percent": _percent_reduction(
+            "peak_memory_reduction_percent":
+            _percent_reduction(
                 baseline["peak_memory_mib"],
                 candidate["peak_memory_mib"],
             ),
-            "median_speedup_ratio": baseline_latency / candidate_latency,
+            "median_speedup_ratio":
+            baseline_latency / candidate_latency,
         }
         if task == "asr":
             comparison.update({
-                "transcript_equal": (
-                    baseline["transcript"] == candidate["transcript"]
-                ),
+                "transcript_equal": (baseline["transcript"] == candidate["transcript"]),
                 "wer_delta": (
-                    None
-                    if baseline["wer"] is None or candidate["wer"] is None
-                    else candidate["wer"] - baseline["wer"]
-                ),
+                    None if baseline["wer"] is None or candidate["wer"] is None else candidate["wer"] -
+                    baseline["wer"]),
                 "cer_delta": (
-                    None
-                    if baseline["cer"] is None or candidate["cer"] is None
-                    else candidate["cer"] - baseline["cer"]
-                ),
+                    None if baseline["cer"] is None or candidate["cer"] is None else candidate["cer"] -
+                    baseline["cer"]),
             })
         else:
             baseline_segments = baseline["segments"]
             candidate_segments = candidate["segments"]
-            comparison["segment_boundaries_equal"] = (
-                [
-                    (segment["start"], segment["end"])
-                    for segment in baseline_segments
-                ]
-                == [
-                    (segment["start"], segment["end"])
-                    for segment in candidate_segments
-                ]
-            )
-            paired_scores = [
-                (left["score"], right["score"])
-                for left, right in zip(
-                    baseline_segments,
-                    candidate_segments,
-                    strict=False,
-                )
-                if left["score"] is not None and right["score"] is not None
-            ]
+            comparison["segment_boundaries_equal"] = ([
+                (segment["start"], segment["end"]) for segment in baseline_segments
+            ] == [(segment["start"], segment["end"]) for segment in candidate_segments])
+            paired_scores = [(left["score"], right["score"]) for left, right in zip(
+                baseline_segments,
+                candidate_segments,
+                strict=False,
+            ) if left["score"] is not None and right["score"] is not None]
             comparison["maximum_score_absolute_difference"] = (
-                None
-                if not paired_scores
-                else max(
-                    abs(left - right)
-                    for left, right in paired_scores
-                )
-            )
+                None if not paired_scores else max(abs(left - right) for left, right in paired_scores))
         comparisons.append(comparison)
     return comparisons
 
@@ -704,8 +652,7 @@ def _worker_environment(
     compile_cache: Path,
 ) -> dict[str, str]:
     environment = dict(os.environ)
-    environment["TORCHINDUCTOR_CACHE_DIR"] = str(
-        compile_cache / "torchinductor")
+    environment["TORCHINDUCTOR_CACHE_DIR"] = str(compile_cache / "torchinductor")
     environment["TRITON_CACHE_DIR"] = str(compile_cache / "triton")
     environment["CUDA_CACHE_PATH"] = str(compile_cache / "cuda")
     if profile in _VAD_PROFILES:
@@ -721,31 +668,19 @@ def _worker_environment(
 def _run_matrix(args: argparse.Namespace) -> dict[str, Any]:
     # Validate duration before starting any isolated model process.
     audio = _load_audio(args.audio)
-    profile_definitions = (
-        _ASR_PROFILES if args.task == "asr" else _VAD_PROFILES
-    )
+    profile_definitions = (_ASR_PROFILES if args.task == "asr" else _VAD_PROFILES)
     requested_profiles = args.profiles
     if requested_profiles is None:
         requested_profiles = (
-            "fp32,fp16,bf16,compile"
-            if args.task == "asr"
-            else "eager,eager-1-thread,compile-1-thread"
-        )
-    profiles = tuple(
-        profile.strip().lower()
-        for profile in requested_profiles.split(",")
-        if profile.strip()
-    )
+            "fp32,fp16,bf16,compile" if args.task == "asr" else "eager,eager-1-thread,compile-1-thread")
+    profiles = tuple(profile.strip().lower() for profile in requested_profiles.split(",") if profile.strip())
     unknown = sorted(set(profiles) - set(profile_definitions))
     if not profiles or unknown:
         expected = ", ".join(profile_definitions)
-        raise ValueError(
-            f"`--profiles` must select from {expected}; unknown: {unknown}.")
+        raise ValueError(f"`--profiles` must select from {expected}; unknown: {unknown}.")
     results = []
     for profile in profiles:
-        with tempfile.TemporaryDirectory(
-            prefix=f"voicehub-{args.task}-{profile}-",
-        ) as cache_directory:
+        with tempfile.TemporaryDirectory(prefix=f"voicehub-{args.task}-{profile}-", ) as cache_directory:
             try:
                 completed = subprocess.run(
                     _worker_command(args, profile),
@@ -775,20 +710,17 @@ def _run_matrix(args: argparse.Namespace) -> dict[str, Any]:
                 "error": completed.stderr.strip() or completed.stdout.strip(),
             })
             continue
-        lines = [
-            line for line in completed.stdout.splitlines()
-            if line.strip()
-        ]
+        lines = [line for line in completed.stdout.splitlines() if line.strip()]
         try:
             results.append(json.loads(lines[-1]))
         except (IndexError, json.JSONDecodeError) as error:
             results.append({
-                "profile": profile,
-                "status": "failed",
-                "error": (
-                    "Worker did not emit valid JSON: "
-                    f"{error}; stdout={completed.stdout!r}"
-                ),
+                "profile":
+                profile,
+                "status":
+                "failed",
+                "error": ("Worker did not emit valid JSON: "
+                          f"{error}; stdout={completed.stdout!r}"),
             })
     return {
         "audio_sha256": _sha256(args.audio),
@@ -797,14 +729,10 @@ def _run_matrix(args: argparse.Namespace) -> dict[str, Any]:
         "compiler_cache_isolated_per_profile": True,
         "error_rate_metrics": {
             "cer": "Unicode alphanumeric code points",
-            "normalization": (
-                "NFKC plus casefold; whitespace and punctuation excluded"
-            ),
+            "normalization": ("NFKC plus casefold; whitespace and punctuation excluded"),
             "wer": "Unicode words",
         },
-        "high_latency_variability_cv_threshold": (
-            _HIGH_LATENCY_VARIABILITY_CV
-        ),
+        "high_latency_variability_cv_threshold": (_HIGH_LATENCY_VARIABILITY_CV),
         "kind": f"voicehub-{args.task}-profile-matrix",
         "profiles": results,
         "registry_audit": audit_registry(),
@@ -816,8 +744,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Audit every ASR/VAD provider or benchmark inference profiles "
-            "in isolated processes."
-        ))
+            "in isolated processes."))
     parser.add_argument("--audit-registry", action="store_true")
     parser.add_argument("--task", choices=("asr", "vad"), default="asr")
     parser.add_argument("--audio")
@@ -857,14 +784,9 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _parser().parse_args()
     if args.model_type is None:
-        args.model_type = (
-            "asr_moonshine" if args.task == "asr" else "vad_silero")
+        args.model_type = ("asr_moonshine" if args.task == "asr" else "vad_silero")
     if args.model_path is None:
-        args.model_path = (
-            "UsefulSensors/moonshine-tiny"
-            if args.task == "asr"
-            else "safestack/silero-vad"
-        )
+        args.model_path = ("UsefulSensors/moonshine-tiny" if args.task == "asr" else "safestack/silero-vad")
     if args.runs < 1:
         raise ValueError("`--runs` must be at least one.")
     if args.warmup_runs < 1:
@@ -874,12 +796,10 @@ def main() -> int:
     if args._worker:
         if not args.audio:
             raise ValueError("Worker mode requires `--audio`.")
-        valid_profiles = (
-            _ASR_PROFILES if args.task == "asr" else _VAD_PROFILES)
+        valid_profiles = (_ASR_PROFILES if args.task == "asr" else _VAD_PROFILES)
         if args.profile not in valid_profiles:
             expected = ", ".join(valid_profiles)
-            raise ValueError(
-                f"Worker profile for {args.task} must be one of: {expected}.")
+            raise ValueError(f"Worker profile for {args.task} must be one of: {expected}.")
         # One compact line makes parent-process parsing robust to logs.
         print(json.dumps(_run_worker(args), allow_nan=False, sort_keys=True))
         return 0
@@ -898,10 +818,7 @@ def main() -> int:
         destination.write_text(encoded + os.linesep, encoding="utf-8")
     print(encoded)
     failed = bool(result.get("failed", 0))
-    failed = failed or any(
-        profile.get("status") != "passed"
-        for profile in result.get("profiles", ())
-    )
+    failed = failed or any(profile.get("status") != "passed" for profile in result.get("profiles", ()))
     registry_audit = result.get("registry_audit", {})
     failed = failed or bool(registry_audit.get("failed", 0))
     return int(failed)

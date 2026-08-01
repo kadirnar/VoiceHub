@@ -1,5 +1,8 @@
 # TTS model catalog
 
+For a step-by-step page with inference, the exact data contract, and training
+support for each individual model, open the [model guides](providers/index.md).
+
 This page covers text-to-speech backends. For automatic speech recognition
 and voice activity detection, see the
 [ASR and VAD support matrix](asr-vad-support.md).
