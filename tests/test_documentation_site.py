@@ -3,6 +3,7 @@ import io
 import json
 import os
 import re
+import runpy
 import tempfile
 import textwrap
 import unittest
@@ -23,6 +24,9 @@ EXPECTED_NOTEBOOK_FILENAMES = {
     "tts_workflow.ipynb",
 }
 NOTEBOOKS_README_PATH = REPOSITORY_ROOT / "notebooks" / "README.md"
+MODEL_NOTEBOOK_DIR = REPOSITORY_ROOT / "notebooks" / "models"
+MODEL_NOTEBOOK_GALLERY_PATH = MODEL_NOTEBOOK_DIR / "README.md"
+MODEL_NOTEBOOK_GENERATOR_PATH = REPOSITORY_ROOT / "scripts" / "generate_model_notebooks.py"
 NOTEBOOK_GALLERY_PATH = DOCS_ROOT / "guides" / "notebook.md"
 README_PATH = REPOSITORY_ROOT / "README.md"
 PYPROJECT_PATH = REPOSITORY_ROOT / "pyproject.toml"
@@ -170,6 +174,64 @@ class DocumentationSiteTests(unittest.TestCase):
                                     f"Broken notebook link {raw_target!r} "
                                     f"in {path.name}",
                                 )
+
+    def test_hugging_face_models_have_generated_notebooks(self):
+        from voicehub import list_model_specs
+
+        hub_specs = tuple(
+            spec for spec in list_model_specs(task=None)
+            if re.fullmatch(r"[^/\s]+/[^/\s]+", spec.default_model_path))
+        expected_paths = {MODEL_NOTEBOOK_DIR / f"{spec.model_type}.ipynb": spec for spec in hub_specs}
+        self.assertEqual(
+            set(MODEL_NOTEBOOK_DIR.glob("*.ipynb")),
+            set(expected_paths),
+        )
+        self.assertTrue(expected_paths)
+
+        gallery = MODEL_NOTEBOOK_GALLERY_PATH.read_text(encoding="utf-8")
+        for path, spec in expected_paths.items():
+            with self.subTest(model_type=spec.model_type):
+                notebook = nbformat.read(path, as_version=4)
+                nbformat.validate(notebook)
+                self.assertLessEqual(len(notebook["cells"]), 8)
+                self.assertEqual(
+                    notebook["metadata"]["voicehub"]["model_type"],
+                    spec.model_type,
+                )
+                source = "\n".join(_cell_source(cell) for cell in notebook["cells"])
+                self.assertIn(f"https://huggingface.co/{spec.default_model_path}", source)
+                self.assertIn(
+                    "https://colab.research.google.com/github/"
+                    "kadirnar/voicehub/blob/main/notebooks/models/"
+                    f"{path.name}",
+                    source,
+                )
+                self.assertIn(f"[View]({path.name})", gallery)
+                namespace = {"__name__": "__main__"}
+                for cell in notebook["cells"]:
+                    if cell["cell_type"] == "code":
+                        source = _cell_source(cell)
+                        ast.parse(
+                            source,
+                            filename=f"{path.name}:{cell['id']}",
+                        )
+                        if "smoke-safe" in cell["metadata"].get("tags", ()):
+                            with redirect_stdout(io.StringIO()):
+                                exec(  # noqa: S102 - execute generated smoke cells
+                                    compile(
+                                        source,
+                                        f"{path.name}:{cell['id']}",
+                                        "exec",
+                                    ),
+                                    namespace,
+                                )
+                self.assertFalse(namespace["RUN_INFERENCE"])
+                self.assertEqual(namespace["MODEL_TYPE"], spec.model_type)
+                self.assertEqual(namespace["CHECKPOINT"], spec.default_model_path)
+
+        generator = runpy.run_path(str(MODEL_NOTEBOOK_GENERATOR_PATH))
+        generated_files = generator["generated_files"]()
+        self.assertEqual(generator["check_generated_files"](generated_files), ())
 
     def test_notebook_code_cells_compile_and_execute_in_smoke_mode(self):
         namespaces = {}

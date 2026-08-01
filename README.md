@@ -166,6 +166,9 @@ and inspect.
 | Fine-tuning                 | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/training.ipynb)         | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/training.ipynb)         |
 | Dia end-to-end workflow     | [View](https://github.com/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb)     | [Run](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/tts_workflow.ipynb)     |
 
+For a dedicated inference page for each Hub-backed model, open the
+[Hugging Face model notebook gallery](https://github.com/kadirnar/voicehub/blob/main/notebooks/models/README.md).
+
 Read the [notebook guide](https://kadirnar.github.io/voicehub/guides/notebook/)
 for expected hardware and opt-in execution flags.
 
