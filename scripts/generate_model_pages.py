@@ -23,9 +23,12 @@ from generate_model_notebooks import (  # noqa: E402
 from voicehub import list_model_specs  # noqa: E402
 
 MODEL_PAGE_DIR = REPOSITORY_ROOT / "docs" / "models" / "providers"
+SITE_CONFIG_PATH = REPOSITORY_ROOT / "mkdocs.yml"
 GENERATOR_PATH = "scripts/generate_model_pages.py"
 COLAB_ROOT = ("https://colab.research.google.com/github/kadirnar/voicehub/"
               "blob/main/notebooks/models")
+NAVIGATION_START = "      # BEGIN GENERATED MODEL GUIDE NAVIGATION"
+NAVIGATION_END = "      # END GENERATED MODEL GUIDE NAVIGATION"
 
 
 def _value(value) -> str:
@@ -481,11 +484,37 @@ def render_index(specs) -> str:
     return "\n".join(lines)
 
 
+def render_navigation(specs) -> str:
+    """Render the task-grouped model links shown in the site sidebar."""
+    lines = [NAVIGATION_START]
+    for task in TASK_ORDER:
+        task_specs = sorted(
+            (spec for spec in specs if spec.task.value == task),
+            key=lambda spec: spec.model_type,
+        )
+        lines.append(f"      - {TASK_LABELS[task]}:")
+        lines.extend(
+            f'          - "{spec.model_type}": models/providers/{spec.model_type}.md' for spec in task_specs)
+    lines.append(NAVIGATION_END)
+    return "\n".join(lines)
+
+
+def render_site_config(specs) -> str:
+    """Replace only the generated model-navigation block in ``mkdocs.yml``."""
+    source = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+    if source.count(NAVIGATION_START) != 1 or source.count(NAVIGATION_END) != 1:
+        raise RuntimeError("mkdocs.yml must contain exactly one generated model navigation block")
+    prefix, remainder = source.split(NAVIGATION_START, 1)
+    _, suffix = remainder.split(NAVIGATION_END, 1)
+    return f"{prefix}{render_navigation(specs)}{suffix}"
+
+
 def generated_files() -> dict[Path, str]:
     """Return every expected generated path and its contents."""
     specs = tuple(list_model_specs(task=None))
     files = {MODEL_PAGE_DIR / f"{spec.model_type}.md": render_page(spec) for spec in specs}
     files[MODEL_PAGE_DIR / "index.md"] = render_index(specs)
+    files[SITE_CONFIG_PATH] = render_site_config(specs)
     return files
 
 
@@ -516,7 +545,8 @@ def main() -> int:
             for path in stale:
                 print(f"stale: {path.relative_to(REPOSITORY_ROOT)}", file=sys.stderr)
             return 1
-        print(f"OK: {len(files) - 1} model pages are current")
+        page_count = sum(path.parent == MODEL_PAGE_DIR and path.name != "index.md" for path in files)
+        print(f"OK: {page_count} model pages and navigation are current")
         return 0
 
     MODEL_PAGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -529,7 +559,8 @@ def main() -> int:
         if not path.is_file() or path.read_text(encoding="utf-8") != content:
             path.write_text(content, encoding="utf-8", newline="\n")
             print(f"wrote: {path.relative_to(REPOSITORY_ROOT)}")
-    print(f"OK: {len(files) - 1} model pages")
+    page_count = sum(path.parent == MODEL_PAGE_DIR and path.name != "index.md" for path in files)
+    print(f"OK: {page_count} model pages and navigation")
     return 0
 
 

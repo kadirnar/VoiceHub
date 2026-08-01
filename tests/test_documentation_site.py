@@ -250,6 +250,7 @@ class DocumentationSiteTests(unittest.TestCase):
         self.assertTrue(expected_paths)
 
         index = MODEL_PAGE_INDEX_PATH.read_text(encoding="utf-8")
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
         for path, spec in expected_paths.items():
             with self.subTest(model_type=spec.model_type):
                 source = path.read_text(encoding="utf-8")
@@ -261,6 +262,11 @@ class DocumentationSiteTests(unittest.TestCase):
                 self.assertIn(spec.task.value.replace("-", " "), source.lower())
                 self.assertIn(spec.training.support.value, source)
                 self.assertIn(f"[`{spec.model_type}`]({path.name})", index)
+                self.assertEqual(
+                    config.count(f"models/providers/{path.name}"),
+                    1,
+                    f"{spec.model_type} should appear once in the Models sidebar",
+                )
                 if spec.default_model_path:
                     self.assertIn(spec.default_model_path, source)
                 if re.fullmatch(r"[^/\s]+/[^/\s]+", spec.default_model_path):
@@ -281,6 +287,9 @@ class DocumentationSiteTests(unittest.TestCase):
         generator = runpy.run_path(str(MODEL_PAGE_GENERATOR_PATH))
         generated_files = generator["generated_files"]()
         self.assertEqual(generator["check_generated_files"](generated_files), ())
+        self.assertIn("- Text to speech:", config)
+        self.assertIn("- Automatic speech recognition:", config)
+        self.assertIn("- Voice activity detection:", config)
 
     def test_notebook_code_cells_compile_and_execute_in_smoke_mode(self):
         namespaces = {}
