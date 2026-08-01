@@ -16,10 +16,7 @@ from voicehub.inference_strategy import (
 )
 from voicehub.optimization import OptimizationCompatibilityError
 from voicehub.optimization.protocols import OptimizationCompileTarget
-from voicehub.optimization.torch_compile import (
-    TorchCompileCapabilityReport,
-    TorchCompileUnavailableError,
-)
+from voicehub.optimization.torch_compile import TorchCompileCapabilityReport, TorchCompileUnavailableError
 
 
 class RecordingInferenceStrategy(InferenceStrategy):
@@ -86,12 +83,11 @@ class InferenceStrategyHooksTest(unittest.TestCase):
 
             def optimization_compile_targets(self, mode):
                 self.compile_mode = mode
-                return (
-                    OptimizationCompileTarget(
-                        label="runtime",
-                        owner=self,
-                        attribute="forward",
-                    ), )
+                return (OptimizationCompileTarget(
+                    label="runtime",
+                    owner=self,
+                    attribute="forward",
+                ), )
 
         runtime = Runtime().eval()
         wrapper = SimpleNamespace(device="cpu")
@@ -139,14 +135,14 @@ class InferenceStrategyHooksTest(unittest.TestCase):
         )
 
         with (
-            patch(
-                "voicehub.optimization.torch_compile.inspect_torch_compile",
-                return_value=report,
-            ),
-            self.assertRaisesRegex(
-                TorchCompileUnavailableError,
-                "unit-test backend is unavailable",
-            ),
+                patch(
+                    "voicehub.optimization.torch_compile.inspect_torch_compile",
+                    return_value=report,
+                ),
+                self.assertRaisesRegex(
+                    TorchCompileUnavailableError,
+                    "unit-test backend is unavailable",
+                ),
         ):
             strategy.validate(SimpleNamespace(device="cpu"))
 
@@ -164,8 +160,8 @@ class InferenceStrategyHooksTest(unittest.TestCase):
                     ),
                 )
                 with self.assertRaisesRegex(
-                    OptimizationCompatibilityError,
-                    rf"{model_type}.*real-checkpoint",
+                        OptimizationCompatibilityError,
+                        rf"{model_type}.*real-checkpoint",
                 ):
                     model.load()
                 self.assertIsNone(model.model)
@@ -199,8 +195,8 @@ class InferenceStrategyHooksTest(unittest.TestCase):
         )
 
         with patch(
-            "voicehub.optimization.torch_compile.inspect_torch_compile",
-            return_value=report,
+                "voicehub.optimization.torch_compile.inspect_torch_compile",
+                return_value=report,
         ):
             strategy.validate(wrapper)
             prepared = strategy.prepare(runtime, wrapper=wrapper)

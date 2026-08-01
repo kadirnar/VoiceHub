@@ -2,10 +2,11 @@
 """Run one reproducible real-checkpoint VITS generator warm-start step.
 
 MMS-TTS metadata does not publish the original FFT, hop, window, mel, or
-segment recipe. This smoke test therefore exercises VoiceHub's explicitly
-preprocessed generator warm-start, not the complete adversarial VITS recipe.
-It creates one short example from the base checkpoint, takes one deterministic
-step, exports native Safetensors, reloads them, and runs long-form inference.
+segment recipe. This smoke test therefore exercises VoiceHub's
+explicitly preprocessed generator warm-start, not the complete
+adversarial VITS recipe. It creates one short example from the base
+checkpoint, takes one deterministic step, exports native Safetensors,
+reloads them, and runs long-form inference.
 """
 
 from __future__ import annotations
@@ -21,16 +22,14 @@ from typing import Any
 
 TRAINING_TEXT = (
     "VoiceHub makes speech model inference easier, clearer, and more "
-    "reproducible for every user."
-)
+    "reproducible for every user.")
 VALIDATION_TEXT = (
     "VoiceHub makes speech model inference easier to understand and reproduce. "
     "This sample is intentionally long enough to produce more than ten seconds "
     "of clear spoken audio. It measures the complete text tokenizer, acoustic "
     "model, normalizing flow, and neural vocoder pipeline on one graphics "
     "processor. The same sentence and random seed are used for every benchmark "
-    "so that baseline and fine-tuned runs remain directly comparable."
-)
+    "so that baseline and fine-tuned runs remain directly comparable.")
 _UNSET = object()
 
 
@@ -136,11 +135,8 @@ def checkpoint_identity(
     resolved_source = getattr(artifacts, "source", None)
     resolved_revision = getattr(artifacts, "revision", None)
     revision_was_explicit = requested_revision is not None
-    if (
-            requested_revision is None
-            and getattr(config, "model_type", None) == "vits"
-            and resolved_revision is not None
-    ):
+    if (requested_revision is None and getattr(config, "model_type", None) == "vits" and
+            resolved_revision is not None):
         requested_revision = "main"
     checkpoint_value = getattr(artifacts, "checkpoint", None)
     checkpoint_path = None
@@ -150,27 +146,22 @@ def checkpoint_identity(
             checkpoint_path = candidate_path.resolve()
     weight_path = (
         checkpoint_path
-        if checkpoint_path is not None
-        and not checkpoint_path.name.endswith(".index.json")
-        else None
-    )
+        if checkpoint_path is not None and not checkpoint_path.name.endswith(".index.json") else None)
     return {
-        "requested_source": str(requested_source),
-        "requested_revision": requested_revision,
-        "requested_revision_was_explicit": revision_was_explicit,
-        "resolved_source": (
-            None if resolved_source is None else str(resolved_source)),
-        "resolved_revision": resolved_revision,
-        "local_checkpoint_path": (
-            None if checkpoint_path is None else str(checkpoint_path)),
-        "local_weight_sha256": (
-            None if weight_path is None else _sha256_file(weight_path)),
+        "requested_source":
+        str(requested_source),
+        "requested_revision":
+        requested_revision,
+        "requested_revision_was_explicit":
+        revision_was_explicit,
+        "resolved_source": (None if resolved_source is None else str(resolved_source)),
+        "resolved_revision":
+        resolved_revision,
+        "local_checkpoint_path": (None if checkpoint_path is None else str(checkpoint_path)),
+        "local_weight_sha256": (None if weight_path is None else _sha256_file(weight_path)),
         "weight_digest_status": (
-            "sha256"
-            if weight_path is not None else
-            "checkpoint-index-only"
-            if checkpoint_path is not None else
-            "not-exposed"),
+            "sha256" if weight_path is not None else
+            "checkpoint-index-only" if checkpoint_path is not None else "not-exposed"),
     }
 
 
@@ -208,9 +199,7 @@ def _run_seeded(adapter: Any, inputs: dict[str, Any], torch: Any, seed: int):
 def run(args: argparse.Namespace) -> dict[str, Any]:
     import torch
 
-    from voicehub import (
-        AutoModelForTextToSpeech,
-    )
+    from voicehub import AutoModelForTextToSpeech
     from voicehub import __version__ as voicehub_version
 
     destination = prepare_output_directory(args.output_dir)
@@ -289,10 +278,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         args.training_seed,
     )
     loss_before = float(before.loss.detach().float().cpu())
-    losses_before = {
-        name: float(value.detach().float().cpu())
-        for name, value in before.losses.items()
-    }
+    losses_before = {name: float(value.detach().float().cpu()) for name, value in before.losses.items()}
     before.loss.backward()
     gradient_norm = float(
         torch.nn.utils.clip_grad_norm_(
@@ -308,26 +294,19 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         args.training_seed,
     )
     loss_after = float(after.loss.detach().float().cpu())
-    losses_after = {
-        name: float(value.detach().float().cpu())
-        for name, value in after.losses.items()
-    }
+    losses_after = {name: float(value.detach().float().cpu()) for name, value in after.losses.items()}
     trained_fingerprint = state_fingerprint(model.model.state_dict())
 
     export_started = time.perf_counter()
     model.export_native_pretrained(destination)
     export_seconds = time.perf_counter() - export_started
     native_export_files = sorted(
-        str(path.relative_to(destination))
-        for path in destination.iterdir() if path.is_file())
+        str(path.relative_to(destination)) for path in destination.iterdir() if path.is_file())
     del after, before, adapter, optimizer, parameters, inputs, model
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    reload_config_kwargs = {
-        key: value
-        for key, value in config_kwargs.items() if key != "revision"
-    }
+    reload_config_kwargs = {key: value for key, value in config_kwargs.items() if key != "revision"}
     reloaded = AutoModelForTextToSpeech.from_pretrained(
         destination,
         model_type="vits",
@@ -468,8 +447,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "output_file":
             str(validation_path),
             "sha256_float32":
-            hashlib.sha256(
-                validation.audio.detach().float().cpu().numpy().tobytes(order="C")).hexdigest(),
+            hashlib.sha256(validation.audio.detach().float().cpu().numpy().tobytes(order="C")).hexdigest(),
         },
     }
     report_path = destination / "smoke_finetune_report.json"
@@ -521,11 +499,9 @@ def main() -> int:
     result = run(args)
     print(json.dumps(result, allow_nan=False, indent=2, sort_keys=True))
     return int(
-        not result["pre_step_repeat_exact"]
-        or not result["training_forward_matches_precheck"]
-        or not result["state_changed"]
-        or result["loss_after"] >= result["loss_before"]
-        or not result["reload_exact"])
+        not result["pre_step_repeat_exact"] or not result["training_forward_matches_precheck"] or
+        not result["state_changed"] or result["loss_after"] >= result["loss_before"] or
+        not result["reload_exact"])
 
 
 if __name__ == "__main__":

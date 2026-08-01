@@ -10,18 +10,11 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from voicehub.architectures.f5tts.audio import (
-    cross_fade,
-    normalize_reference_rms,
-    trim_silence,
-)
+from voicehub.architectures.f5tts.audio import cross_fade, normalize_reference_rms, trim_silence
 from voicehub.architectures.f5tts.frontend import NativeF5TextFrontend, TokenSequence
 from voicehub.architectures.f5tts.modeling import F5ConditionalFlowMatcher
 from voicehub.architectures.f5tts.vocoder import NativeVocos
-from voicehub.optimization.protocols import (
-    OptimizationCompileTarget,
-    OptimizationModuleRoot,
-)
+from voicehub.optimization.protocols import OptimizationCompileTarget, OptimizationModuleRoot
 from voicehub.processing.waveform import load_native_audio
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[;:,.!?])\s+|(?<=[；：，。！？])")
@@ -77,14 +70,12 @@ class NativeF5TTSRuntime(nn.Module):
     ) -> None:
         super().__init__()
         if not isinstance(allow_unvalidated_reduced_precision_inference, bool):
-            raise TypeError(
-                "`allow_unvalidated_reduced_precision_inference` must be a "
-                "boolean.")
+            raise TypeError("`allow_unvalidated_reduced_precision_inference` must be a "
+                            "boolean.")
         self.ema_model = flow_model
         self.vocoder = vocoder
         self.frontend = frontend
-        self.allow_unvalidated_reduced_precision_inference = (
-            allow_unvalidated_reduced_precision_inference)
+        self.allow_unvalidated_reduced_precision_inference = (allow_unvalidated_reduced_precision_inference)
         self.target_sample_rate = flow_model.config.sample_rate
         self.hop_length = flow_model.config.hop_length
         self.seed: int | None = None
@@ -122,11 +113,12 @@ class NativeF5TTSRuntime(nn.Module):
         # Keep dynamic duration, RNG, solver control flow, and the one-shot
         # vocoder eager. The DiT is the stable tensor region repeated at every
         # flow evaluation.
-        return (OptimizationCompileTarget(
-            "flow_model.transformer.forward",
-            self.ema_model.transformer,
-            "forward",
-        ), )
+        return (
+            OptimizationCompileTarget(
+                "flow_model.transformer.forward",
+                self.ema_model.transformer,
+                "forward",
+            ), )
 
     def prepare_for_training(self) -> None:
         self.ema_model.train()
@@ -145,32 +137,21 @@ class NativeF5TTSRuntime(nn.Module):
             "DiT": self.ema_model,
             "Vocos": self.vocoder,
         }
-        reduced_precision_components = tuple(
-            (
-                name,
-                tuple(sorted({
+        reduced_precision_components = tuple((
+            name,
+            tuple(
+                sorted({
                     str(parameter.dtype).removeprefix("torch.")
                     for parameter in component.parameters()
-                    if (
-                        parameter.is_floating_point()
-                        and parameter.dtype != torch.float32
-                    )
+                    if (parameter.is_floating_point() and parameter.dtype != torch.float32)
                 })),
-            )
-            for name, component in components.items()
-            if component is not None
-            and any(
-                parameter.is_floating_point()
-                and parameter.dtype != torch.float32
-                for parameter in component.parameters()
-            )
-        )
+        ) for name, component in components.items() if component is not None and any(
+            parameter.is_floating_point() and parameter.dtype != torch.float32
+            for parameter in component.parameters()))
         if not reduced_precision_components:
             return
         joined = " and ".join(
-            f"{name} ({', '.join(dtypes)})"
-            for name, dtypes in reduced_precision_components
-        )
+            f"{name} ({', '.join(dtypes)})" for name, dtypes in reduced_precision_components)
         raise RuntimeError(
             "F5-TTS reduced-precision inference is disabled by default "
             "because the "

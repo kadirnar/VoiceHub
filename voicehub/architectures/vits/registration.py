@@ -5,10 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.architectures.vits.checkpoint import (
     FACEBOOK_MMS_TTS_ENG_REVISION,
     ORIGINAL_VITS_REVISION,

@@ -11,18 +11,9 @@ from unittest.mock import patch
 import numpy as np
 import torch
 
-from voicehub.models.vad_silero import (
-    SileroVADConfig,
-    SileroVADForVoiceActivityDetection,
-)
-from voicehub.models.vad_transformers import (
-    TransformersVADConfig,
-    TransformersVADForVoiceActivityDetection,
-)
-from voicehub.models.vad_webrtc import (
-    WebRTCVADConfig,
-    WebRTCVADForVoiceActivityDetection,
-)
+from voicehub.models.vad_silero import SileroVADConfig, SileroVADForVoiceActivityDetection
+from voicehub.models.vad_transformers import TransformersVADConfig, TransformersVADForVoiceActivityDetection
+from voicehub.models.vad_webrtc import WebRTCVADConfig, WebRTCVADForVoiceActivityDetection
 from voicehub.models.vad_webrtc.modeling_vad_webrtc import _pcm16_samples
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -251,9 +242,7 @@ class SileroVADInferenceTests(unittest.TestCase):
     def test_native_silero_maps_controls_and_returns_frame_scores(self):
         import torch
 
-        from voicehub.architectures.silero_vad.configuration import (
-            SileroVADConfig as NativeSileroVADConfig,
-        )
+        from voicehub.architectures.silero_vad.configuration import SileroVADConfig as NativeSileroVADConfig
 
         captured = {}
 
@@ -301,9 +290,7 @@ class SileroVADInferenceTests(unittest.TestCase):
     def test_native_silero_frame_scores_are_direct_model_probabilities(self):
         import torch
 
-        from voicehub.architectures.silero_vad.configuration import (
-            SileroVADConfig as NativeSileroVADConfig,
-        )
+        from voicehub.architectures.silero_vad.configuration import SileroVADConfig as NativeSileroVADConfig
 
         model = SileroVADForVoiceActivityDetection(
             SileroVADConfig(),

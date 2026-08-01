@@ -25,11 +25,7 @@ from voicehub.architectures.neutts.tokenization import (
     normalize_neutts_text,
 )
 from voicehub.generation import GenerationConfig
-from voicehub.generation.engine import (
-    AutoregressiveGenerator,
-    GenerationStepInput,
-    GenerationStepOutput,
-)
+from voicehub.generation.engine import AutoregressiveGenerator, GenerationStepInput, GenerationStepOutput
 from voicehub.neural.rotary import RotaryEmbedding
 from voicehub.optimization.protocols import OptimizationCompileTarget
 from voicehub.processing.waveform import load_native_audio
@@ -190,8 +186,9 @@ class NeuTTSRuntime(nn.Module):
 
         Real-checkpoint inference validation changed generated audio and
         transcript content after compiling the autoregressive backbone.
-        Training keeps the full-sequence backbone boundary because it does
-        not perform stochastic token generation or waveform reconstruction.
+        Training keeps the full-sequence backbone boundary because it
+        does not perform stochastic token generation or waveform
+        reconstruction.
         """
         if mode == "inference":
             return ()

@@ -713,8 +713,7 @@ class TorchCompileOptimizationTests(unittest.TestCase):
                 "nfe_step": 1,
                 "cross_fade_duration": 0.0,
             }
-            expected_waveform, expected_rate, expected_spectrogram = (
-                runtime.infer(**inference_kwargs))
+            expected_waveform, expected_rate, expected_spectrogram = (runtime.infer(**inference_kwargs))
             result = OptimizationPassManager().apply(
                 runtime,
                 (TorchCompilePass(
@@ -728,8 +727,7 @@ class TorchCompileOptimizationTests(unittest.TestCase):
                     dtype="float32",
                 ),
             )
-            waveform, sample_rate, spectrogram = runtime.infer(
-                **inference_kwargs)
+            waveform, sample_rate, spectrogram = runtime.infer(**inference_kwargs)
 
         self.assertEqual(sample_rate, expected_rate)
         self.assertEqual(sample_rate, 24_000)
@@ -825,8 +823,7 @@ class TorchCompileOptimizationTests(unittest.TestCase):
                 ), ),
                 self._context("training", architecture="neutts"),
             )
-            actual = runtime.codec.decode_code(
-                runtime.backbone(runtime.backbone(torch.tensor(3.0))))
+            actual = runtime.codec.decode_code(runtime.backbone(runtime.backbone(torch.tensor(3.0))))
 
         torch.testing.assert_close(actual, torch.tensor(13.0))
         self.assertEqual(compile_calls, ["forward", "forward"])

@@ -83,6 +83,8 @@ NAVIGATION_PATHS = (
     "project/adding-a-model.md",
     "project/adding-speech-provider.md",
     "project/adding-an-optimization.md",
+    "project/roadmap.md",
+    "project/release-readiness.md",
     "project/translations.md",
     "project/model-audit.md",
 )
@@ -261,6 +263,17 @@ class DocumentationSiteTests(unittest.TestCase):
                 self.assertIn("## Training", source)
                 self.assertIn(spec.task.value.replace("-", " "), source.lower())
                 self.assertIn(spec.training.support.value, source)
+                self.assertIn("| License |", source)
+                if spec.license is None:
+                    self.assertIn("| License | Checkpoint-specific |", source)
+                    self.assertIn(
+                        "Verify the checkpoint and upstream source terms before use.",
+                        source,
+                    )
+                else:
+                    self.assertIn(spec.license.license_id, source)
+                    self.assertIn(spec.license.upstream, source)
+                    self.assertIn(spec.license.notice, source)
                 self.assertIn(f"[`{spec.model_type}`]({path.name})", index)
                 self.assertEqual(
                     config.count(f"models/providers/{path.name}"),

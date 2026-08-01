@@ -4,18 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from voicehub.architectures.moonshine.checkpoint import (
-    USEFULSENSORS_MOONSHINE_TINY_REVISION,
-)
+from voicehub.architectures.moonshine.checkpoint import USEFULSENSORS_MOONSHINE_TINY_REVISION
 from voicehub.architectures.moonshine.configuration import (
     MOONSHINE_MAIN_LIBRARY_REVISION,
     TRANSFORMERS_MOONSHINE_REVISION,
 )
 from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.tasks import SpeechTask
 
 DEFAULT_MOONSHINE_ALIASES = (

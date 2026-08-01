@@ -11,10 +11,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from voicehub.architectures.f5tts.metadata import (
-    F5TTS_NATIVE_FORMAT,
-    VOCOS_NATIVE_FORMAT,
-)
+from voicehub.architectures.f5tts.metadata import F5TTS_NATIVE_FORMAT, VOCOS_NATIVE_FORMAT
 from voicehub.checkpointing import SafeTensorReader, save_safetensors
 
 
@@ -72,8 +69,7 @@ def _resolve_prefix(
     for prefix in dict.fromkeys(candidates):
         names = {
             name.removeprefix(prefix)
-            for name in checkpoint_names
-            if not prefix or name.startswith(prefix)
+            for name in checkpoint_names if not prefix or name.startswith(prefix)
         }
         if set(expected).issubset(names):
             return prefix
@@ -118,11 +114,7 @@ def load_f5tts_checkpoint(
         selected = {f"{prefix}{name}" for name in expected}
         ignored = {"step", "initted"}
         checkpoint_names = reader.keys()
-        unexpected = tuple(
-            name
-            for name in checkpoint_names
-            if name not in selected and name not in ignored
-        )
+        unexpected = tuple(name for name in checkpoint_names if name not in selected and name not in ignored)
     if strict and (missing or unexpected):
         raise ValueError(
             "F5-TTS checkpoint namespace mismatch: "
@@ -258,9 +250,7 @@ def load_vocos_checkpoint(
     with SafeTensorReader(source) as reader:
         missing = tuple(name for name in expected if name not in reader)
         checkpoint_names = reader.keys()
-        unexpected = tuple(
-            name for name in checkpoint_names if name not in expected
-        )
+        unexpected = tuple(name for name in checkpoint_names if name not in expected)
         if missing or unexpected:
             raise ValueError(
                 "Vocos checkpoint namespace mismatch: "
