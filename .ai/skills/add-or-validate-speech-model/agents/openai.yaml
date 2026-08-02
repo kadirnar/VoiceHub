@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Speech Model"
+  short_description: "Complete and audit speech model integrations"
+  default_prompt: "Use $add-or-validate-speech-model to add or audit this VoiceHub model integration end to end."

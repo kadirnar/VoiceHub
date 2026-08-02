@@ -9,7 +9,7 @@ import tempfile
 import textwrap
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from scripts.scaffold_model import (
     IMPLEMENTATION_STATUS,
@@ -17,6 +17,7 @@ from scripts.scaffold_model import (
     READY_STATUS,
     TASKS,
     ScaffoldError,
+    _display_relative_path,
     check_model_scaffold,
     create_model_scaffold,
     main,
@@ -29,6 +30,15 @@ from voicehub.training.specs import discover_manifest_training_specs
 
 
 class ModelScaffoldTests(unittest.TestCase):
+
+    def test_displayed_paths_are_platform_independent(self):
+        root = PureWindowsPath("C:/workspace/voicehub")
+        path = root / "voicehub/models/auroratts/runtime.py"
+
+        self.assertEqual(
+            _display_relative_path(path, root),
+            "voicehub/models/auroratts/runtime.py",
+        )
 
     def _files(self, *, task="tts"):
         return scaffold_files(

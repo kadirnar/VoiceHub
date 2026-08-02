@@ -10,7 +10,7 @@ import re
 import sys
 import textwrap
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from urllib.parse import urlsplit
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -110,6 +110,11 @@ class BuiltinCatalogFragments:
     model_spec: str
     aliases: str
     training_spec: str
+
+
+def _display_relative_path(path: PurePath, root: PurePath) -> str:
+    """Render one repository-relative path consistently on every platform."""
+    return path.relative_to(root).as_posix()
 
 
 def _nonempty(value: str, *, name: str) -> str:
@@ -669,7 +674,7 @@ def create_model_scaffold(output_root: Path, files: dict[Path, str]) -> tuple[Pa
     destinations = tuple(root / relative_path for relative_path in files)
     existing = tuple(path for path in destinations if path.exists())
     if existing:
-        rendered = ", ".join(str(path.relative_to(root)) for path in existing)
+        rendered = ", ".join(_display_relative_path(path, root) for path in existing)
         raise ScaffoldError("Refusing to overwrite existing scaffold paths: " + rendered)
     for destination in destinations:
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -693,7 +698,7 @@ def render_builtin_catalog_fragments(
     manifest_path = (root / "voicehub" / "models" / normalized_model_type / "model-integration.json")
     if not manifest_path.is_file():
         raise ScaffoldError(
-            f"{normalized_model_type}: missing {manifest_path.relative_to(root)}; "
+            f"{normalized_model_type}: missing {_display_relative_path(manifest_path, root)}; "
             "run scaffold_model.py create first.")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1000,7 +1005,7 @@ def check_model_scaffold(output_root: Path, model_type: str) -> tuple[str, ...]:
 
     if not manifest_path.is_file():
         return (
-            f"{normalized_model_type}: missing {manifest_path.relative_to(root)}; "
+            f"{normalized_model_type}: missing {_display_relative_path(manifest_path, root)}; "
             "run scaffold_model.py create first.", )
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1097,7 +1102,7 @@ def check_model_scaffold(output_root: Path, model_type: str) -> tuple[str, ...]:
     for path in required:
         if not path.is_file():
             errors.append(
-                f"{normalized_model_type}: missing {path.relative_to(root)}; "
+                f"{normalized_model_type}: missing {_display_relative_path(path, root)}; "
                 "restore the scaffold artifact and complete it.")
 
     python_paths = tuple(path for path in required if path.suffix == ".py" and path.is_file())
@@ -1109,14 +1114,16 @@ def check_model_scaffold(output_root: Path, model_type: str) -> tuple[str, ...]:
                 filename=str(path),
             )
         except SyntaxError as error:
-            errors.append(f"{normalized_model_type}: {path.relative_to(root)} does not compile: {error}.")
+            errors.append(
+                f"{normalized_model_type}: {_display_relative_path(path, root)} "
+                f"does not compile: {error}.")
 
     config_path = package / f"configuration_{normalized_model_type}.py"
     if config_path in parsed:
         class_names = {node.name for node in parsed[config_path].body if isinstance(node, ast.ClassDef)}
         if config_class not in class_names:
             errors.append(
-                f"{normalized_model_type}: {config_path.relative_to(root)} must define "
+                f"{normalized_model_type}: {_display_relative_path(config_path, root)} must define "
                 f"{config_class}.")
 
     model_path = package / f"modeling_{normalized_model_type}.py"
@@ -1124,7 +1131,7 @@ def check_model_scaffold(output_root: Path, model_type: str) -> tuple[str, ...]:
         class_names = {node.name for node in parsed[model_path].body if isinstance(node, ast.ClassDef)}
         if model_class not in class_names:
             errors.append(
-                f"{normalized_model_type}: {model_path.relative_to(root)} must define "
+                f"{normalized_model_type}: {_display_relative_path(model_path, root)} must define "
                 f"{model_class}.")
         status = _string_assignment(parsed[model_path], "IMPLEMENTATION_STATUS")
         if status != READY_STATUS:
@@ -1188,7 +1195,7 @@ def check_model_scaffold(output_root: Path, model_type: str) -> tuple[str, ...]:
         ):
             if fragment not in test_source:
                 errors.append(
-                    f"{normalized_model_type}: {test_path.relative_to(root)} is missing "
+                    f"{normalized_model_type}: {_display_relative_path(test_path, root)} is missing "
                     f"contract coverage marker {fragment!r}.")
 
     page_path = root / "docs" / "models" / "providers" / f"{normalized_model_type}.md"
@@ -1217,7 +1224,7 @@ def check_model_scaffold(output_root: Path, model_type: str) -> tuple[str, ...]:
         registry_tree = None
         if not registry_path.is_file():
             errors.append(
-                f"{normalized_model_type}: missing {registry_path.relative_to(root)}; "
+                f"{normalized_model_type}: missing {_display_relative_path(registry_path, root)}; "
                 "restore the shared built-in registry implementation.")
         else:
             try:
@@ -1227,7 +1234,7 @@ def check_model_scaffold(output_root: Path, model_type: str) -> tuple[str, ...]:
                 )
             except SyntaxError as error:
                 errors.append(
-                    f"{normalized_model_type}: {registry_path.relative_to(root)} does not "
+                    f"{normalized_model_type}: {_display_relative_path(registry_path, root)} does not "
                     f"compile: {error}.")
         if registry_tree is not None:
             if manifest_builtin:
@@ -1267,7 +1274,7 @@ def check_model_scaffold(output_root: Path, model_type: str) -> tuple[str, ...]:
         training_tree = None
         if not training_path.is_file():
             errors.append(
-                f"{normalized_model_type}: missing {training_path.relative_to(root)}; "
+                f"{normalized_model_type}: missing {_display_relative_path(training_path, root)}; "
                 "restore the shared training registry implementation.")
         else:
             try:
@@ -1277,7 +1284,7 @@ def check_model_scaffold(output_root: Path, model_type: str) -> tuple[str, ...]:
                 )
             except SyntaxError as error:
                 errors.append(
-                    f"{normalized_model_type}: {training_path.relative_to(root)} does not "
+                    f"{normalized_model_type}: {_display_relative_path(training_path, root)} does not "
                     f"compile: {error}.")
         if training_tree is not None:
             if manifest_builtin:
@@ -1356,7 +1363,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             paths = create_model_scaffold(args.output_root, files)
             for path in paths:
-                print(f"created: {path.relative_to(args.output_root.resolve())}")
+                print(f"created: {_display_relative_path(path, args.output_root.resolve())}")
             print(
                 "INCOMPLETE: implement the runtime, pin the checkpoint revision, "
                 "register the built-in ModelSpec, aliases, and training profile, "
