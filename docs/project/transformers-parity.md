@@ -46,7 +46,7 @@ as top-level parity.
 | Page type | Transformers route | VoiceHub route | Structural shell | Responsive and visual status |
 | --- | --- | --- | --- | --- |
 | Home | `/docs/transformers/main/en/index` | `/voicehub/` | Left navigation and right table of contents are present at desktop width | Partial: desktop, tablet, and mobile shell behavior plus light/dark VoiceHub states, pointer dismissal, and Escape dismissal verified; the reference mobile light state and remaining interaction matrix remain gaps |
-| Installation | `/docs/transformers/main/en/installation` | `/voicehub/getting-started/installation/` | Partial: mapped active left-navigation item and expanded current section verified | Partial: light and dark active styling plus keyboard focus verified at the available 1280 x 720 viewport; exact desktop, tablet, and mobile reruns remain pending |
+| Installation | `/docs/transformers/main/en/installation` | `/voicehub/getting-started/installation/` | Mapped active left-navigation item and expanded current section verified | Partial: active styling, expanded state, keyboard focus, and overflow verified at 1440 x 900, 1024 x 768, and 390 x 844; remaining shell interactions are pending |
 | Quickstart | `/docs/transformers/main/en/quicktour` | `/voicehub/getting-started/quickstart/` | Pending | Pending |
 | Task guide | `/docs/transformers/main/en/pipeline_tutorial` | `/voicehub/guides/inference/` | Pending | Pending |
 | Model index | `/docs/transformers/main/en/model_doc/auto` | `/voicehub/models/providers/` | Pending | Pending |
@@ -61,7 +61,7 @@ as top-level parity.
 | Component or state | Current evidence | Remaining gate |
 | --- | --- | --- |
 | Global header | VoiceHub product, repository, search, theme, and language controls render | Ordering, geometry, focus, and expanded states |
-| Left navigation | Visible on desktop; persistent and 270 pixels wide at 1024 pixels; the home active item and keyboard focus render at 1440 x 900; the mobile drawer opens and closes by backdrop click or Escape in LTR and RTL layouts; the Installation route has a filled active item, expanded current section, and visible keyboard focus in light and dark themes at 1280 x 720 | Repeat Installation active, focus, and expanded-state evidence at the exact tablet and mobile viewports |
+| Left navigation | Visible on desktop; persistent and 270 pixels wide at 1024 pixels; the home active item and keyboard focus render at 1440 x 900; the mobile drawer opens and closes by backdrop click or Escape in LTR and RTL layouts; the Installation route has one visible filled active item, an expanded current section, and visible keyboard focus at 1440 x 900, 1024 x 768, and 390 x 844 in light and dark VoiceHub themes | Remaining representative routes, focus order, and sticky behavior |
 | Right table of contents | Visible on desktop; collapsed at tablet and mobile widths | Sticky and scroll-active states |
 | Main content | No horizontal overflow at the three checked viewports | Representative page typography, spacing, tables, callouts, tabs, and code actions |
 | Footer and page actions | Edit, previous/next, back-to-top, and footer regions render | Geometry, focus order, and all representative page pairs |
@@ -131,21 +131,22 @@ indigo outline with a two-pixel offset.
 ## Installation navigation-state evidence
 
 The mapped Transformers Installation page renders its current left-navigation
-item as a rounded filled control. At the available 1280 x 720 viewport, the
-reference active item measured about 218 x 31 pixels. VoiceHub's original
-active item was a transparent 210 x 22-pixel text link. The rebuilt VoiceHub
-item measures 219 x 34 pixels, uses the VoiceHub palette for its filled and
-bordered state, keeps the `Get started` branch checked, and has no horizontal
-overflow. The same active state rendered against the light and `slate` dark
-surfaces. Keyboard traversal applied Material's `focus-visible` class and the
-link rendered a two-pixel outline with a two-pixel offset.
+item as a rounded filled control. At 1440 x 900, the reference item measured
+about 218 x 31 pixels and VoiceHub measured 219 x 34 pixels. VoiceHub rendered
+one visible active item, kept the `Get started` branch checked, and had no
+horizontal overflow in its default light and `slate` dark themes. Keyboard
+traversal rendered a two-pixel theme-colored outline with a two-pixel offset.
 
-The responsive browser's requested 1440 x 900, 1024 x 768, and 390 x 844
-overrides all continued to report 1280 x 720, and the Chrome fallback did not
-become controllable. Those attempts are inaccessible checks, not passing
-evidence. This slice therefore leaves the exact three-viewport navigation-state
-matrix open even though the source regression, available desktop render, and
-strict documentation build pass.
+At 1024 x 768, the reference retained its 218 x 31-pixel active item. VoiceHub
+retained a persistent 270-pixel sidebar, rendered one 212 x 34-pixel active
+item in both themes, hid the mobile drawer button, kept `Get started` checked,
+and had no horizontal overflow. At 390 x 844, the VoiceHub drawer opened to
+242 pixels and its backdrop occupied the remaining 133 pixels. The current
+page became one visible 251 x 48-pixel active row, `Get started` remained
+checked, and a keyboard-focused drawer link rendered the same two-pixel focus
+treatment in both themes. The mapped Transformers drawer rendered one filled
+323 x 31-pixel Installation item with a visible keyboard focus outline. Both
+mobile pages had zero horizontal overflow.
 
 The following gaps remain explicit and are not passed by this slice:
 
@@ -153,8 +154,8 @@ The following gaps remain explicit and are not passed by this slice:
   Transformers-aligned navigation sections.
 - Header product, search, version, language, and source controls do not yet
   match the reference geometry or ordering.
-- Exact sticky behavior and the Installation focus and expanded-state matrix at
-  1440 x 900, 1024 x 768, and 390 x 844 are not yet verified.
+- Exact sticky behavior and the remaining representative-route focus and
+  expanded-state matrix are not yet verified.
 - The reference mobile light screenshot and remaining representative page-type
   matrix are pending. Home evidence covers both themes at all three VoiceHub
   viewports, both reference themes at desktop and tablet, and reference dark at
