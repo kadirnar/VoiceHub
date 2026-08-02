@@ -353,8 +353,14 @@ class TENVADDifferentialOracleTests(unittest.TestCase):
                 source,
                 directory,
                 trust_onnx_checkpoint=True,
+                expected_source_sha256=TEN_VAD_ONNX_SHA256,
             )
             config_values = json.loads((destination / "config.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                config_values["source_onnx_sha256"],
+                TEN_VAD_ONNX_SHA256,
+            )
+            self.assertTrue(config_values["official_source"])
             model = TENVADModel(TENVADConfig.from_dict(config_values))
             with SafeTensorReader(destination / NATIVE_TEN_VAD_FILENAME) as reader:
                 TENVADSafeTensorsCheckpointAdapter().load_streaming(

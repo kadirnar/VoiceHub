@@ -411,10 +411,10 @@ class Vui(nn.Module):
         """Expose only quality-safe Vui compile boundaries.
 
         Real-checkpoint tests changed autoregressive generation for both
-        compiler-default and explicit dynamic inference policies. Inference
-        therefore exposes no compile target. Training retains its full-
-        sequence decoder boundary, which does not use mutable generation
-        caches or waveform reconstruction.
+        compiler-default and explicit dynamic inference policies.
+        Inference therefore exposes no compile target. Training retains
+        its full- sequence decoder boundary, which does not use mutable
+        generation caches or waveform reconstruction.
         """
         if mode == "training":
             return (OptimizationCompileTarget(
@@ -463,10 +463,7 @@ class Vui(nn.Module):
             is_native_checkpoint = (
                 direct_checkpoint.is_file() and direct_checkpoint.suffix.lower() == ".safetensors")
             if is_native_directory or is_native_checkpoint:
-                from voicehub.models.vui.checkpoint import (
-                    load_vui_safetensors,
-                    resolve_native_vui_artifact,
-                )
+                from voicehub.models.vui.checkpoint import load_vui_safetensors, resolve_native_vui_artifact
 
                 native_artifact = resolve_native_vui_artifact(direct_checkpoint, )
                 if (is_native_checkpoint and direct_checkpoint.resolve() != native_artifact.model_checkpoint):
@@ -511,11 +508,7 @@ class Vui(nn.Module):
             raise TypeError("Pass either `codec` or `codec_path`, not both.")
         if codec is None:
             if codec_path is None:
-                from voicehub.models.vui.artifacts import (
-                    VUI_CODEC_FILENAME,
-                    VUI_REPO_ID,
-                    VUI_REVISION,
-                )
+                from voicehub.models.vui.artifacts import VUI_CODEC_FILENAME, VUI_REPO_ID, VUI_REVISION
 
                 codec = Fluac.from_pretrained(
                     VUI_CODEC_FILENAME,

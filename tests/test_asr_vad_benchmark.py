@@ -15,11 +15,7 @@ from types import SimpleNamespace
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = PROJECT_ROOT / "scripts" / "benchmark_asr_vad.py"
-RESULTS = (
-    PROJECT_ROOT
-    / "benchmarks"
-    / "asr_vad_rtx4090_2026-07-31.json"
-)
+RESULTS = (PROJECT_ROOT / "benchmarks" / "asr_vad_rtx4090_2026-07-31.json")
 
 
 class ASRVADBenchmarkScriptTests(unittest.TestCase):
@@ -43,10 +39,7 @@ class ASRVADBenchmarkScriptTests(unittest.TestCase):
         for index in range(sample_rate * 12):
             second = index / sample_rate
             value = (
-                0
-                if second < 1 or second >= 11
-                else round(12_000 * math.sin(2 * math.pi * 220 * second))
-            )
+                0 if second < 1 or second >= 11 else round(12_000 * math.sin(2 * math.pi * 220 * second)))
             samples.append(value)
         with wave.open(str(path), "wb") as output:
             output.setnchannels(1)
@@ -69,10 +62,8 @@ class ASRVADBenchmarkScriptTests(unittest.TestCase):
         self.assertEqual(result["passed"], 34)
         self.assertEqual(result["failed"], 0)
         self.assertEqual(
-            {
-                record["task"]
-                for record in result["providers"]
-            },
+            {record["task"]
+             for record in result["providers"]},
             {
                 "automatic-speech-recognition",
                 "voice-activity-detection",
@@ -80,10 +71,8 @@ class ASRVADBenchmarkScriptTests(unittest.TestCase):
         )
         self.assertTrue(
             all(
-                record["status"] == "lazy-contract-passed"
-                and record["lazy_runtime_allocated"] is False
-                for record in result["providers"]
-            ))
+                record["status"] == "lazy-contract-passed" and record["lazy_runtime_allocated"] is False
+                for record in result["providers"]))
 
     def test_checked_in_results_cover_every_provider(self):
         result = json.loads(RESULTS.read_text(encoding="utf-8"))
@@ -92,13 +81,13 @@ class ASRVADBenchmarkScriptTests(unittest.TestCase):
         self.assertEqual(result["voicehub_version"], "0.3.0")
         self.assertEqual(len(coverage), 34)
         self.assertEqual(
-            len({record["model_type"] for record in coverage}),
+            len({record["model_type"]
+                 for record in coverage}),
             34,
         )
         self.assertEqual(
             sum(
-                result["coverage_summary"][name]
-                for name in (
+                result["coverage_summary"][name] for name in (
                     "real_checkpoint_or_algorithm",
                     "tiny_native_graph",
                     "external_checkpoint_blocker",
@@ -106,10 +95,8 @@ class ASRVADBenchmarkScriptTests(unittest.TestCase):
             34,
         )
         sherpa = next(
-            measurement
-            for measurement in result["vad_measurements"]
-            if measurement["model_type"] == "vad_sherpa_onnx"
-        )
+            measurement for measurement in result["vad_measurements"]
+            if measurement["model_type"] == "vad_sherpa_onnx")
         self.assertEqual(
             sherpa["profiles"][0]["mean_seconds"],
             1.6402040142255525,
@@ -158,12 +145,7 @@ class ASRVADBenchmarkScriptTests(unittest.TestCase):
         self.assertEqual(
             module._resolved_checkpoint_revision(
                 SimpleNamespace(
-                    model=SimpleNamespace(
-                        artifacts=SimpleNamespace(
-                            revision="commit-123",
-                        ),
-                    ),
-                ),
+                    model=SimpleNamespace(artifacts=SimpleNamespace(revision="commit-123", ), ), ),
                 SimpleNamespace(metadata={}),
             ),
             "commit-123",
@@ -171,9 +153,7 @@ class ASRVADBenchmarkScriptTests(unittest.TestCase):
         self.assertEqual(
             module._resolved_checkpoint_revision(
                 SimpleNamespace(),
-                SimpleNamespace(
-                    metadata={"checkpoint_revision": "main"},
-                ),
+                SimpleNamespace(metadata={"checkpoint_revision": "main"}, ),
             ),
             "main",
         )
@@ -190,8 +170,7 @@ class ASRVADBenchmarkScriptTests(unittest.TestCase):
                 output.setnchannels(1)
                 output.setsampwidth(2)
                 output.setframerate(16_000)
-                output.writeframes(
-                    struct.pack("<16000h", *([0] * 16_000)))
+                output.writeframes(struct.pack("<16000h", *([0] * 16_000)))
 
             completed = subprocess.run(
                 [

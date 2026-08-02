@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from threading import RLock
 from types import MappingProxyType
 from typing import Iterable, Iterator, Mapping
 
 from voicehub.errors import UnknownModelError
+from voicehub.models.manifests import BuiltinModelManifest, discover_builtin_model_manifests
 from voicehub.tasks import SpeechTask
 
 
@@ -34,6 +36,8 @@ class ModelSpec:
     config_class: str = "VoiceHubConfig"
     task: SpeechTask | str = SpeechTask.TEXT_TO_SPEECH
     architecture: str | None = None
+    components: tuple[str, ...] = ()
+    default_for_task: bool = False
 
     def __post_init__(self) -> None:
         model_type = _normalize_identifier(self.model_type, name="model_type")
@@ -63,6 +67,8 @@ class ModelSpec:
 
         task = SpeechTask.coerce(self.task)
         object.__setattr__(self, "task", task)
+        if not isinstance(self.default_for_task, bool):
+            raise TypeError("default_for_task must be a boolean.")
 
         capabilities = ((self.capabilities, ) if isinstance(self.capabilities, str) else tuple(
             self.capabilities))
@@ -84,6 +90,13 @@ class ModelSpec:
                 name="architecture",
             )
         object.__setattr__(self, "architecture", architecture)
+
+        components = ((self.components, ) if isinstance(self.components, str) else tuple(self.components))
+        normalized_components = tuple(
+            _normalize_identifier(component, name="component") for component in components)
+        if len(set(normalized_components)) != len(normalized_components):
+            raise ValueError("components must not contain duplicates.")
+        object.__setattr__(self, "components", normalized_components)
 
     def supports_task(self, task: SpeechTask | str) -> bool:
         """Return whether this implementation belongs to *task*."""
@@ -107,13 +120,6 @@ class ModelSpec:
         return get_architecture_spec(self.architecture)
 
     @property
-    def components(self) -> tuple[str, ...]:
-        """Names of reusable source components used by this backend."""
-        from voicehub.components.registry import MODEL_COMPONENTS
-
-        return MODEL_COMPONENTS.get(self.model_type, ())
-
-    @property
     def license(self):
         """Return special model/checkpoint license metadata, if present."""
         from voicehub.policies.licensing import get_model_license
@@ -129,16 +135,18 @@ class ModelSpec:
 
     @classmethod
     def from_classes(
-        cls,
-        *,
-        model_type: str,
-        model_class: type,
-        config_class: type,
-        default_model_path: str = "",
-        install_extra: str | None = None,
-        capabilities: tuple[str, ...] = (),
-        task: SpeechTask | str = SpeechTask.TEXT_TO_SPEECH,
-        architecture: str | None = None,
+            cls,
+            *,
+            model_type: str,
+            model_class: type,
+            config_class: type,
+            default_model_path: str = "",
+            install_extra: str | None = None,
+            capabilities: tuple[str, ...] = (),
+            task: SpeechTask | str = SpeechTask.TEXT_TO_SPEECH,
+            architecture: str | None = None,
+            components: tuple[str, ...] = (),
+            default_for_task: bool = False,
     ) -> ModelSpec:
         """Build a lazy registry declaration from Python classes.
 
@@ -165,7 +173,38 @@ class ModelSpec:
             config_class=config_class.__name__,
             task=task,
             architecture=architecture,
+            components=components,
+            default_for_task=default_for_task,
         )
+
+
+def model_spec_from_manifest(manifest: BuiltinModelManifest, ) -> ModelSpec:
+    """Project one activated, source-only manifest into lazy registry
+    metadata."""
+    if not isinstance(manifest, BuiltinModelManifest):
+        raise TypeError("`manifest` must be a BuiltinModelManifest.")
+    package = f"voicehub.models.{manifest.model_type}"
+    return ModelSpec(
+        model_type=manifest.model_type,
+        module=f"{package}.modeling_{manifest.model_type}",
+        class_name=manifest.model_class,
+        default_model_path=manifest.default_checkpoint,
+        install_extra=manifest.install_extra,
+        capabilities=manifest.capabilities,
+        config_module=f"{package}.configuration_{manifest.model_type}",
+        config_class=manifest.config_class,
+        task=manifest.task,
+        architecture=manifest.architecture,
+        components=manifest.components,
+        default_for_task=manifest.default_for_task,
+    )
+
+
+def discover_manifest_model_specs(models_root: str | Path | None = None) -> tuple[ModelSpec, ...]:
+    """Discover lazy specs for activated package-local integration
+    manifests."""
+    return tuple(
+        model_spec_from_manifest(manifest) for manifest in discover_builtin_model_manifests(models_root))
 
 
 class ModelRegistry:
@@ -238,6 +277,17 @@ class ModelRegistry:
             raise UnknownModelError(f"Unknown model type {model_type!r}. Available models: {available}.")
         return spec
 
+    def get_default(self, task: SpeechTask | str) -> ModelSpec | None:
+        """Return the model declared as the task default, when one exists."""
+        resolved_task = SpeechTask.coerce(task)
+        with self._lock:
+            return next(
+                (
+                    self._specs[name] for name in self._order
+                    if self._specs[name].task is resolved_task and self._specs[name].default_for_task),
+                None,
+            )
+
     def list(
         self,
         *,
@@ -295,6 +345,17 @@ class ModelRegistry:
                     f"for {target!r}.")
             if spec.model_type in self._specs and not exist_ok:
                 raise ValueError(f"A model backend is already registered for {spec.model_type!r}.")
+            if spec.default_for_task:
+                existing_default = next(
+                    (
+                        self._specs[name] for name in self._order if name != spec.model_type and
+                        self._specs[name].task is spec.task and self._specs[name].default_for_task),
+                    None,
+                )
+                if existing_default is not None:
+                    raise ValueError(
+                        f"Task {spec.task.value!r} already declares default model "
+                        f"{existing_default.model_type!r}.")
             normalized_aliases = tuple(
                 self._validated_alias(alias, spec.model_type, exist_ok=exist_ok) for alias in aliases)
             if len(normalized_aliases) != len(set(normalized_aliases)):
@@ -395,6 +456,7 @@ _MODEL_SPECS = (
         "voicehub.models.orpheustts.configuration_orpheustts",
         "OrpheusTTSConfig",
         architecture="causal-lm",
+        default_for_task=True,
     ),
     ModelSpec(
         "dia",
@@ -413,6 +475,7 @@ _MODEL_SPECS = (
         "voicehub.models.dia.configuration_dia",
         "DiaConfig",
         architecture="dia",
+        components=("dac", ),
     ),
     ModelSpec(
         "vui",
@@ -451,6 +514,7 @@ _MODEL_SPECS = (
         "voicehub.models.chatterbox.configuration_chatterbox",
         "ChatterboxConfig",
         architecture="chatterbox",
+        components=("conformer", ),
     ),
     ModelSpec(
         "kokoro",
@@ -555,6 +619,7 @@ _MODEL_SPECS = (
         "voicehub.models.cosyvoice.configuration_cosyvoice",
         "CosyVoiceConfig",
         architecture="cosyvoice-native",
+        components=("conformer", ),
     ),
     ModelSpec(
         "f5tts",
@@ -574,6 +639,7 @@ _MODEL_SPECS = (
         "voicehub.models.f5tts.configuration_f5tts",
         "F5TTSConfig",
         architecture="f5tts",
+        components=("vocos", ),
     ),
     ModelSpec(
         "gptsovits",
@@ -641,6 +707,7 @@ _MODEL_SPECS = (
         "voicehub.models.openvoice.configuration_openvoice",
         "OpenVoiceConfig",
         architecture="openvoice-v2-converter",
+        components=("wavmark", ),
     ),
     ModelSpec(
         "outetts",
@@ -661,6 +728,7 @@ _MODEL_SPECS = (
         "voicehub.models.outetts.configuration_outetts",
         "OuteTTSConfig",
         architecture="outetts",
+        components=("dac", ),
     ),
     ModelSpec(
         "parlertts",
@@ -680,6 +748,7 @@ _MODEL_SPECS = (
         "voicehub.models.parlertts.configuration_parlertts",
         "ParlerTTSConfig",
         architecture="parlertts",
+        components=("dac", ),
     ),
     ModelSpec(
         "styletts2",
@@ -793,6 +862,7 @@ _MODEL_SPECS = (
         "voicehub.models.zonos.configuration_zonos",
         "ZonosConfig",
         architecture="zonos",
+        components=("dac", ),
     ),
     ModelSpec(
         "zonos2",
@@ -812,6 +882,7 @@ _MODEL_SPECS = (
         "voicehub.models.zonos2.configuration_zonos2",
         "Zonos2Config",
         architecture="zonos2",
+        components=("dac", ),
     ),
     ModelSpec(
         "voxcpm",
@@ -942,6 +1013,7 @@ _MODEL_SPECS = (
         "voicehub.models.fishtts.configuration_fishtts",
         "FishTTSConfig",
         architecture="fish-s2",
+        components=("dac", ),
     ),
     ModelSpec(
         "csm",
@@ -1046,6 +1118,7 @@ _MODEL_SPECS = (
         "voicehub.models.bark.configuration_bark",
         "BarkConfig",
         architecture="bark",
+        components=("encodec", ),
     ),
     ModelSpec(
         "speecht5",
@@ -1114,6 +1187,7 @@ _AUDIO_INPUT_MODEL_SPECS = (
         "TransformersASRConfig",
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         architecture="native-asr-dispatch",
+        default_for_task=True,
     ),
     ModelSpec(
         "asr_whisper",
@@ -1566,6 +1640,7 @@ _AUDIO_INPUT_MODEL_SPECS = (
         "TransformersVADConfig",
         task=SpeechTask.VOICE_ACTIVITY_DETECTION,
         architecture="wav2vec2",
+        default_for_task=True,
     ),
     ModelSpec(
         "vad_silero",
@@ -1871,6 +1946,24 @@ _BUILTIN_MODEL_ALIASES: dict[str, str] = {
     "pyannote-brouhaha": "vad_pyannote_brouhaha",
 }
 
+_DISCOVERED_BUILTIN_MANIFESTS = discover_builtin_model_manifests()
+_DISCOVERED_MODEL_SPECS = tuple(
+    model_spec_from_manifest(manifest) for manifest in _DISCOVERED_BUILTIN_MANIFESTS)
+_CENTRAL_MODEL_TYPES = {spec.model_type for spec in _MODEL_SPECS}
+_DUPLICATE_MANIFEST_MODELS = sorted(
+    manifest.model_type for manifest in _DISCOVERED_BUILTIN_MANIFESTS
+    if manifest.model_type in _CENTRAL_MODEL_TYPES)
+if _DUPLICATE_MANIFEST_MODELS:
+    raise ValueError(
+        "Manifest-discovered models duplicate legacy central ModelSpec entries: "
+        f"{_DUPLICATE_MANIFEST_MODELS!r}.")
+for _manifest in _DISCOVERED_BUILTIN_MANIFESTS:
+    for _alias in _manifest.aliases:
+        if _alias in _BUILTIN_MODEL_ALIASES:
+            raise ValueError(f"Manifest alias {_alias!r} duplicates a legacy central alias declaration.")
+        _BUILTIN_MODEL_ALIASES[_alias] = _manifest.model_type
+_MODEL_SPECS += _DISCOVERED_MODEL_SPECS
+
 MODEL_CATALOG = ModelRegistry(
     _MODEL_SPECS,
     aliases=_BUILTIN_MODEL_ALIASES,
@@ -1887,6 +1980,11 @@ def normalize_model_type(model_type: str) -> str:
 def get_model_spec(model_type: str) -> ModelSpec:
     """Return registry metadata or raise an error containing valid choices."""
     return MODEL_CATALOG.get(model_type)
+
+
+def get_default_model_spec(task: SpeechTask | str) -> ModelSpec | None:
+    """Return the registry-declared default for a speech task, if present."""
+    return MODEL_CATALOG.get_default(task)
 
 
 def list_model_specs(

@@ -42,7 +42,8 @@ def create_conversationtts_architecture_spec() -> ArchitectureSpec:
         decoder=(
             "voicehub.models.conversationtts.source.conversationtts.tools."
             "tokenizer.MimiCodec.mimi_tokenizer:MimiTokenizer"),
-        objective=("voicehub.training.recipes:ConversationTTSTrainingAdapter"),
+        objective=("voicehub.models.conversationtts.training:"
+                   "ConversationTTSTrainingAdapter"),
         checkpoint_adapter=(
             "voicehub.architectures.conversationtts.checkpoint:"
             "load_conversationtts_checkpoint"),
@@ -94,6 +95,9 @@ def create_conversationtts_architecture_spec() -> ArchitectureSpec:
         upstream_revision=CONVERSATIONTTS_SOURCE_REVISION,
         license_id=CONVERSATIONTTS_LICENSE,
         metadata={
+            "external_llm_backend_blocker": (
+                "ConversationTTS requires a global transformer plus a "
+                "hidden-state conditioned depth decoder."),
             "implementation":
             "voicehub-native",
             "tensor_backend":

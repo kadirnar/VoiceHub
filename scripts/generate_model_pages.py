@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a focused inference, data, and training guide for every model."""
+"""Generate one compact, contract-aligned guide for every registered model."""
 
 from __future__ import annotations
 
@@ -14,10 +14,10 @@ sys.path.insert(0, str(REPOSITORY_ROOT))
 sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from generate_model_notebooks import (  # noqa: E402
-    HUGGING_FACE_MODEL_ID,
     TASK_LABELS,
     TASK_ORDER,
     TTS_GENERATION_OPTIONS,
+    checkpoint_documentation,
 )
 
 from voicehub import list_model_specs  # noqa: E402
@@ -29,6 +29,14 @@ COLAB_ROOT = ("https://colab.research.google.com/github/kadirnar/voicehub/"
               "blob/main/notebooks/models")
 NAVIGATION_START = "      # BEGIN GENERATED MODEL GUIDE NAVIGATION"
 NAVIGATION_END = "      # END GENERATED MODEL GUIDE NAVIGATION"
+MODEL_PAGE_SECTIONS = (
+    "Overview",
+    "Quickstart",
+    "Supported tasks and capabilities",
+    "Checkpoints, provenance, and license",
+    "Optimization and training support",
+    "Public API",
+)
 
 
 def _value(value) -> str:
@@ -51,15 +59,14 @@ def _code_list(values) -> str:
 
 
 def _checkpoint(spec) -> tuple[str, str]:
-    checkpoint = spec.default_model_path or "owner/model-or-local-directory"
-    if HUGGING_FACE_MODEL_ID.fullmatch(spec.default_model_path):
-        rendered = (f"[`{spec.default_model_path}`]"
-                    f"(https://huggingface.co/{spec.default_model_path})")
-    elif spec.default_model_path:
-        rendered = f"`{spec.default_model_path}`"
+    documentation = checkpoint_documentation(spec)
+    if documentation.identifier and documentation.url:
+        rendered = f"[`{documentation.identifier}`]({documentation.url})"
+    elif documentation.identifier:
+        rendered = f"`{documentation.identifier}`"
     else:
         rendered = "No default; pass a compatible Hub ID or local directory."
-    return checkpoint, rendered
+    return documentation.example, rendered
 
 
 def _install_command(spec) -> str:
@@ -144,7 +151,64 @@ def _inference_notes(spec) -> str:
             "3. Place a supported recording at `speech.wav`.",
             "4. Run detection and tune the threshold against labeled validation audio.",
         ))
-    return "\n".join(notes)
+    checkpoint_note = checkpoint_documentation(spec).note
+    rendered = "\n".join(notes)
+    if checkpoint_note:
+        rendered += f"\n\nCheckpoint note: {checkpoint_note}"
+    return rendered
+
+
+def _factory_name(spec) -> str:
+    return {
+        "text-to-speech": "AutoModelForTextToSpeech",
+        "automatic-speech-recognition": "AutoModelForSpeechRecognition",
+        "voice-activity-detection": "AutoModelForVoiceActivityDetection",
+    }[spec.task.value]
+
+
+def _output_name(spec) -> str:
+    return {
+        "text-to-speech": "TTSOutput",
+        "automatic-speech-recognition": "ASROutput",
+        "voice-activity-detection": "VADOutput",
+    }[spec.task.value]
+
+
+def _module_source_roots(module: str) -> tuple[Path, ...]:
+    """Return package roots for a lazy module path without importing it."""
+    module_path = REPOSITORY_ROOT / Path(*module.split("."))
+    if module_path.is_dir():
+        return (module_path, )
+    source_path = module_path.with_suffix(".py")
+    if source_path.is_file():
+        return (source_path.parent, )
+    return ()
+
+
+def _source_provenance(spec) -> str:
+    """Describe the closest bundled source record without inventing provenance."""
+    roots = [
+        REPOSITORY_ROOT / "voicehub" / "models" / spec.model_type,
+        *_module_source_roots(spec.module),
+    ]
+    if spec.is_voicehub_native:
+        architecture = spec.native_architecture
+        roots.extend(
+            root for reference in architecture.component_references.values()
+            for root in _module_source_roots(reference.module))
+    roots.append(REPOSITORY_ROOT / "voicehub" / "architectures" / (spec.architecture or ""))
+
+    candidates = []
+    seen = set()
+    for root in roots:
+        for candidate in (root / "source" / "SOURCE.json", root / "SOURCE.json"):
+            if candidate not in seen:
+                candidates.append(candidate)
+                seen.add(candidate)
+    for candidate in candidates:
+        if candidate.is_file():
+            return f"`{candidate.relative_to(REPOSITORY_ROOT).as_posix()}`"
+    return "No integration-specific bundled `SOURCE.json` is declared for this registry entry."
 
 
 def _variant_dependencies(variant) -> str:
@@ -176,94 +240,39 @@ def _dataset_section(spec) -> str:
                 f"| `{_cell(variant.name)}` | {_code_list(variant.required_fields)} | "
                 f"{_cell(one_of)} | {'Prepared' if variant.preprocessed else 'Source'} | "
                 f"{_cell(_variant_dependencies(variant))} |")
-        dataset_class = "TTSDataset" if spec.task.value == "text-to-speech" else "ASRDataset"
         getter = "get_tts_dataset_spec" if spec.task.value == "text-to-speech" else "get_asr_dataset_spec"
-        guide = "../../guides/data-preparation.md" if spec.task.value == "text-to-speech" else "../../guides/speech-data.md"
+        guide = (
+            "../../guides/data-preparation.md"
+            if spec.task.value == "text-to-speech" else "../../guides/speech-data.md")
         sample_rate = f"{dataset.sample_rate:,} Hz" if dataset.sample_rate else "Model/checkpoint specific"
-        return f'''The `{spec.model_type}` contract is **{_cell(dataset.readiness)}**. Its
-data architecture is **{_cell(dataset.architecture)}** and its declared sample rate is
-**{sample_rate}**.
-
-{_cell(dataset.description)}
+        return f'''| Property | Value |
+| --- | --- |
+| Readiness | `{_cell(dataset.readiness)}` |
+| Data architecture | `{_cell(dataset.architecture)}` |
+| Sample rate | {sample_rate} |
+| Contract getter | `{getter}({spec.model_type!r})` |
 
 | Variant | Required fields | One of | Boundary | Other rules |
 | --- | --- | --- | --- | --- |
 {chr(10).join(rows)}
 
-Follow this process:
-
-1. Keep immutable source audio, exact transcripts or labels, stable IDs, consent,
-   license, speaker, and session metadata.
-2. Split by speaker or recording session before model preprocessing.
-3. Match one of the exact variants above. Source variants are processed by the
-   integration; prepared variants must already contain the listed model inputs.
-4. Validate one collated batch, then persist the preprocessing version and hashes.
-
-```python
-from voicehub import {dataset_class}, {getter}
-
-contract = {getter}({spec.model_type!r})
-print(contract.architecture, contract.readiness, contract.sample_rate)
-for variant in contract.variants:
-    print(variant.name, variant.required_fields, variant.one_of)
-
-# Source-record integrations can validate a JSONL manifest directly.
-if contract.accepts_raw_records:
-    records = {dataset_class}.from_manifest(
-        "data/manifest.jsonl",
-        model_type={spec.model_type!r},
-        validate_files=True,
-    )
-    train_records, validation_records = records.train_test_split(
-        validation_fraction=0.1,
-        seed=42,
-        group_by="session_id",
-    )
-```
-
-See the [complete data guide]({guide}) for manifest aliases, audio validation,
-leakage-safe splits, and model-owned preprocessing.'''
+{_cell(dataset.description)} Follow the [shared data workflow]({guide}) for
+manifest loading, audio validation, leakage-safe splits, and model-owned
+preprocessing.'''
 
     required = tuple(dict.fromkeys(name for phase in training.phases for name in phase.required_inputs))
-    fields = _code_list(required) if required else "the inputs declared by the selected backend"
-    if training.support.value == "inference-only":
-        boundary = (
-            "VoiceHub does not expose a verified training dataset contract for this "
-            "inference-only provider.")
-    else:
-        boundary = f"Training phases consume {fields}."
-    required_tuple = repr(required or ("audio", "labels"))
-    return f'''VAD source data should pair authorized audio with clip-, frame-, or
-segment-level speech labels. {boundary}
+    fields = _code_list(required) if required else "—"
+    boundary = (
+        "No verified training dataset contract"
+        if training.support.value == "inference-only" else "Clip-, frame-, or segment-level labels")
+    return f'''| Property | Value |
+| --- | --- |
+| Label boundary | {boundary} |
+| Required training inputs | {fields} |
 
-Follow this process:
-
-1. Preserve source audio, annotation provenance, consent, and license metadata.
-2. Split complete speakers and sessions before windowing the recordings.
-3. Convert annotations to the frame or clip boundary required by the phase below.
-4. Measure class balance and tune the inference threshold only on validation data.
-
-```python
-import json
-from pathlib import Path
-
-from voicehub import SpeechDataset
-
-manifest = Path("data/vad-train.jsonl")
-source_records = [
-    json.loads(line)
-    for line in manifest.read_text(encoding="utf-8").splitlines()
-    if line.strip()
-]
-records = SpeechDataset(
-    source_records,
-    required_fields={required_tuple},
-)
-print(len(records), records.column_names)
-```
-
-See the [ASR and VAD data guide](../../guides/speech-data.md) for audio input
-forms, timestamp labels, frame targets, and leakage-safe evaluation.'''
+Use authorized audio and preserve annotation provenance. Follow the
+[ASR and VAD data workflow](../../guides/speech-data.md) for supported audio
+forms, timestamp labels, frame targets, leakage-safe splits, and evaluation.'''
 
 
 def _phase_rows(training) -> str:
@@ -303,27 +312,6 @@ attach a generic loss to inference output. Choose a trainable model from the
 [training matrix](../training-support.md), or contribute a tested training
 adapter and data contract.'''
 
-    factory = {
-        "text-to-speech": "AutoModelForTextToSpeech",
-        "automatic-speech-recognition": "AutoModelForSpeechRecognition",
-        "voice-activity-detection": "AutoModelForVoiceActivityDetection",
-    }[spec.task.value]
-    preparation = (
-        '''train_dataset = model.create_training_dataset(
-    "data/train.jsonl",
-    validate_audio_files=True,
-)''' if spec.task.value != "voice-activity-detection" else '''import json
-from pathlib import Path
-
-from voicehub import SpeechDataset
-
-manifest = Path("data/vad-train.jsonl")
-train_records = [
-    json.loads(line)
-    for line in manifest.read_text(encoding="utf-8").splitlines()
-    if line.strip()
-]
-train_dataset = SpeechDataset(train_records)''')
     qualifier = {
         "native": "The integration accepts its declared source or prepared contract directly.",
         "preprocessed": "Prepare the exact tensors listed in the data contract before this step.",
@@ -331,44 +319,16 @@ train_dataset = SpeechDataset(train_records)''')
     }[training.support.value]
     return f'''{summary}
 
-{qualifier} Start with one optimizer step and verify finite loss, intended
-gradients, frozen components, save, and reload before scaling the run.
-
-```python
-from voicehub import {factory}, Trainer, TrainingArguments
-
-model = {factory}.from_pretrained(
-    {training_checkpoint!r},
-    model_type={spec.model_type!r},
-    device="cuda",
-    lazy_load=True,
-)
-model.validate_training_support()
-{preparation}
-
-arguments = TrainingArguments(
-    output_dir="runs/{spec.model_type}-smoke",
-    max_steps=1,
-    per_device_train_batch_size=1,
-    learning_rate=5e-5,
-    logging_steps=1,
-    save_steps=1,
-    report_to="none",
-    seed=42,
-)
-trainer = Trainer(model=model, args=arguments, train_dataset=train_dataset)
-result = trainer.train(resume_from_checkpoint=False)
-print(result.training_loss, result.metrics)
-trainer.save_model("runs/{spec.model_type}-smoke/final")
-```
-
-See the [training guide](../../guides/training.md) for validation datasets,
-checkpoint resume, mixed precision, optimizations, and portable exports.'''
+{qualifier} Call `model.validate_training_support()` before constructing a
+trainer. Follow the [shared training workflow](../../guides/training.md) for a
+one-step smoke test, validation, checkpoint resume, optimization, and portable
+export.'''
 
 
 def render_page(spec) -> str:
     """Render one deterministic provider guide."""
     _, checkpoint = _checkpoint(spec)
+    checkpoint_metadata = checkpoint_documentation(spec)
     license_spec = spec.license
     if license_spec is None:
         license_text = (
@@ -384,44 +344,32 @@ def render_page(spec) -> str:
         license_value = f"[{license_spec.license_id}]({license_spec.upstream})"
         license_text = f"{license_spec.notice} Commercial use: **{commercial}**."
     notebook = ""
-    if HUGGING_FACE_MODEL_ID.fullmatch(spec.default_model_path):
+    if checkpoint_metadata.is_hugging_face:
         notebook = (
             f" [Open the `{spec.model_type}` Colab notebook]"
             f"({COLAB_ROOT}/{spec.model_type}.ipynb).")
     architecture = spec.architecture or "provider-owned"
     components = _code_list(spec.components)
+    factory = _factory_name(spec)
+    output = _output_name(spec)
+    source_provenance = _source_provenance(spec)
     return f'''---
-description: Inference, data preparation, and training guide for the {spec.model_type} integration.
+description: Public API, checkpoint, training, and optimization guide for the {spec.model_type} integration.
 ---
 
 # `{spec.model_type}` model guide
+
+## Overview
 
 `{spec.model_type}` is a VoiceHub **{TASK_LABELS[spec.task.value].lower()}**
 integration. This page is generated from the model registry and its executable
 data and training contracts, so the documented support stays aligned with code.{notebook}
 
-## Model information
-
-| Property | Value |
-| --- | --- |
-| Task | {TASK_LABELS[spec.task.value]} |
-| Default checkpoint | {checkpoint} |
-| Architecture | `{architecture}` |
-| Runtime | `{'VoiceHub-native' if spec.is_voicehub_native else 'provider adapter'}` |
-| Implementation | `{spec.module}.{spec.class_name}` |
-| Capabilities | {_code_list(spec.capabilities)} |
-| Reusable components | {components} |
-| License | {license_value} |
-
-{license_text}
-
-## Install
+## Quickstart
 
 ```bash
 {_install_command(spec)}
 ```
-
-## Inference
 
 {_inference_notes(spec)}
 
@@ -430,17 +378,65 @@ data and training contracts, so the documented support stays aligned with code.{
 ```
 
 Use only authorized recordings for reference voice, transcription, detection,
-or evaluation. Pin a checkpoint revision in production.
+or evaluation. The example selects a concrete device; verify checkpoint-specific
+hardware needs and pin an immutable revision before production use.
 
-## Data preparation
+## Supported tasks and capabilities
+
+| Property | Value |
+| --- | --- |
+| Task | {TASK_LABELS[spec.task.value]} |
+| Architecture | `{architecture}` |
+| Runtime | `{'VoiceHub-native' if spec.is_voicehub_native else 'provider adapter'}` |
+| Capabilities | {_code_list(spec.capabilities)} |
+| Reusable components | {components} |
+
+### Data contract
 
 {_dataset_section(spec)}
 
-## Training
+## Checkpoints, provenance, and license
+
+| Property | Value |
+| --- | --- |
+| Default checkpoint | {checkpoint} |
+| Checkpoint status | {_cell(checkpoint_metadata.status)} |
+| Implementation | `{spec.module}.{spec.class_name}` |
+| Configuration | `{spec.config_module}.{spec.config_class}` |
+| Source provenance | {source_provenance} |
+| License | {license_value} |
+
+{license_text}
+
+The default checkpoint identifies the expected family, not every compatible
+variant. Confirm the selected checkpoint's revision, access terms, provenance,
+and license before downloading or redistributing it.
+
+## Optimization and training support
+
+All public optimizations enter this model through the shared
+`BaseSpeechModel` lifecycle. Use `available_optimization_passes()` to discover
+the public pass registry, then apply, inspect, serialize, or restore a plan
+through the common model API. Application remains fail-closed when the active
+runtime or hardware cannot satisfy a pass.
+
+### Training contract
 
 {_training_section(spec)}
 
-## Next steps
+## Public API
+
+| Purpose | Public object |
+| --- | --- |
+| Discover | `get_model_spec({spec.model_type!r})` |
+| Load and run | `{factory}` |
+| Configure | `{spec.config_class}` |
+| Model implementation | `{spec.class_name}` |
+| Normalized output | `{output}` |
+| Training contract | `get_training_spec({spec.model_type!r})` |
+| Optimization lifecycle | `available_optimization_passes`, `apply_optimization_plan`, `optimization_manifest`, `restore_optimization_plan` |
+
+Related shared documentation:
 
 - [All model guides](index.md)
 - [Shared inference guides](../../guides/index.md)
@@ -452,14 +448,14 @@ def render_index(specs) -> str:
     """Render the generated provider-guide index."""
     lines = [
         "---",
-        "description: One clear inference, data preparation, and training page for every VoiceHub model.",
+        "description: One compact, contract-aligned page for every registered VoiceHub model.",
         "---",
         "",
         "# Model guides",
         "",
-        "Every registered model has one focused page covering model metadata, inference,",
-        "its exact data boundary, and verified training support. Hub-backed models also",
-        "link to a dedicated Colab notebook.",
+        "Every registered model has one focused page with the same six sections: overview,",
+        "quickstart, capabilities, checkpoint and license status, optimization and training,",
+        "and public API. Hub-backed models also link to a dedicated Colab notebook.",
         "",
         f"Generated by `{GENERATOR_PATH}`. Edit registry and contract metadata, then rerun the generator.",
         "",
@@ -474,9 +470,10 @@ def render_index(specs) -> str:
         ))
         for spec in task_specs:
             _, checkpoint = _checkpoint(spec)
+            checkpoint_metadata = checkpoint_documentation(spec)
             notebook = (
-                f"[Colab]({COLAB_ROOT}/{spec.model_type}.ipynb)" if HUGGING_FACE_MODEL_ID.fullmatch(
-                    spec.default_model_path) else "—")
+                f"[Colab]({COLAB_ROOT}/{spec.model_type}.ipynb)"
+                if checkpoint_metadata.is_hugging_face else "—")
             lines.append(
                 f"| [`{spec.model_type}`]({spec.model_type}.md) | {checkpoint} | "
                 f"`{spec.training.support.value}` | {notebook} |")

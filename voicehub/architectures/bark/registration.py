@@ -89,22 +89,37 @@ def create_bark_architecture_spec() -> ArchitectureSpec:
         upstream_revision=BARK_ORIGINAL_SOURCE_REVISION,
         license_id="MIT",
         metadata={
-            "family": "bark",
-            "implementation": "voicehub-native",
-            "tensor_backend": "pytorch",
-            "reference_checkpoint": BARK_CHECKPOINT,
-            "reference_checkpoint_revision": BARK_CHECKPOINT_REVISION,
-            "reference_tensor_count": BARK_TENSOR_COUNT,
-            "reference_state_values": BARK_STATE_VALUES,
+            "external_llm_backend_blocker":
+            ("Bark uses three distinct semantic, coarse, and fine "
+             "generation stages."),
+            "family":
+            "bark",
+            "implementation":
+            "voicehub-native",
+            "tensor_backend":
+            "pytorch",
+            "reference_checkpoint":
+            BARK_CHECKPOINT,
+            "reference_checkpoint_revision":
+            BARK_CHECKPOINT_REVISION,
+            "reference_tensor_count":
+            BARK_TENSOR_COUNT,
+            "reference_state_values":
+            BARK_STATE_VALUES,
             "reference_inventory_fingerprint": (BARK_INVENTORY_FINGERPRINT),
             "transformers_reference_revision": (BARK_TRANSFORMERS_SOURCE_REVISION),
-            "official_safetensors_published": False,
+            "official_safetensors_published":
+            False,
             "checkpoint_import_boundary": ("digest-pinned-weights-only-explicit-trust"),
-            "training_scope": "pretokenized-stage-specific",
-            "raw_audio_finetuning_ready": False,
-            "full_finetuning_ready": False,
+            "training_scope":
+            "pretokenized-stage-specific",
+            "raw_audio_finetuning_ready":
+            False,
+            "full_finetuning_ready":
+            False,
             "always_frozen_components": ("codec_model", ),
-            "sampling_rate": 24_000,
+            "sampling_rate":
+            24_000,
             "languages": (
                 "de",
                 "en",

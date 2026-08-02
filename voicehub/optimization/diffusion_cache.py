@@ -1462,16 +1462,21 @@ class DiffusionCachePass(OptimizationPass):
         }
 
     def validate(self, model: Any, context: OptimizationContext) -> None:
-        super().validate(model, context)
         if not _cache_targets(model):
-            raise OptimizationCompatibilityError(
-                f"{type(model).__name__} exposes no architecture-owned "
-                "enable_diffusion_cache()/disable_diffusion_cache() block "
-                "surface.")
+            return
+        super().validate(model, context)
 
     def apply(self, model: Any, context: OptimizationContext) -> PassResult:
         del context
         targets = _cache_targets(model)
+        if not targets:
+            return self.not_applicable_result(
+                model,
+                reason=(
+                    f"{type(model).__name__} exposes no architecture-owned "
+                    "enable_diffusion_cache()/disable_diffusion_cache() "
+                    "block surface"),
+            )
         patches: list[_CachePatch] = []
         try:
             for target in targets:
@@ -1488,6 +1493,7 @@ class DiffusionCachePass(OptimizationPass):
             model=model,
             state={"patches": tuple(patches)},
             metadata={
+                "outcome": "configured",
                 "targets": [target.label for target in targets],
                 "fidelity": "approximate",
             },
@@ -1500,6 +1506,8 @@ class DiffusionCachePass(OptimizationPass):
         context: OptimizationContext,
     ) -> Any:
         del context
+        if state.get("kind") == "not-applicable":
+            return state.get("model", model)
         patches = state.get("patches")
         if not isinstance(patches, tuple):
             raise DiffusionCacheError("Diffusion-cache restoration state is missing its target patches.")
@@ -1520,6 +1528,11 @@ class DiffusionCachePass(OptimizationPass):
         self,
         result: PassResult,
     ) -> Mapping[str, Any]:
+        if result.state.get("kind") == "not-applicable":
+            return {
+                "outcome": "not-applicable",
+                "reason": result.metadata["reason"],
+            }
         patches = result.state.get("patches", ())
         return {patch.target.label: patch.target.module.diffusion_cache_stats() for patch in patches}
 

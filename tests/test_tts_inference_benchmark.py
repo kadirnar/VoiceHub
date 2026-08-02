@@ -86,6 +86,7 @@ class TTSInferenceBenchmarkTests(unittest.TestCase):
         result = json.loads(VUI_REJECTED_RESULTS.read_text(encoding="utf-8"), )
         profiles = {profile["profile"]: profile for profile in result["results"]}
 
+        self.assertEqual(result["voicehub_version"], voicehub.__version__)
         self.assertEqual(result["status"], "rejected")
         self.assertEqual(
             set(profiles),

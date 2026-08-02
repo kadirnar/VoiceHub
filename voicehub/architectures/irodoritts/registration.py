@@ -74,6 +74,7 @@ def create_irodori_architecture_spec() -> ArchitectureSpec:
             ),
             features=(
                 "diffusion-family",
+                "diffusion-serving-native",
                 "diffusion-kind-rectified-flow",
                 "diffusion-operation-denoiser",
                 "diffusion-operation-classifier-free-guidance",

@@ -1,35 +1,20 @@
 ---
-description: Inference, data preparation, and training guide for the vad_funasr integration.
+description: Public API, checkpoint, training, and optimization guide for the vad_funasr integration.
 ---
 
 # `vad_funasr` model guide
+
+## Overview
 
 `vad_funasr` is a VoiceHub **voice activity detection**
 integration. This page is generated from the model registry and its executable
 data and training contracts, so the documented support stays aligned with code. [Open the `vad_funasr` Colab notebook](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/models/vad_funasr.ipynb).
 
-## Model information
-
-| Property | Value |
-| --- | --- |
-| Task | Voice activity detection |
-| Default checkpoint | [`funasr/fsmn-vad`](https://huggingface.co/funasr/fsmn-vad) |
-| Architecture | `fsmn-vad` |
-| Runtime | `VoiceHub-native` |
-| Implementation | `voicehub.models.vad_funasr.modeling_vad_funasr.FunASRVADForVoiceActivityDetection` |
-| Capabilities | `voice-activity-detection`, `voicehub-native`, `safetensors`, `trusted-checkpoint-conversion`, `frame-scores`, `streaming`, `fine-tuning`, `modelscope-compatible` |
-| Reusable components | — |
-| License | Checkpoint-specific |
-
-No VoiceHub-specific license override is registered. Verify the checkpoint and upstream source terms before use.
-
-## Install
+## Quickstart
 
 ```bash
 python -m pip install voicehub
 ```
-
-## Inference
 
 1. Install VoiceHub and the provider extra shown above.
 2. Choose a checkpoint that matches this integration.
@@ -51,43 +36,56 @@ for segment in output.segments:
 ```
 
 Use only authorized recordings for reference voice, transcription, detection,
-or evaluation. Pin a checkpoint revision in production.
+or evaluation. The example selects a concrete device; verify checkpoint-specific
+hardware needs and pin an immutable revision before production use.
 
-## Data preparation
+## Supported tasks and capabilities
 
-VAD source data should pair authorized audio with clip-, frame-, or
-segment-level speech labels. Training phases consume `waveforms`, `labels`.
+| Property | Value |
+| --- | --- |
+| Task | Voice activity detection |
+| Architecture | `fsmn-vad` |
+| Runtime | `VoiceHub-native` |
+| Capabilities | `voice-activity-detection`, `voicehub-native`, `safetensors`, `trusted-checkpoint-conversion`, `frame-scores`, `streaming`, `fine-tuning`, `modelscope-compatible` |
+| Reusable components | — |
 
-Follow this process:
+### Data contract
 
-1. Preserve source audio, annotation provenance, consent, and license metadata.
-2. Split complete speakers and sessions before windowing the recordings.
-3. Convert annotations to the frame or clip boundary required by the phase below.
-4. Measure class balance and tune the inference threshold only on validation data.
+| Property | Value |
+| --- | --- |
+| Label boundary | Clip-, frame-, or segment-level labels |
+| Required training inputs | `waveforms`, `labels` |
 
-```python
-import json
-from pathlib import Path
+Use authorized audio and preserve annotation provenance. Follow the
+[ASR and VAD data workflow](../../guides/speech-data.md) for supported audio
+forms, timestamp labels, frame targets, leakage-safe splits, and evaluation.
 
-from voicehub import SpeechDataset
+## Checkpoints, provenance, and license
 
-manifest = Path("data/vad-train.jsonl")
-source_records = [
-    json.loads(line)
-    for line in manifest.read_text(encoding="utf-8").splitlines()
-    if line.strip()
-]
-records = SpeechDataset(
-    source_records,
-    required_fields=('waveforms', 'labels'),
-)
-print(len(records), records.column_names)
-```
+| Property | Value |
+| --- | --- |
+| Default checkpoint | [`funasr/fsmn-vad`](https://huggingface.co/funasr/fsmn-vad) |
+| Checkpoint status | Registry default; pin an immutable revision for production and reproducible evidence |
+| Implementation | `voicehub.models.vad_funasr.modeling_vad_funasr.FunASRVADForVoiceActivityDetection` |
+| Configuration | `voicehub.models.vad_funasr.configuration_vad_funasr.FunASRVADConfig` |
+| Source provenance | `voicehub/architectures/fsmn_vad/SOURCE.json` |
+| License | Checkpoint-specific |
 
-See the [ASR and VAD data guide](../../guides/speech-data.md) for audio input
-forms, timestamp labels, frame targets, and leakage-safe evaluation.
+No VoiceHub-specific license override is registered. Verify the checkpoint and upstream source terms before use.
 
-## Training
+The default checkpoint identifies the expected family, not every compatible
+variant. Confirm the selected checkpoint's revision, access terms, provenance,
+and license before downloading or redistributing it.
+
+## Optimization and training support
+
+All public optimizations enter this model through the shared
+`BaseSpeechModel` lifecycle. Use `available_optimization_passes()` to discover
+the public pass registry, then apply, inspect, serialize, or restore a plan
+through the common model API. Application remains fail-closed when the active
+runtime or hardware cannot satisfy a pass.
+
+### Training contract
 
 | Property | Value |
 | --- | --- |
@@ -102,52 +100,24 @@ forms, timestamp labels, frame targets, and leakage-safe evaluation.
 | --- | --- | --- | --- | --- |
 | `voice_activity_detection` | objective | `model` | `waveforms`, `labels` | `loss` |
 
-The integration accepts its declared source or prepared contract directly. Start with one optimizer step and verify finite loss, intended
-gradients, frozen components, save, and reload before scaling the run.
+The integration accepts its declared source or prepared contract directly. Call `model.validate_training_support()` before constructing a
+trainer. Follow the [shared training workflow](../../guides/training.md) for a
+one-step smoke test, validation, checkpoint resume, optimization, and portable
+export.
 
-```python
-from voicehub import AutoModelForVoiceActivityDetection, Trainer, TrainingArguments
+## Public API
 
-model = AutoModelForVoiceActivityDetection.from_pretrained(
-    'funasr/fsmn-vad',
-    model_type='vad_funasr',
-    device="cuda",
-    lazy_load=True,
-)
-model.validate_training_support()
-import json
-from pathlib import Path
+| Purpose | Public object |
+| --- | --- |
+| Discover | `get_model_spec('vad_funasr')` |
+| Load and run | `AutoModelForVoiceActivityDetection` |
+| Configure | `FunASRVADConfig` |
+| Model implementation | `FunASRVADForVoiceActivityDetection` |
+| Normalized output | `VADOutput` |
+| Training contract | `get_training_spec('vad_funasr')` |
+| Optimization lifecycle | `available_optimization_passes`, `apply_optimization_plan`, `optimization_manifest`, `restore_optimization_plan` |
 
-from voicehub import SpeechDataset
-
-manifest = Path("data/vad-train.jsonl")
-train_records = [
-    json.loads(line)
-    for line in manifest.read_text(encoding="utf-8").splitlines()
-    if line.strip()
-]
-train_dataset = SpeechDataset(train_records)
-
-arguments = TrainingArguments(
-    output_dir="runs/vad_funasr-smoke",
-    max_steps=1,
-    per_device_train_batch_size=1,
-    learning_rate=5e-5,
-    logging_steps=1,
-    save_steps=1,
-    report_to="none",
-    seed=42,
-)
-trainer = Trainer(model=model, args=arguments, train_dataset=train_dataset)
-result = trainer.train(resume_from_checkpoint=False)
-print(result.training_loss, result.metrics)
-trainer.save_model("runs/vad_funasr-smoke/final")
-```
-
-See the [training guide](../../guides/training.md) for validation datasets,
-checkpoint resume, mixed precision, optimizations, and portable exports.
-
-## Next steps
+Related shared documentation:
 
 - [All model guides](index.md)
 - [Shared inference guides](../../guides/index.md)

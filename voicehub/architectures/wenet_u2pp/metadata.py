@@ -4,6 +4,9 @@ WENET_SOURCE_REPOSITORY = "https://github.com/wenet-e2e/wenet"
 WENET_SOURCE_REVISION = "a50d4208f13bbf3a0746e606ac29176cd2e87e6b"
 WENET_SOURCE_DATE = "2021-10-25"
 WENET_SOURCE_LICENSE = "Apache-2.0"
+WENET_CHECKPOINT_LISTING_URL = (
+    "https://github.com/wenet-e2e/wenet/blob/"
+    f"{WENET_SOURCE_REVISION}/examples/gigaspeech/s0/README.md#conformer-u2-result")
 
 GIGASPEECH_MODEL_NAME = "gigaspeech-u2pp-conformer"
 GIGASPEECH_MODEL_VERSION = "20210728"
@@ -23,5 +26,15 @@ GIGASPEECH_STATE_VALUES = 136_225_077
 GIGASPEECH_TENSOR_FINGERPRINT = ("c1956c8a895e342aa4f53f824b1729f41fa3a861b6b08a1fe5e3d55b48ff45c3")
 GIGASPEECH_TENSOR_FINGERPRINT_FORMAT = ("SHA-256 of sorted name|portable-dtype|dimxdim rows joined by LF")
 GIGASPEECH_CHECKPOINT_LICENSE = "NOT DECLARED"
+GIGASPEECH_CHECKPOINT_PROVIDER = "external-archive"
+GIGASPEECH_DOCUMENTATION_PATH = "path/to/converted-wenet-u2pp"
+GIGASPEECH_CHECKPOINT_STATUS = (
+    "Upstream archive unavailable (HTTP 404 verified 2026-08-02); "
+    "use a previously downloaded, fingerprint-verified local artifact")
+GIGASPEECH_DOCUMENTATION_NOTE = (
+    "The registry identifier is not a Hugging Face repository and the "
+    "published upstream archive is currently unavailable. Replace the path "
+    "below with a VoiceHub-native directory containing model.safetensors, "
+    "config.json, tokenizer.model, and units.txt.")
 
 __all__ = [name for name in globals() if name.startswith(("GIGASPEECH_", "WENET_"))]

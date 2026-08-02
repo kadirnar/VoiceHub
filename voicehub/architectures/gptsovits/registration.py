@@ -97,6 +97,9 @@ def create_gptsovits_architecture_spec() -> ArchitectureSpec:
         upstream_revision=GPT_SOVITS_SOURCE_REVISION,
         license_id=GPT_SOVITS_LICENSE,
         metadata={
+            "external_llm_backend_blocker":
+            ("GPT-SoVITS uses phoneme/BERT embeddings and a custom "
+             "semantic head."),
             "vits_architecture_kind":
             "hybrid-acoustic",
             "implementation":

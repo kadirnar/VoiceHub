@@ -20,11 +20,7 @@ from threading import RLock
 from types import MappingProxyType
 from typing import Any
 
-from voicehub.optimization.capabilities import (
-    OptimizationCapabilities,
-    OptimizationContext,
-    OptimizationMode,
-)
+from voicehub.optimization.capabilities import OptimizationCapabilities, OptimizationContext, OptimizationMode
 from voicehub.optimization.passes import (
     OptimizationCompatibilityError,
     OptimizationPass,
@@ -212,8 +208,7 @@ def torch_compile_architecture_incompatibility(
         f"Architecture {architecture_id!r} rejects torch.compile during "
         "inference because real-checkpoint validation changed generated "
         "tokens or audio under tested compiler policies. Training "
-        "compilation remains available."
-    )
+        "compilation remains available.")
 
 
 def _available_backends(torch: Any) -> tuple[str, ...]:
@@ -727,12 +722,13 @@ class TorchCompilePass(OptimizationPass):
         )
 
     def validate(self, model: Any, context: OptimizationContext) -> None:
+        targets = self._execution_targets(model, context)
+        if (not targets and self.config.requirement is TorchCompileRequirement.AUTO):
+            return
         super().validate(model, context)
         architecture_issue = self._architecture_incompatibility(context)
-        if (architecture_issue is not None and
-                self.config.requirement is TorchCompileRequirement.REQUIRED):
+        if (architecture_issue is not None and self.config.requirement is TorchCompileRequirement.REQUIRED):
             raise OptimizationCompatibilityError(architecture_issue)
-        targets = self._execution_targets(model, context)
         report = inspect_torch_compile(self.config.backend)
         issues = []
         if not targets:

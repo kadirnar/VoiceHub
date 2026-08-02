@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import math
 import os
@@ -24,10 +25,14 @@ from voicehub.architectures.sensevoice.decoding import ctc_forced_align, ctc_gre
 from voicehub.architectures.sensevoice.frontend import load_sensevoice_cmvn, low_frame_rate_stack
 from voicehub.architectures.sensevoice.metadata import (
     FUNASR_SOURCE_REVISION,
+    SENSEVOICE_REPOSITORY,
     SENSEVOICE_REVISION,
     SENSEVOICE_STATE_VALUES,
     SENSEVOICE_TENSOR_COUNT,
     SENSEVOICE_TENSOR_FINGERPRINT,
+    SENSEVOICE_TOKENIZER_FILENAME,
+    SENSEVOICE_TOKENIZER_SHA256,
+    SENSEVOICE_TOKENIZER_SIZE,
 )
 from voicehub.architectures.sensevoice.modeling import (
     MultiHeadedAttentionSANM,
@@ -38,6 +43,7 @@ from voicehub.architectures.sensevoice.registration import create_sensevoice_arc
 from voicehub.architectures.sensevoice.tokenization import SenseVoiceTokenizer, rich_transcription_postprocess
 from voicehub.architectures.sensevoice.training import NativeSenseVoiceTrainingAdapter
 from voicehub.checkpointing import save_safetensors
+from voicehub.hub import resolve_pretrained_file
 from voicehub.models.asr_native.configuration import FunASRConfig
 from voicehub.models.asr_native.funasr import FunASRForSpeechRecognition
 from voicehub.training.specs import TrainingFamily, get_training_spec
@@ -479,12 +485,28 @@ class NativeSenseVoiceTests(unittest.TestCase):
             })
 
     @unittest.skipUnless(
-        os.environ.get("VOICEHUB_TEST_SENSEVOICE_ASSETS"),
-        "set VOICEHUB_TEST_SENSEVOICE_ASSETS for release tokenizer checks",
+        os.environ.get("VOICEHUB_TEST_SENSEVOICE_ASSETS") or
+        os.environ.get("VOICEHUB_TEST_RELEASE_ASSETS") == "1",
+        "set VOICEHUB_TEST_SENSEVOICE_ASSETS or VOICEHUB_TEST_RELEASE_ASSETS=1 "
+        "for release tokenizer checks",
     )
     def test_release_tokenizer_matches_published_control_and_text_vectors(self):
-        root = Path(os.environ["VOICEHUB_TEST_SENSEVOICE_ASSETS"])
-        tokenizer = SenseVoiceTokenizer.from_model_file(root / "chn_jpn_yue_eng_ko_spectok.bpe.model")
+        configured_root = os.environ.get("VOICEHUB_TEST_SENSEVOICE_ASSETS")
+        if configured_root is not None:
+            tokenizer_path = Path(configured_root) / SENSEVOICE_TOKENIZER_FILENAME
+        else:
+            tokenizer_path = resolve_pretrained_file(
+                SENSEVOICE_REPOSITORY,
+                SENSEVOICE_TOKENIZER_FILENAME,
+                revision=SENSEVOICE_REVISION,
+            )
+        tokenizer_payload = tokenizer_path.read_bytes()
+        self.assertEqual(len(tokenizer_payload), SENSEVOICE_TOKENIZER_SIZE)
+        self.assertEqual(
+            hashlib.sha256(tokenizer_payload).hexdigest(),
+            SENSEVOICE_TOKENIZER_SHA256,
+        )
+        tokenizer = SenseVoiceTokenizer.from_model_file(tokenizer_path)
         self.assertEqual(tokenizer.encode_text("hello world"), (5_000, 439, 234))
         labels = tokenizer.prepare_training_labels(
             "hello",

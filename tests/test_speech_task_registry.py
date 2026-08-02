@@ -1,7 +1,10 @@
+import ast
+import inspect
 import json
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
@@ -14,12 +17,14 @@ from voicehub.auto import (
     AutoModelForVoiceActivityDetection,
 )
 from voicehub.automodel import MODEL_TYPE_TO_MODEL_CLASS_NAME, AutoInferenceModel
+from voicehub.components import MODEL_COMPONENTS, components_for_model
 from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.registry import (
     MODEL_ALIASES,
     MODEL_REGISTRY,
     ModelRegistry,
     ModelSpec,
+    get_default_model_spec,
     get_model_spec,
     list_model_specs,
     register_model_alias,
@@ -65,6 +70,33 @@ class _FakeASRModel(_FakeSpeechModel):
 
 class _FakeVADModel(_FakeSpeechModel):
     pass
+
+
+class _FakeDefaultTTSModel:
+
+    def __init__(self, config=None, *, model_path=None, device="auto", **kwargs):
+        self.config = config
+        self.model_path = model_path
+        self.device = device
+        self.init_kwargs = kwargs
+        self.loaded = False
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path,
+        *,
+        config,
+        inference_strategy=None,
+        **kwargs,
+    ):
+        model = cls(
+            config,
+            model_path=pretrained_model_name_or_path,
+            **kwargs,
+        )
+        model.inference_strategy = inference_strategy
+        return model
 
 
 class _ExtensionASRConfig(VoiceHubConfig):
@@ -140,8 +172,60 @@ class SpeechTaskRegistryTests(unittest.TestCase):
             (SpeechTask.AUTOMATIC_SPEECH_RECOGNITION.value, ),
         )
         self.assertEqual(asr_spec.architecture, "test-speech-family")
+        self.assertEqual(asr_spec.components, ())
+        self.assertFalse(asr_spec.default_for_task)
         self.assertTrue(asr_spec.supports_task("asr"))
         self.assertFalse(asr_spec.supports_task("vad"))
+
+    def test_registry_enforces_one_declarative_default_per_task(self):
+        first = replace(
+            self._spec(
+                self.ASR_MODEL_TYPE,
+                "_FakeASRModel",
+                "asr",
+            ),
+            default_for_task=True,
+        )
+        second = replace(
+            self._spec(
+                "test-second-default-asr",
+                "_FakeASRModel",
+                "asr",
+            ),
+            default_for_task=True,
+        )
+        registry = ModelRegistry((first, ))
+
+        self.assertIs(registry.get_default("speech-to-text"), first)
+        self.assertIsNone(registry.get_default("vad"))
+        with self.assertRaisesRegex(
+                ValueError,
+                "already declares default model",
+        ):
+            registry.register(second)
+        with self.assertRaisesRegex(TypeError, "default_for_task"):
+            replace(first, default_for_task="yes")
+
+    def test_model_spec_normalizes_component_declarations(self):
+        spec = ModelSpec(
+            model_type=self.ASR_MODEL_TYPE,
+            module=self.FAKE_MODULE,
+            class_name="_FakeASRModel",
+            default_model_path="acme/asr",
+            task="asr",
+            components=(" DAC ", "vocos"),
+        )
+
+        self.assertEqual(spec.components, ("dac", "vocos"))
+        with self.assertRaisesRegex(ValueError, "duplicates"):
+            ModelSpec(
+                model_type=self.ASR_MODEL_TYPE,
+                module=self.FAKE_MODULE,
+                class_name="_FakeASRModel",
+                default_model_path="acme/asr",
+                task="asr",
+                components=("dac", " DAC "),
+            )
 
     def test_registration_aliases_and_task_filters_are_live(self):
         self._register_task_backends()
@@ -218,6 +302,40 @@ class SpeechTaskRegistryTests(unittest.TestCase):
         self.assertIsInstance(model, _FakeASRModel)
         self.assertEqual(model.init_kwargs["marker"], "extension")
         self.assertEqual(model.config.sample_rate, 22_050)
+
+    def test_auto_factory_declares_components_without_a_shared_model_map(self):
+        model_type = _ExtensionASRConfig.model_type
+        try:
+            spec = AutoModelForSpeechRecognition.register(
+                _ExtensionASRConfig,
+                _FakeASRModel,
+                default_model_path="acme/extension-asr",
+                components=("dac", ),
+            )
+
+            self.assertEqual(spec.components, ("dac", ))
+            self.assertEqual(MODEL_COMPONENTS[model_type], ("dac", ))
+            self.assertEqual(
+                tuple(component.name for component in components_for_model(model_type)),
+                ("dac", ),
+            )
+        finally:
+            AutoModel.unregister(model_type, missing_ok=True)
+
+        self.assertNotIn(model_type, MODEL_COMPONENTS)
+
+    def test_unknown_declared_component_fails_when_resolved(self):
+        model_type = _ExtensionASRConfig.model_type
+        try:
+            AutoModelForSpeechRecognition.register(
+                _ExtensionASRConfig,
+                _FakeASRModel,
+                components=("future-codec", ),
+            )
+            with self.assertRaisesRegex(KeyError, "Unknown component 'future-codec'"):
+                components_for_model(model_type)
+        finally:
+            AutoModel.unregister(model_type, missing_ok=True)
 
     def test_native_filter_resolves_owned_architecture_contracts(self):
         native_asr = list_model_specs(
@@ -299,6 +417,54 @@ class SpeechTaskRegistryTests(unittest.TestCase):
         )
         self.assertEqual(vad_model.init_kwargs["marker"], "vad")
 
+    def test_all_registered_models_round_trip_portable_metadata_without_loading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for spec in list_model_specs():
+                with self.subTest(model_type=spec.model_type, task=spec.task.value):
+                    config = AutoConfig.for_model(
+                        spec.model_type,
+                        name_or_path=spec.default_model_path,
+                    )
+                    model = AutoModel.from_config(
+                        config,
+                        device="cpu",
+                        lazy_load=True,
+                    )
+                    destination = root / spec.model_type
+
+                    model.save_pretrained(
+                        destination,
+                        include_native_export=False,
+                    )
+                    saved_config = json.loads((destination / "config.json").read_text(encoding="utf-8"))
+                    restored_config = AutoConfig.from_pretrained(
+                        destination,
+                        local_files_only=True,
+                    )
+                    restored_model = AutoModel.from_pretrained(
+                        destination,
+                        config=restored_config,
+                        device="cpu",
+                        lazy_load=True,
+                    )
+
+                    serialized_model_config = json.loads(model.config.to_json_string())
+                    serialized_restored_config = json.loads(restored_config.to_json_string())
+                    serialized_restored_config["name_or_path"] = (serialized_model_config["name_or_path"])
+
+                    self.assertEqual(saved_config, serialized_model_config)
+                    self.assertEqual(
+                        serialized_restored_config,
+                        serialized_model_config,
+                    )
+                    self.assertIs(type(restored_config), type(model.config))
+                    self.assertEqual(restored_config.model_type, spec.model_type)
+                    self.assertIs(type(restored_model), type(model))
+                    self.assertFalse(model.is_loaded)
+                    self.assertFalse(restored_model.is_loaded)
+                    self.assertFalse((destination / "native_export").exists())
+
     def test_explicit_model_type_cannot_override_a_different_typed_config(self):
         self._register_task_backends()
         config = AutoConfig.for_model(self.ASR_MODEL_TYPE)
@@ -377,6 +543,104 @@ class SpeechTaskRegistryTests(unittest.TestCase):
         self.assertFalse(vad.is_loaded)
         with self.assertRaisesRegex(ValueError, "checkpoint-family provider"):
             vad.load()
+
+    def test_tts_factories_share_the_registry_declared_compatibility_default(self):
+        default = get_default_model_spec("tts")
+
+        self.assertIsNotNone(default)
+        self.assertEqual(default.model_type, "orpheustts")
+        self.assertTrue(default.default_for_task)
+        signature = inspect.signature(AutoInferenceModel.from_pretrained)
+        self.assertIsNone(signature.parameters["model_type"].default)
+
+    def test_legacy_tts_default_is_resolved_from_live_registry_metadata(self):
+        builtin_default = get_default_model_spec("tts")
+        extension_model_type = "test-legacy-default-tts"
+        extension = ModelSpec(
+            model_type=extension_model_type,
+            module=self.FAKE_MODULE,
+            class_name="_FakeDefaultTTSModel",
+            default_model_path="acme/legacy-default-tts",
+            task="tts",
+            default_for_task=True,
+        )
+        fake_module = ModuleType(self.FAKE_MODULE)
+        fake_module._FakeDefaultTTSModel = _FakeDefaultTTSModel
+
+        try:
+            register_model_spec(
+                replace(builtin_default, default_for_task=False),
+                exist_ok=True,
+            )
+            register_model_spec(extension)
+            with patch.dict(sys.modules, {self.FAKE_MODULE: fake_module}):
+                task_model = AutoModelForTextToSpeech.from_pretrained(marker="task")
+                legacy_model = AutoInferenceModel.from_pretrained(marker="legacy")
+
+            self.assertIs(get_default_model_spec("tts"), extension)
+            self.assertEqual(task_model.config.name_or_path, extension.default_model_path)
+            self.assertEqual(task_model.init_kwargs["marker"], "task")
+            self.assertEqual(legacy_model.model_path, extension.default_model_path)
+            self.assertEqual(legacy_model.device, "cuda")
+            self.assertEqual(legacy_model.init_kwargs["marker"], "legacy")
+
+            unregister_model_spec(extension_model_type)
+            self.assertIsNone(get_default_model_spec("tts"))
+            with self.assertRaisesRegex(
+                    ValueError,
+                    "no registry-declared TTS default",
+            ):
+                AutoInferenceModel.from_pretrained()
+        finally:
+            unregister_model_spec(extension_model_type, missing_ok=True)
+            register_model_spec(builtin_default, exist_ok=True)
+
+        self.assertIs(get_default_model_spec("tts"), builtin_default)
+
+    def test_task_factory_default_is_resolved_from_registry_metadata(self):
+        builtin_default = get_default_model_spec("asr")
+        self.assertIsNotNone(builtin_default)
+        extension_model_type = _ExtensionASRConfig.model_type
+
+        try:
+            register_model_spec(
+                replace(builtin_default, default_for_task=False),
+                exist_ok=True,
+            )
+            extension_spec = AutoModelForSpeechRecognition.register(
+                _ExtensionASRConfig,
+                _FakeASRModel,
+                default_model_path="acme/extension-default-asr",
+                default_for_task=True,
+            )
+
+            model = AutoModelForSpeechRecognition.from_pretrained()
+
+            self.assertIs(get_default_model_spec("asr"), extension_spec)
+            self.assertEqual(
+                model.config.name_or_path,
+                "acme/extension-default-asr",
+            )
+            self.assertIsInstance(model, _FakeASRModel)
+        finally:
+            AutoModel.unregister(extension_model_type, missing_ok=True)
+            register_model_spec(builtin_default, exist_ok=True)
+
+        self.assertIs(get_default_model_spec("asr"), builtin_default)
+
+    def test_shared_auto_factories_contain_no_registered_model_literals(self):
+        package_root = Path(__file__).resolve().parents[1] / "voicehub"
+        registered_model_types = {spec.model_type for spec in list_model_specs(task=None)}
+        for filename in ("auto.py", "automodel.py"):
+            with self.subTest(filename=filename):
+                tree = ast.parse((package_root / filename).read_text(encoding="utf-8"))
+                string_literals = {
+                    node.value
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                }
+
+                self.assertEqual(registered_model_types & string_literals, set())
 
     def test_upstream_model_type_aliases_are_resolved_in_task_context(self):
         with tempfile.TemporaryDirectory() as directory:

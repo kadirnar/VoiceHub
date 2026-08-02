@@ -16,7 +16,7 @@ from voicehub.errors import LLMBackendCompatibilityError, LLMBackendRequestError
 from voicehub.llm_serving.configuration import LLMBackend, LLMBackendConfig, LLMBackendTransport
 from voicehub.llm_serving.http import HTTPBackendClient
 from voicehub.llm_serving.protocol import TokenGenerationRequest, TokenGenerationResult
-from voicehub.llm_serving.support import get_llm_backend_support
+from voicehub.llm_serving.support import LLMBackendSupport, get_llm_backend_support
 from voicehub.models._shared import finish_audio_output
 from voicehub.processing.waveform import decode_pcm_wave
 
@@ -227,31 +227,26 @@ class LLMServingClient:
 
     @staticmethod
     def _task_type(
-        model_type: str,
+        support: LLMBackendSupport,
         inputs: Mapping[str, Any],
         *,
         has_reference: bool,
     ) -> str | None:
         explicit = inputs.get("task_type")
         mode = inputs.get("mode", explicit)
-        if mode is None and model_type != "qwen3tts":
-            return None
         if mode is None:
-            return "Base" if has_reference else "CustomVoice"
+            return (
+                support.task_type_with_reference if has_reference else support.task_type_without_reference)
         if not isinstance(mode, str) or not mode.strip():
             raise ValueError("`mode`/`task_type` must be a non-empty string.")
         normalized = mode.strip().lower().replace("-", "_")
-        aliases = {
-            "auto": ("Base" if has_reference else "CustomVoice"),
-            "base": "Base",
-            "voice_clone": "Base",
-            "customvoice": "CustomVoice",
-            "custom_voice": "CustomVoice",
-            "voicedesign": "VoiceDesign",
-            "voice_design": "VoiceDesign",
-        }
+        if normalized == "auto":
+            task_type = (
+                support.task_type_with_reference if has_reference else support.task_type_without_reference)
+            if task_type is not None:
+                return task_type
         try:
-            return aliases[normalized]
+            return dict(support.task_type_aliases)[normalized]
         except KeyError as error:
             raise ValueError(f"Unsupported external TTS task type {mode!r}.") from error
 
@@ -260,6 +255,22 @@ class LLMServingClient:
         model_type: str,
         inputs: Mapping[str, Any],
     ) -> dict[str, Any]:
+        support, transport = get_llm_backend_support(
+            model_type,
+            self.config.backend,
+            transport=self.config.transport,
+        )
+        if transport is not LLMBackendTransport.SPEECH:
+            raise LLMBackendCompatibilityError(
+                f"{model_type!r} is configured for token transport, not the "
+                "complete speech endpoint.")
+        unknown = sorted(set(inputs) - {"text"} - set(support.speech_input_options))
+        if unknown:
+            recognized = ", ".join(support.speech_input_options)
+            invalid = ", ".join(unknown)
+            raise ValueError(
+                f"Unsupported external speech option(s): {invalid}. "
+                f"Recognized options: {recognized}.")
         text = inputs.get("text")
         if not isinstance(text, str) or not text.strip():
             raise ValueError("External speech generation requires non-empty `text`.")
@@ -320,7 +331,7 @@ class LLMServingClient:
         if model is not None:
             payload["model"] = model
         if ref_audio is not None:
-            if self.config.backend is LLMBackend.SGLANG and model_type == "fishtts":
+            if support.reference_format == "references":
                 reference = {
                     "audio_path": ref_audio,
                 }
@@ -332,7 +343,7 @@ class LLMServingClient:
                 if ref_text is not None:
                     payload["ref_text"] = ref_text.strip()
         task_type = self._task_type(
-            model_type,
+            support,
             inputs,
             has_reference=ref_audio is not None,
         )
@@ -340,23 +351,7 @@ class LLMServingClient:
             payload["task_type"] = task_type
         if instruction is not None:
             payload["instructions"] = instruction.strip()
-        direct_fields = (
-            "duration_tokens",
-            "initial_codec_chunk_frames",
-            "language",
-            "max_new_tokens",
-            "non_streaming_mode",
-            "repetition_penalty",
-            "seed",
-            "speed",
-            "stage_params",
-            "temperature",
-            "token_count",
-            "top_k",
-            "top_p",
-            "x_vector_only_mode",
-        )
-        for name in direct_fields:
+        for name in support.speech_direct_options:
             value = inputs.get(name)
             if value is not None:
                 payload[name] = value
@@ -443,58 +438,14 @@ class LLMServingClient:
                 raise LLMBackendCompatibilityError(
                     f"{self.config.backend.value} speech serving does not "
                     f"support VoiceHub option `{name}`.")
-        native_only = {
-            "ambient_sound",
-            "audio_repetition_penalty",
-            "audio_temperature",
-            "audio_top_k",
-            "audio_top_p",
-            "cfg_value",
-            "chunk_length",
-            "class_temperature",
-            "denoise",
-            "duration",
-            "flow_steps",
-            "force_audio_gen",
-            "guidance_scale",
-            "inference_timesteps",
-            "iterative_prompt",
-            "layer_penalty_factor",
-            "max_len",
-            "min_len",
-            "min_new_tokens",
-            "normalize",
-            "normalize_text",
-            "num_samples",
-            "num_step",
-            "num_steps",
-            "position_temperature",
-            "postprocess_output",
-            "preprocess_prompt",
-            "quality",
-            "ras_win_len",
-            "ras_win_max_num_repeat",
-            "reference_codes",
-            "reference_sampling_rate",
-            "retry_badcase",
-            "scene_prompt",
-            "sound_event",
-            "speaker_audio_codes",
-            "system_prompt",
-            "t_shift",
-            "text_temperature",
-            "text_top_k",
-            "text_top_p",
-            "time_shift",
-            "use_kv_cache",
-        }
-        if (self.config.backend is LLMBackend.VLLM and model_type == "mosstts" and
-                inputs.get("ambient_sound") is not None):
-            ambient_sound = inputs["ambient_sound"]
-            if not isinstance(ambient_sound, str) or not ambient_sound.strip():
-                raise ValueError("`ambient_sound` must be a non-empty string.")
-            payload["ambient_sound"] = ambient_sound.strip()
-            native_only.remove("ambient_sound")
+        native_only = set(support.speech_native_only_options)
+        for name in support.speech_string_options:
+            value = inputs.get(name)
+            if value is None:
+                continue
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"`{name}` must be a non-empty string.")
+            payload[name] = value.strip()
         supplied_native_only = sorted(name for name in native_only if inputs.get(name) is not None)
         if supplied_native_only:
             raise LLMBackendCompatibilityError(
@@ -513,15 +464,6 @@ class LLMServingClient:
         default_sample_rate: int,
     ):
         """Run one complete Omni speech pipeline and return ``TTSOutput``."""
-        _, transport = get_llm_backend_support(
-            model_type,
-            self.config.backend,
-            transport=self.config.transport,
-        )
-        if transport is not LLMBackendTransport.SPEECH:
-            raise LLMBackendCompatibilityError(
-                f"{model_type!r} is configured for token transport, not the "
-                "complete speech endpoint.")
         payload = self._speech_payload(
             model_type,
             inputs,

@@ -5,10 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.tasks import SpeechTask
 
 DEFAULT_VUI_ALIASES = (
@@ -64,6 +61,9 @@ def create_vui_architecture_spec() -> ArchitectureSpec:
         upstream_revision=_SOURCE_REVISION,
         license_id="MIT",
         metadata={
+            "external_llm_backend_blocker":
+            ("Vui samples multiple codebooks through architecture-specific "
+             "heads."),
             "implementation":
             "voicehub-native",
             "tensor_backend":

@@ -12,10 +12,7 @@ from voicehub.architectures.neutts.metadata import (
     NEUTTS_VARIANTS,
 )
 from voicehub.architectures.registry import ARCHITECTURE_REGISTRY, ArchitectureRegistry
-from voicehub.architectures.specifications import (
-    ArchitectureCapabilities,
-    ArchitectureSpec,
-)
+from voicehub.architectures.specifications import ArchitectureCapabilities, ArchitectureSpec
 from voicehub.tasks import SpeechTask
 
 DEFAULT_NEUTTS_ALIASES = (
@@ -87,6 +84,10 @@ def create_neutts_architecture_spec() -> ArchitectureSpec:
         upstream_revision=NEUTTS_SOURCE_REVISION,
         license_id="NeuTTS-Open-License-1.0",
         metadata={
+            "external_llm_backend_blocker": (
+                "NeuTTS requires checkpoint-gated RoPE behavior and "
+                "minimum-token EOS masking that are not represented by the "
+                "generic server contract."),
             "implementation":
             "voicehub-native",
             "tensor_backend":

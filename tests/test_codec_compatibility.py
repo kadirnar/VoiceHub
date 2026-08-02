@@ -141,38 +141,29 @@ class CodecCompatibilityTests(unittest.TestCase):
             places=2,
         )
 
-    def test_active_codec_imports_do_not_resolve_audiotools(self):
-        required = (
-            "einops",
-            "huggingface_hub",
-            "librosa",
-            "loguru",
-            "pandas",
-            "transformers",
-            "vector_quantize_pytorch",
-        )
-        if any(importlib.util.find_spec(name) is None for name in required):
-            self.skipTest("The unified inference dependencies are not installed")
-
+    def test_active_codec_imports_do_not_resolve_legacy_dependencies(self):
         script = textwrap.dedent(
             """
             import importlib
             import importlib.abc
             import sys
 
-            class RejectAudiotools(importlib.abc.MetaPathFinder):
+            class RejectLegacyCodecDependency(importlib.abc.MetaPathFinder):
                 def find_spec(self, fullname, path=None, target=None):
-                    if fullname == "audiotools" or fullname.startswith("audiotools."):
+                    if fullname.split(".", 1)[0] in {
+                        "audiotools",
+                        "loguru",
+                        "vector_quantize_pytorch",
+                    }:
                         raise AssertionError(
                             f"Active codec import attempted to load {fullname}")
                     return None
 
-            sys.meta_path.insert(0, RejectAudiotools())
+            sys.meta_path.insert(0, RejectLegacyCodecDependency())
             modules = (
                 "voicehub.components.audio.codecs.dac",
                 "voicehub.models.fishtts.source.fish_speech.models.dac.modded_dac",
-                "voicehub.models.higgstts.source.boson_multimodal.audio_processing."
-                "higgs_audio_tokenizer",
+                "voicehub.architectures.higgs_audio_v2.tokenizer",
                 "voicehub.models.irodoritts.source.dacvae",
                 "voicehub.models.irodoritts.source.irodori_tts.codec",
             )

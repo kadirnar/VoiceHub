@@ -220,16 +220,6 @@ class NeuTTSTrainingAdapter(CodecCausalLMTrainingAdapter):
 
     native_export_semantics = "inference-export"
 
-    def create_dataset(self, records, **kwargs):
-        self.setup()
-        return NeuTTSSFTDataset(
-            records,
-            runtime=self.model.model,
-            max_length=int(kwargs.get("max_length", 2_048)),
-            phonemizer=kwargs.get("phonemizer"),
-            truncate=kwargs.get("truncate", True),
-        )
-
     def save_pretrained(self, save_directory) -> None:
         self.setup()
         export = getattr(self.model, "export_native_pretrained", None)
@@ -255,9 +245,21 @@ class NeuTTSTrainingAdapter(CodecCausalLMTrainingAdapter):
         return manifest
 
 
+def build_training_dataset(model, records, **kwargs) -> NeuTTSSFTDataset:
+    """Build the source-native dataset declared by the training registry."""
+    return NeuTTSSFTDataset(
+        records,
+        runtime=model.model,
+        max_length=int(kwargs.get("max_length", 2_048)),
+        phonemizer=kwargs.get("phonemizer"),
+        truncate=kwargs.get("truncate", True),
+    )
+
+
 __all__ = [
     "NEUTTS_TRAINING_SOURCE",
     "NEUTTS_TRAINING_SOURCE_REVISION",
     "NeuTTSSFTDataset",
     "NeuTTSTrainingAdapter",
+    "build_training_dataset",
 ]

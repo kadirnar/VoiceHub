@@ -1,9 +1,8 @@
 import json
 import subprocess
 import sys
-import tempfile
 import unittest
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
@@ -11,18 +10,9 @@ from unittest.mock import patch
 import numpy as np
 import torch
 
-from voicehub.models.vad_silero import (
-    SileroVADConfig,
-    SileroVADForVoiceActivityDetection,
-)
-from voicehub.models.vad_transformers import (
-    TransformersVADConfig,
-    TransformersVADForVoiceActivityDetection,
-)
-from voicehub.models.vad_webrtc import (
-    WebRTCVADConfig,
-    WebRTCVADForVoiceActivityDetection,
-)
+from voicehub.models.vad_silero import SileroVADConfig, SileroVADForVoiceActivityDetection
+from voicehub.models.vad_transformers import TransformersVADConfig, TransformersVADForVoiceActivityDetection
+from voicehub.models.vad_webrtc import WebRTCVADConfig, WebRTCVADForVoiceActivityDetection
 from voicehub.models.vad_webrtc.modeling_vad_webrtc import _pcm16_samples
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -41,70 +31,6 @@ def _temporary_modules(modules):
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = original
-
-
-class _FakeTensor:
-
-    def __init__(self, values):
-        self.values = np.asarray(values)
-        self.device = "cpu"
-
-    @property
-    def shape(self):
-        return self.values.shape
-
-    def __getitem__(self, index):
-        return _FakeTensor(self.values[index])
-
-    def to(self, device):
-        self.device = device
-        return self
-
-    def detach(self):
-        return self
-
-    def float(self):
-        return self
-
-    def cpu(self):
-        self.device = "cpu"
-        return self
-
-    def tolist(self):
-        return self.values.tolist()
-
-
-class _InferenceRuntime:
-
-    def __init__(self):
-        self.training = True
-
-    def eval(self):
-        self.training = False
-        return self
-
-    def train(self):
-        self.training = True
-        return self
-
-
-def _fake_torch():
-    module = ModuleType("torch")
-    module.as_tensor = lambda values: _FakeTensor(values)
-    module.inference_mode = nullcontext
-
-    def softmax(tensor, dim=-1):
-        values = tensor.values
-        shifted = values - np.max(values, axis=dim, keepdims=True)
-        exponentials = np.exp(shifted)
-        return _FakeTensor(exponentials / exponentials.sum(axis=dim, keepdims=True))
-
-    def sigmoid(tensor):
-        return _FakeTensor(1.0 / (1.0 + np.exp(-tensor.values)))
-
-    module.softmax = softmax
-    module.sigmoid = sigmoid
-    return module
 
 
 class VADProviderContractTests(unittest.TestCase):
@@ -251,9 +177,7 @@ class SileroVADInferenceTests(unittest.TestCase):
     def test_native_silero_maps_controls_and_returns_frame_scores(self):
         import torch
 
-        from voicehub.architectures.silero_vad.configuration import (
-            SileroVADConfig as NativeSileroVADConfig,
-        )
+        from voicehub.architectures.silero_vad.configuration import SileroVADConfig as NativeSileroVADConfig
 
         captured = {}
 
@@ -301,9 +225,7 @@ class SileroVADInferenceTests(unittest.TestCase):
     def test_native_silero_frame_scores_are_direct_model_probabilities(self):
         import torch
 
-        from voicehub.architectures.silero_vad.configuration import (
-            SileroVADConfig as NativeSileroVADConfig,
-        )
+        from voicehub.architectures.silero_vad.configuration import SileroVADConfig as NativeSileroVADConfig
 
         model = SileroVADForVoiceActivityDetection(
             SileroVADConfig(),
@@ -455,235 +377,6 @@ class WebRTCVADInferenceTests(unittest.TestCase):
                 sampling_rate=16_000,
                 window_size_samples=160,
             )
-
-
-@unittest.skip("Legacy mock-Transformers contract was replaced by the native "
-               "Wav2Vec2 provider tests.")
-class TransformersVADInferenceTests(unittest.TestCase):
-
-    @staticmethod
-    def _fake_transformers(*, frame_classification=False):
-        captured = {}
-        module = ModuleType("transformers")
-        architecture = (
-            "FutureForAudioFrameClassification" if frame_classification else "ASTForAudioClassification")
-        native_config = SimpleNamespace(
-            architectures=[architecture],
-            id2label={
-                0: "silence",
-                1: "speech",
-            },
-        )
-
-        class AutoConfig:
-
-            @classmethod
-            def from_pretrained(cls, source, **kwargs):
-                captured["config"] = (source, kwargs)
-                return native_config
-
-        class FeatureExtractor:
-            sampling_rate = 10
-
-            def __call__(self, audio, **kwargs):
-                captured.setdefault("processor_calls", []).append((audio, kwargs))
-                return {"input_values": _FakeTensor(audio)}
-
-            def save_pretrained(self, directory):
-                captured["processor_saved"] = Path(directory)
-
-        feature_extractor = FeatureExtractor()
-
-        class AutoFeatureExtractor:
-
-            @classmethod
-            def from_pretrained(cls, source, **kwargs):
-                captured["processor_load"] = (source, kwargs)
-                return feature_extractor
-
-        class Runtime(_InferenceRuntime):
-
-            def to(self, device):
-                captured["device"] = device
-                return self
-
-            def __call__(self, **kwargs):
-                captured["model_inputs"] = kwargs
-                if frame_classification:
-                    logits = [[
-                        [3.0, 0.0],
-                        [0.0, 3.0],
-                        [0.0, 3.0],
-                        [3.0, 0.0],
-                    ]]
-                else:
-                    batch_size = kwargs["input_values"].shape[0]
-                    logits = [
-                        [0.0, 3.0],
-                        [0.0, 3.0],
-                        [3.0, 0.0],
-                    ][:batch_size]
-                return SimpleNamespace(logits=_FakeTensor(logits))
-
-            def save_pretrained(self, directory, **kwargs):
-                captured["model_saved"] = (Path(directory), kwargs)
-
-        runtime = Runtime()
-
-        class ModelLoader:
-
-            @classmethod
-            def from_pretrained(cls, source, **kwargs):
-                captured["model_load"] = (source, kwargs)
-                return runtime
-
-        module.AutoConfig = AutoConfig
-        module.AutoFeatureExtractor = AutoFeatureExtractor
-        module.AutoProcessor = AutoFeatureExtractor
-        module.AutoModelForAudioClassification = ModelLoader
-        module.AutoModelForAudioFrameClassification = ModelLoader
-        return module, captured
-
-    def test_clip_classifier_is_windowed_and_returns_requested_scores(self):
-        transformers, captured = self._fake_transformers()
-        model = TransformersVADForVoiceActivityDetection(
-            TransformersVADConfig(
-                name_or_path="publisher/vad",
-                architecture_family="auto",
-                window_duration_s=0.4,
-                hop_duration_s=0.2,
-            ),
-            device="cpu",
-        )
-
-        with _temporary_modules({
-                "transformers": transformers,
-                "torch": _fake_torch(),
-        }):
-            model._load_pretrained_model()
-            output = model._detect(
-                np.zeros(8, dtype=np.float32),
-                sampling_rate=10,
-                min_speech_duration_ms=0,
-                min_silence_duration_ms=0,
-                speech_pad_ms=0,
-                return_frames=True,
-            )
-
-        self.assertEqual(model.architecture_family, "audio-classification")
-        self.assertEqual(captured["config"][0], "publisher/vad")
-        self.assertFalse(captured["config"][1]["trust_remote_code"])
-        self.assertFalse(captured["model_load"][1]["trust_remote_code"])
-        self.assertEqual(captured["device"], "cpu")
-        self.assertEqual(captured["model_inputs"]["input_values"].shape, (3, 4))
-        self.assertEqual(
-            [(segment.start, segment.end) for segment in output.segments],
-            [(0.0, 0.6)],
-        )
-        self.assertEqual(output.probabilities.shape, (3, ))
-        self.assertEqual(output.metadata["speech_class_id"], 1)
-        self.assertEqual(output.metadata["frame_hop_samples"], 2)
-        self.assertEqual(output.metadata["frame_length_samples"], 4)
-
-    def test_frame_classifier_dispatch_and_training_preprocessing(self):
-        transformers, captured = self._fake_transformers(frame_classification=True)
-        model = TransformersVADForVoiceActivityDetection(
-            TransformersVADConfig(
-                name_or_path="publisher/frame-vad",
-                architecture_family="auto",
-            ),
-            device="cpu",
-        )
-
-        with _temporary_modules({
-                "transformers": transformers,
-                "torch": _fake_torch(),
-        }):
-            model._load_pretrained_model()
-            output = model._detect(
-                np.zeros(8, dtype=np.float32),
-                sampling_rate=10,
-                min_speech_duration_ms=0,
-                min_silence_duration_ms=0,
-                speech_pad_ms=0,
-            )
-            training_inputs = model.prepare_training_inputs(
-                {
-                    "audio": [
-                        np.zeros(4, dtype=np.float32),
-                        np.ones(4, dtype=np.float32),
-                    ],
-                    "sampling_rate": 10,
-                    "labels": [0, 1],
-                },
-                phase="vad",
-            )
-            with tempfile.TemporaryDirectory() as directory:
-                model._save_pretrained(Path(directory))
-                saved_directory = Path(directory)
-                self.assertEqual(captured["model_saved"][0], saved_directory)
-                self.assertEqual(captured["processor_saved"], saved_directory)
-
-        self.assertEqual(model.architecture_family, "frame-classification")
-        self.assertEqual(
-            [(segment.start, segment.end) for segment in output.segments],
-            [(0.2, 0.6)],
-        )
-        self.assertIsNone(output.probabilities)
-        self.assertEqual(training_inputs["labels"], [0, 1])
-        self.assertEqual(training_inputs["input_values"].shape, (2, 4))
-        self.assertTrue(captured["model_saved"][1]["safe_serialization"])
-
-    def test_multiclass_checkpoint_requires_explicit_speech_label(self):
-        model = TransformersVADForVoiceActivityDetection(TransformersVADConfig())
-        model.native_config = SimpleNamespace(id2label={
-            0: "music",
-            1: "noise",
-            2: "silence",
-        })
-
-        with self.assertRaisesRegex(ValueError, "speech_class_id"):
-            model._speech_class_id(3)
-
-    def test_single_logit_and_negative_labels_resolve_the_positive_class(self):
-        model = TransformersVADForVoiceActivityDetection(TransformersVADConfig())
-        model.native_config = SimpleNamespace(id2label={
-            0: "non-speech",
-            1: "speech",
-        })
-
-        self.assertEqual(model._speech_class_id(1), 0)
-        self.assertEqual(model._speech_class_id(2), 1)
-
-    def test_task_ambiguous_and_asr_configs_are_not_silently_dispatched(self):
-        with self.assertRaisesRegex(ValueError, "task-ambiguous"):
-            TransformersVADForVoiceActivityDetection._infer_architecture_family(
-                SimpleNamespace(
-                    model_type="wav2vec2",
-                    architectures=[],
-                ))
-        with self.assertRaisesRegex(ValueError, "ASR head"):
-            TransformersVADForVoiceActivityDetection._infer_architecture_family(
-                SimpleNamespace(
-                    model_type="wav2vec2",
-                    architectures=["Wav2Vec2ForCTC"],
-                ))
-
-    def test_frame_geometry_prefers_checkpoint_logit_stride(self):
-        model = TransformersVADForVoiceActivityDetection(TransformersVADConfig())
-        model.native_config = SimpleNamespace(inputs_to_logits_ratio=320)
-
-        self.assertEqual(
-            model._frame_geometry(
-                frame_count=4,
-                waveform_samples=16_000,
-            ),
-            (320, 320),
-        )
-
-    def test_training_audio_batch_cannot_be_empty(self):
-        with self.assertRaisesRegex(ValueError, "cannot be empty"):
-            TransformersVADForVoiceActivityDetection._audio_batch([])
 
 
 if __name__ == "__main__":

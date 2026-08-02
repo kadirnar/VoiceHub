@@ -84,6 +84,7 @@ def create_zonos_architecture_spec() -> ArchitectureSpec:
         upstream_revision=ZONOS_SOURCE_REVISION,
         license_id=ZONOS_SOURCE_LICENSE,
         metadata={
+            "external_llm_backend_blocker": ("Zonos requires multi-codebook CFG generation."),
             "implementation":
             "voicehub-native",
             "tensor_backend":

@@ -31,8 +31,12 @@ from voicehub.architectures.espnet_transformer.metadata import (
     ESPNET_ASR_STATE_VALUES,
     ESPNET_ASR_TENSOR_COUNT,
     ESPNET_ASR_TENSOR_FINGERPRINT,
+    ESPNET_CONFIG_FILENAME,
+    ESPNET_CONFIG_SHA256,
+    ESPNET_CONFIG_SIZE,
     ESPNET_LM_NATIVE_TENSOR_FINGERPRINT,
     ESPNET_LM_SOURCE_TENSOR_FINGERPRINT,
+    ESPNET_REPOSITORY,
     ESPNET_REVISION,
     ESPNET_SOURCE_REVISION,
     ESPNET_TOKEN_LIST_SHA256,
@@ -45,7 +49,7 @@ from voicehub.architectures.espnet_transformer.registration import create_espnet
 from voicehub.architectures.espnet_transformer.tokenization import ESPnetLibriSpeechTokenizer
 from voicehub.architectures.espnet_transformer.training import NativeESPnetASRTrainingAdapter
 from voicehub.checkpointing import SafeTensorReader, save_safetensors
-from voicehub.hub import write_json_file
+from voicehub.hub import resolve_pretrained_file, write_json_file
 from voicehub.models.asr_native.configuration import ESPnetASRConfig
 from voicehub.models.asr_native.espnet import ESPnetASRForSpeechRecognition
 from voicehub.training import ASRDataset, get_training_spec
@@ -201,8 +205,13 @@ class NativeESPnetArchitectureTests(unittest.TestCase):
         self.assertEqual(training.support.value, "native")
         self.assertEqual(training.default_phase, "speech_recognition")
         self.assertEqual(
+            training.adapter_factory,
+            ("voicehub.architectures.espnet_transformer.training:"
+             "NativeESPnetASRTrainingAdapter"),
+        )
+        self.assertEqual(
             BUILTIN_MODEL_ADAPTERS["asr_espnet"].__name__,
-            "_native_espnet_adapter",
+            "NativeESPnetASRTrainingAdapter",
         )
 
     def test_release_graph_matches_range_audited_inventory(self):
@@ -389,11 +398,26 @@ class NativeESPnetArtifactTests(unittest.TestCase):
         )
 
     @unittest.skipUnless(
-        os.environ.get("VOICEHUB_TEST_ESPNET_CONFIG"),
-        "set VOICEHUB_TEST_ESPNET_CONFIG for pinned token-list verification",
+        os.environ.get("VOICEHUB_TEST_ESPNET_CONFIG") or
+        os.environ.get("VOICEHUB_TEST_RELEASE_ASSETS") == "1",
+        "set VOICEHUB_TEST_ESPNET_CONFIG or VOICEHUB_TEST_RELEASE_ASSETS=1 "
+        "for pinned release-asset verification",
     )
     def test_release_token_list_fingerprint(self):
-        tokens = extract_espnet_token_list(os.environ["VOICEHUB_TEST_ESPNET_CONFIG"])
+        configured_path = os.environ.get("VOICEHUB_TEST_ESPNET_CONFIG")
+        config_path = (
+            Path(configured_path) if configured_path is not None else resolve_pretrained_file(
+                ESPNET_REPOSITORY,
+                ESPNET_CONFIG_FILENAME,
+                revision=ESPNET_REVISION,
+            ))
+        config_payload = config_path.read_bytes()
+        self.assertEqual(len(config_payload), ESPNET_CONFIG_SIZE)
+        self.assertEqual(
+            hashlib.sha256(config_payload).hexdigest(),
+            ESPNET_CONFIG_SHA256,
+        )
+        tokens = extract_espnet_token_list(config_path)
         payload = ("\n".join(tokens) + "\n").encode("utf-8")
         self.assertEqual(
             hashlib.sha256(payload).hexdigest(),

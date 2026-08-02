@@ -225,6 +225,19 @@ fields, excluded fields, and whether it is already model-shaped. Validation
 checks the portable record schema. The processor still validates tensor
 shape, dtype, vocabulary, duration, and sample rate.
 
+Some upstream manifests use architecture-specific nested records or control
+tokens. Their `ASRDatasetSpec` declares `field_aliases` and a lazy
+`record_normalizer`; the implementation remains in the corresponding
+architecture package. Inspect those fields to audit preprocessing without
+loading the normalizer or model graph.
+
+The profile's `dataset_spec_factory` is the lazy `module:callable` boundary for
+the full model-specific contract. The zero-argument callable must return an
+`ASRDatasetSpec`; VoiceHub attaches the registered model type, training support,
+and derived readiness. This lets an extension register a new ASR data contract
+without editing a shared provider table, while keeping registry inspection free
+of PyTorch and checkpoint imports.
+
 ### Architecture-specific records
 
 The simplest raw record remains `{"audio": ..., "text": ...}`, but metadata

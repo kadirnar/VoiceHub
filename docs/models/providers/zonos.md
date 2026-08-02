@@ -1,35 +1,20 @@
 ---
-description: Inference, data preparation, and training guide for the zonos integration.
+description: Public API, checkpoint, training, and optimization guide for the zonos integration.
 ---
 
 # `zonos` model guide
+
+## Overview
 
 `zonos` is a VoiceHub **text to speech**
 integration. This page is generated from the model registry and its executable
 data and training contracts, so the documented support stays aligned with code. [Open the `zonos` Colab notebook](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/models/zonos.ipynb).
 
-## Model information
-
-| Property | Value |
-| --- | --- |
-| Task | Text to speech |
-| Default checkpoint | [`Zyphra/Zonos-v0.1-transformer`](https://huggingface.co/Zyphra/Zonos-v0.1-transformer) |
-| Architecture | `zonos` |
-| Runtime | `VoiceHub-native` |
-| Implementation | `voicehub.models.zonos.modeling_zonos.ZonosForTextToSpeech` |
-| Capabilities | `text-to-speech`, `voice-cloning`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime` |
-| Reusable components | `dac` |
-| License | Checkpoint-specific |
-
-No VoiceHub-specific license override is registered. Verify the checkpoint and upstream source terms before use.
-
-## Install
+## Quickstart
 
 ```bash
 python -m pip install voicehub
 ```
-
-## Inference
 
 1. Install VoiceHub and the provider extra shown above.
 2. Choose a checkpoint that matches this integration.
@@ -61,55 +46,62 @@ print(output.file_path, output.sample_rate)
 ```
 
 Use only authorized recordings for reference voice, transcription, detection,
-or evaluation. Pin a checkpoint revision in production.
+or evaluation. The example selects a concrete device; verify checkpoint-specific
+hardware needs and pin an immutable revision before production use.
 
-## Data preparation
+## Supported tasks and capabilities
 
-The `zonos` contract is **preprocessed**. Its
-data architecture is **codec-lm** and its declared sample rate is
-**Model/checkpoint specific**.
+| Property | Value |
+| --- | --- |
+| Task | Text to speech |
+| Architecture | `zonos` |
+| Runtime | `VoiceHub-native` |
+| Capabilities | `text-to-speech`, `voice-cloning`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime` |
+| Reusable components | `dac` |
 
-Autoregressive text/audio-token or codec-language-model data.
+### Data contract
+
+| Property | Value |
+| --- | --- |
+| Readiness | `preprocessed` |
+| Data architecture | `codec-lm` |
+| Sample rate | Model/checkpoint specific |
+| Contract getter | `get_tts_dataset_spec('zonos')` |
 
 | Variant | Required fields | One of | Boundary | Other rules |
 | --- | --- | --- | --- | --- |
 | `codec-batch` | `prefix_conditioning`, `audio_codes` | — | Prepared | — |
 
-Follow this process:
+Autoregressive text/audio-token or codec-language-model data. Follow the [shared data workflow](../../guides/data-preparation.md) for
+manifest loading, audio validation, leakage-safe splits, and model-owned
+preprocessing.
 
-1. Keep immutable source audio, exact transcripts or labels, stable IDs, consent,
-   license, speaker, and session metadata.
-2. Split by speaker or recording session before model preprocessing.
-3. Match one of the exact variants above. Source variants are processed by the
-   integration; prepared variants must already contain the listed model inputs.
-4. Validate one collated batch, then persist the preprocessing version and hashes.
+## Checkpoints, provenance, and license
 
-```python
-from voicehub import TTSDataset, get_tts_dataset_spec
+| Property | Value |
+| --- | --- |
+| Default checkpoint | [`Zyphra/Zonos-v0.1-transformer`](https://huggingface.co/Zyphra/Zonos-v0.1-transformer) |
+| Checkpoint status | Registry default; pin an immutable revision for production and reproducible evidence |
+| Implementation | `voicehub.models.zonos.modeling_zonos.ZonosForTextToSpeech` |
+| Configuration | `voicehub.models.zonos.configuration_zonos.ZonosConfig` |
+| Source provenance | `voicehub/models/zonos/source/SOURCE.json` |
+| License | Checkpoint-specific |
 
-contract = get_tts_dataset_spec('zonos')
-print(contract.architecture, contract.readiness, contract.sample_rate)
-for variant in contract.variants:
-    print(variant.name, variant.required_fields, variant.one_of)
+No VoiceHub-specific license override is registered. Verify the checkpoint and upstream source terms before use.
 
-# Source-record integrations can validate a JSONL manifest directly.
-if contract.accepts_raw_records:
-    records = TTSDataset.from_manifest(
-        "data/manifest.jsonl",
-        model_type='zonos',
-        validate_files=True,
-    )
-    train_records, validation_records = records.train_test_split(
-        validation_fraction=0.1,
-        seed=42,
-        group_by="session_id",
-    )
-```
+The default checkpoint identifies the expected family, not every compatible
+variant. Confirm the selected checkpoint's revision, access terms, provenance,
+and license before downloading or redistributing it.
 
-See the [complete data guide](../../guides/data-preparation.md) for manifest aliases, audio validation,
-leakage-safe splits, and model-owned preprocessing.
+## Optimization and training support
 
-## Training
+All public optimizations enter this model through the shared
+`BaseSpeechModel` lifecycle. Use `available_optimization_passes()` to discover
+the public pass registry, then apply, inspect, serialize, or restore a plan
+through the common model API. Application remains fail-closed when the active
+runtime or hardware cannot satisfy a pass.
+
+### Training contract
 
 | Property | Value |
 | --- | --- |
@@ -124,44 +116,24 @@ leakage-safe splits, and model-owned preprocessing.
 | --- | --- | --- | --- | --- |
 | `reconstructed_codec_language_model` | objective | `model` | `prefix_conditioning`, `audio_codes` | `loss`, `codec_ce_loss` |
 
-Prepare the exact tensors listed in the data contract before this step. Start with one optimizer step and verify finite loss, intended
-gradients, frozen components, save, and reload before scaling the run.
+Prepare the exact tensors listed in the data contract before this step. Call `model.validate_training_support()` before constructing a
+trainer. Follow the [shared training workflow](../../guides/training.md) for a
+one-step smoke test, validation, checkpoint resume, optimization, and portable
+export.
 
-```python
-from voicehub import AutoModelForTextToSpeech, Trainer, TrainingArguments
+## Public API
 
-model = AutoModelForTextToSpeech.from_pretrained(
-    'Zyphra/Zonos-v0.1-transformer',
-    model_type='zonos',
-    device="cuda",
-    lazy_load=True,
-)
-model.validate_training_support()
-train_dataset = model.create_training_dataset(
-    "data/train.jsonl",
-    validate_audio_files=True,
-)
+| Purpose | Public object |
+| --- | --- |
+| Discover | `get_model_spec('zonos')` |
+| Load and run | `AutoModelForTextToSpeech` |
+| Configure | `ZonosConfig` |
+| Model implementation | `ZonosForTextToSpeech` |
+| Normalized output | `TTSOutput` |
+| Training contract | `get_training_spec('zonos')` |
+| Optimization lifecycle | `available_optimization_passes`, `apply_optimization_plan`, `optimization_manifest`, `restore_optimization_plan` |
 
-arguments = TrainingArguments(
-    output_dir="runs/zonos-smoke",
-    max_steps=1,
-    per_device_train_batch_size=1,
-    learning_rate=5e-5,
-    logging_steps=1,
-    save_steps=1,
-    report_to="none",
-    seed=42,
-)
-trainer = Trainer(model=model, args=arguments, train_dataset=train_dataset)
-result = trainer.train(resume_from_checkpoint=False)
-print(result.training_loss, result.metrics)
-trainer.save_model("runs/zonos-smoke/final")
-```
-
-See the [training guide](../../guides/training.md) for validation datasets,
-checkpoint resume, mixed precision, optimizations, and portable exports.
-
-## Next steps
+Related shared documentation:
 
 - [All model guides](index.md)
 - [Shared inference guides](../../guides/index.md)

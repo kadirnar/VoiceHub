@@ -30,10 +30,7 @@ from voicehub.architectures.f5tts.metadata import (
     VOCOS_SOURCE_REVISION,
 )
 from voicehub.architectures.f5tts.modeling import F5ConditionalFlowMatcher
-from voicehub.architectures.f5tts.modules import (
-    RotaryEmbedding,
-    apply_rotary_position_embedding,
-)
+from voicehub.architectures.f5tts.modules import RotaryEmbedding, apply_rotary_position_embedding
 from voicehub.architectures.f5tts.registration import create_f5tts_architecture_spec
 from voicehub.architectures.f5tts.runtime import NativeF5TTSRuntime
 from voicehub.architectures.f5tts.vocoder import ISTFTHead, NativeVocos
@@ -311,13 +308,11 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
         for flow_dtype in (torch.float16, torch.bfloat16):
             for vocoder_dtype in (torch.float32, flow_dtype):
                 with self.subTest(
-                    flow_dtype=flow_dtype,
-                    vocoder_dtype=vocoder_dtype,
+                        flow_dtype=flow_dtype,
+                        vocoder_dtype=vocoder_dtype,
                 ):
-                    flow = F5ConditionalFlowMatcher(_tiny_config()).to(
-                        dtype=flow_dtype)
-                    vocoder = TinyVocoder(flow.num_channels).to(
-                        dtype=vocoder_dtype)
+                    flow = F5ConditionalFlowMatcher(_tiny_config()).to(dtype=flow_dtype)
+                    vocoder = TinyVocoder(flow.num_channels).to(dtype=vocoder_dtype)
                     runtime = NativeF5TTSRuntime(
                         flow_model=flow,
                         vocoder=vocoder,
@@ -325,8 +320,8 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
                     )
 
                     with self.assertRaisesRegex(
-                        RuntimeError,
-                        "reduced-precision inference is disabled.*DiT",
+                            RuntimeError,
+                            "reduced-precision inference is disabled.*DiT",
                     ):
                         runtime.prepare_for_inference()
 
@@ -362,12 +357,10 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
 
     def test_reduced_precision_acknowledgement_is_boolean(self):
         with self.assertRaisesRegex(
-            TypeError,
-            "allow_unvalidated_reduced_precision_inference.*boolean",
+                TypeError,
+                "allow_unvalidated_reduced_precision_inference.*boolean",
         ):
-            F5TTSConfig(
-                allow_unvalidated_reduced_precision_inference="yes",
-            )
+            F5TTSConfig(allow_unvalidated_reduced_precision_inference="yes", )
 
     def test_reduced_precision_fails_before_checkpoint_resolution(self):
         model = F5TTSForTextToSpeech(
@@ -377,17 +370,15 @@ class NativeF5TTSRuntimeTests(unittest.TestCase):
         )
 
         with (
-            patch(
-                "voicehub.models.f5tts.inference.resolve_f5tts_artifacts",
-            ) as resolver,
-            patch(
-                "voicehub.models.f5tts.inference.resolve_torch_dtype",
-                return_value=torch.float16,
-            ),
-            self.assertRaisesRegex(
-                RuntimeError,
-                "reduced-precision inference is disabled",
-            ),
+                patch("voicehub.models.f5tts.inference.resolve_f5tts_artifacts", ) as resolver,
+                patch(
+                    "voicehub.models.f5tts.inference.resolve_torch_dtype",
+                    return_value=torch.float16,
+                ),
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "reduced-precision inference is disabled",
+                ),
         ):
             model.load()
 

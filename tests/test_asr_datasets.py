@@ -1,9 +1,15 @@
+import ast
 import json
 import pickle
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import voicehub.training.asr_data_contracts as asr_data_contracts_module
+import voicehub.training.asr_datasets as asr_datasets_module
 from voicehub import (
     ASRDataArchitecture,
     ASRDataReadiness,
@@ -20,9 +26,309 @@ from voicehub import (
     list_asr_dataset_specs,
     list_training_specs,
 )
+from voicehub.training.contracts import TrainingSupport
+from voicehub.training.specs import ModelTrainingSpec, TrainingFamily, register_training_spec, unregister_training_spec
+
+
+def _normalize_extension_record(record, *, index):
+    value = dict(record)
+    value["language"] = value.get("language", "").strip().lower()
+    value["normalizer_index"] = index
+    return value
+
+
+def _return_invalid_record(record, *, index):
+    del record, index
+    return None
+
+
+def _build_extension_asr_dataset_spec():
+    return ASRDatasetSpec(
+        architecture=ASRDataArchitecture.CTC,
+        variants=(
+            ASRRecordVariant(
+                name="extension-raw",
+                required_fields=("audio", "text"),
+            ),
+            ASRRecordVariant(
+                name="extension-ready",
+                required_fields=("input_values", "labels"),
+                preprocessed=True,
+            ),
+        ),
+        sample_rate=22_050,
+        description="Extension-owned ASR dataset contract.",
+    )
+
+
+def _return_invalid_asr_dataset_spec():
+    return {"architecture": "ctc"}
 
 
 class ASRDatasetContractTests(unittest.TestCase):
+
+    def test_training_profiles_select_dataset_specs_without_a_provider_map(self):
+        training_specs = list_training_specs(task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION, )
+        self.assertTrue(all(spec.dataset_spec_factory for spec in training_specs))
+
+        source_path = Path(asr_data_contracts_module.__file__)
+        source = source_path.read_text(encoding="utf-8")
+        self.assertNotIn("_MODEL_DATA_OVERRIDES", source)
+        tree = ast.parse(source)
+        model_types = {spec.model_type for spec in training_specs}
+        provider_keyed_dicts = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = {
+                key.value
+                for key in node.keys if isinstance(key, ast.Constant) and key.value in model_types
+            }
+            if keys:
+                provider_keyed_dicts.append((node.lineno, sorted(keys)))
+        self.assertEqual(provider_keyed_dicts, [])
+
+    def test_extension_dataset_spec_factory_needs_no_shared_provider_edit(self):
+        model_type = "future-asr-dataset-contract"
+        training_spec = ModelTrainingSpec(
+            model_type=model_type,
+            family=TrainingFamily.CTC,
+            task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+            support=TrainingSupport.NATIVE,
+            dataset_spec_factory=f"{__name__}:_build_extension_asr_dataset_spec",
+        )
+        register_training_spec(training_spec)
+        try:
+            dataset_spec = get_asr_dataset_spec(model_type)
+        finally:
+            unregister_training_spec(model_type, missing_ok=True)
+
+        self.assertEqual(dataset_spec.model_type, model_type)
+        self.assertEqual(dataset_spec.sample_rate, 22_050)
+        self.assertEqual(
+            tuple(variant.name for variant in dataset_spec.variants),
+            ("extension-raw", "extension-ready"),
+        )
+        self.assertIs(dataset_spec.readiness, ASRDataReadiness.INTEGRATED)
+        self.assertEqual(dataset_spec.training_support, "native")
+
+    def test_dataset_spec_factory_resolution_fails_actionably(self):
+        model_type = "future-missing-asr-dataset-contract"
+        training_spec = ModelTrainingSpec(
+            model_type=model_type,
+            family=TrainingFamily.CTC,
+            task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+            dataset_spec_factory=f"{__name__}:missing_asr_dataset_spec_factory",
+        )
+        register_training_spec(training_spec)
+        try:
+            with self.assertRaisesRegex(
+                    ImportError,
+                    "Could not resolve ASR dataset spec factory.*missing_asr_dataset_spec_factory",
+            ):
+                get_asr_dataset_spec(model_type)
+        finally:
+            unregister_training_spec(model_type, missing_ok=True)
+
+    def test_dataset_spec_factory_protocol_fails_actionably(self):
+        cases = (
+            (
+                "future-non-callable-asr-dataset-contract",
+                "voicehub.training.asr_data_contracts:_TRANSCRIPT_FIELDS",
+                "must be callable",
+            ),
+            (
+                "future-invalid-asr-dataset-contract",
+                f"{__name__}:_return_invalid_asr_dataset_spec",
+                "returned dict; expected ASRDatasetSpec",
+            ),
+        )
+        for model_type, factory_path, message in cases:
+            with self.subTest(model_type=model_type):
+                training_spec = ModelTrainingSpec(
+                    model_type=model_type,
+                    family=TrainingFamily.CTC,
+                    task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
+                    dataset_spec_factory=factory_path,
+                )
+                register_training_spec(training_spec)
+                try:
+                    with self.assertRaisesRegex(TypeError, message):
+                        get_asr_dataset_spec(model_type)
+                finally:
+                    unregister_training_spec(model_type, missing_ok=True)
+
+    def test_dataset_spec_factory_keeps_framework_imports_lazy(self):
+        code = """
+import json
+import sys
+from voicehub import get_asr_dataset_spec
+get_asr_dataset_spec('asr_qwen3')
+print(json.dumps({name: name in sys.modules for name in ('torch', 'transformers')}))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(
+            json.loads(result.stdout),
+            {
+                "torch": False,
+                "transformers": False
+            },
+        )
+
+    def test_model_specific_normalization_is_declared_by_dataset_specs(self):
+        sensevoice = get_asr_dataset_spec("asr_funasr")
+        seamless = get_asr_dataset_spec("asr_seamless_m4t_v2")
+
+        self.assertEqual(
+            dict(sensevoice.field_aliases),
+            {
+                "emo_target": "emotion",
+                "event_target": "event",
+                "source": "audio",
+                "target": "text",
+                "text_language": "language",
+                "with_or_wo_itn": "use_itn",
+            },
+        )
+        self.assertEqual(
+            sensevoice.record_normalizer,
+            "voicehub.architectures.sensevoice.data:normalize_record",
+        )
+        self.assertEqual(sensevoice.record_normalizer_phase, "after-aliases")
+        self.assertEqual(
+            dict(seamless.field_aliases),
+            {"target_lang": "target_language"},
+        )
+        self.assertEqual(
+            seamless.record_normalizer,
+            "voicehub.architectures.seamless_m4t_v2.data:normalize_record",
+        )
+        self.assertEqual(seamless.record_normalizer_phase, "before-aliases")
+
+    def test_dataset_spec_normalizer_metadata_validates_fail_closed(self):
+        values = {
+            "architecture": ASRDataArchitecture.CTC,
+            "variants": (ASRRecordVariant(name="raw", required_fields=("audio", "text")), ),
+        }
+        with self.assertRaisesRegex(ValueError, "module:attribute"):
+            ASRDatasetSpec(**values, record_normalizer="not-an-import-path")
+        with self.assertRaisesRegex(ValueError, "record_normalizer_phase"):
+            ASRDatasetSpec(**values, record_normalizer_phase="before-aliases")
+        with self.assertRaisesRegex(ValueError, "repeats source"):
+            ASRDatasetSpec(
+                **values,
+                field_aliases=(("recording", "audio"), ("recording", "input_values")),
+            )
+
+    def test_extension_normalizer_uses_the_shared_pipeline(self):
+        spec = ASRDatasetSpec(
+            architecture=ASRDataArchitecture.CTC,
+            variants=(ASRRecordVariant(name="raw", required_fields=("audio", "text")), ),
+            model_type="future-asr",
+            field_aliases={
+                "recording": "audio",
+                "transcript": "text",
+            },
+            record_normalizer=f"{__name__}:_normalize_extension_record",
+        )
+        with mock.patch.object(
+                asr_datasets_module,
+                "get_asr_dataset_spec",
+                return_value=spec,
+        ):
+            dataset = ASRDataset(
+                [{
+                    "recording": "sample.wav",
+                    "transcript": "Hello.",
+                    "language": " EN ",
+                }],
+                model_type=spec.model_type,
+            )
+
+        self.assertEqual(dataset[0]["audio"], "sample.wav")
+        self.assertEqual(dataset[0]["text"], "Hello.")
+        self.assertEqual(dataset[0]["language"], "en")
+        self.assertEqual(dataset[0]["normalizer_index"], 0)
+
+    def test_normalizer_resolution_and_output_fail_actionably(self):
+        variant = ASRRecordVariant(name="raw", required_fields=("audio", "text"))
+        missing = ASRDatasetSpec(
+            architecture=ASRDataArchitecture.CTC,
+            variants=(variant, ),
+            model_type="missing-normalizer",
+            record_normalizer=f"{__name__}:missing_record_normalizer",
+        )
+        invalid = ASRDatasetSpec(
+            architecture=ASRDataArchitecture.CTC,
+            variants=(variant, ),
+            model_type="invalid-normalizer",
+            record_normalizer=f"{__name__}:_return_invalid_record",
+        )
+        record = {"audio": "sample.wav", "text": "Hello."}
+
+        with mock.patch.object(
+                asr_datasets_module,
+                "get_asr_dataset_spec",
+                return_value=missing,
+        ):
+            with self.assertRaisesRegex(ImportError, "missing_record_normalizer"):
+                ASRDataset([record], model_type=missing.model_type)
+        with mock.patch.object(
+                asr_datasets_module,
+                "get_asr_dataset_spec",
+                return_value=invalid,
+        ):
+            with self.assertRaisesRegex(TypeError, "expected a mapping"):
+                ASRDataset([record], model_type=invalid.model_type)
+
+    def test_dataset_contract_listing_keeps_normalizer_modules_lazy(self):
+        code = """
+import json
+import sys
+from voicehub import list_asr_dataset_specs
+list_asr_dataset_specs()
+print(json.dumps(sorted(
+    name for name in sys.modules
+    if name in {
+        'voicehub.architectures.sensevoice.data',
+        'voicehub.architectures.seamless_m4t_v2.data',
+    }
+)))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(json.loads(result.stdout), [])
+
+    def test_shared_dataset_pipeline_does_not_branch_on_model_names(self):
+        source_path = Path(asr_datasets_module.__file__)
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        model_types = {
+            spec.model_type
+            for spec in list_training_specs(task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION, )
+        }
+        violations = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            matched = sorted({
+                value.value
+                for value in ast.walk(node) if isinstance(value, ast.Constant) and value.value in model_types
+            })
+            if matched:
+                violations.append((node.lineno, matched))
+
+        self.assertEqual(violations, [])
 
     def test_every_asr_profile_has_a_raw_finetuning_contract(self):
         training_specs = list_training_specs(task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION, )
@@ -619,12 +925,50 @@ class ASRDatasetManifestTests(unittest.TestCase):
         self.assertEqual(sensevoice[0]["emotion"], "neutral")
         self.assertEqual(sensevoice[0]["event"], "speech")
         self.assertIs(sensevoice[0]["use_itn"], False)
+        restored_sensevoice = pickle.loads(pickle.dumps(sensevoice))
+        self.assertEqual(restored_sensevoice[0], sensevoice[0])
         self.assertEqual(seamless.variant_names, ("raw-audio", ))
         self.assertEqual(seamless[0]["audio"], "seamless.wav")
         self.assertEqual(seamless[0]["text"], "Seamless transcript.")
         self.assertEqual(seamless[0]["source_language"], "eng")
         self.assertEqual(seamless[0]["target_language"], "deu")
         self.assertEqual(seamless[0]["sampling_rate"], 16_000)
+
+    def test_declared_record_normalizers_preserve_failure_behavior(self):
+        with self.assertRaisesRegex(ValueError, "withitn"):
+            ASRDataset(
+                [{
+                    "source": "sense.wav",
+                    "target": "Transcript.",
+                    "text_language": "<|en|>",
+                    "with_or_wo_itn": "<|maybe|>",
+                }],
+                model_type="asr_funasr",
+            )
+        with self.assertRaisesRegex(TypeError, "must both be mappings"):
+            ASRDataset(
+                [{
+                    "source": {
+                        "audio": "seamless.wav"
+                    },
+                    "target": "Transcript.",
+                }],
+                model_type="asr_seamless_m4t_v2",
+            )
+        with self.assertRaisesRegex(ValueError, "canonical field 'text'"):
+            ASRDataset(
+                [{
+                    "source": {
+                        "audio": "seamless.wav"
+                    },
+                    "target": {
+                        "text": "Nested transcript.",
+                        "lang": "eng",
+                    },
+                    "text": "Conflicting transcript.",
+                }],
+                model_type="asr_seamless_m4t_v2",
+            )
 
     def test_tabular_numeric_sampling_rate_and_duration_are_coerced(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -97,6 +97,9 @@ def create_xtts2_architecture_spec() -> ArchitectureSpec:
         upstream_revision=XTTS2_SOURCE_REVISION,
         license_id=XTTS2_SOURCE_LICENSE,
         metadata={
+            "external_llm_backend_blocker":
+            ("XTTS requires conditioning embeddings and generated hidden "
+             "states."),
             "implementation":
             "voicehub-native",
             "tensor_backend":

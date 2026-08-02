@@ -76,6 +76,7 @@ def create_chatterbox_architecture_spec() -> ArchitectureSpec:
             features=(
                 "llm-tts-codec",
                 "diffusion-family",
+                "diffusion-serving-native",
                 "diffusion-kind-conditional-flow-matching",
                 "diffusion-operation-denoiser",
                 "diffusion-operation-classifier-free-guidance",
@@ -96,6 +97,7 @@ def create_chatterbox_architecture_spec() -> ArchitectureSpec:
         upstream_revision=CHATTERBOX_SOURCE_REVISION,
         license_id=CHATTERBOX_SOURCE_LICENSE,
         metadata={
+            "external_llm_backend_blocker": ("Chatterbox requires prompt embeddings and synchronized CFG."),
             "diffusion_architecture_kind":
             "conditional-flow-matching",
             "diffusion_operations": (

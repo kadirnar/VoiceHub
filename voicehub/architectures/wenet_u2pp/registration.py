@@ -9,7 +9,12 @@ from voicehub.architectures.specifications import ArchitectureCapabilities, Arch
 from voicehub.architectures.wenet_u2pp.metadata import (
     GIGASPEECH_ARCHIVE_SHA256,
     GIGASPEECH_CHECKPOINT_LICENSE,
+    GIGASPEECH_CHECKPOINT_PROVIDER,
+    GIGASPEECH_CHECKPOINT_STATUS,
+    GIGASPEECH_DOCUMENTATION_NOTE,
+    GIGASPEECH_DOCUMENTATION_PATH,
     GIGASPEECH_MODEL_VERSION,
+    WENET_CHECKPOINT_LISTING_URL,
     WENET_SOURCE_REVISION,
 )
 from voicehub.tasks import SpeechTask
@@ -78,6 +83,16 @@ def create_wenet_u2pp_architecture_spec() -> ArchitectureSpec:
             GIGASPEECH_MODEL_VERSION,
             "reference_checkpoint_sha256":
             GIGASPEECH_ARCHIVE_SHA256,
+            "reference_checkpoint_url":
+            WENET_CHECKPOINT_LISTING_URL,
+            "reference_checkpoint_status":
+            GIGASPEECH_CHECKPOINT_STATUS,
+            "checkpoint_provider":
+            GIGASPEECH_CHECKPOINT_PROVIDER,
+            "documentation_checkpoint_path":
+            GIGASPEECH_DOCUMENTATION_PATH,
+            "documentation_checkpoint_note":
+            GIGASPEECH_DOCUMENTATION_NOTE,
             "checkpoint_license":
             GIGASPEECH_CHECKPOINT_LICENSE,
             "verified_scope": (

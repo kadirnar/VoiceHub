@@ -78,6 +78,7 @@ def create_parlertts_architecture_spec() -> ArchitectureSpec:
         upstream_revision=PARLER_TTS_SOURCE_REVISION,
         license_id=PARLER_TTS_SOURCE_LICENSE,
         metadata={
+            "external_llm_backend_blocker": ("Parler-TTS uses delayed parallel codebooks."),
             "implementation":
             "voicehub-native",
             "tensor_backend":

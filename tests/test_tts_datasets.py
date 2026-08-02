@@ -1,3 +1,4 @@
+import ast
 import json
 import pickle
 import subprocess
@@ -6,20 +7,128 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import voicehub.training.data_contracts as data_contracts_module
 from voicehub import (
     PreTrainedTTSModel,
     TTSDataArchitecture,
     TTSDataReadiness,
     TTSDataset,
+    TTSDatasetSpec,
     TTSOutput,
+    TTSRecordVariant,
     VoiceHubConfig,
     get_tts_dataset_spec,
     list_training_specs,
     list_tts_dataset_specs,
 )
+from voicehub.training.contracts import TrainingSupport
+from voicehub.training.specs import ModelTrainingSpec, TrainingFamily, register_training_spec, unregister_training_spec
+
+
+def _build_extension_tts_dataset_spec():
+    return TTSDatasetSpec(
+        architecture=TTSDataArchitecture.VITS,
+        variants=(
+            TTSRecordVariant(
+                name="extension-raw",
+                required_fields=("text", "audio"),
+            ),
+            TTSRecordVariant(
+                name="extension-ready",
+                required_fields=("input_ids", "audio_values"),
+                preprocessed=True,
+            ),
+        ),
+        sample_rate=22_050,
+        description="Extension-owned TTS dataset contract.",
+    )
+
+
+def _return_invalid_tts_dataset_spec():
+    return {"architecture": "vits"}
 
 
 class TTSDatasetContractTests(unittest.TestCase):
+
+    def test_training_profiles_select_dataset_specs_without_a_provider_map(self):
+        training_specs = list_training_specs()
+        self.assertEqual(len(training_specs), 34)
+        self.assertTrue(all(spec.dataset_spec_factory for spec in training_specs))
+
+        source_path = Path(data_contracts_module.__file__)
+        source = source_path.read_text(encoding="utf-8")
+        self.assertNotIn("_MODEL_DATA_OVERRIDES", source)
+        tree = ast.parse(source)
+        model_types = {spec.model_type for spec in training_specs}
+        provider_keyed_dicts = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = {
+                key.value
+                for key in node.keys if isinstance(key, ast.Constant) and key.value in model_types
+            }
+            if len(keys) > 1:
+                provider_keyed_dicts.append((node.lineno, sorted(keys)))
+        self.assertEqual(provider_keyed_dicts, [])
+
+    def test_extension_dataset_spec_factory_needs_no_shared_provider_edit(self):
+        model_type = "future-tts-dataset-contract"
+        training_spec = ModelTrainingSpec(
+            model_type=model_type,
+            family=TrainingFamily.VITS,
+            support=TrainingSupport.NATIVE,
+            dataset_spec_factory=f"{__name__}:_build_extension_tts_dataset_spec",
+        )
+        register_training_spec(training_spec)
+        try:
+            dataset_spec = get_tts_dataset_spec(model_type)
+        finally:
+            unregister_training_spec(model_type, missing_ok=True)
+
+        self.assertEqual(dataset_spec.model_type, model_type)
+        self.assertEqual(dataset_spec.sample_rate, 22_050)
+        self.assertEqual(
+            tuple(variant.name for variant in dataset_spec.variants),
+            ("extension-raw", "extension-ready"),
+        )
+        self.assertIs(dataset_spec.readiness, TTSDataReadiness.INTEGRATED)
+        self.assertEqual(dataset_spec.training_support, "native")
+
+    def test_dataset_spec_factory_resolution_fails_actionably(self):
+        cases = (
+            (
+                "future-missing-tts-dataset-contract",
+                f"{__name__}:missing_tts_dataset_spec_factory",
+                ImportError,
+                "Could not resolve TTS dataset spec factory.*missing_tts_dataset_spec_factory",
+            ),
+            (
+                "future-non-callable-tts-dataset-contract",
+                "voicehub.training.data_contracts:_TRAINING_FAMILY_TO_DATA_ARCHITECTURE",
+                TypeError,
+                "must be callable",
+            ),
+            (
+                "future-invalid-tts-dataset-contract",
+                f"{__name__}:_return_invalid_tts_dataset_spec",
+                TypeError,
+                "returned dict; expected TTSDatasetSpec",
+            ),
+        )
+        for model_type, factory_path, error_type, message in cases:
+            with self.subTest(model_type=model_type):
+                training_spec = ModelTrainingSpec(
+                    model_type=model_type,
+                    family=TrainingFamily.VITS,
+                    dataset_spec_factory=factory_path,
+                )
+                register_training_spec(training_spec)
+                try:
+                    with self.assertRaisesRegex(error_type, message):
+                        get_tts_dataset_spec(model_type)
+                finally:
+                    unregister_training_spec(model_type, missing_ok=True)
 
     def test_every_tts_profile_has_an_architecture_dataset_contract(self):
         training_specs = list_training_specs()
@@ -52,6 +161,53 @@ class TTSDatasetContractTests(unittest.TestCase):
         )
         self.assertEqual(get_tts_dataset_spec("dia").sample_rate, 44_100)
         self.assertEqual(get_tts_dataset_spec("qwen3tts").sample_rate, 24_000)
+
+    def test_model_field_aliases_are_inspectable_contract_metadata(self):
+        self.assertEqual(
+            get_tts_dataset_spec("cosyvoice").field_aliases,
+            (("audio_path", "audio_path"), ),
+        )
+        self.assertEqual(
+            get_tts_dataset_spec("qwen3tts").field_aliases,
+            (
+                ("reference_audio", "ref_audio"),
+                ("reference_audio_path", "ref_audio"),
+                ("speaker_audio", "ref_audio"),
+            ),
+        )
+
+    def test_field_alias_contract_is_normalized_and_validated(self):
+        variant = TTSRecordVariant(name="raw", required_fields=("text", ))
+        spec = TTSDatasetSpec(
+            architecture="codec-lm",
+            variants=(variant, ),
+            field_aliases={" prompt ": " text "},
+        )
+        self.assertEqual(spec.field_aliases, (("prompt", "text"), ))
+
+        with self.assertRaisesRegex(ValueError, "repeats source"):
+            TTSDatasetSpec(
+                architecture="codec-lm",
+                variants=(variant, ),
+                field_aliases=(("prompt", "text"), ("prompt", "input_ids")),
+            )
+        with self.assertRaisesRegex(ValueError, "targets must be non-empty"):
+            TTSDatasetSpec(
+                architecture="codec-lm",
+                variants=(variant, ),
+                field_aliases=(("prompt", " "), ),
+            )
+
+    def test_shared_tts_dataset_has_no_registered_model_literals(self):
+        source = (Path(__file__).parents[1] / "voicehub" / "training" /
+                  "tts_datasets.py").read_text(encoding="utf-8")
+        literals = {
+            node.value
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        registered = {spec.model_type for spec in list_training_specs()}
+        self.assertFalse(literals & registered)
 
     def test_model_contracts_distinguish_raw_preprocessed_and_unavailable_data(self):
         self.assertIs(

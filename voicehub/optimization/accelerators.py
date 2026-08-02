@@ -279,6 +279,13 @@ class _SelectorPass(OptimizationPass):
         return targets
 
     def validate(self, model: Any, context: OptimizationContext) -> None:
+        targets = _selector_targets(
+            model,
+            setter_name=self.setter_name,
+            state_attribute=self.state_attribute,
+        )
+        if not targets:
+            return
         super().validate(model, context)
         self._targets_or_error(model, compatibility=True)
         try:
@@ -311,6 +318,17 @@ class _SelectorPass(OptimizationPass):
             raise AcceleratorRestorationError(f"Could not restore accelerator selectors ({details}).")
 
     def apply(self, model: Any, context: OptimizationContext) -> PassResult:
+        targets = _selector_targets(
+            model,
+            setter_name=self.setter_name,
+            state_attribute=self.state_attribute,
+        )
+        if not targets:
+            return self.not_applicable_result(
+                model,
+                reason=(f"{type(model).__name__} has no submodule exposing "
+                        f"{self.setter_name}()"),
+            )
         targets = self._targets_or_error(model, compatibility=False)
         issues = self._selection_issues(context)
         if issues:
@@ -407,6 +425,8 @@ class _SelectorPass(OptimizationPass):
         context: OptimizationContext,
     ) -> Any:
         del context
+        if state.get("kind") == "not-applicable":
+            return state.get("model", model)
         patches = state.get("patches")
         if not isinstance(patches, tuple) or any(not isinstance(patch, _SelectorPatch) for patch in patches):
             raise AcceleratorRestorationError("Accelerator selector restoration state is invalid.")

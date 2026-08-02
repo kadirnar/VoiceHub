@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -30,11 +31,15 @@ from voicehub.architectures.speechbrain_asr.metadata import (
     SPEECHBRAIN_ASR_NATIVE_STATE_VALUES,
     SPEECHBRAIN_ASR_NATIVE_TENSOR_COUNT,
     SPEECHBRAIN_ASR_NATIVE_TENSOR_FINGERPRINT,
+    SPEECHBRAIN_ASR_REPOSITORY,
+    SPEECHBRAIN_ASR_REVISION,
     SPEECHBRAIN_ASR_SOURCE_REVISION,
+    SPEECHBRAIN_ASR_TOKENIZER_SHA256,
+    SPEECHBRAIN_ASR_TOKENIZER_SIZE,
 )
 from voicehub.architectures.speechbrain_asr.modeling import SpeechBrainCRDNNForASR
 from voicehub.checkpointing import SafeTensorReader, save_safetensors
-from voicehub.hub import write_json_file
+from voicehub.hub import resolve_pretrained_file, write_json_file
 from voicehub.models.asr_native.configuration import SpeechBrainASRConfig
 from voicehub.models.asr_native.speechbrain import SpeechBrainASRForSpeechRecognition
 from voicehub.models.asr_native.speechbrain_training import NativeSpeechBrainASRTrainingAdapter
@@ -769,12 +774,28 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             )
 
     @unittest.skipUnless(
-        os.environ.get("VOICEHUB_TEST_SPEECHBRAIN_ASR_ASSETS"),
-        "set VOICEHUB_TEST_SPEECHBRAIN_ASR_ASSETS for release tokenizer checks",
+        os.environ.get("VOICEHUB_TEST_SPEECHBRAIN_ASR_ASSETS") or
+        os.environ.get("VOICEHUB_TEST_RELEASE_ASSETS") == "1",
+        "set VOICEHUB_TEST_SPEECHBRAIN_ASR_ASSETS or VOICEHUB_TEST_RELEASE_ASSETS=1 "
+        "for release tokenizer checks",
     )
     def test_release_tokenizer_matches_published_sentencepiece(self):
-        root = Path(os.environ["VOICEHUB_TEST_SPEECHBRAIN_ASR_ASSETS"], )
-        tokenizer = SentencePieceUnigramTokenizer.from_model_file(root / "tokenizer.ckpt", )
+        configured_root = os.environ.get("VOICEHUB_TEST_SPEECHBRAIN_ASR_ASSETS")
+        if configured_root is not None:
+            tokenizer_path = Path(configured_root) / "tokenizer.ckpt"
+        else:
+            tokenizer_path = resolve_pretrained_file(
+                SPEECHBRAIN_ASR_REPOSITORY,
+                "tokenizer.ckpt",
+                revision=SPEECHBRAIN_ASR_REVISION,
+            )
+        tokenizer_payload = tokenizer_path.read_bytes()
+        self.assertEqual(len(tokenizer_payload), SPEECHBRAIN_ASR_TOKENIZER_SIZE)
+        self.assertEqual(
+            hashlib.sha256(tokenizer_payload).hexdigest(),
+            SPEECHBRAIN_ASR_TOKENIZER_SHA256,
+        )
+        tokenizer = SentencePieceUnigramTokenizer.from_model_file(tokenizer_path)
 
         self.assertEqual(
             tokenizer.encode_as_ids("HELLO WORLD"),

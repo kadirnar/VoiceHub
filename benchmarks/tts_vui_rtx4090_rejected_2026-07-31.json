@@ -1,6 +1,7 @@
 {
   "benchmark": "voicehub-vui-inference-compile-quality-rejection",
   "date": "2026-07-31",
+  "voicehub_version": "0.3.0",
   "status": "rejected",
   "model_type": "vui",
   "checkpoint": "vui-abraham-100m.pt",

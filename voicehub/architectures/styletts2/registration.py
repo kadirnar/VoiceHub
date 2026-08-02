@@ -66,6 +66,7 @@ def create_styletts2_architecture_spec() -> ArchitectureSpec:
             ),
             features=(
                 "diffusion-family",
+                "diffusion-serving-native",
                 "diffusion-kind-style-diffusion",
                 "diffusion-operation-denoiser",
                 "diffusion-operation-classifier-free-guidance",

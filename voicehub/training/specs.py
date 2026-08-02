@@ -6,11 +6,14 @@ import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from threading import RLock
 from types import MappingProxyType
 from typing import Any
 
+from voicehub.dependencies import normalize_import_path
 from voicehub.errors import UnknownModelError
+from voicehub.models.manifests import BuiltinModelManifest, discover_builtin_model_manifests
 from voicehub.models.registry import get_model_spec, normalize_model_type
 from voicehub.tasks import SpeechTask
 from voicehub.training.contracts import (
@@ -122,6 +125,14 @@ class ModelTrainingSpec:
     training_default_model_name_or_path: str | None = None
     field_schemas: Mapping[str, Any] = field(default_factory=dict)
     task: SpeechTask | str = SpeechTask.TEXT_TO_SPEECH
+    adapter_factory: str | None = None
+    dataset_factory: str | None = None
+    dataset_spec_factory: str | None = None
+    tokenizer_paths: tuple[str, ...] = (
+        "tokenizer",
+        "model.tokenizer",
+    )
+    optimization_profile_factory: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_type, str) or not self.model_type.strip():
@@ -136,6 +147,24 @@ class ModelTrainingSpec:
             "task",
             SpeechTask.coerce(self.task),
         )
+
+        for field_name in (
+                "adapter_factory",
+                "dataset_factory",
+                "dataset_spec_factory",
+                "optimization_profile_factory",
+        ):
+            import_path = getattr(self, field_name)
+            if import_path is None:
+                continue
+            object.__setattr__(
+                self,
+                field_name,
+                normalize_import_path(
+                    import_path,
+                    name=field_name,
+                ),
+            )
 
         family = self.family
         if isinstance(family, str) and not isinstance(family, TrainingFamily):
@@ -157,6 +186,7 @@ class ModelTrainingSpec:
                 "prediction_keys",
                 "loss_keys",
                 "source_entrypoints",
+                "tokenizer_paths",
         ):
             object.__setattr__(
                 self,
@@ -165,6 +195,9 @@ class ModelTrainingSpec:
             )
         if not self.module_paths:
             raise ValueError("module_paths must contain at least one candidate path.")
+        if any(any(not segment.isidentifier() for segment in path.split("."))
+               for path in self.tokenizer_paths):
+            raise ValueError("tokenizer_paths must contain dotted attribute paths.")
 
         weights = _pairs(self.loss_weights, name="loss_weights")
         normalized_weights = []
@@ -351,11 +384,11 @@ class ModelTrainingSpec:
 
     @property
     def dataset_spec(self):
-        """Return this training profile's architecture-level data contract.
+        """Return this training profile's model-specific data contract.
 
-        Dataset contracts are imported lazily to keep the framework-free
-        training registry free of import cycles. TTS and ASR expose
-        task-specific contracts; VAD continues to use
+        The optional ``dataset_spec_factory`` and task-specific contract
+        modules are resolved lazily to keep the framework-free training
+        registry free of import cycles. VAD continues to use
         :class:`SpeechDataset`.
         """
         if self.task is SpeechTask.TEXT_TO_SPEECH:
@@ -369,6 +402,27 @@ class ModelTrainingSpec:
         raise AttributeError(
             f"{self.model_type!r} is a {self.task.value} profile and has "
             "no architecture dataset spec.")
+
+
+def training_spec_from_manifest(manifest: BuiltinModelManifest, ) -> ModelTrainingSpec:
+    """Project one activated manifest into an honest inference-only profile."""
+    if not isinstance(manifest, BuiltinModelManifest):
+        raise TypeError("`manifest` must be a BuiltinModelManifest.")
+    return ModelTrainingSpec(
+        model_type=manifest.model_type,
+        family=manifest.training_family,
+        support=manifest.training_support,
+        task=manifest.task,
+    )
+
+
+_TrainingSpecTuple = tuple[ModelTrainingSpec, ...]
+
+
+def discover_manifest_training_specs(models_root: str | Path | None = None, ) -> _TrainingSpecTuple:
+    """Discover inference-only profiles from activated package manifests."""
+    return tuple(
+        training_spec_from_manifest(manifest) for manifest in discover_builtin_model_manifests(models_root))
 
 
 _COMMON_LM_PATHS = (
@@ -424,6 +478,11 @@ def _profile(
     loss_weights: tuple[tuple[str, float], ...] = (),
     regression_loss: str = "mse",
     source_entrypoints: tuple[str, ...] = (),
+    adapter_factory: str | None = None,
+    dataset_factory: str | None = None,
+    dataset_spec_factory: str | None = None,
+    tokenizer_paths: tuple[str, ...] = ModelTrainingSpec.tokenizer_paths,
+    optimization_profile_factory: str | None = None,
     native_training: bool = False,
     separate_optimizers: bool | None = None,
     support: TrainingSupport = TrainingSupport.PREPROCESSED,
@@ -449,6 +508,11 @@ def _profile(
         loss_weights=loss_weights,
         regression_loss=regression_loss,
         source_entrypoints=source_entrypoints,
+        adapter_factory=adapter_factory,
+        dataset_factory=dataset_factory,
+        dataset_spec_factory=dataset_spec_factory,
+        tokenizer_paths=tokenizer_paths,
+        optimization_profile_factory=optimization_profile_factory,
         native_training=native_training,
         separate_optimizers=(
             family in (TrainingFamily.COMPOSITE,
@@ -468,10 +532,14 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "orpheustts",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory="voicehub.training.data_contracts:build_orpheustts_dataset_spec",
+        adapter_factory="voicehub.models.orpheustts.training:OrpheusTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         source_entrypoints=("voicehub.architectures.causal_lm.modeling:"
                             "CausalLMForCausalLM.forward", ),
+        dataset_factory=("voicehub.models.orpheustts.training:"
+                         "build_training_dataset"),
         native_training=True,
         support=TrainingSupport.NATIVE,
         phases=(
@@ -489,6 +557,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "dia",
         TrainingFamily.SEQ2SEQ,
+        dataset_spec_factory="voicehub.training.data_contracts:build_dia_dataset_spec",
+        adapter_factory="voicehub.models.dia.training:DiaTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         source_entrypoints=("voicehub.architectures.dia.modeling:"
@@ -516,6 +586,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "vui",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory="voicehub.training.data_contracts:build_vui_dataset_spec",
+        adapter_factory="voicehub.models.vui.training:VuiTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         source_entrypoints=("voicehub.models.vui.training.VuiTrainingAdapter", ),
@@ -548,6 +620,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "chatterbox",
         TrainingFamily.COMPOSITE,
+        dataset_spec_factory="voicehub.training.data_contracts:build_chatterbox_dataset_spec",
+        adapter_factory="voicehub.models.chatterbox.training:ChatterboxTrainingAdapter",
         component_paths=("model.t3", "model.s3gen.flow"),
         source_entrypoints=("voicehub.models.chatterbox.training:"
                             "ChatterboxTrainingAdapter", ),
@@ -607,6 +681,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "kokoro",
         TrainingFamily.ACOUSTIC,
+        dataset_spec_factory="voicehub.training.data_contracts:build_kokoro_dataset_spec",
+        adapter_factory="voicehub.models.kokoro.training:KokoroTrainingAdapter",
         module_paths=("training_model", ),
         component_paths=(
             "model.bert",
@@ -672,6 +748,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "echo",
         TrainingFamily.FLOW_MATCHING,
+        dataset_spec_factory="voicehub.training.data_contracts:build_echo_dataset_spec",
+        adapter_factory="voicehub.models.echo.training:EchoTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         source_entrypoints=("voicehub.models.echo.training.EchoTrainingAdapter", ),
@@ -697,6 +775,9 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "conversationtts",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory=("voicehub.training.data_contracts:build_conversationtts_dataset_spec"),
+        adapter_factory=("voicehub.models.conversationtts.training:"
+                         "ConversationTTSTrainingAdapter"),
         module_paths=("model", ),
         component_paths=("model", ),
         source_entrypoints=(
@@ -704,8 +785,10 @@ _BUILTIN_TRAINING_SPECS = (
             "ConversationTTSModel.forward",
             "voicehub.architectures.conversationtts.processing:"
             "build_conversationtts_sequence",
-            "voicehub.training.recipes:ConversationTTSTrainingAdapter",
+            "voicehub.models.conversationtts.training:"
+            "ConversationTTSTrainingAdapter",
         ),
+        optimization_profile_factory=("voicehub.training.tts_optimization:LLMTTSOptimizationConfig"),
         native_training=True,
         support=TrainingSupport.NATIVE,
         training_default_model_name_or_path=("AudioFoundation/SpeechFoundation"),
@@ -774,6 +857,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "llasa",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory="voicehub.training.data_contracts:build_llasa_dataset_spec",
+        adapter_factory="voicehub.models.llasa.training:LlasaTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         label_names=("labels", ),
@@ -783,6 +868,8 @@ _BUILTIN_TRAINING_SPECS = (
             "voicehub.models.llasa.training:LlasaSFTDataset",
             "voicehub.models.llasa.training:LlasaTrainingAdapter",
         ),
+        dataset_factory=("voicehub.models.llasa.training:"
+                         "build_training_dataset"),
         native_training=True,
         support=TrainingSupport.NATIVE,
         phases=(
@@ -820,6 +907,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "cosyvoice",
         TrainingFamily.COMPOSITE,
+        dataset_spec_factory="voicehub.training.data_contracts:build_cosyvoice_dataset_spec",
+        adapter_factory="voicehub.models.cosyvoice.training:CosyVoiceTrainingAdapter",
         module_paths=("model", ),
         component_paths=(
             "model.llm",
@@ -879,10 +968,13 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "f5tts",
         TrainingFamily.FLOW_MATCHING,
+        dataset_spec_factory="voicehub.training.data_contracts:build_f5tts_dataset_spec",
+        adapter_factory="voicehub.models.f5tts.training:F5TTSTrainingAdapter",
         module_paths=("model.ema_model", "model.model", "model"),
         component_paths=("model.ema_model", ),
         label_names=("labels", "mel_spec", "mel_labels", "target"),
         source_entrypoints=("f5_tts/train/train.py", ),
+        optimization_profile_factory=("voicehub.training.tts_optimization:DiffusionTTSOptimizationConfig"),
         native_training=True,
         support=TrainingSupport.PREPROCESSED,
         phases=(
@@ -899,6 +991,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "gptsovits",
         TrainingFamily.COMPOSITE,
+        dataset_spec_factory="voicehub.training.data_contracts:build_gptsovits_dataset_spec",
+        adapter_factory="voicehub.models.gptsovits.training:GPTSoVITSTrainingAdapter",
         module_paths=("training_model", ),
         component_paths=(
             "training_model.s1",
@@ -973,6 +1067,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "melotts",
         TrainingFamily.VITS,
+        dataset_spec_factory="voicehub.training.data_contracts:build_melotts_dataset_spec",
+        adapter_factory="voicehub.models.melotts.training:MeloTTSTrainingAdapter",
         module_paths=("training_model", ),
         component_paths=(
             "training_model.model",
@@ -1068,6 +1164,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "openvoice",
         TrainingFamily.VITS,
+        dataset_spec_factory="voicehub.training.data_contracts:build_openvoice_dataset_spec",
+        adapter_factory="voicehub.models.openvoice.training:OpenVoiceTrainingAdapter",
         module_paths=("model", ),
         component_paths=(
             "model.enc_q",
@@ -1112,6 +1210,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "outetts",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory="voicehub.training.data_contracts:build_outetts_dataset_spec",
+        adapter_factory="voicehub.models.outetts.training:OuteTTSTrainingAdapter",
         module_paths=("model.language_model", ),
         component_paths=("model.language_model", ),
         label_names=("labels", ),
@@ -1119,6 +1219,13 @@ _BUILTIN_TRAINING_SPECS = (
             "voicehub.architectures.causal_lm.modeling:"
             "CausalLMForCausalLM.forward",
             "voicehub.models.outetts.training:OuteTTSSFTDataset",
+        ),
+        dataset_factory=("voicehub.models.outetts.training:"
+                         "build_training_dataset"),
+        tokenizer_paths=(
+            "tokenizer",
+            "model.tokenizer",
+            "model.prompt_processor.tokenizer",
         ),
         native_training=True,
         support=TrainingSupport.PREPROCESSED,
@@ -1137,6 +1244,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "parlertts",
         TrainingFamily.SEQ2SEQ,
+        dataset_spec_factory="voicehub.training.data_contracts:build_parlertts_dataset_spec",
+        adapter_factory="voicehub.models.parlertts.training:ParlerTTSTrainingAdapter",
         module_paths=("model", ),
         component_paths=(
             "model.decoder",
@@ -1169,6 +1278,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "styletts2",
         TrainingFamily.VITS,
+        dataset_spec_factory="voicehub.training.data_contracts:build_styletts2_dataset_spec",
+        adapter_factory="voicehub.models.styletts2.training:StyleTTS2TrainingAdapter",
         module_paths=("training_model", ),
         component_paths=(
             "training_model.model",
@@ -1241,6 +1352,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "mosstts",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory="voicehub.training.data_contracts:build_mosstts_dataset_spec",
+        adapter_factory="voicehub.architectures.mosstts.training:NativeMossTTSTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         label_names=("labels", ),
@@ -1315,6 +1428,9 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "qwen3tts",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory="voicehub.training.data_contracts:build_qwen3tts_dataset_spec",
+        adapter_factory=("voicehub.models.qwen3tts.training_adapter:"
+                         "Qwen3TTSTrainingAdapter"),
         module_paths=("model.model", ),
         component_paths=("model.model.talker", ),
         support=TrainingSupport.PREPROCESSED,
@@ -1325,6 +1441,7 @@ _BUILTIN_TRAINING_SPECS = (
             "Qwen3TTSForConditionalGeneration.forward",
             "voicehub.models.qwen3tts.training:Qwen3TTSSFTDataset",
         ),
+        optimization_profile_factory=("voicehub.training.tts_optimization:LLMTTSOptimizationConfig.qwen3tts"),
         phases=(
             _phase(
                 "codec_language_model",
@@ -1352,6 +1469,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "irodoritts",
         TrainingFamily.FLOW_MATCHING,
+        dataset_spec_factory="voicehub.training.data_contracts:build_irodoritts_dataset_spec",
+        adapter_factory="voicehub.models.irodoritts.training:NativeIrodoriTrainingAdapter",
         module_paths=("model.model", ),
         component_paths=("model.model", ),
         label_names=("target_latent", "duration_target"),
@@ -1379,6 +1498,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "zonos",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory="voicehub.training.data_contracts:build_zonos_dataset_spec",
+        adapter_factory="voicehub.models.zonos.training:ZonosTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         label_names=("audio_codes", ),
@@ -1442,6 +1563,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "zonos2",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory="voicehub.training.data_contracts:build_zonos2_dataset_spec",
+        adapter_factory="voicehub.models.zonos2.training:Zonos2TrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         label_names=("labels", "audio_codes", "audio_values"),
@@ -1502,6 +1625,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "voxcpm",
         TrainingFamily.FLOW_MATCHING,
+        dataset_spec_factory="voicehub.training.data_contracts:build_voxcpm_dataset_spec",
+        adapter_factory="voicehub.models.voxcpm.training:VoxCPMTrainingAdapter",
         module_paths=("model", ),
         component_paths=(
             "model",
@@ -1536,6 +1661,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "omnivoice",
         TrainingFamily.COMPOSITE,
+        dataset_spec_factory="voicehub.training.data_contracts:build_omnivoice_dataset_spec",
+        adapter_factory="voicehub.models.omnivoice.training:OmniVoiceTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         source_entrypoints=("voicehub.architectures.omnivoice.modeling:"
@@ -1572,6 +1699,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "higgstts",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory="voicehub.training.data_contracts:build_higgstts_dataset_spec",
+        adapter_factory="voicehub.models.higgstts.training:HiggsTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         source_entrypoints=(
@@ -1629,6 +1758,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "xtts",
         TrainingFamily.COMPOSITE,
+        dataset_spec_factory="voicehub.training.data_contracts:build_xtts_dataset_spec",
+        adapter_factory="voicehub.models.xtts_native.training_xtts:XTTSTrainingAdapter",
         module_paths=("model.gpt", ),
         component_paths=("model.gpt", ),
         loss_weights=(
@@ -1694,6 +1825,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "vibevoice",
         TrainingFamily.COMPOSITE,
+        dataset_spec_factory="voicehub.training.data_contracts:build_vibevoice_dataset_spec",
+        adapter_factory="voicehub.models.vibevoice.training:VibeVoiceTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         source_entrypoints=(
@@ -1728,6 +1861,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "fishtts",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory="voicehub.training.data_contracts:build_fishtts_dataset_spec",
+        adapter_factory="voicehub.models.fishtts.training:FishSpeechTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         source_entrypoints=(
@@ -1755,6 +1890,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "csm",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory="voicehub.training.data_contracts:build_csm_dataset_spec",
+        adapter_factory="voicehub.models.csm.training:CSMTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         label_names=("labels", ),
@@ -1780,6 +1917,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "neutts",
         TrainingFamily.CAUSAL_LM,
+        dataset_spec_factory="voicehub.training.data_contracts:build_neutts_dataset_spec",
+        adapter_factory="voicehub.models.neutts.training:NeuTTSTrainingAdapter",
         module_paths=("model.backbone", ),
         component_paths=("model.backbone", ),
         label_names=("labels", ),
@@ -1788,6 +1927,8 @@ _BUILTIN_TRAINING_SPECS = (
             "NeuTTSBackbone.forward",
             "voicehub.models.neutts.training:NeuTTSSFTDataset",
         ),
+        dataset_factory=("voicehub.models.neutts.training:"
+                         "build_training_dataset"),
         native_training=True,
         support=TrainingSupport.NATIVE,
         phases=(
@@ -1806,6 +1947,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "supertonic",
         TrainingFamily.FLOW_MATCHING,
+        dataset_spec_factory="voicehub.training.data_contracts:build_supertonic_dataset_spec",
+        adapter_factory="voicehub.models.supertonic.training:SupertonicTrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         source_entrypoints=(
@@ -1870,6 +2013,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "inflecttts",
         TrainingFamily.VITS,
+        dataset_spec_factory="voicehub.training.data_contracts:build_inflecttts_dataset_spec",
+        adapter_factory="voicehub.models.inflecttts.training:InflectTTSTrainingAdapter",
         module_paths=("training_model", ),
         component_paths=(
             "training_model.generator",
@@ -1957,6 +2102,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "bark",
         TrainingFamily.COMPOSITE,
+        dataset_spec_factory="voicehub.training.data_contracts:build_bark_dataset_spec",
+        adapter_factory="voicehub.architectures.bark.training:BarkTrainingAdapter",
         module_paths=("training_model.semantic", ),
         component_paths=(
             "training_model.semantic",
@@ -2038,6 +2185,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "speecht5",
         TrainingFamily.SEQ2SEQ,
+        dataset_spec_factory="voicehub.training.data_contracts:build_speecht5_dataset_spec",
+        adapter_factory="voicehub.models.speecht5.training:NativeSpeechT5TrainingAdapter",
         module_paths=("model", ),
         component_paths=("model", ),
         label_names=("labels", ),
@@ -2099,6 +2248,8 @@ _BUILTIN_TRAINING_SPECS = (
     _profile(
         "vits",
         TrainingFamily.VITS,
+        dataset_spec_factory="voicehub.training.data_contracts:build_vits_dataset_spec",
+        adapter_factory="voicehub.models.vits.training:NativeVitsGeneratorTrainingAdapter",
         module_paths=("training_model", ),
         component_paths=(
             "training_model.native_model",
@@ -2112,6 +2263,7 @@ _BUILTIN_TRAINING_SPECS = (
             "voicehub.architectures.vits.training.VitsAdversarialTrainingModel",
             "voicehub.models.vits.training.NativeVitsGeneratorTrainingAdapter",
         ),
+        optimization_profile_factory=("voicehub.training.tts_optimization:VITSOptimizationConfig"),
         # MMS-TTS checkpoints omit the source FFT, hop, window, mel, and
         # segment settings. Full raw-waveform training is therefore available
         # only after the caller supplies that exact acoustic configuration.
@@ -2421,6 +2573,8 @@ def _transformers_asr_preset_profile(
     family: TrainingFamily,
     entrypoint: str,
     *,
+    adapter_factory: str,
+    dataset_spec_factory: str,
     field_schemas: Mapping[str, Any] = _RAW_AUDIO_FIELD_SCHEMAS,
 ) -> ModelTrainingSpec:
     """Create one locked preset around the shared native ASR trainer."""
@@ -2432,6 +2586,8 @@ def _transformers_asr_preset_profile(
         component_paths=("model", ),
         label_names=("labels", ),
         source_entrypoints=(entrypoint, ),
+        adapter_factory=adapter_factory,
+        dataset_spec_factory=dataset_spec_factory,
         native_training=True,
         support=TrainingSupport.NATIVE,
         phases=(
@@ -2452,6 +2608,9 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "asr_transformers",
         TrainingFamily.NATIVE_ASR_DISPATCH,
+        adapter_factory=(
+            "voicehub.models.asr_transformers.training_asr_transformers:TransformersASRTrainingAdapter"),
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_transformers_dataset_spec"),
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -2482,12 +2641,18 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
         "asr_whisper",
         TrainingFamily.SPEECH_SEQ2SEQ,
         "voicehub.architectures.whisper.WhisperModel",
+        adapter_factory=(
+            "voicehub.models.asr_whisper_native.training_asr_whisper_native:NativeWhisperTrainingAdapter"),
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_whisper_dataset_spec"),
         field_schemas=_CHANNEL_FIRST_ASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
         "asr_tiron",
         TrainingFamily.SPEECH_SEQ2SEQ,
         "voicehub.architectures.whisper.WhisperModel",
+        adapter_factory=(
+            "voicehub.models.asr_whisper_native.training_asr_whisper_native:NativeWhisperTrainingAdapter"),
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_tiron_dataset_spec"),
         field_schemas=_CHANNEL_FIRST_ASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
@@ -2495,11 +2660,16 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
         TrainingFamily.SPEECH_SEQ2SEQ,
         ("voicehub.architectures.qwen3_asr.modeling."
          "Qwen3ASRForConditionalGeneration"),
+        adapter_factory="voicehub.models.asr_qwen3.training_asr_qwen3:NativeQwen3ASRTrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_qwen3_dataset_spec"),
         field_schemas=_QWEN3_ASR_FIELD_SCHEMAS,
     ),
     _profile(
         "asr_vibevoice",
         TrainingFamily.SPEECH_SEQ2SEQ,
+        adapter_factory=(
+            "voicehub.models.asr_vibevoice.training_asr_vibevoice:NativeVibeVoiceASRTrainingAdapter"),
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_vibevoice_dataset_spec"),
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         module_paths=("model", ),
         component_paths=(
@@ -2548,6 +2718,10 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "asr_granite_speech",
         TrainingFamily.SPEECH_SEQ2SEQ,
+        adapter_factory=(
+            "voicehub.models.asr_granite_speech.training_asr_granite_speech:NativeGraniteSpeechTrainingAdapter"
+        ),
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_granite_speech_dataset_spec"),
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         module_paths=("model", ),
         component_paths=(
@@ -2592,6 +2766,9 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "asr_parakeet_tdt",
         TrainingFamily.TDT,
+        adapter_factory=(
+            "voicehub.models.asr_parakeet_tdt.training_asr_parakeet_tdt:NativeParakeetTDTTrainingAdapter"),
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_parakeet_tdt_dataset_spec"),
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         module_paths=("model", ),
         component_paths=(
@@ -2636,6 +2813,8 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "asr_nemotron",
         TrainingFamily.RNNT,
+        adapter_factory="voicehub.models.asr_nemotron.training_asr_nemotron:NativeNemotronASRTrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_nemotron_dataset_spec"),
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         module_paths=("model", ),
         component_paths=(
@@ -2684,6 +2863,8 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "asr_cohere",
         TrainingFamily.SPEECH_SEQ2SEQ,
+        adapter_factory="voicehub.models.asr_cohere.training_asr_cohere:NativeCohereASRTrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_cohere_dataset_spec"),
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         module_paths=("model", ),
         component_paths=(
@@ -2729,6 +2910,8 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "asr_medasr",
         TrainingFamily.CTC,
+        adapter_factory="voicehub.models.asr_medasr.training_asr_medasr:NativeMedASRTrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_medasr_dataset_spec"),
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         module_paths=("model", ),
         component_paths=(
@@ -2768,29 +2951,41 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
         "asr_wav2vec2",
         TrainingFamily.CTC,
         "voicehub.architectures.wav2vec2.Wav2Vec2ForCTC",
+        adapter_factory="voicehub.models.asr_wav2vec2.training_asr_wav2vec2:NativeWav2Vec2TrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_wav2vec2_dataset_spec"),
         field_schemas=_WAVEFORM_ASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
         "asr_hubert",
         TrainingFamily.CTC,
         "voicehub.architectures.hubert.HubertForCTC",
+        adapter_factory="voicehub.models.asr_hubert.training_asr_hubert:NativeHubertTrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_hubert_dataset_spec"),
         field_schemas=_WAVEFORM_ASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
         "asr_wavlm",
         TrainingFamily.CTC,
         "voicehub.architectures.wavlm.WavLMForCTC",
+        adapter_factory="voicehub.models.asr_wavlm.training_asr_wavlm:NativeWavLMTrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_wavlm_dataset_spec"),
         field_schemas=_WAVEFORM_ASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
         "asr_moonshine",
         TrainingFamily.SPEECH_SEQ2SEQ,
         "voicehub.architectures.moonshine.MoonshineForConditionalGeneration",
+        adapter_factory="voicehub.models.asr_moonshine.training_asr_moonshine:NativeMoonshineTrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_moonshine_dataset_spec"),
         field_schemas=_WAVEFORM_ASR_FIELD_SCHEMAS,
     ),
     _profile(
         "asr_seamless_m4t_v2",
         TrainingFamily.SPEECH_SEQ2SEQ,
+        adapter_factory=(
+            "voicehub.models.asr_seamless_m4t_v2.training_asr_seamless_m4t_v2:NativeSeamlessM4Tv2TrainingAdapter"
+        ),
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_seamless_m4t_v2_dataset_spec"),
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         module_paths=("model", ),
         component_paths=(
@@ -2837,29 +3032,42 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
         "asr_faster_whisper",
         TrainingFamily.SPEECH_SEQ2SEQ,
         "voicehub.architectures.whisper.WhisperModel",
+        adapter_factory=(
+            "voicehub.models.asr_whisper_native.training_asr_whisper_native:NativeWhisperTrainingAdapter"),
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_faster_whisper_dataset_spec"),
         field_schemas=_CHANNEL_FIRST_ASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
         "asr_whisperx",
         TrainingFamily.SPEECH_SEQ2SEQ,
         "voicehub.architectures.whisper.WhisperModel",
+        adapter_factory=(
+            "voicehub.models.asr_whisper_native.training_asr_whisper_native:NativeWhisperTrainingAdapter"),
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_whisperx_dataset_spec"),
         field_schemas=_CHANNEL_FIRST_ASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
         "asr_openai_whisper",
         TrainingFamily.SPEECH_SEQ2SEQ,
         "voicehub.architectures.whisper.WhisperModel",
+        adapter_factory=(
+            "voicehub.models.asr_whisper_native.training_asr_whisper_native:NativeWhisperTrainingAdapter"),
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_openai_whisper_dataset_spec"),
         field_schemas=_CHANNEL_FIRST_ASR_FIELD_SCHEMAS,
     ),
     _transformers_asr_preset_profile(
         "asr_nemo",
         TrainingFamily.CTC,
         "voicehub.architectures.nemo_ctc.modeling.NeMoQuartzNetForCTC",
+        adapter_factory="voicehub.models.asr_nemo.training_asr_nemo:NativeNeMoCTCTrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_nemo_dataset_spec"),
         field_schemas=_NEMO_CTC_FIELD_SCHEMAS,
     ),
     _profile(
         "asr_speechbrain",
         TrainingFamily.SPEECH_SEQ2SEQ,
+        adapter_factory="voicehub.models.asr_native.speechbrain_training:NativeSpeechBrainASRTrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_speechbrain_dataset_spec"),
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -2892,6 +3100,8 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "asr_funasr",
         TrainingFamily.CTC,
+        adapter_factory="voicehub.architectures.sensevoice.training:NativeSenseVoiceTrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_funasr_dataset_spec"),
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -2947,6 +3157,8 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "asr_espnet",
         TrainingFamily.SPEECH_SEQ2SEQ,
+        adapter_factory="voicehub.architectures.espnet_transformer.training:NativeESPnetASRTrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_espnet_dataset_spec"),
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -2999,6 +3211,8 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "asr_wenet",
         TrainingFamily.SPEECH_SEQ2SEQ,
+        adapter_factory="voicehub.models.asr_wenet.training_asr_wenet:NativeWeNetU2PPTrainingAdapter",
+        dataset_spec_factory=("voicehub.training.asr_data_contracts:build_asr_wenet_dataset_spec"),
         task=SpeechTask.AUTOMATIC_SPEECH_RECOGNITION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -3024,6 +3238,8 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "vad_transformers",
         TrainingFamily.AUDIO_CLASSIFICATION,
+        adapter_factory=(
+            "voicehub.models.vad_transformers.training_vad_transformers:TransformersVADTrainingAdapter"),
         task=SpeechTask.VOICE_ACTIVITY_DETECTION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -3052,6 +3268,7 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "vad_silero",
         TrainingFamily.FRAME_CLASSIFICATION,
+        adapter_factory="voicehub.models.vad_silero.training_vad_silero:NativeSileroVADTrainingAdapter",
         task=SpeechTask.VOICE_ACTIVITY_DETECTION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -3085,6 +3302,7 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "vad_pyannote",
         TrainingFamily.FRAME_CLASSIFICATION,
+        adapter_factory="voicehub.models.vad_pyannote.training_vad_pyannote:NativePyanNetTrainingAdapter",
         task=SpeechTask.VOICE_ACTIVITY_DETECTION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -3111,6 +3329,8 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "vad_speechbrain",
         TrainingFamily.FRAME_CLASSIFICATION,
+        adapter_factory=(
+            "voicehub.models.vad_speechbrain.training_vad_speechbrain:NativeSpeechBrainVADTrainingAdapter"),
         task=SpeechTask.VOICE_ACTIVITY_DETECTION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -3138,6 +3358,7 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "vad_nemo",
         TrainingFamily.FRAME_CLASSIFICATION,
+        adapter_factory="voicehub.models.vad_nemo.training_vad_nemo:NativeMarbleNetVADTrainingAdapter",
         task=SpeechTask.VOICE_ACTIVITY_DETECTION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -3164,6 +3385,7 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "vad_funasr",
         TrainingFamily.FRAME_CLASSIFICATION,
+        adapter_factory="voicehub.models.vad_funasr.training_vad_funasr:NativeFSMNVADTrainingAdapter",
         task=SpeechTask.VOICE_ACTIVITY_DETECTION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -3195,6 +3417,9 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "vad_sherpa_onnx",
         TrainingFamily.FRAME_CLASSIFICATION,
+        adapter_factory=(
+            "voicehub.models.vad_sherpa_onnx.training_vad_sherpa_onnx:create_sherpa_native_vad_training_adapter"
+        ),
         task=SpeechTask.VOICE_ACTIVITY_DETECTION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -3224,6 +3449,7 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "vad_pyannote_segmentation",
         TrainingFamily.FRAME_CLASSIFICATION,
+        adapter_factory="voicehub.models.vad_pyannote.training_vad_pyannote:NativePyanNetTrainingAdapter",
         task=SpeechTask.VOICE_ACTIVITY_DETECTION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -3250,6 +3476,7 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
     _profile(
         "vad_pyannote_brouhaha",
         TrainingFamily.COMPOSITE,
+        adapter_factory="voicehub.models.vad_pyannote.training_vad_pyannote:NativePyanNetTrainingAdapter",
         task=SpeechTask.VOICE_ACTIVITY_DETECTION,
         module_paths=("model", ),
         component_paths=("model", ),
@@ -3285,6 +3512,17 @@ _BUILTIN_AUDIO_INPUT_TRAINING_SPECS = (
 )
 
 _BUILTIN_TRAINING_SPECS += _BUILTIN_AUDIO_INPUT_TRAINING_SPECS
+
+_DISCOVERED_MANIFEST_TRAINING_SPECS = discover_manifest_training_specs()
+_CENTRAL_TRAINING_MODEL_TYPES = {spec.model_type for spec in _BUILTIN_TRAINING_SPECS}
+_DUPLICATE_MANIFEST_TRAINING_MODELS = sorted(
+    spec.model_type for spec in _DISCOVERED_MANIFEST_TRAINING_SPECS
+    if spec.model_type in _CENTRAL_TRAINING_MODEL_TYPES)
+if _DUPLICATE_MANIFEST_TRAINING_MODELS:
+    raise ValueError(
+        "Manifest-discovered training profiles duplicate legacy central declarations: "
+        f"{_DUPLICATE_MANIFEST_TRAINING_MODELS!r}.")
+_BUILTIN_TRAINING_SPECS += _DISCOVERED_MANIFEST_TRAINING_SPECS
 
 _TRAINING_SPEC_REGISTRY: dict[str, ModelTrainingSpec] = {
     spec.model_type: spec

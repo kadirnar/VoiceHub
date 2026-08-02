@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from voicehub.auto import (
-    AutoModelForSpeechRecognition,
-    AutoModelForTextToSpeech,
-    AutoModelForVoiceActivityDetection,
-)
+from voicehub.auto import AutoModelForSpeechRecognition, AutoModelForTextToSpeech, AutoModelForVoiceActivityDetection
 
 
 class AutoModelConfigKwargsTests(unittest.TestCase):

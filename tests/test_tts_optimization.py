@@ -1,18 +1,27 @@
+import ast
 import importlib.util
 import unittest
+from pathlib import Path
 from unittest import mock
 
+import voicehub.training.tts_optimization as tts_optimization_module
 from voicehub import (
     DiffusionTTSOptimizationConfig,
     EpochLengthBatchSampler,
     LLMTTSOptimizationConfig,
+    ModelTrainingSpec,
     Trainer,
     TrainingArguments,
+    TrainingFamily,
     TTSBatchingConfig,
     TTSBatchingStrategy,
     TTSDataset,
     VITSOptimizationConfig,
+    get_training_spec,
     get_tts_training_optimization_profile,
+    list_training_specs,
+    register_training_spec,
+    unregister_training_spec,
 )
 from voicehub.trainer_utils import get_scheduler_lambda
 
@@ -20,6 +29,90 @@ TORCH_AVAILABLE = importlib.util.find_spec("torch") is not None
 
 
 class TTSOptimizationProfileTests(unittest.TestCase):
+
+    def test_model_profiles_are_declared_by_the_training_registry(self):
+        expected_factories = {
+            "conversationtts": ("voicehub.training.tts_optimization:LLMTTSOptimizationConfig"),
+            "f5tts": ("voicehub.training.tts_optimization:DiffusionTTSOptimizationConfig"),
+            "qwen3tts": ("voicehub.training.tts_optimization:LLMTTSOptimizationConfig.qwen3tts"),
+            "vits": ("voicehub.training.tts_optimization:VITSOptimizationConfig"),
+        }
+
+        self.assertEqual(
+            {
+                model_type: get_training_spec(model_type).optimization_profile_factory
+                for model_type in expected_factories
+            },
+            expected_factories,
+        )
+
+    def test_extension_can_declare_a_profile_without_resolver_changes(self):
+        spec = ModelTrainingSpec(
+            model_type="future-vits-profile",
+            family=TrainingFamily.VITS,
+            optimization_profile_factory=("voicehub.training.tts_optimization:VITSOptimizationConfig"),
+        )
+        register_training_spec(spec)
+        try:
+            profile = get_tts_training_optimization_profile(spec.model_type)
+        finally:
+            unregister_training_spec(spec.model_type)
+
+        self.assertIsInstance(profile, VITSOptimizationConfig)
+
+    def test_profile_factory_result_must_satisfy_protocol(self):
+        incompatible = ModelTrainingSpec(
+            model_type="incompatible-profile-factory",
+            family=TrainingFamily.VITS,
+            optimization_profile_factory="builtins:dict",
+        )
+        register_training_spec(incompatible)
+        try:
+            with self.assertRaisesRegex(TypeError, "missing callable"):
+                get_tts_training_optimization_profile(incompatible.model_type)
+        finally:
+            unregister_training_spec(incompatible.model_type)
+
+    def test_profile_factory_validation_is_declarative_and_lazy(self):
+        with self.assertRaisesRegex(ValueError, "module:attribute"):
+            ModelTrainingSpec(
+                model_type="invalid-profile-path",
+                family=TrainingFamily.VITS,
+                optimization_profile_factory="not-an-import-path",
+            )
+
+        spec = ModelTrainingSpec(
+            model_type="deferred-profile-resolution",
+            family=TrainingFamily.VITS,
+            optimization_profile_factory=("voicehub.training.tts_optimization:MissingProfileFactory"),
+        )
+        register_training_spec(spec)
+        try:
+            self.assertIs(get_training_spec(spec.model_type), spec)
+            with self.assertRaisesRegex(
+                    ImportError,
+                    "MissingProfileFactory",
+            ):
+                get_tts_training_optimization_profile(spec.model_type)
+        finally:
+            unregister_training_spec(spec.model_type)
+
+    def test_shared_profile_resolver_does_not_branch_on_model_names(self):
+        source_path = Path(tts_optimization_module.__file__)
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        model_types = {spec.model_type for spec in list_training_specs()}
+        violations = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            matched = sorted({
+                value.value
+                for value in ast.walk(node) if isinstance(value, ast.Constant) and value.value in model_types
+            })
+            if matched:
+                violations.append((node.lineno, matched))
+
+        self.assertEqual(violations, [])
 
     def test_model_and_architecture_resolution_stays_separate(self):
         self.assertIsInstance(

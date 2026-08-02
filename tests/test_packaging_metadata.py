@@ -83,10 +83,8 @@ REQUIRED_DISTRIBUTION_FILES = (
     "voicehub/py.typed",
     "voicehub/architectures/outetts/default_speaker.json",
     "voicehub/models/conversationtts/source/conversationtts/llama3_2/tokenizer.json",
-    (
-        "voicehub/models/chatterbox/source/perth/perth_net/pretrained/implicit/"
-        "perth_net_250000.pth.tar"
-    ),
+    ("voicehub/models/chatterbox/source/perth/perth_net/pretrained/implicit/"
+     "perth_net_250000.pth.tar"),
     "voicehub/kernels/csrc/activations.cpp",
 )
 
@@ -281,11 +279,18 @@ class PackagingMetadataTests(unittest.TestCase):
                 self.assertTrue((REPOSITORY_ROOT / relative_path).is_file())
 
     def test_distribution_check_covers_all_install_modes(self):
-        source = (REPOSITORY_ROOT / "scripts" / "check_distribution.py").read_text(
-            encoding="utf-8")
-        self.assertIn('"wheel": install_and_probe(', source)
-        self.assertIn('"sdist": install_and_probe(', source)
-        self.assertIn('"editable": install_and_probe(', source)
+        source = (REPOSITORY_ROOT / "scripts" / "check_distribution.py").read_text(encoding="utf-8")
+        install_modes = set()
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.Dict):
+                continue
+            for key, value in zip(node.keys, node.values):
+                if (isinstance(key, ast.Constant) and isinstance(key.value, str) and
+                        isinstance(value, ast.Call) and isinstance(value.func, ast.Name) and
+                        value.func.id == "install_and_probe"):
+                    install_modes.add(key.value)
+
+        self.assertEqual(install_modes, {"wheel", "sdist", "editable"})
 
 
 if __name__ == "__main__":

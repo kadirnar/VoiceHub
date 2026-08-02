@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build and install-check VoiceHub's wheel, sdist, and editable source tree.
 
-The default check skips runtime dependencies so it can validate packaging
-without downloading PyTorch. Pass ``--with-dependencies`` for a complete
-dependency installation on a release machine.
+The default check skips runtime dependencies so it can validate
+packaging without downloading PyTorch. Pass ``--with-dependencies`` for
+a complete dependency installation on a release machine.
 """
 
 from __future__ import annotations
@@ -18,16 +18,64 @@ from pathlib import Path
 from zipfile import ZipFile
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-REQUIRED_PACKAGE_FILES = (
+REPRESENTATIVE_PACKAGE_FILES = (
     "voicehub/py.typed",
     "voicehub/architectures/outetts/default_speaker.json",
     "voicehub/models/conversationtts/source/conversationtts/llama3_2/tokenizer.json",
-    (
-        "voicehub/models/chatterbox/source/perth/perth_net/pretrained/implicit/"
-        "perth_net_250000.pth.tar"
-    ),
+    ("voicehub/models/chatterbox/source/perth/perth_net/pretrained/implicit/"
+     "perth_net_250000.pth.tar"),
     "voicehub/kernels/csrc/activations.cpp",
 )
+COMPLIANCE_NAME_TOKENS = ("LICENSE", "LICENCE", "NOTICE", "COPYING")
+
+
+def compliance_package_files(repository_root: Path = REPOSITORY_ROOT) -> tuple[str, ...]:
+    """List every provenance manifest and legal notice shipped in VoiceHub."""
+    package_root = repository_root / "voicehub"
+    return tuple(
+        sorted(
+            path.relative_to(repository_root).as_posix() for path in package_root.rglob("*")
+            if path.is_file() and (
+                path.name == "SOURCE.json" or any(
+                    token in path.name.upper() for token in COMPLIANCE_NAME_TOKENS))))
+
+
+COMPLIANCE_PACKAGE_FILES = compliance_package_files()
+REQUIRED_PACKAGE_FILES = tuple(dict.fromkeys((*REPRESENTATIVE_PACKAGE_FILES, *COMPLIANCE_PACKAGE_FILES)))
+
+
+def _manifest_values(value: object, key_tokens: tuple[str, ...]) -> list[object]:
+    values: list[object] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized_key = str(key).lower()
+            if (any(token in normalized_key for token in key_tokens) and child not in (None, "", [], {})):
+                values.append(child)
+            values.extend(_manifest_values(child, key_tokens))
+    elif isinstance(value, list):
+        for child in value:
+            values.extend(_manifest_values(child, key_tokens))
+    return values
+
+
+def validate_provenance_manifests(repository_root: Path = REPOSITORY_ROOT) -> int:
+    """Require every retained source manifest to pin origin and license
+    terms."""
+    manifest_paths = sorted((repository_root / "voicehub").rglob("SOURCE.json"))
+    if not manifest_paths:
+        raise RuntimeError("No source provenance manifests were found.")
+    for path in manifest_paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise RuntimeError(f"Could not read provenance manifest {path}: {error}") from error
+        if not isinstance(payload, dict) or not payload:
+            raise RuntimeError(f"Provenance manifest {path} must contain a JSON object.")
+        if not _manifest_values(payload, ("revision", "release", "commit", "tag")):
+            raise RuntimeError(f"Provenance manifest {path} does not pin an upstream source.")
+        if not _manifest_values(payload, ("license", "licence")):
+            raise RuntimeError(f"Provenance manifest {path} does not record license terms.")
+    return len(manifest_paths)
 
 
 def run(*command: str | Path, cwd: Path | None = None) -> None:
@@ -67,6 +115,19 @@ def require_members(kind: str, members: set[str]) -> None:
     missing = sorted(set(REQUIRED_PACKAGE_FILES) - members)
     if missing:
         raise RuntimeError(f"{kind} is missing required package data: {missing}")
+
+
+def require_project_license(kind: str, members: set[str]) -> None:
+    """Require the project license in both standard distribution layouts."""
+    if kind == "wheel":
+        licenses = sorted(member for member in members if member.endswith(".dist-info/licenses/LICENSE"))
+        if len(licenses) != 1:
+            raise RuntimeError(f"wheel must contain one dist-info project LICENSE; found {licenses}")
+    elif kind == "sdist":
+        if "LICENSE" not in members:
+            raise RuntimeError("sdist is missing the project LICENSE")
+    else:
+        raise ValueError(f"Unknown distribution kind: {kind}")
 
 
 def create_venv(path: Path) -> Path:
@@ -127,6 +188,24 @@ if not all(required.values()):
     raise RuntimeError(f"Missing installed package data: {required}")
 
 package_root = Path(str(files("voicehub")))
+compliance_files = sorted(
+    path
+    for path in package_root.rglob("*")
+    if path.is_file()
+    and (
+        path.name == "SOURCE.json"
+        or any(
+            token in path.name.upper()
+            for token in ("LICENSE", "LICENCE", "NOTICE", "COPYING")
+        )
+    )
+)
+expected_compliance_files = int(sys.argv[1])
+if len(compliance_files) != expected_compliance_files:
+    raise RuntimeError(
+        "Installed compliance inventory is incomplete: "
+        f"{len(compliance_files)} files, expected {expected_compliance_files}"
+    )
 violations = inspect_native_runtime(package_root)
 if violations:
     raise RuntimeError(
@@ -154,10 +233,11 @@ print(json.dumps({
     "torch_imported": "torch" in sys.modules,
     "required_data": required,
     "runtime_dependency_violations": len(violations),
+    "compliance_files": len(compliance_files),
 }))
 """
     completed = subprocess.run(
-        [str(python), "-c", probe],
+        [str(python), "-c", probe, str(len(COMPLIANCE_PACKAGE_FILES))],
         cwd=root,
         check=True,
         capture_output=True,
@@ -180,6 +260,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     options = parse_args()
+    provenance_manifests = validate_provenance_manifests()
     with tempfile.TemporaryDirectory(prefix="voicehub-distribution-") as directory:
         root = Path(directory)
         dist = root / "dist"
@@ -198,29 +279,34 @@ def main() -> None:
         wheels = sorted(dist.glob("voicehub-*.whl"))
         sdists = sorted(dist.glob("voicehub-*.tar.gz"))
         if len(wheels) != 1 or len(sdists) != 1:
-            raise RuntimeError(
-                f"Expected one wheel and one sdist, found {wheels!r} and {sdists!r}"
-            )
+            raise RuntimeError(f"Expected one wheel and one sdist, found {wheels!r} and {sdists!r}")
 
-        require_members("wheel", wheel_members(wheels[0]))
-        require_members("sdist", sdist_members(sdists[0]))
+        wheel_files = wheel_members(wheels[0])
+        sdist_files = sdist_members(sdists[0])
+        require_members("wheel", wheel_files)
+        require_members("sdist", sdist_files)
+        require_project_license("wheel", wheel_files)
+        require_project_license("sdist", sdist_files)
 
         results = {
-            "wheel": install_and_probe(
+            "wheel":
+            install_and_probe(
                 "wheel",
                 wheels[0],
                 root=root,
                 editable=False,
                 with_dependencies=options.with_dependencies,
             ),
-            "sdist": install_and_probe(
+            "sdist":
+            install_and_probe(
                 "sdist",
                 sdists[0],
                 root=root,
                 editable=False,
                 with_dependencies=options.with_dependencies,
             ),
-            "editable": install_and_probe(
+            "editable":
+            install_and_probe(
                 "editable",
                 REPOSITORY_ROOT,
                 root=root,
@@ -230,13 +316,16 @@ def main() -> None:
         }
         versions = {str(result["version"]) for result in results.values()}
         model_counts = {int(result["models"]) for result in results.values()}
-        if len(versions) != 1 or len(model_counts) != 1:
+        compliance_counts = {int(result["compliance_files"]) for result in results.values()}
+        if len(versions) != 1 or len(model_counts) != 1 or len(compliance_counts) != 1:
             raise RuntimeError(f"Installation modes disagree: {results}")
 
         print(
             "PASS:",
             f"version={versions.pop()}",
             f"models={model_counts.pop()}",
+            f"provenance_manifests={provenance_manifests}",
+            f"compliance_files={compliance_counts.pop()}",
             f"wheel_bytes={wheels[0].stat().st_size}",
             f"sdist_bytes={sdists[0].stat().st_size}",
         )

@@ -4,6 +4,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from voicehub.architectures import (
+    ArchitectureCapabilities,
+    ArchitectureSpec,
+    register_architecture_spec,
+    unregister_architecture_spec,
+)
 from voicehub.diffusion_serving import (
     DiffusionServingBackend,
     DiffusionServingCompatibilityError,
@@ -15,6 +21,7 @@ from voicehub.diffusion_serving import (
     resolve_diffusion_tts_backend,
 )
 from voicehub.llm_serving import LLMBackend, LLMBackendConfig, LLMBackendTransport
+from voicehub.models.registry import ModelSpec, register_model_spec, unregister_model_spec
 
 
 class DiffusionServingCapabilityTests(unittest.TestCase):
@@ -34,6 +41,21 @@ class DiffusionServingCapabilityTests(unittest.TestCase):
         )
 
     def test_capabilities_are_truthful_about_modalities_and_tts(self):
+        native = get_diffusion_serving_capability("native")
+        self.assertEqual(
+            native.verified_tts_models,
+            (
+                "chatterbox",
+                "cosyvoice",
+                "echo",
+                "f5tts",
+                "irodoritts",
+                "styletts2",
+                "supertonic",
+                "voxcpm",
+            ),
+        )
+
         vllm = get_diffusion_serving_capability("vllm-omni")
         self.assertTrue(vllm.supports_tts_diffusion)
         self.assertEqual(vllm.verified_tts_models, ("cosyvoice", "voxcpm"))
@@ -48,6 +70,41 @@ class DiffusionServingCapabilityTests(unittest.TestCase):
         self.assertTrue(omni_sglang.supports_tts)
         self.assertFalse(omni_sglang.supports_visual_diffusion)
         self.assertFalse(omni_sglang.supports_tts_diffusion)
+
+    def test_registered_architecture_feature_extends_native_support(self):
+        architecture_id = "test-diffusion-serving-architecture"
+        model_type = "test-diffusion-serving-model"
+        architecture = ArchitectureSpec(
+            architecture_id=architecture_id,
+            model_builder="tests.test_diffusion_serving:TestModel",
+            capabilities=ArchitectureCapabilities(
+                tasks=("text-to-speech", ),
+                features=(
+                    "diffusion-family",
+                    "diffusion-serving-native",
+                ),
+            ),
+        )
+        model = ModelSpec(
+            model_type=model_type,
+            module="tests.test_diffusion_serving",
+            class_name="TestModel",
+            default_model_path="",
+            capabilities=("voicehub-native", ),
+            architecture=architecture_id,
+        )
+
+        try:
+            register_architecture_spec(architecture)
+            register_model_spec(model)
+
+            capability = get_diffusion_serving_capability("native")
+            self.assertIn(model_type, capability.verified_tts_models)
+            plan = resolve_diffusion_tts_backend(model_type, "native")
+            self.assertTrue(plan.verified)
+        finally:
+            unregister_model_spec(model_type, missing_ok=True)
+            unregister_architecture_spec(architecture_id, missing_ok=True)
 
     def test_capability_filters_do_not_import_optional_engines(self):
         visual = list_diffusion_serving_capabilities(supports_visual_diffusion=True)

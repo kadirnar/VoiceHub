@@ -1123,15 +1123,20 @@ class DiffusionSamplingPass(OptimizationPass):
         }
 
     def validate(self, model: Any, context: OptimizationContext) -> None:
-        super().validate(model, context)
         if not _sampling_targets(model):
-            raise OptimizationCompatibilityError(
-                f"{type(model).__name__} exposes no architecture-owned "
-                "diffusion sampling surface.")
+            return
+        super().validate(model, context)
 
     def apply(self, model: Any, context: OptimizationContext) -> PassResult:
         del context
         targets = _sampling_targets(model)
+        if not targets:
+            return self.not_applicable_result(
+                model,
+                reason=(
+                    f"{type(model).__name__} exposes no architecture-owned "
+                    "diffusion sampling surface"),
+            )
         patches: list[_SamplingPatch] = []
         try:
             for target in targets:
@@ -1148,6 +1153,7 @@ class DiffusionSamplingPass(OptimizationPass):
             model=model,
             state={"patches": tuple(patches)},
             metadata={
+                "outcome": "configured",
                 "targets": [target.label for target in targets],
                 "fidelity": "approximate",
             },
@@ -1160,6 +1166,8 @@ class DiffusionSamplingPass(OptimizationPass):
         context: OptimizationContext,
     ) -> Any:
         del context
+        if state.get("kind") == "not-applicable":
+            return state.get("model", model)
         patches = state.get("patches")
         if not isinstance(patches, tuple):
             raise DiffusionSamplingError("Diffusion-sampling restoration state is missing target patches.")
@@ -1180,6 +1188,11 @@ class DiffusionSamplingPass(OptimizationPass):
         self,
         result: PassResult,
     ) -> Mapping[str, Any]:
+        if result.state.get("kind") == "not-applicable":
+            return {
+                "outcome": "not-applicable",
+                "reason": result.metadata["reason"],
+            }
         patches = result.state.get("patches", ())
         return {patch.target.label: patch.target.module.diffusion_sampling_stats() for patch in patches}
 

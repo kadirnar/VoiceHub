@@ -1,35 +1,20 @@
 ---
-description: Inference, data preparation, and training guide for the voxcpm integration.
+description: Public API, checkpoint, training, and optimization guide for the voxcpm integration.
 ---
 
 # `voxcpm` model guide
+
+## Overview
 
 `voxcpm` is a VoiceHub **text to speech**
 integration. This page is generated from the model registry and its executable
 data and training contracts, so the documented support stays aligned with code. [Open the `voxcpm` Colab notebook](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/models/voxcpm.ipynb).
 
-## Model information
-
-| Property | Value |
-| --- | --- |
-| Task | Text to speech |
-| Default checkpoint | [`openbmb/VoxCPM2`](https://huggingface.co/openbmb/VoxCPM2) |
-| Architecture | `voxcpm2` |
-| Runtime | `VoiceHub-native` |
-| Implementation | `voicehub.models.voxcpm.modeling_voxcpm.VoxCPMForTextToSpeech` |
-| Capabilities | `text-to-speech`, `voice-cloning`, `voice-design`, `audio-continuation`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime` |
-| Reusable components | — |
-| License | Checkpoint-specific |
-
-No VoiceHub-specific license override is registered. Verify the checkpoint and upstream source terms before use.
-
-## Install
+## Quickstart
 
 ```bash
 python -m pip install voicehub
 ```
-
-## Inference
 
 1. Install VoiceHub and the provider extra shown above.
 2. Choose a checkpoint that matches this integration.
@@ -61,56 +46,63 @@ print(output.file_path, output.sample_rate)
 ```
 
 Use only authorized recordings for reference voice, transcription, detection,
-or evaluation. Pin a checkpoint revision in production.
+or evaluation. The example selects a concrete device; verify checkpoint-specific
+hardware needs and pin an immutable revision before production use.
 
-## Data preparation
+## Supported tasks and capabilities
 
-The `voxcpm` contract is **integrated-raw**. Its
-data architecture is **diffusion** and its declared sample rate is
-**16,000 Hz**.
+| Property | Value |
+| --- | --- |
+| Task | Text to speech |
+| Architecture | `voxcpm2` |
+| Runtime | `VoiceHub-native` |
+| Capabilities | `text-to-speech`, `voice-cloning`, `voice-design`, `audio-continuation`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime` |
+| Reusable components | — |
 
-Conditional flow-matching, rectified-flow, or diffusion data.
+### Data contract
+
+| Property | Value |
+| --- | --- |
+| Readiness | `integrated-raw` |
+| Data architecture | `diffusion` |
+| Sample rate | 16,000 Hz |
+| Contract getter | `get_tts_dataset_spec('voxcpm')` |
 
 | Variant | Required fields | One of | Boundary | Other rules |
 | --- | --- | --- | --- | --- |
 | `raw-waveform` | `text` | audio / waveform | Source | at most one: audio / waveform; forbidden: audio_features |
 | `audio-features` | `text`, `audio_features` | — | Prepared | forbidden: audio, waveform |
 
-Follow this process:
+Conditional flow-matching, rectified-flow, or diffusion data. Follow the [shared data workflow](../../guides/data-preparation.md) for
+manifest loading, audio validation, leakage-safe splits, and model-owned
+preprocessing.
 
-1. Keep immutable source audio, exact transcripts or labels, stable IDs, consent,
-   license, speaker, and session metadata.
-2. Split by speaker or recording session before model preprocessing.
-3. Match one of the exact variants above. Source variants are processed by the
-   integration; prepared variants must already contain the listed model inputs.
-4. Validate one collated batch, then persist the preprocessing version and hashes.
+## Checkpoints, provenance, and license
 
-```python
-from voicehub import TTSDataset, get_tts_dataset_spec
+| Property | Value |
+| --- | --- |
+| Default checkpoint | [`openbmb/VoxCPM2`](https://huggingface.co/openbmb/VoxCPM2) |
+| Checkpoint status | Registry default; pin an immutable revision for production and reproducible evidence |
+| Implementation | `voicehub.models.voxcpm.modeling_voxcpm.VoxCPMForTextToSpeech` |
+| Configuration | `voicehub.models.voxcpm.configuration_voxcpm.VoxCPMConfig` |
+| Source provenance | `voicehub/models/voxcpm/source/SOURCE.json` |
+| License | Checkpoint-specific |
 
-contract = get_tts_dataset_spec('voxcpm')
-print(contract.architecture, contract.readiness, contract.sample_rate)
-for variant in contract.variants:
-    print(variant.name, variant.required_fields, variant.one_of)
+No VoiceHub-specific license override is registered. Verify the checkpoint and upstream source terms before use.
 
-# Source-record integrations can validate a JSONL manifest directly.
-if contract.accepts_raw_records:
-    records = TTSDataset.from_manifest(
-        "data/manifest.jsonl",
-        model_type='voxcpm',
-        validate_files=True,
-    )
-    train_records, validation_records = records.train_test_split(
-        validation_fraction=0.1,
-        seed=42,
-        group_by="session_id",
-    )
-```
+The default checkpoint identifies the expected family, not every compatible
+variant. Confirm the selected checkpoint's revision, access terms, provenance,
+and license before downloading or redistributing it.
 
-See the [complete data guide](../../guides/data-preparation.md) for manifest aliases, audio validation,
-leakage-safe splits, and model-owned preprocessing.
+## Optimization and training support
 
-## Training
+All public optimizations enter this model through the shared
+`BaseSpeechModel` lifecycle. Use `available_optimization_passes()` to discover
+the public pass registry, then apply, inspect, serialize, or restore a plan
+through the common model API. Application remains fail-closed when the active
+runtime or hardware cannot satisfy a pass.
+
+### Training contract
 
 | Property | Value |
 | --- | --- |
@@ -125,44 +117,24 @@ leakage-safe splits, and model-owned preprocessing.
 | --- | --- | --- | --- | --- |
 | `source_flow_and_stop` | objective | `model` | `text_tokens`, `text_mask`, `audio_feats`, `audio_mask`, `loss_mask`, `position_ids`, `labels` | `diffusion_loss`, `stop_loss` |
 
-The integration accepts its declared source or prepared contract directly. Start with one optimizer step and verify finite loss, intended
-gradients, frozen components, save, and reload before scaling the run.
+The integration accepts its declared source or prepared contract directly. Call `model.validate_training_support()` before constructing a
+trainer. Follow the [shared training workflow](../../guides/training.md) for a
+one-step smoke test, validation, checkpoint resume, optimization, and portable
+export.
 
-```python
-from voicehub import AutoModelForTextToSpeech, Trainer, TrainingArguments
+## Public API
 
-model = AutoModelForTextToSpeech.from_pretrained(
-    'openbmb/VoxCPM2',
-    model_type='voxcpm',
-    device="cuda",
-    lazy_load=True,
-)
-model.validate_training_support()
-train_dataset = model.create_training_dataset(
-    "data/train.jsonl",
-    validate_audio_files=True,
-)
+| Purpose | Public object |
+| --- | --- |
+| Discover | `get_model_spec('voxcpm')` |
+| Load and run | `AutoModelForTextToSpeech` |
+| Configure | `VoxCPMConfig` |
+| Model implementation | `VoxCPMForTextToSpeech` |
+| Normalized output | `TTSOutput` |
+| Training contract | `get_training_spec('voxcpm')` |
+| Optimization lifecycle | `available_optimization_passes`, `apply_optimization_plan`, `optimization_manifest`, `restore_optimization_plan` |
 
-arguments = TrainingArguments(
-    output_dir="runs/voxcpm-smoke",
-    max_steps=1,
-    per_device_train_batch_size=1,
-    learning_rate=5e-5,
-    logging_steps=1,
-    save_steps=1,
-    report_to="none",
-    seed=42,
-)
-trainer = Trainer(model=model, args=arguments, train_dataset=train_dataset)
-result = trainer.train(resume_from_checkpoint=False)
-print(result.training_loss, result.metrics)
-trainer.save_model("runs/voxcpm-smoke/final")
-```
-
-See the [training guide](../../guides/training.md) for validation datasets,
-checkpoint resume, mixed precision, optimizations, and portable exports.
-
-## Next steps
+Related shared documentation:
 
 - [All model guides](index.md)
 - [Shared inference guides](../../guides/index.md)

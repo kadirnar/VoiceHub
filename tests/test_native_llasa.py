@@ -200,8 +200,12 @@ class LlasaDependencyAndProvenanceTests(unittest.TestCase):
         self.assertEqual(training.support.value, "native")
         self.assertEqual(training.default_phase, "codec_language_model")
         self.assertEqual(
+            training.adapter_factory,
+            "voicehub.models.llasa.training:LlasaTrainingAdapter",
+        )
+        self.assertEqual(
             BUILTIN_MODEL_ADAPTERS["llasa"].__name__,
-            "_llasa_adapter",
+            "LlasaTrainingAdapter",
         )
 
     def test_public_execution_path_has_no_provider_imports(self):

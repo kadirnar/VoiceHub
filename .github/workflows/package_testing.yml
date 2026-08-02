@@ -31,6 +31,12 @@ jobs:
           python -m pip install --upgrade pip build "nbformat>=5.10" numpy pytest soundfile uv
           python -m build
 
+      - name: Verify source, documentation, and benchmark version alignment
+        run: python scripts/check_release.py --dist-dir dist
+
+      - name: Validate wheel, sdist, editable, provenance, and license data
+        run: python scripts/check_distribution.py
+
       - name: Verify the dependency-free package surface
         run: |
           python -m pip install --force-reinstall --no-deps dist/*.whl
@@ -38,6 +44,37 @@ jobs:
 
       - name: Install the declared wheel runtime
         run: uv pip install --system --torch-backend cpu dist/*.whl
+
+      - name: Verify the pinned release assets
+        env:
+          VOICEHUB_TEST_RELEASE_ASSETS: "1"
+        run: >-
+          python -m pytest -q
+          tests/test_native_espnet.py tests/test_native_sensevoice.py
+          tests/test_native_speechbrain_asr.py
+          -k "release_token_list_fingerprint or
+          release_tokenizer_matches_published_control_and_text_vectors or
+          release_tokenizer_matches_published_sentencepiece"
+
+      - name: Verify the TEN VAD ONNX differential oracle
+        run: |
+          python -m pip install "onnxruntime==1.22.1"
+          curl --fail --location --retry 3 \
+            --output "${RUNNER_TEMP}/ten-vad.onnx" \
+            "https://raw.githubusercontent.com/TEN-framework/ten-vad/22a3bcd4509d0faaa8eef4881e8af5f39c178950/src/onnx_model/ten-vad.onnx"
+          VOICEHUB_TEN_VAD_ONNX="${RUNNER_TEMP}/ten-vad.onnx" \
+            python -m pytest -q tests/test_native_ten_vad.py \
+            -k converted_native_graph_matches_onnxruntime_recurrently
+
+      - name: Verify the NVIDIA QuartzNet checkpoint conversion
+        run: |
+          curl --fail --location --retry 3 \
+            --header "Accept-Encoding: identity" \
+            --output "${RUNNER_TEMP}/stt_en_quartznet15x5.nemo" \
+            "https://api.ngc.nvidia.com/v2/models/nvidia/nemo/stt_en_quartznet15x5/versions/1.0.0rc1/files/stt_en_quartznet15x5.nemo"
+          VOICEHUB_TEST_NEMO_QUARTZNET_CHECKPOINT="${RUNNER_TEMP}/stt_en_quartznet15x5.nemo" \
+            python -m pytest -q tests/test_native_nemo_ctc.py \
+            -k real_archive_converts_with_exact_namespace
 
       - name: Import every integration from the installed wheel
         working-directory: ${{ runner.temp }}

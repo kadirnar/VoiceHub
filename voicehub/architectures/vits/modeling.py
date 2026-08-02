@@ -18,11 +18,7 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
-from voicehub.architectures.vits.alignment import (
-    generate_path,
-    maximum_path,
-    sequence_mask,
-)
+from voicehub.architectures.vits.alignment import generate_path, maximum_path, sequence_mask
 from voicehub.architectures.vits.configuration import VitsConfig
 from voicehub.kernels.vits import VITSKernelOptimizable
 from voicehub.optimization.protocols import OptimizationCompileTarget

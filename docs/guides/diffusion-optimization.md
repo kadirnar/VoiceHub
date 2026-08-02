@@ -626,6 +626,11 @@ VoiceHub verifies its complete speech bridge only for `cosyvoice` and
 `voxcpm`; the bridge reuses the existing `/v1/audio/speech` client rather than
 pretending that a DiT-only endpoint returns audio.
 
+Verified pairings are discovered from the registered architecture features
+`diffusion-serving-native` and `diffusion-serving-vllm-omni`. An extension can
+therefore declare an evidenced pairing beside its architecture integration
+without adding a provider-name branch to the shared serving resolver.
+
 The native serving capability similarly excludes `vibevoice`: VoiceHub
 exposes and optimizes its low-level diffusion head, but the public high-level
 TTS generation path intentionally still fails closed pending parity.

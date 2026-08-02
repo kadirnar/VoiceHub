@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from types import MappingProxyType
 from typing import Any
+
+from voicehub.dependencies import resolve_import_path
 
 
 def _field_names(values: Iterable[str], *, owner: str) -> tuple[str, ...]:
@@ -19,6 +21,27 @@ def _field_names(values: Iterable[str], *, owner: str) -> tuple[str, ...]:
         normalized.append(value.strip())
     if len(set(normalized)) != len(normalized):
         raise ValueError(f"{owner} must not contain duplicate field names.")
+    return tuple(normalized)
+
+
+def _field_aliases(values: Mapping[str, str] | Iterable[tuple[str, str]], ) -> tuple[tuple[str, str], ...]:
+    items = tuple(values.items()) if isinstance(values, Mapping) else tuple(values)
+    normalized = []
+    seen = set()
+    for item in items:
+        if not isinstance(item, (tuple, list)) or len(item) != 2:
+            raise TypeError("TTS field_aliases entries must be source/target pairs.")
+        source, target = item
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError("TTS field alias sources must be non-empty strings.")
+        if not isinstance(target, str) or not target.strip():
+            raise ValueError("TTS field alias targets must be non-empty strings.")
+        source = source.strip()
+        target = target.strip()
+        if source in seen:
+            raise ValueError(f"TTS field_aliases repeats source {source!r}.")
+        seen.add(source)
+        normalized.append((source, target))
     return tuple(normalized)
 
 
@@ -233,6 +256,7 @@ class TTSDatasetSpec:
     description: str = ""
     readiness: TTSDataReadiness | None = None
     training_support: str | None = None
+    field_aliases: Mapping[str, str] | tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -273,6 +297,11 @@ class TTSDatasetSpec:
                 "training_support",
                 self.training_support.strip().lower().replace("_", "-"),
             )
+        object.__setattr__(
+            self,
+            "field_aliases",
+            _field_aliases(self.field_aliases),
+        )
 
     def match_variant(self, record: Mapping[str, Any], *, index: int | None = None) -> str:
         """Validate a record and return the matching variant name."""
@@ -485,910 +514,1102 @@ _ARCHITECTURE_SPECS: Mapping[TTSDataArchitecture, TTSDatasetSpec] = MappingProxy
     ),
 })
 
-_MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
-    "orpheustts": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant("raw-audio", required=("text", ), one_of=(("audio", "audio_codes"), )),
-            _ARCHITECTURE_SPECS[TTSDataArchitecture.CODEC_LM].variants[2],
-        ),
-    },
-    "dia": {
-        "sample_rate":
-        44_100,
-        "variants": (
-            _variant("raw-audio", required=("text", "audio")),
-            _variant(
-                "processor-ready",
-                required=(
-                    "input_ids",
-                    "attention_mask",
-                    "decoder_input_ids",
-                    "decoder_attention_mask",
-                    "labels",
-                ),
-                preprocessed=True,
+
+def _model_spec(
+    architecture: TTSDataArchitecture,
+    values: Mapping[str, Any],
+) -> TTSDatasetSpec:
+    base = _ARCHITECTURE_SPECS[architecture]
+    return TTSDatasetSpec(
+        architecture=architecture,
+        variants=tuple(values.get("variants", base.preprocessed_variants)),
+        sample_rate=values.get("sample_rate", base.sample_rate),
+        description=str(values.get("description", base.description)),
+        readiness=values.get("readiness", base.readiness),
+        field_aliases=tuple(values.get("field_aliases", base.field_aliases)),
+    )
+
+
+def build_orpheustts_dataset_spec() -> TTSDatasetSpec:
+    """Return the OrpheusTTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant("raw-audio", required=("text", ), one_of=(("audio", "audio_codes"), )),
+                _ARCHITECTURE_SPECS[TTSDataArchitecture.CODEC_LM].variants[2],
             ),
-        ),
-    },
-    "chatterbox": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant(
-                "t3-raw",
-                required=("text", ),
-                one_of=(("audio", "audio_path"), ),
-                description="Text plus source audio for the native T3 objective.",
-            ),
-            _variant(
-                "flow-raw",
-                one_of=(("audio", "audio_path"), ),
-                description="Source audio for the native flow objective.",
-            ),
-            _variant(
-                "t3-precomputed",
-                required=(
-                    "text_tokens",
-                    "speech_tokens",
-                    "speaker_emb",
-                ),
-                preprocessed=True,
-            ),
-            _variant(
-                "flow-precomputed",
-                required=(
-                    "speech_token",
-                    "speech_feat",
-                    "embedding",
-                ),
-                preprocessed=True,
-            ),
-        ),
-    },
-    "kokoro": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant(
-                "full-preprocessed",
-                required=("durations", ),
-                one_of=(
-                    ("input_ids", "phonemes"),
-                    ("ref_s", "voice"),
-                    ("audio_values", "audio", "labels"),
-                ),
-                description=(
-                    "Phoneme IDs, prepared style, integer durations, and "
-                    "waveform targets for the alternating duration/acoustic "
-                    "recipe."),
-                preprocessed=True,
-            ),
-            _variant(
-                "duration-only",
-                required=("durations", "training_phase"),
-                one_of=(
-                    ("input_ids", "phonemes"),
-                    ("ref_s", "voice"),
-                ),
-                description="Explicit duration-only phase supervision.",
-                preprocessed=True,
-            ),
-        ),
-    },
-    "vui": {
-        "sample_rate":
-        44_100,
-        "variants": (
-            _variant(
-                "codec-batch",
-                required=("input_ids", "audio_codes"),
-                description=(
-                    "Text tokens and codebook-first Fluac targets; text masks "
-                    "and audio-code lengths are optional."),
-                preprocessed=True,
-            ), ),
-    },
-    "echo": {
-        "variants": (
-            _variant(
-                "flow-batch",
-                required=(
-                    "target_latents",
-                    "text_input_ids",
-                    "text_mask",
-                    "speaker_latents",
-                    "speaker_mask",
-                ),
-                description="Frozen-codec latents and aligned conditioning.",
-                preprocessed=True,
-            ), ),
-    },
-    "conversationtts": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant(
-                "raw-text-audio",
-                one_of=(
-                    ("text", "texts"),
-                    ("audio", "audio_values"),
-                ),
-                at_most_one_of=(
-                    ("text", "texts"),
-                    ("audio", "audio_values"),
-                ),
-                forbidden=(
-                    "text_token_ids",
-                    "text_ids",
-                    "audio_codes",
-                    "codes",
-                ),
-                description="Text plus raw waveform for frozen-Mimi encoding.",
-            ),
-            _variant(
-                "raw-text-code",
-                one_of=(
-                    ("text", "texts"),
-                    ("audio_codes", "codes"),
-                ),
-                at_most_one_of=(
-                    ("text", "texts"),
-                    ("audio_codes", "codes"),
-                ),
-                forbidden=(
-                    "text_token_ids",
-                    "text_ids",
-                    "audio",
-                    "audio_values",
-                ),
-                preprocessed=True,
-            ),
-            _variant(
-                "tokenized-text-audio",
-                one_of=(
-                    ("text_token_ids", "text_ids"),
-                    ("audio", "audio_values"),
-                ),
-                at_most_one_of=(
-                    ("text_token_ids", "text_ids"),
-                    ("audio", "audio_values"),
-                ),
-                forbidden=("text", "texts", "audio_codes", "codes"),
-                preprocessed=True,
-            ),
-            _variant(
-                "tokenized-text-code",
-                one_of=(
-                    ("text_token_ids", "text_ids"),
-                    ("audio_codes", "codes"),
-                ),
-                at_most_one_of=(
-                    ("text_token_ids", "text_ids"),
-                    ("audio_codes", "codes"),
-                ),
-                forbidden=("text", "texts", "audio", "audio_values"),
-                preprocessed=True,
-            ),
-            _variant(
-                "multi-codebook-batch",
-                required=("tokens", "labels", "tokens_mask"),
-                description="Aligned token/codebook tensors and validity mask.",
-                preprocessed=True,
-            ),
-        ),
-    },
-    "cosyvoice": {
-        "sample_rate":
-        24_000,
-        "readiness":
-        TTSDataReadiness.INTEGRATED,
-        "variants": (
-            _variant(
-                "llm-raw-audio",
-                required=("text", ),
-                one_of=((
-                    "speech_audio",
-                    "audio",
-                    "waveform",
-                    "audio_path",
-                ), ),
-                at_most_one_of=((
-                    "speech_audio",
-                    "audio",
-                    "waveform",
-                    "audio_path",
-                ), ),
-                forbidden=("speech_tokens", ),
-                requires_one_of=(
-                    (
-                        "speech_audio",
-                        (
-                            "speech_sampling_rate",
-                            "sampling_rate",
-                            "sample_rate",
-                        ),
+        })
+
+
+def build_dia_dataset_spec() -> TTSDatasetSpec:
+    """Return the Dia source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.SEQUENCE_TO_SEQUENCE, {
+            "sample_rate":
+            44_100,
+            "variants": (
+                _variant("raw-audio", required=("text", "audio")),
+                _variant(
+                    "processor-ready",
+                    required=(
+                        "input_ids",
+                        "attention_mask",
+                        "decoder_input_ids",
+                        "decoder_attention_mask",
+                        "labels",
                     ),
-                    (
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_chatterbox_dataset_spec() -> TTSDatasetSpec:
+    """Return the Chatterbox source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.HYBRID, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant(
+                    "t3-raw",
+                    required=("text", ),
+                    one_of=(("audio", "audio_path"), ),
+                    description="Text plus source audio for the native T3 objective.",
+                ),
+                _variant(
+                    "flow-raw",
+                    one_of=(("audio", "audio_path"), ),
+                    description="Source audio for the native flow objective.",
+                ),
+                _variant(
+                    "t3-precomputed",
+                    required=(
+                        "text_tokens",
+                        "speech_tokens",
+                        "speaker_emb",
+                    ),
+                    preprocessed=True,
+                ),
+                _variant(
+                    "flow-precomputed",
+                    required=(
+                        "speech_token",
+                        "speech_feat",
+                        "embedding",
+                    ),
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_kokoro_dataset_spec() -> TTSDatasetSpec:
+    """Return the Kokoro source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.ACOUSTIC, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant(
+                    "full-preprocessed",
+                    required=("durations", ),
+                    one_of=(
+                        ("input_ids", "phonemes"),
+                        ("ref_s", "voice"),
+                        ("audio_values", "audio", "labels"),
+                    ),
+                    description=(
+                        "Phoneme IDs, prepared style, integer durations, and "
+                        "waveform targets for the alternating duration/acoustic "
+                        "recipe."),
+                    preprocessed=True,
+                ),
+                _variant(
+                    "duration-only",
+                    required=("durations", "training_phase"),
+                    one_of=(
+                        ("input_ids", "phonemes"),
+                        ("ref_s", "voice"),
+                    ),
+                    description="Explicit duration-only phase supervision.",
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_vui_dataset_spec() -> TTSDatasetSpec:
+    """Return the VUI source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "sample_rate":
+            44_100,
+            "variants": (
+                _variant(
+                    "codec-batch",
+                    required=("input_ids", "audio_codes"),
+                    description=(
+                        "Text tokens and codebook-first Fluac targets; text masks "
+                        "and audio-code lengths are optional."),
+                    preprocessed=True,
+                ), ),
+        })
+
+
+def build_echo_dataset_spec() -> TTSDatasetSpec:
+    """Return the Echo source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.DIFFUSION, {
+            "variants": (
+                _variant(
+                    "flow-batch",
+                    required=(
+                        "target_latents",
+                        "text_input_ids",
+                        "text_mask",
+                        "speaker_latents",
+                        "speaker_mask",
+                    ),
+                    description="Frozen-codec latents and aligned conditioning.",
+                    preprocessed=True,
+                ), ),
+        })
+
+
+def build_conversationtts_dataset_spec() -> TTSDatasetSpec:
+    """Return the ConversationTTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant(
+                    "raw-text-audio",
+                    one_of=(
+                        ("text", "texts"),
+                        ("audio", "audio_values"),
+                    ),
+                    at_most_one_of=(
+                        ("text", "texts"),
+                        ("audio", "audio_values"),
+                    ),
+                    forbidden=(
+                        "text_token_ids",
+                        "text_ids",
+                        "audio_codes",
+                        "codes",
+                    ),
+                    description="Text plus raw waveform for frozen-Mimi encoding.",
+                ),
+                _variant(
+                    "raw-text-code",
+                    one_of=(
+                        ("text", "texts"),
+                        ("audio_codes", "codes"),
+                    ),
+                    at_most_one_of=(
+                        ("text", "texts"),
+                        ("audio_codes", "codes"),
+                    ),
+                    forbidden=(
+                        "text_token_ids",
+                        "text_ids",
                         "audio",
-                        (
-                            "speech_sampling_rate",
-                            "sampling_rate",
-                            "sample_rate",
-                        ),
+                        "audio_values",
                     ),
-                    (
+                    preprocessed=True,
+                ),
+                _variant(
+                    "tokenized-text-audio",
+                    one_of=(
+                        ("text_token_ids", "text_ids"),
+                        ("audio", "audio_values"),
+                    ),
+                    at_most_one_of=(
+                        ("text_token_ids", "text_ids"),
+                        ("audio", "audio_values"),
+                    ),
+                    forbidden=("text", "texts", "audio_codes", "codes"),
+                    preprocessed=True,
+                ),
+                _variant(
+                    "tokenized-text-code",
+                    one_of=(
+                        ("text_token_ids", "text_ids"),
+                        ("audio_codes", "codes"),
+                    ),
+                    at_most_one_of=(
+                        ("text_token_ids", "text_ids"),
+                        ("audio_codes", "codes"),
+                    ),
+                    forbidden=("text", "texts", "audio", "audio_values"),
+                    preprocessed=True,
+                ),
+                _variant(
+                    "multi-codebook-batch",
+                    required=("tokens", "labels", "tokens_mask"),
+                    description="Aligned token/codebook tensors and validity mask.",
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_cosyvoice_dataset_spec() -> TTSDatasetSpec:
+    """Return the CosyVoice source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.HYBRID,
+        {
+            "sample_rate":
+            24_000,
+            "readiness":
+            TTSDataReadiness.INTEGRATED,
+            # An identity alias preserves the model-canonical path field instead
+            # of applying the shared ``audio_path`` -> ``audio`` spelling.
+            "field_aliases": (("audio_path", "audio_path"), ),
+            "variants": (
+                _variant(
+                    "llm-raw-audio",
+                    required=("text", ),
+                    one_of=((
+                        "speech_audio",
+                        "audio",
                         "waveform",
+                        "audio_path",
+                    ), ),
+                    at_most_one_of=((
+                        "speech_audio",
+                        "audio",
+                        "waveform",
+                        "audio_path",
+                    ), ),
+                    forbidden=("speech_tokens", ),
+                    requires_one_of=(
                         (
-                            "speech_sampling_rate",
-                            "sampling_rate",
-                            "sample_rate",
+                            "speech_audio",
+                            (
+                                "speech_sampling_rate",
+                                "sampling_rate",
+                                "sample_rate",
+                            ),
+                        ),
+                        (
+                            "audio",
+                            (
+                                "speech_sampling_rate",
+                                "sampling_rate",
+                                "sample_rate",
+                            ),
+                        ),
+                        (
+                            "waveform",
+                            (
+                                "speech_sampling_rate",
+                                "sampling_rate",
+                                "sample_rate",
+                            ),
                         ),
                     ),
+                    description=(
+                        "Text plus raw audio for the frozen native S3Tokenizer. "
+                        "Tensor-like audio declares its source rate; PCM WAVE "
+                        "paths use `audio_path` and carry their own rate."),
                 ),
-                description=(
-                    "Text plus raw audio for the frozen native S3Tokenizer. "
-                    "Tensor-like audio declares its source rate; PCM WAVE "
-                    "paths use `audio_path` and carry their own rate."),
-            ),
-            _variant(
-                "llm-record",
-                required=("text", "speech_tokens"),
-                forbidden=(
-                    "speech_audio",
-                    "audio",
-                    "waveform",
-                    "audio_path",
-                ),
-                description=(
-                    "Text plus precomputed speech tokens for the native "
-                    "CosyVoice language-model dataset."),
-                preprocessed=True,
-            ),
-        ),
-    },
-    "llasa": {
-        "sample_rate":
-        16_000,
-        "variants": (
-            _variant("raw-audio", required=("text", ), one_of=(("audio", "audio_codes"), )),
-            _ARCHITECTURE_SPECS[TTSDataArchitecture.CODEC_LM].variants[2],
-        ),
-    },
-    "f5tts": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant(
-                "waveform-vocab",
-                required=("input_values", "input_ids"),
-                description=(
-                    "Waveform values plus caller-supplied vocabulary IDs; "
-                    "sequence lengths are optional."),
-                preprocessed=True,
-            ),
-            _variant(
-                "mel-features",
-                required=("input_ids", ),
-                one_of=(("mel", "mel_spec"), ),
-                description=(
-                    "Prepared 100-bin mel features plus vocabulary IDs; "
-                    "sequence lengths are optional."),
-                preprocessed=True,
-            ),
-            _variant(
-                "native-ready",
-                required=("inp", "text"),
-                description="Native waveform/mel input and encoded text conditioning.",
-                preprocessed=True,
-            ),
-        ),
-    },
-    "gptsovits": {
-        "sample_rate":
-        32_000,
-        "variants": (
-            _variant(
-                "s1-preprocessed",
-                required=(
-                    "phoneme_ids",
-                    "semantic_ids",
-                    "bert_features",
-                ),
-                preprocessed=True,
-            ),
-            _variant(
-                "s2-preprocessed",
-                required=(
-                    "ssl_features",
-                    "spectrogram",
-                    "audio_values",
-                    "phoneme_ids",
-                ),
-                preprocessed=True,
-            ),
-            _variant(
-                "s2-pro-preprocessed",
-                required=(
-                    "ssl_features",
-                    "spectrogram",
-                    "audio_values",
-                    "phoneme_ids",
-                    "speaker_embedding",
-                ),
-                preprocessed=True,
-            ),
-        ),
-    },
-    "melotts": {
-        "sample_rate":
-        44_100,
-        "variants": (
-            _variant(
-                "explicit-features",
-                required=(
-                    "input_ids",
-                    "tone_ids",
-                    "language_ids",
-                    "bert_features",
-                    "ja_bert_features",
-                    "spectrogram",
-                    "audio_values",
-                    "speaker_id",
-                ),
-                description=(
-                    "Exact phone, tone, language, BERT, spectrogram, waveform, "
-                    "and speaker supervision consumed by the native collator."),
-                preprocessed=True,
-            ), ),
-    },
-    "openvoice": {
-        "sample_rate":
-        22_050,
-        "variants": (
-            _variant(
-                "paired-waveforms",
-                required=("source_audio", "target_audio"),
-                description=(
-                    "Linguistically paired source and target waveforms for "
-                    "the explicit reconstructed converter objective."),
-            ),
-            _variant(
-                "paired-waveform-aliases",
-                required=("audio", "target_waveform"),
-                description="Canonical source and target waveform aliases.",
-            ),
-        ),
-    },
-    "outetts": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant(
-                "v3-profile",
-                one_of=(("speaker_profile", "speaker", "profile"), ),
-                description=(
-                    "Aligned V3 speaker profile with word timestamps, DAC "
-                    "codebooks, and acoustic features."),
-                preprocessed=True,
-            ),
-            _variant(
-                "inline-v3-profile",
-                required=("text", "words", "global_features"),
-                preprocessed=True,
-            ),
-            _variant(
-                "tokenized",
-                required=("input_ids", "labels"),
-                preprocessed=True,
-            ),
-        ),
-    },
-    "parlertts": {
-        "sample_rate":
-        44_100,
-        "variants": (
-            _variant(
-                "waveform-teacher-forcing",
-                one_of=(
-                    ("description", "input_ids"),
-                    ("audio_values", "input_values"),
-                ),
-                at_most_one_of=(
-                    ("description", "input_ids"),
-                    ("audio_values", "input_values"),
-                ),
-                forbidden=("audio_codes", "labels"),
-                description=(
-                    "Description or prepared text IDs plus waveform tensors "
-                    "for frozen-DAC teacher forcing."),
-            ),
-            _variant(
-                "dac-codes",
-                required=("audio_codes", ),
-                one_of=(("description", "input_ids"), ),
-                at_most_one_of=(("description", "input_ids"), ),
-                forbidden=("audio_values", "input_values", "labels"),
-                preprocessed=True,
-            ),
-            _variant(
-                "delayed-labels",
-                required=("labels", ),
-                one_of=(("description", "input_ids"), ),
-                at_most_one_of=(("description", "input_ids"), ),
-                forbidden=("audio_values", "input_values", "audio_codes"),
-                preprocessed=True,
-            ),
-        ),
-    },
-    "mosstts": {
-        "variants": (
-            _variant(
-                "raw-audio",
-                required=("text", ),
-                one_of=(("audio", "waveform", "audio_path"), ),
-                at_most_one_of=(("audio", "waveform", "audio_path"), ),
-                forbidden=("speech_tokens", ),
-                description=(
-                    "Text plus waveform for the selected runtime's frozen "
-                    "codec; model sample rates vary by checkpoint family."),
-            ),
-            _variant(
-                "preencoded-rvq",
-                required=("text", "speech_tokens"),
-                forbidden=("audio", "waveform", "audio_path"),
-                preprocessed=True,
-            ),
-        ),
-    },
-    "qwen3tts": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant(
-                "single-speaker-sft",
-                required=("text", "audio_codes", "ref_audio"),
-                description="Precomputed 16-codebook targets and reference audio.",
-                preprocessed=True,
-            ),
-            _variant(
-                "model-ready",
-                required=(
-                    "input_ids",
-                    "codec_ids",
-                    "ref_mels",
-                    "text_embedding_mask",
-                    "codec_embedding_mask",
-                    "attention_mask",
-                    "codec_0_labels",
-                    "codec_mask",
-                ),
-                preprocessed=True,
-            ),
-        ),
-    },
-    "irodoritts": {
-        "sample_rate":
-        48_000,
-        "variants": (
-            _variant(
-                "raw-waveform",
-                required=("text", ),
-                one_of=(("waveform", "audio"), ),
-                at_most_one_of=(("waveform", "audio"), ),
-                forbidden=("target_latent", "latent"),
-                description="Text plus an in-memory target waveform.",
-            ),
-            _variant(
-                "preencoded-latent",
-                required=("text", ),
-                one_of=(("target_latent", "latent"), ),
-                at_most_one_of=(("target_latent", "latent"), ),
-                forbidden=("waveform", "audio"),
-                description="Text plus a precomputed codec target latent.",
-                preprocessed=True,
-            ),
-        ),
-    },
-    "zonos": {
-        "variants": (
-            _variant(
-                "codec-batch",
-                required=("prefix_conditioning", "audio_codes"),
-                description="Prefix conditioning and delayed DAC codebooks.",
-                preprocessed=True,
-            ), ),
-    },
-    "zonos2": {
-        "sample_rate":
-        44_100,
-        "variants": (
-            _variant(
-                "raw-audio",
-                one_of=(
-                    ("text", "texts"),
-                    ("audio", "audio_values"),
-                ),
-                at_most_one_of=(
-                    ("text", "texts"),
-                    ("audio", "audio_values"),
-                ),
-                forbidden=("audio_codes", "input_ids", "labels"),
-                description="Text plus waveform for frozen native DAC encoding.",
-            ),
-            _variant(
-                "cached-dac",
-                required=("audio_codes", ),
-                one_of=(("text", "texts"), ),
-                at_most_one_of=(("text", "texts"), ),
-                forbidden=("audio", "audio_values", "input_ids", "labels"),
-                description="Text plus undelayed cached DAC frames.",
-                preprocessed=True,
-            ),
-            _variant(
-                "model-ready",
-                required=("input_ids", "labels"),
-                forbidden=(
-                    "text",
-                    "texts",
-                    "audio",
-                    "audio_values",
-                    "audio_codes",
-                ),
-                preprocessed=True,
-            ),
-        ),
-    },
-    "voxcpm": {
-        "sample_rate":
-        16_000,
-        "variants": (
-            _variant(
-                "raw-waveform",
-                required=("text", ),
-                one_of=(("audio", "waveform"), ),
-                at_most_one_of=(("audio", "waveform"), ),
-                forbidden=("audio_features", ),
-                description="Text plus an in-memory 16 kHz target waveform.",
-            ),
-            _variant(
-                "audio-features",
-                required=("text", "audio_features"),
-                forbidden=("audio", "waveform"),
-                description="Text plus pre-encoded AudioVAE latent patches.",
-                preprocessed=True,
-            ),
-        ),
-    },
-    "omnivoice": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant(
-                "raw-audio",
-                required=("text", ),
-                one_of=(("audio", "waveform"), ),
-                at_most_one_of=(("audio", "waveform"), ),
-                forbidden=("audio_tokens", ),
-                description="Text plus raw 24 kHz audio for frozen-codec encoding.",
-            ),
-            _variant(
-                "audio-tokens",
-                required=("text", "audio_tokens"),
-                forbidden=("audio", "waveform"),
-                description="Text plus pre-encoded eight-codebook audio tokens.",
-                preprocessed=True,
-            ),
-        ),
-    },
-    "higgstts": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant(
-                "raw-audio",
-                required=("text", ),
-                one_of=(("audio", "target_audio"), ),
-                at_most_one_of=(
-                    ("audio", "target_audio"),
-                    ("reference_audio", "reference_codes"),
-                ),
-                forbidden=("audio_codes", ),
-                requires=(
-                    ("reference_audio", ("reference_text", )),
-                    ("reference_codes", ("reference_text", )),
-                ),
-                requires_one_of=(("reference_text", ("reference_audio", "reference_codes")), ),
-                description="Text plus raw target audio and optional aligned reference.",
-            ),
-            _variant(
-                "audio-codes",
-                required=("text", "audio_codes"),
-                at_most_one_of=(("reference_audio", "reference_codes"), ),
-                forbidden=("audio", "target_audio"),
-                requires=(
-                    ("reference_audio", ("reference_text", )),
-                    ("reference_codes", ("reference_text", )),
-                ),
-                requires_one_of=(("reference_text", ("reference_audio", "reference_codes")), ),
-                description="Text plus pre-encoded target and optional reference codes.",
-                preprocessed=True,
-            ),
-        ),
-    },
-    "xtts": {
-        "sample_rate":
-        22_050,
-        "variants": (
-            _variant(
-                "native-gpt-tokens",
-                required=(
-                    "text_inputs",
-                    "text_lengths",
-                    "audio_codes",
-                    "wav_lengths",
-                ),
-                one_of=(("cond_mels", "cond_latents"), ),
-                description=(
-                    "Precomputed native XTTS GPT inputs; this remains the "
-                    "zero-DVAE-overhead training path."),
-                preprocessed=True,
-            ),
-            _variant(
-                "native-gpt-waveform",
-                required=(
-                    "text_inputs",
-                    "text_lengths",
-                ),
-                one_of=(
-                    ("wav", "audio_values"),
-                    ("cond_mels", "cond_latents"),
-                ),
-                at_most_one_of=(("wav", "audio_values"), ),
-                forbidden=("audio_codes", ),
-                description=(
-                    "Tokenized text and conditioning plus waveform audio; "
-                    "the separately loaded native frozen DVAE produces targets."),
-                preprocessed=True,
-            ),
-        ),
-    },
-    "vibevoice": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant(
-                "lm-diffusion-batch",
-                required=(
-                    "input_ids",
-                    "attention_mask",
-                    "speech_tensors",
-                    "speech_masks",
-                    "speeches_loss_input",
-                    "speech_semantic_tensors",
-                    "acoustic_input_mask",
-                    "acoustic_loss_mask",
-                ),
-                preprocessed=True,
-            ), ),
-    },
-    "fishtts": {
-        "sample_rate":
-        44_100,
-        "variants": (
-            _variant(
-                "semantic-tokens",
-                required=("labels", ),
-                one_of=(("tokens", "inputs"), ),
-                description="Offline semantic-codec tokens and labels.",
-                preprocessed=True,
-            ), ),
-    },
-    "csm": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant("conversation", one_of=(("conversation", "messages"), )),
-            _variant(
-                "grouped-audios",
-                required=("texts", "speaker_ids", "audios"),
-            ),
-            _variant(
-                "grouped-concatenated",
-                required=(
-                    "texts",
-                    "speaker_ids",
-                    "audio",
-                    "audio_cut_idxs",
+                _variant(
+                    "llm-record",
+                    required=("text", "speech_tokens"),
+                    forbidden=(
+                        "speech_audio",
+                        "audio",
+                        "waveform",
+                        "audio_path",
+                    ),
+                    description=(
+                        "Text plus precomputed speech tokens for the native "
+                        "CosyVoice language-model dataset."),
+                    preprocessed=True,
                 ),
             ),
-            _variant("utterance", required=("text", "audio")),
-            _ARCHITECTURE_SPECS[TTSDataArchitecture.CODEC_LM].variants[2],
-        ),
-    },
-    "neutts": {
-        "variants": (
-            _variant("raw-audio", required=("text", ), one_of=(("audio", "audio_codes"), )),
-            _ARCHITECTURE_SPECS[TTSDataArchitecture.CODEC_LM].variants[2],
-        ),
-    },
-    "speecht5": {
-        "sample_rate":
-        16_000,
-        "variants": (
-            _variant("raw-audio", required=("text", "audio")),
-            _ARCHITECTURE_SPECS[TTSDataArchitecture.SEQUENCE_TO_SEQUENCE].variants[1],
-        ),
-    },
-    "styletts2": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant(
-                "explicit-features",
-                required=(
-                    "input_ids",
-                    "alignments",
-                    "normalized_mel",
-                    "reference_mel",
-                    "f0_targets",
-                    "noise_targets",
-                    "audio_values",
+        })
+
+
+def build_llasa_dataset_spec() -> TTSDatasetSpec:
+    """Return the LLaSA source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "sample_rate":
+            16_000,
+            "variants": (
+                _variant("raw-audio", required=("text", ), one_of=(("audio", "audio_codes"), )),
+                _ARCHITECTURE_SPECS[TTSDataArchitecture.CODEC_LM].variants[2],
+            ),
+        })
+
+
+def build_f5tts_dataset_spec() -> TTSDatasetSpec:
+    """Return the F5-TTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.DIFFUSION, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant(
+                    "waveform-vocab",
+                    required=("input_values", "input_ids"),
+                    description=(
+                        "Waveform values plus caller-supplied vocabulary IDs; "
+                        "sequence lengths are optional."),
+                    preprocessed=True,
                 ),
-                description=(
-                    "Exact phoneme, monotonic-alignment, mel, prosody, noise, "
-                    "and waveform supervision consumed by the native collator."),
-                preprocessed=True,
-            ), ),
-    },
-    "supertonic": {
-        "sample_rate":
-        44_100,
-        "variants": (
-            _variant(
-                "text-style-object",
-                required=("text", "style"),
-                one_of=((
-                    "target_duration",
-                    "duration",
-                    "duration_seconds",
-                    "target_latent",
-                    "latent",
-                    "latents",
+                _variant(
+                    "mel-features",
+                    required=("input_ids", ),
+                    one_of=(("mel", "mel_spec"), ),
+                    description=(
+                        "Prepared 100-bin mel features plus vocabulary IDs; "
+                        "sequence lengths are optional."),
+                    preprocessed=True,
+                ),
+                _variant(
+                    "native-ready",
+                    required=("inp", "text"),
+                    description="Native waveform/mel input and encoded text conditioning.",
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_gptsovits_dataset_spec() -> TTSDatasetSpec:
+    """Return the GPT-SoVITS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.HYBRID, {
+            "sample_rate":
+            32_000,
+            "variants": (
+                _variant(
+                    "s1-preprocessed",
+                    required=(
+                        "phoneme_ids",
+                        "semantic_ids",
+                        "bert_features",
+                    ),
+                    preprocessed=True,
+                ),
+                _variant(
+                    "s2-preprocessed",
+                    required=(
+                        "ssl_features",
+                        "spectrogram",
+                        "audio_values",
+                        "phoneme_ids",
+                    ),
+                    preprocessed=True,
+                ),
+                _variant(
+                    "s2-pro-preprocessed",
+                    required=(
+                        "ssl_features",
+                        "spectrogram",
+                        "audio_values",
+                        "phoneme_ids",
+                        "speaker_embedding",
+                    ),
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_melotts_dataset_spec() -> TTSDatasetSpec:
+    """Return the MeloTTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.VITS, {
+            "sample_rate":
+            44_100,
+            "variants": (
+                _variant(
+                    "explicit-features",
+                    required=(
+                        "input_ids",
+                        "tone_ids",
+                        "language_ids",
+                        "bert_features",
+                        "ja_bert_features",
+                        "spectrogram",
+                        "audio_values",
+                        "speaker_id",
+                    ),
+                    description=(
+                        "Exact phone, tone, language, BERT, spectrogram, waveform, "
+                        "and speaker supervision consumed by the native collator."),
+                    preprocessed=True,
                 ), ),
-                preprocessed=True,
+        })
+
+
+def build_openvoice_dataset_spec() -> TTSDatasetSpec:
+    """Return the OpenVoice source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.VITS, {
+            "sample_rate":
+            22_050,
+            "variants": (
+                _variant(
+                    "paired-waveforms",
+                    required=("source_audio", "target_audio"),
+                    description=(
+                        "Linguistically paired source and target waveforms for "
+                        "the explicit reconstructed converter objective."),
+                ),
+                _variant(
+                    "paired-waveform-aliases",
+                    required=("audio", "target_waveform"),
+                    description="Canonical source and target waveform aliases.",
+                ),
             ),
-            _variant(
-                "text-style-tensors",
-                required=("text", "style_ttl", "style_dp"),
-                one_of=((
-                    "target_duration",
-                    "duration",
-                    "duration_seconds",
-                    "target_latent",
-                    "latent",
-                    "latents",
+        })
+
+
+def build_outetts_dataset_spec() -> TTSDatasetSpec:
+    """Return the OuteTTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant(
+                    "v3-profile",
+                    one_of=(("speaker_profile", "speaker", "profile"), ),
+                    description=(
+                        "Aligned V3 speaker profile with word timestamps, DAC "
+                        "codebooks, and acoustic features."),
+                    preprocessed=True,
+                ),
+                _variant(
+                    "inline-v3-profile",
+                    required=("text", "words", "global_features"),
+                    preprocessed=True,
+                ),
+                _variant(
+                    "tokenized",
+                    required=("input_ids", "labels"),
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_parlertts_dataset_spec() -> TTSDatasetSpec:
+    """Return the Parler-TTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.SEQUENCE_TO_SEQUENCE, {
+            "sample_rate":
+            44_100,
+            "variants": (
+                _variant(
+                    "waveform-teacher-forcing",
+                    one_of=(
+                        ("description", "input_ids"),
+                        ("audio_values", "input_values"),
+                    ),
+                    at_most_one_of=(
+                        ("description", "input_ids"),
+                        ("audio_values", "input_values"),
+                    ),
+                    forbidden=("audio_codes", "labels"),
+                    description=(
+                        "Description or prepared text IDs plus waveform tensors "
+                        "for frozen-DAC teacher forcing."),
+                ),
+                _variant(
+                    "dac-codes",
+                    required=("audio_codes", ),
+                    one_of=(("description", "input_ids"), ),
+                    at_most_one_of=(("description", "input_ids"), ),
+                    forbidden=("audio_values", "input_values", "labels"),
+                    preprocessed=True,
+                ),
+                _variant(
+                    "delayed-labels",
+                    required=("labels", ),
+                    one_of=(("description", "input_ids"), ),
+                    at_most_one_of=(("description", "input_ids"), ),
+                    forbidden=("audio_values", "input_values", "audio_codes"),
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_mosstts_dataset_spec() -> TTSDatasetSpec:
+    """Return the MossTTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "variants": (
+                _variant(
+                    "raw-audio",
+                    required=("text", ),
+                    one_of=(("audio", "waveform", "audio_path"), ),
+                    at_most_one_of=(("audio", "waveform", "audio_path"), ),
+                    forbidden=("speech_tokens", ),
+                    description=(
+                        "Text plus waveform for the selected runtime's frozen "
+                        "codec; model sample rates vary by checkpoint family."),
+                ),
+                _variant(
+                    "preencoded-rvq",
+                    required=("text", "speech_tokens"),
+                    forbidden=("audio", "waveform", "audio_path"),
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_qwen3tts_dataset_spec() -> TTSDatasetSpec:
+    """Return the Qwen3-TTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "sample_rate":
+            24_000,
+            "field_aliases": (
+                ("reference_audio", "ref_audio"),
+                ("reference_audio_path", "ref_audio"),
+                ("speaker_audio", "ref_audio"),
+            ),
+            "variants": (
+                _variant(
+                    "single-speaker-sft",
+                    required=("text", "audio_codes", "ref_audio"),
+                    description="Precomputed 16-codebook targets and reference audio.",
+                    preprocessed=True,
+                ),
+                _variant(
+                    "model-ready",
+                    required=(
+                        "input_ids",
+                        "codec_ids",
+                        "ref_mels",
+                        "text_embedding_mask",
+                        "codec_embedding_mask",
+                        "attention_mask",
+                        "codec_0_labels",
+                        "codec_mask",
+                    ),
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_irodoritts_dataset_spec() -> TTSDatasetSpec:
+    """Return the IrodoriTTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.DIFFUSION, {
+            "sample_rate":
+            48_000,
+            "variants": (
+                _variant(
+                    "raw-waveform",
+                    required=("text", ),
+                    one_of=(("waveform", "audio"), ),
+                    at_most_one_of=(("waveform", "audio"), ),
+                    forbidden=("target_latent", "latent"),
+                    description="Text plus an in-memory target waveform.",
+                ),
+                _variant(
+                    "preencoded-latent",
+                    required=("text", ),
+                    one_of=(("target_latent", "latent"), ),
+                    at_most_one_of=(("target_latent", "latent"), ),
+                    forbidden=("waveform", "audio"),
+                    description="Text plus a precomputed codec target latent.",
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_zonos_dataset_spec() -> TTSDatasetSpec:
+    """Return the Zonos source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "variants": (
+                _variant(
+                    "codec-batch",
+                    required=("prefix_conditioning", "audio_codes"),
+                    description="Prefix conditioning and delayed DAC codebooks.",
+                    preprocessed=True,
                 ), ),
-                preprocessed=True,
+        })
+
+
+def build_zonos2_dataset_spec() -> TTSDatasetSpec:
+    """Return the Zonos2 source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "sample_rate":
+            44_100,
+            "variants": (
+                _variant(
+                    "raw-audio",
+                    one_of=(
+                        ("text", "texts"),
+                        ("audio", "audio_values"),
+                    ),
+                    at_most_one_of=(
+                        ("text", "texts"),
+                        ("audio", "audio_values"),
+                    ),
+                    forbidden=("audio_codes", "input_ids", "labels"),
+                    description="Text plus waveform for frozen native DAC encoding.",
+                ),
+                _variant(
+                    "cached-dac",
+                    required=("audio_codes", ),
+                    one_of=(("text", "texts"), ),
+                    at_most_one_of=(("text", "texts"), ),
+                    forbidden=("audio", "audio_values", "input_ids", "labels"),
+                    description="Text plus undelayed cached DAC frames.",
+                    preprocessed=True,
+                ),
+                _variant(
+                    "model-ready",
+                    required=("input_ids", "labels"),
+                    forbidden=(
+                        "text",
+                        "texts",
+                        "audio",
+                        "audio_values",
+                        "audio_codes",
+                    ),
+                    preprocessed=True,
+                ),
             ),
-            _variant(
-                "tokenized-style-object",
-                required=("text_ids", "style"),
-                one_of=(
-                    ("text_mask", "text_lengths"),
-                    (
+        })
+
+
+def build_voxcpm_dataset_spec() -> TTSDatasetSpec:
+    """Return the VoxCPM source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.DIFFUSION, {
+            "sample_rate":
+            16_000,
+            "variants": (
+                _variant(
+                    "raw-waveform",
+                    required=("text", ),
+                    one_of=(("audio", "waveform"), ),
+                    at_most_one_of=(("audio", "waveform"), ),
+                    forbidden=("audio_features", ),
+                    description="Text plus an in-memory 16 kHz target waveform.",
+                ),
+                _variant(
+                    "audio-features",
+                    required=("text", "audio_features"),
+                    forbidden=("audio", "waveform"),
+                    description="Text plus pre-encoded AudioVAE latent patches.",
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_omnivoice_dataset_spec() -> TTSDatasetSpec:
+    """Return the OmniVoice source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.HYBRID, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant(
+                    "raw-audio",
+                    required=("text", ),
+                    one_of=(("audio", "waveform"), ),
+                    at_most_one_of=(("audio", "waveform"), ),
+                    forbidden=("audio_tokens", ),
+                    description="Text plus raw 24 kHz audio for frozen-codec encoding.",
+                ),
+                _variant(
+                    "audio-tokens",
+                    required=("text", "audio_tokens"),
+                    forbidden=("audio", "waveform"),
+                    description="Text plus pre-encoded eight-codebook audio tokens.",
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_higgstts_dataset_spec() -> TTSDatasetSpec:
+    """Return the Higgs Audio source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant(
+                    "raw-audio",
+                    required=("text", ),
+                    one_of=(("audio", "target_audio"), ),
+                    at_most_one_of=(
+                        ("audio", "target_audio"),
+                        ("reference_audio", "reference_codes"),
+                    ),
+                    forbidden=("audio_codes", ),
+                    requires=(
+                        ("reference_audio", ("reference_text", )),
+                        ("reference_codes", ("reference_text", )),
+                    ),
+                    requires_one_of=(("reference_text", ("reference_audio", "reference_codes")), ),
+                    description="Text plus raw target audio and optional aligned reference.",
+                ),
+                _variant(
+                    "audio-codes",
+                    required=("text", "audio_codes"),
+                    at_most_one_of=(("reference_audio", "reference_codes"), ),
+                    forbidden=("audio", "target_audio"),
+                    requires=(
+                        ("reference_audio", ("reference_text", )),
+                        ("reference_codes", ("reference_text", )),
+                    ),
+                    requires_one_of=(("reference_text", ("reference_audio", "reference_codes")), ),
+                    description="Text plus pre-encoded target and optional reference codes.",
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_xtts_dataset_spec() -> TTSDatasetSpec:
+    """Return the XTTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.HYBRID, {
+            "sample_rate":
+            22_050,
+            "variants": (
+                _variant(
+                    "native-gpt-tokens",
+                    required=(
+                        "text_inputs",
+                        "text_lengths",
+                        "audio_codes",
+                        "wav_lengths",
+                    ),
+                    one_of=(("cond_mels", "cond_latents"), ),
+                    description=(
+                        "Precomputed native XTTS GPT inputs; this remains the "
+                        "zero-DVAE-overhead training path."),
+                    preprocessed=True,
+                ),
+                _variant(
+                    "native-gpt-waveform",
+                    required=(
+                        "text_inputs",
+                        "text_lengths",
+                    ),
+                    one_of=(
+                        ("wav", "audio_values"),
+                        ("cond_mels", "cond_latents"),
+                    ),
+                    at_most_one_of=(("wav", "audio_values"), ),
+                    forbidden=("audio_codes", ),
+                    description=(
+                        "Tokenized text and conditioning plus waveform audio; "
+                        "the separately loaded native frozen DVAE produces targets."),
+                    preprocessed=True,
+                ),
+            ),
+        })
+
+
+def build_vibevoice_dataset_spec() -> TTSDatasetSpec:
+    """Return the VibeVoice TTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.HYBRID, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant(
+                    "lm-diffusion-batch",
+                    required=(
+                        "input_ids",
+                        "attention_mask",
+                        "speech_tensors",
+                        "speech_masks",
+                        "speeches_loss_input",
+                        "speech_semantic_tensors",
+                        "acoustic_input_mask",
+                        "acoustic_loss_mask",
+                    ),
+                    preprocessed=True,
+                ), ),
+        })
+
+
+def build_fishtts_dataset_spec() -> TTSDatasetSpec:
+    """Return the Fish Speech source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "sample_rate":
+            44_100,
+            "variants": (
+                _variant(
+                    "semantic-tokens",
+                    required=("labels", ),
+                    one_of=(("tokens", "inputs"), ),
+                    description="Offline semantic-codec tokens and labels.",
+                    preprocessed=True,
+                ), ),
+        })
+
+
+def build_csm_dataset_spec() -> TTSDatasetSpec:
+    """Return the CSM source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant("conversation", one_of=(("conversation", "messages"), )),
+                _variant(
+                    "grouped-audios",
+                    required=("texts", "speaker_ids", "audios"),
+                ),
+                _variant(
+                    "grouped-concatenated",
+                    required=(
+                        "texts",
+                        "speaker_ids",
+                        "audio",
+                        "audio_cut_idxs",
+                    ),
+                ),
+                _variant("utterance", required=("text", "audio")),
+                _ARCHITECTURE_SPECS[TTSDataArchitecture.CODEC_LM].variants[2],
+            ),
+        })
+
+
+def build_neutts_dataset_spec() -> TTSDatasetSpec:
+    """Return the NeuTTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.CODEC_LM, {
+            "variants": (
+                _variant("raw-audio", required=("text", ), one_of=(("audio", "audio_codes"), )),
+                _ARCHITECTURE_SPECS[TTSDataArchitecture.CODEC_LM].variants[2],
+            ),
+        })
+
+
+def build_speecht5_dataset_spec() -> TTSDatasetSpec:
+    """Return the SpeechT5 source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.SEQUENCE_TO_SEQUENCE, {
+            "sample_rate":
+            16_000,
+            "variants": (
+                _variant("raw-audio", required=("text", "audio")),
+                _ARCHITECTURE_SPECS[TTSDataArchitecture.SEQUENCE_TO_SEQUENCE].variants[1],
+            ),
+        })
+
+
+def build_styletts2_dataset_spec() -> TTSDatasetSpec:
+    """Return the StyleTTS2 source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.VITS, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant(
+                    "explicit-features",
+                    required=(
+                        "input_ids",
+                        "alignments",
+                        "normalized_mel",
+                        "reference_mel",
+                        "f0_targets",
+                        "noise_targets",
+                        "audio_values",
+                    ),
+                    description=(
+                        "Exact phoneme, monotonic-alignment, mel, prosody, noise, "
+                        "and waveform supervision consumed by the native collator."),
+                    preprocessed=True,
+                ), ),
+        })
+
+
+def build_supertonic_dataset_spec() -> TTSDatasetSpec:
+    """Return the Supertonic source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.DIFFUSION, {
+            "sample_rate":
+            44_100,
+            "variants": (
+                _variant(
+                    "text-style-object",
+                    required=("text", "style"),
+                    one_of=((
                         "target_duration",
                         "duration",
                         "duration_seconds",
                         "target_latent",
                         "latent",
                         "latents",
-                    ),
+                    ), ),
+                    preprocessed=True,
                 ),
-                preprocessed=True,
-            ),
-            _variant(
-                "tokenized-style-tensors",
-                required=("text_ids", "style_ttl", "style_dp"),
-                one_of=(
-                    ("text_mask", "text_lengths"),
-                    (
+                _variant(
+                    "text-style-tensors",
+                    required=("text", "style_ttl", "style_dp"),
+                    one_of=((
                         "target_duration",
                         "duration",
                         "duration_seconds",
                         "target_latent",
                         "latent",
                         "latents",
+                    ), ),
+                    preprocessed=True,
+                ),
+                _variant(
+                    "tokenized-style-object",
+                    required=("text_ids", "style"),
+                    one_of=(
+                        ("text_mask", "text_lengths"),
+                        (
+                            "target_duration",
+                            "duration",
+                            "duration_seconds",
+                            "target_latent",
+                            "latent",
+                            "latents",
+                        ),
                     ),
+                    preprocessed=True,
                 ),
-                preprocessed=True,
-            ),
-        ),
-    },
-    "inflecttts": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant(
-                "explicit-features",
-                required=("input_ids", "spectrogram", "audio_values"),
-                description=(
-                    "Checkpoint-compatible phoneme IDs, 513-bin magnitude "
-                    "spectrogram, and aligned waveform."),
-                preprocessed=True,
-            ), ),
-    },
-    "bark": {
-        "sample_rate":
-        24_000,
-        "variants": (
-            _variant(
-                "causal-stage",
-                required=("input_ids", "labels", "training_phase"),
-                description="Prepared semantic- or coarse-stage tokens.",
-                preprocessed=True,
-            ),
-            _variant(
-                "fine-stage",
-                required=(
-                    "input_ids",
-                    "labels",
-                    "codebook_idx",
-                    "training_phase",
+                _variant(
+                    "tokenized-style-tensors",
+                    required=("text_ids", "style_ttl", "style_dp"),
+                    one_of=(
+                        ("text_mask", "text_lengths"),
+                        (
+                            "target_duration",
+                            "duration",
+                            "duration_seconds",
+                            "target_latent",
+                            "latent",
+                            "latents",
+                        ),
+                    ),
+                    preprocessed=True,
                 ),
-                description="Prepared fine-stage codec tokens.",
-                preprocessed=True,
             ),
-            _variant(
-                "all-stages",
-                required=(
-                    "semantic_input_ids",
-                    "semantic_labels",
-                    "coarse_input_ids",
-                    "coarse_labels",
-                    "fine_input_ids",
-                    "fine_labels",
-                    "codebook_idx",
+        })
+
+
+def build_inflecttts_dataset_spec() -> TTSDatasetSpec:
+    """Return the InflectTTS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.VITS, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant(
+                    "explicit-features",
+                    required=("input_ids", "spectrogram", "audio_values"),
+                    description=(
+                        "Checkpoint-compatible phoneme IDs, 513-bin magnitude "
+                        "spectrogram, and aligned waveform."),
+                    preprocessed=True,
+                ), ),
+        })
+
+
+def build_bark_dataset_spec() -> TTSDatasetSpec:
+    """Return the Bark source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.HYBRID, {
+            "sample_rate":
+            24_000,
+            "variants": (
+                _variant(
+                    "causal-stage",
+                    required=("input_ids", "labels", "training_phase"),
+                    description="Prepared semantic- or coarse-stage tokens.",
+                    preprocessed=True,
                 ),
-                description="One batch carrying prefixed inputs for all Bark phases.",
-                preprocessed=True,
-            ),
-        ),
-    },
-    "vits": {
-        "variants": (
-            _variant(
-                "raw-adversarial",
-                required=("text", ),
-                one_of=(("audio", "audio_values"), ),
-                description=(
-                    "Raw text/waveform training requires "
-                    "enable_native_adversarial_training=True and an explicit "
-                    "training_acoustic_config."),
-            ),
-            _variant(
-                "tokenized-raw-adversarial",
-                required=("input_ids", ),
-                one_of=(("audio", "audio_values"), ),
-                description=(
-                    "Tokenized raw-waveform training requires "
-                    "enable_native_adversarial_training=True and an explicit "
-                    "training_acoustic_config."),
-            ),
-            _variant(
-                "precomputed-spectrogram",
-                required=("spectrogram", ),
-                one_of=(
-                    ("text", "input_ids"),
-                    ("audio", "audio_values"),
+                _variant(
+                    "fine-stage",
+                    required=(
+                        "input_ids",
+                        "labels",
+                        "codebook_idx",
+                        "training_phase",
+                    ),
+                    description="Prepared fine-stage codec tokens.",
+                    preprocessed=True,
                 ),
-                description="Generator warm-start with an explicit spectrogram.",
-                preprocessed=True,
+                _variant(
+                    "all-stages",
+                    required=(
+                        "semantic_input_ids",
+                        "semantic_labels",
+                        "coarse_input_ids",
+                        "coarse_labels",
+                        "fine_input_ids",
+                        "fine_labels",
+                        "codebook_idx",
+                    ),
+                    description="One batch carrying prefixed inputs for all Bark phases.",
+                    preprocessed=True,
+                ),
             ),
-        ),
-    },
-})
+        })
+
+
+def build_vits_dataset_spec() -> TTSDatasetSpec:
+    """Return the VITS source-data contract."""
+    return _model_spec(
+        TTSDataArchitecture.VITS, {
+            "variants": (
+                _variant(
+                    "raw-adversarial",
+                    required=("text", ),
+                    one_of=(("audio", "audio_values"), ),
+                    description=(
+                        "Raw text/waveform training requires "
+                        "enable_native_adversarial_training=True and an explicit "
+                        "training_acoustic_config."),
+                ),
+                _variant(
+                    "tokenized-raw-adversarial",
+                    required=("input_ids", ),
+                    one_of=(("audio", "audio_values"), ),
+                    description=(
+                        "Tokenized raw-waveform training requires "
+                        "enable_native_adversarial_training=True and an explicit "
+                        "training_acoustic_config."),
+                ),
+                _variant(
+                    "precomputed-spectrogram",
+                    required=("spectrogram", ),
+                    one_of=(
+                        ("text", "input_ids"),
+                        ("audio", "audio_values"),
+                    ),
+                    description="Generator warm-start with an explicit spectrogram.",
+                    preprocessed=True,
+                ),
+            ),
+        })
+
 
 _TRAINING_FAMILY_TO_DATA_ARCHITECTURE = MappingProxyType({
     "causal-lm": TTSDataArchitecture.CODEC_LM,
@@ -1400,6 +1621,37 @@ _TRAINING_FAMILY_TO_DATA_ARCHITECTURE = MappingProxyType({
 })
 
 
+def _load_model_dataset_spec(training_spec: Any) -> TTSDatasetSpec | None:
+    factory_path = training_spec.dataset_spec_factory
+    if factory_path is None:
+        return None
+    try:
+        factory = resolve_import_path(factory_path)
+    except (AttributeError, ImportError) as exc:
+        raise ImportError(
+            f"Could not resolve TTS dataset spec factory {factory_path!r} "
+            f"for {training_spec.model_type!r}.") from exc
+    if not callable(factory):
+        raise TypeError(
+            f"TTS dataset spec factory {factory_path!r} for "
+            f"{training_spec.model_type!r} must be callable.")
+    spec = factory()
+    if not isinstance(spec, TTSDatasetSpec):
+        raise TypeError(
+            f"TTS dataset spec factory {factory_path!r} for "
+            f"{training_spec.model_type!r} returned {type(spec).__name__}; "
+            "expected TTSDatasetSpec.")
+    if spec.model_type not in (None, training_spec.model_type):
+        raise ValueError(
+            f"TTS dataset spec factory {factory_path!r} returned a contract for "
+            f"{spec.model_type!r}, not {training_spec.model_type!r}.")
+    if spec.training_support not in (None, training_spec.support.value):
+        raise ValueError(
+            f"TTS dataset spec factory {factory_path!r} declares training support "
+            f"{spec.training_support!r}, not {training_spec.support.value!r}.")
+    return spec
+
+
 def get_tts_dataset_spec(
     model_type: str | None = None,
     *,
@@ -1408,6 +1660,7 @@ def get_tts_dataset_spec(
     """Return the inspectable dataset contract for a model or architecture."""
     canonical_model_type = None
     training_support = None
+    model_spec = None
     if model_type is not None:
         if not isinstance(model_type, str) or not model_type.strip():
             raise ValueError("model_type must be a non-empty string or None.")
@@ -1419,12 +1672,16 @@ def get_tts_dataset_spec(
         if training_spec.task.value != "text-to-speech":
             raise ValueError(
                 f"{canonical_model_type!r} is registered for {training_spec.task.value}, not TTS.")
-        try:
-            resolved_architecture = _TRAINING_FAMILY_TO_DATA_ARCHITECTURE[training_spec.family_name]
-        except KeyError as exc:
-            raise ValueError(
-                f"TTS training family {training_spec.family_name!r} has no "
-                "registered source-data architecture.") from exc
+        model_spec = _load_model_dataset_spec(training_spec)
+        if model_spec is not None:
+            resolved_architecture = model_spec.architecture
+        else:
+            try:
+                resolved_architecture = _TRAINING_FAMILY_TO_DATA_ARCHITECTURE[training_spec.family_name]
+            except KeyError as exc:
+                raise ValueError(
+                    f"TTS training family {training_spec.family_name!r} has no "
+                    "registered source-data architecture.") from exc
         if architecture is not None and TTSDataArchitecture.coerce(architecture) is not resolved_architecture:
             raise ValueError(
                 f"{canonical_model_type!r} uses {resolved_architecture.value!r} "
@@ -1434,32 +1691,26 @@ def get_tts_dataset_spec(
     else:
         resolved_architecture = TTSDataArchitecture.coerce(architecture)
 
-    base = _ARCHITECTURE_SPECS[resolved_architecture]
-    override = _MODEL_DATA_OVERRIDES.get(canonical_model_type or "", {})
+    base = model_spec or _ARCHITECTURE_SPECS[resolved_architecture]
     if canonical_model_type is None:
         variants = base.variants
         readiness = None
     else:
-        variants = tuple(override.get(
-            "variants",
-            base.preprocessed_variants,
-        ))
+        variants = base.variants if model_spec is not None else base.preprocessed_variants
         if training_support == "inference-only":
             readiness = TTSDataReadiness.UNAVAILABLE
-        elif "readiness" in override:
-            readiness = TTSDataReadiness.coerce(override["readiness"])
+        elif base.readiness is not None:
+            readiness = base.readiness
         elif any(not variant.preprocessed for variant in variants):
             readiness = TTSDataReadiness.INTEGRATED
         elif training_support == "custom":
             readiness = TTSDataReadiness.CUSTOM
         else:
             readiness = TTSDataReadiness.PREPROCESSED
-    return TTSDatasetSpec(
-        architecture=resolved_architecture,
+    return replace(
+        base,
         variants=variants,
         model_type=canonical_model_type,
-        sample_rate=override.get("sample_rate", base.sample_rate),
-        description=str(override.get("description", base.description)),
         readiness=readiness,
         training_support=training_support,
     )

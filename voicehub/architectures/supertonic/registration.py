@@ -64,6 +64,7 @@ def create_supertonic_architecture_spec() -> ArchitectureSpec:
             ),
             features=(
                 "diffusion-family",
+                "diffusion-serving-native",
                 "diffusion-kind-flow-matching",
                 "diffusion-operation-denoiser",
                 "diffusion-operation-iterative-estimator",

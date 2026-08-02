@@ -99,36 +99,25 @@ class TorchCompileInferenceStrategy(InferenceStrategy):
         )
 
         context = self._runtime_context(None, wrapper)
-        architecture = (
-            None
-            if context.architecture is None else
-            get_architecture_spec(context.architecture)
-        )
+        architecture = (None if context.architecture is None else get_architecture_spec(context.architecture))
         architecture_issue = torch_compile_architecture_incompatibility(
             self.config,
             architecture,
             mode=context.mode,
         )
-        if (
-                architecture_issue is not None
-                and self.config.requirement is TorchCompileRequirement.REQUIRED
-        ):
+        if (architecture_issue is not None and self.config.requirement is TorchCompileRequirement.REQUIRED):
             raise OptimizationCompatibilityError(architecture_issue)
 
         report = inspect_torch_compile(self.config.backend)
-        if (
-            not report.available
-            and self.config.requirement is TorchCompileRequirement.REQUIRED
-        ):
+        if (not report.available and self.config.requirement is TorchCompileRequirement.REQUIRED):
             raise TorchCompileUnavailableError(
                 "Required torch.compile inference is unavailable: "
                 f"{report.reason or 'unknown compiler error'}")
 
         requested_device = str(getattr(wrapper, "device", "cpu")).partition(":")[0]
         if requested_device == "mps":
-            raise ValueError(
-                "TorchCompileInferenceStrategy supports CPU and CUDA runtimes, "
-                "not MPS.")
+            raise ValueError("TorchCompileInferenceStrategy supports CPU and CUDA runtimes, "
+                             "not MPS.")
 
     @staticmethod
     def _runtime_context(model: Any, wrapper: Any):
@@ -218,9 +207,7 @@ _BUILTIN_INFERENCE_STRATEGIES: dict[str, InferenceStrategyFactory] = {
     _BUILTIN_STRATEGY_NAME: EagerInferenceStrategy,
     TorchCompileInferenceStrategy.name: TorchCompileInferenceStrategy,
 }
-_INFERENCE_STRATEGIES: dict[str, InferenceStrategyFactory] = dict(
-    _BUILTIN_INFERENCE_STRATEGIES,
-)
+_INFERENCE_STRATEGIES: dict[str, InferenceStrategyFactory] = dict(_BUILTIN_INFERENCE_STRATEGIES, )
 _REGISTRY_LOCK = RLock()
 
 
@@ -244,7 +231,8 @@ def register_inference_strategy(
     Factories are called only when :func:`get_inference_strategy`
     resolves the strategy, allowing implementations to import optional
     runtimes lazily. ``exist_ok=True`` intentionally replaces an
-    existing custom registration. Built-in strategies cannot be replaced.
+    existing custom registration. Built-in strategies cannot be
+    replaced.
     """
     normalized = _normalize_strategy_name(name)
     if not callable(factory):
@@ -256,8 +244,7 @@ def register_inference_strategy(
         if normalized in _BUILTIN_INFERENCE_STRATEGIES:
             if exist_ok and factory is _BUILTIN_INFERENCE_STRATEGIES[normalized]:
                 return
-            raise ValueError(
-                f"The built-in {normalized!r} strategy cannot be replaced.")
+            raise ValueError(f"The built-in {normalized!r} strategy cannot be replaced.")
         if normalized in _INFERENCE_STRATEGIES and not exist_ok:
             raise ValueError(f"An inference strategy named {normalized!r} is already registered.")
         _INFERENCE_STRATEGIES[normalized] = factory
@@ -270,8 +257,7 @@ def unregister_inference_strategy(name: str) -> None:
     """
     normalized = _normalize_strategy_name(name)
     if normalized in _BUILTIN_INFERENCE_STRATEGIES:
-        raise ValueError(
-            f"The built-in {normalized!r} strategy cannot be unregistered.")
+        raise ValueError(f"The built-in {normalized!r} strategy cannot be unregistered.")
 
     with _REGISTRY_LOCK:
         try:

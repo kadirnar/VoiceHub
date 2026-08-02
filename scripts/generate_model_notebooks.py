@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
 
@@ -53,11 +54,79 @@ TTS_GENERATION_OPTIONS = {
 }
 
 
+@dataclass(frozen=True)
+class CheckpointDocumentation:
+    """Declarative checkpoint presentation shared by generated artifacts."""
+
+    identifier: str
+    example: str
+    provider: str
+    url: str | None
+    status: str
+    note: str | None
+
+    @property
+    def is_hugging_face(self) -> bool:
+        """Whether the checkpoint is a real Hugging Face repository."""
+        return self.provider == "huggingface"
+
+
+def checkpoint_documentation(spec) -> CheckpointDocumentation:
+    """Resolve documentation metadata without importing a model backend."""
+    metadata = spec.native_architecture.metadata if spec.is_voicehub_native else {}
+    inferred_provider = (
+        "huggingface" if HUGGING_FACE_MODEL_ID.fullmatch(spec.default_model_path) else "local")
+    provider = metadata.get("checkpoint_provider", inferred_provider)
+    if provider not in {"external-archive", "huggingface", "local"}:
+        raise ValueError(
+            f"Unsupported checkpoint documentation provider {provider!r} "
+            f"for {spec.model_type!r}.")
+
+    identifier = spec.default_model_path
+    example = metadata.get(
+        "documentation_checkpoint_path",
+        identifier or "owner/model-or-local-directory",
+    )
+    url = metadata.get("reference_checkpoint_url")
+    if url is None and provider == "huggingface" and identifier:
+        url = f"https://huggingface.co/{identifier}"
+    status = metadata.get(
+        "reference_checkpoint_status",
+        (
+            "Registry default; pin an immutable revision for production and "
+            "reproducible evidence"
+            if identifier else "No registry default; provide a compatible Hub ID or local directory"),
+    )
+    note = metadata.get("documentation_checkpoint_note")
+    for name, value in (
+        ("example", example),
+        ("provider", provider),
+        ("status", status),
+    ):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                f"Checkpoint documentation {name} for {spec.model_type!r} "
+                "must be a non-empty string.")
+    if url is not None and (not isinstance(url, str) or not url.startswith("https://")):
+        raise ValueError(f"Checkpoint documentation URL for {spec.model_type!r} must use HTTPS.")
+    if note is not None and (not isinstance(note, str) or not note.strip()):
+        raise ValueError(
+            f"Checkpoint documentation note for {spec.model_type!r} must be "
+            "a non-empty string or None.")
+    return CheckpointDocumentation(
+        identifier=identifier,
+        example=example,
+        provider=provider,
+        url=url,
+        status=status,
+        note=note,
+    )
+
+
 def hub_model_specs():
     """Return registry entries whose default checkpoint is a Hub model ID."""
     return tuple(
-        spec for spec in list_model_specs(task=None)
-        if HUGGING_FACE_MODEL_ID.fullmatch(spec.default_model_path))
+        spec for spec in list_model_specs(task=None) if checkpoint_documentation(spec).is_hugging_face)
 
 
 def _markdown(cell_id: str, source: str) -> dict[str, object]:
@@ -354,11 +423,31 @@ def generated_files() -> dict[Path, str]:
     return files
 
 
+def generated_notebook_paths() -> tuple[Path, ...]:
+    """Return notebooks owned by this generator, ignoring user artifacts."""
+    result = []
+    if not MODEL_NOTEBOOK_DIR.is_dir():
+        return ()
+    for path in sorted(MODEL_NOTEBOOK_DIR.glob("*.ipynb")):
+        try:
+            metadata = json.loads(path.read_text(encoding="utf-8"))["metadata"]
+        except (KeyError, TypeError, ValueError):
+            continue
+        voicehub = metadata.get("voicehub", {})
+        if voicehub.get("generated_by") == GENERATOR_PATH:
+            result.append(path)
+    return tuple(result)
+
+
 def check_generated_files(files: dict[Path, str]) -> tuple[Path, ...]:
     """Return generated paths that are missing or stale."""
-    return tuple(
+    stale = [
         path for path, expected in files.items()
-        if not path.is_file() or path.read_text(encoding="utf-8") != expected)
+        if not path.is_file() or path.read_text(encoding="utf-8") != expected
+    ]
+    expected = set(files)
+    stale.extend(path for path in generated_notebook_paths() if path not in expected)
+    return tuple(stale)
 
 
 def main() -> int:
@@ -381,8 +470,12 @@ def main() -> int:
 
     MODEL_NOTEBOOK_DIR.mkdir(parents=True, exist_ok=True)
     for path in stale:
-        path.write_text(files[path], encoding="utf-8")
-        print(f"wrote: {path.relative_to(REPOSITORY_ROOT)}")
+        if path in files:
+            path.write_text(files[path], encoding="utf-8")
+            print(f"wrote: {path.relative_to(REPOSITORY_ROOT)}")
+        else:
+            path.unlink()
+            print(f"removed: {path.relative_to(REPOSITORY_ROOT)}")
     print(f"OK: {len(files) - 1} model notebooks")
     return 0
 
