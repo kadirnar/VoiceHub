@@ -1,14 +1,11 @@
 ---
-hide:
-  - navigation
-  - toc
 description: 통합 TTS 추론, 데이터 준비, 아키텍처 인식 미세 조정을 위한 VoiceHub 문서입니다.
 ---
 
 <div class="vh-doc-home" markdown>
 
 <p class="vh-doc-logo">
-  <img src="assets/voicehub-mark.svg" alt="">
+  <img src="../assets/voicehub-mark.svg" alt="">
 </p>
 
 # VoiceHub: 텍스트 음성 변환 추론 및 학습
@@ -25,7 +22,7 @@ description: 통합 TTS 추론, 데이터 준비, 아키텍처 인식 미세 조
   </div>
   <span class="vh-doc-teaser__arrow" aria-hidden="true">→</span>
   <div class="vh-doc-teaser__model">
-    <img src="assets/voicehub-mark.svg" alt="">
+    <img src="../assets/voicehub-mark.svg" alt="">
     <strong>VoiceHub</strong>
     <span>모델 어댑터</span>
   </div>

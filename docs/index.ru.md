@@ -1,14 +1,11 @@
 ---
-hide:
-  - navigation
-  - toc
 description: Документация VoiceHub по унифицированному TTS-инференсу, подготовке данных и дообучению с учетом архитектуры модели.
 ---
 
 <div class="vh-doc-home" markdown>
 
 <p class="vh-doc-logo">
-  <img src="assets/voicehub-mark.svg" alt="">
+  <img src="../assets/voicehub-mark.svg" alt="">
 </p>
 
 # VoiceHub: инференс и обучение моделей синтеза речи
@@ -25,7 +22,7 @@ description: Документация VoiceHub по унифицированно
   </div>
   <span class="vh-doc-teaser__arrow" aria-hidden="true">→</span>
   <div class="vh-doc-teaser__model">
-    <img src="assets/voicehub-mark.svg" alt="">
+    <img src="../assets/voicehub-mark.svg" alt="">
     <strong>VoiceHub</strong>
     <span>АДАПТЕР МОДЕЛИ</span>
   </div>

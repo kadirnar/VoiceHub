@@ -1,14 +1,11 @@
 ---
-hide:
-  - navigation
-  - toc
 description: VoiceHub 文档：统一的 TTS 推理、数据准备和架构感知微调。
 ---
 
 <div class="vh-doc-home" markdown>
 
 <p class="vh-doc-logo">
-  <img src="assets/voicehub-mark.svg" alt="">
+  <img src="../assets/voicehub-mark.svg" alt="">
 </p>
 
 # VoiceHub：文本转语音推理与训练
@@ -25,7 +22,7 @@ description: VoiceHub 文档：统一的 TTS 推理、数据准备和架构感�
   </div>
   <span class="vh-doc-teaser__arrow" aria-hidden="true">→</span>
   <div class="vh-doc-teaser__model">
-    <img src="assets/voicehub-mark.svg" alt="">
+    <img src="../assets/voicehub-mark.svg" alt="">
     <strong>VoiceHub</strong>
     <span>模型适配器</span>
   </div>

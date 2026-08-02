@@ -1,14 +1,11 @@
 ---
-hide:
-  - navigation
-  - toc
 description: وثائق VoiceHub للاستدلال الموحّد لأنظمة TTS، وإعداد البيانات، والضبط الدقيق المراعي للبنية المعمارية.
 ---
 
 <div class="vh-doc-home" markdown>
 
 <p class="vh-doc-logo">
-  <img src="assets/voicehub-mark.svg" alt="">
+  <img src="../assets/voicehub-mark.svg" alt="">
 </p>
 
 # VoiceHub: الاستدلال والتدريب لتحويل النص إلى كلام
@@ -25,7 +22,7 @@ description: وثائق VoiceHub للاستدلال الموحّد لأنظمة 
   </div>
   <span class="vh-doc-teaser__arrow" aria-hidden="true">→</span>
   <div class="vh-doc-teaser__model">
-    <img src="assets/voicehub-mark.svg" alt="">
+    <img src="../assets/voicehub-mark.svg" alt="">
     <strong>VoiceHub</strong>
     <span>مهايئ النموذج</span>
   </div>

@@ -38,6 +38,7 @@ README_PATH = REPOSITORY_ROOT / "README.md"
 PYPROJECT_PATH = REPOSITORY_ROOT / "pyproject.toml"
 THEME_OVERRIDE_PATH = REPOSITORY_ROOT / "overrides" / "main.html"
 STYLESHEET_PATH = DOCS_ROOT / "stylesheets" / "extra.css"
+MOBILE_DRAWER_SCRIPT_PATH = DOCS_ROOT / "javascripts" / "mobile-drawer.js"
 PUBLIC_SITE_URL = "https://kadirnar.github.io/voicehub/"
 LOCALIZED_HOME_LOCALES = ("ar", "de", "es", "fr", "ja", "ko", "pt", "ru", "tr", "zh")
 TOP_LEVEL_NAVIGATION = (
@@ -93,6 +94,7 @@ NAVIGATION_PATHS = (
     "project/adding-a-model.md",
     "project/adding-speech-provider.md",
     "project/adding-an-optimization.md",
+    "project/transformers-parity.md",
     "project/translations.md",
     "project/model-audit.md",
 )
@@ -692,6 +694,87 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 localized_source = localized_home.read_text(encoding="utf-8")
                 self.assertIn('<div class="vh-doc-home" markdown>', localized_source)
                 self.assertIn('<div class="grid cards" markdown>', localized_source)
+
+    def test_homepages_keep_the_transformers_shell_visible(self):
+        parity_inventory = (DOCS_ROOT / "project" / "transformers-parity.md").read_text(encoding="utf-8")
+        self.assertIn("b3a36037d3feb22e3f0174b3dd4248fcc0f0f722", parity_inventory)
+        self.assertIn("/docs/transformers/main/en/index", parity_inventory)
+
+        homepages = (DOCS_ROOT / "index.md", ) + tuple(
+            DOCS_ROOT / f"index.{locale}.md" for locale in LOCALIZED_HOME_LOCALES)
+        for homepage in homepages:
+            with self.subTest(homepage=homepage):
+                source = homepage.read_text(encoding="utf-8")
+                frontmatter = source.split("---\n", 2)[1]
+                self.assertNotIn("hide:", frontmatter)
+                self.assertNotIn("navigation", frontmatter)
+                self.assertNotIn("toc", frontmatter)
+                expected_mark_path = (
+                    "assets/voicehub-mark.svg" if homepage == DOCS_ROOT /
+                    "index.md" else "../assets/voicehub-mark.svg")
+                self.assertEqual(source.count(f'src="{expected_mark_path}"'), 2)
+
+    def test_tablet_shell_keeps_primary_navigation_in_the_layout(self):
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        tablet_shell = stylesheet.split(
+            "@media screen and (min-width: 60em) and (max-width: 76.234375em)",
+            1,
+        )[1].split("@media screen and (max-width: 44.984375em)", 1)[0]
+
+        self.assertIn('.md-header__button[for="__drawer"]', tablet_shell)
+        self.assertIn('[dir="ltr"] .md-sidebar--primary', tablet_shell)
+        self.assertIn("position: sticky", tablet_shell)
+        self.assertIn("width: 13.5rem", tablet_shell)
+        self.assertIn(".md-sidebar--primary .md-sidebar__scrollwrap", tablet_shell)
+        self.assertIn("overflow-y: auto", tablet_shell)
+        self.assertIn(".md-nav--primary > .md-nav__title", tablet_shell)
+        self.assertIn(".md-nav__toggle:checked ~ .md-nav", tablet_shell)
+        self.assertIn("visibility: visible", tablet_shell)
+        self.assertIn(".md-sidebar--secondary:not([hidden])", tablet_shell)
+        self.assertIn("display: none", tablet_shell)
+
+    def test_left_navigation_marks_active_and_keyboard_focus_states(self):
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        active_state = stylesheet.split(".md-nav__link--active {", 1)[1].split("}", 1)[0]
+        focus_selector = (".md-nav__link[href]:focus-visible,\n"
+                          ".md-nav__link[href].focus-visible {")
+        focus_state = stylesheet.split(focus_selector, 1)[1].split("}", 1)[0]
+
+        self.assertIn("background:", active_state)
+        self.assertIn("box-shadow:", active_state)
+        self.assertIn("border-radius:", active_state)
+        self.assertIn(".md-nav__link[href].focus-visible", stylesheet)
+        self.assertIn("outline: 2px solid var(--vh-indigo)", focus_state)
+        self.assertIn("outline-offset: 2px", focus_state)
+
+    def test_mobile_drawer_overlay_click_target_stays_outside_the_panel(self):
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        mobile_overlay = stylesheet.split(
+            "@media screen and (max-width: 59.984375em)",
+            1,
+        )[1].split(
+            "@media screen and (min-width: 60em) and (max-width: 76.234375em)",
+            1,
+        )[0]
+
+        self.assertIn('[dir="ltr"] [data-md-toggle="drawer"]:checked ~ .md-overlay', mobile_overlay)
+        self.assertIn('[dir="rtl"] [data-md-toggle="drawer"]:checked ~ .md-overlay', mobile_overlay)
+        self.assertIn("left: 12.1rem", mobile_overlay)
+        self.assertIn("right: 12.1rem", mobile_overlay)
+        self.assertEqual(mobile_overlay.count("width: calc(100% - 12.1rem)"), 2)
+
+    def test_mobile_drawer_escape_dismissal_is_loaded(self):
+        site_config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        script = MOBILE_DRAWER_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("javascripts/mobile-drawer.js", site_config)
+        self.assertIn('document.addEventListener("keydown"', script)
+        self.assertIn('event.key !== "Escape"', script)
+        self.assertIn('document.getElementById("__drawer")', script)
+        self.assertIn("!drawer.checked", script)
+        self.assertIn("event.preventDefault()", script)
+        self.assertIn("drawer.checked = false", script)
+        self.assertIn('drawer.dispatchEvent(new Event("change", { bubbles: true }))', script)
 
     def test_process_overviews_are_readable_without_horizontal_scrolling(self):
         for page_path, expected_steps in PROCESS_PAGE_STEPS:

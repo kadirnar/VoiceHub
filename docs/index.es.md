@@ -1,14 +1,11 @@
 ---
-hide:
-  - navigation
-  - toc
 description: Documentación de VoiceHub para inferencia TTS unificada, preparación de datos y ajuste fino adaptado a cada arquitectura.
 ---
 
 <div class="vh-doc-home" markdown>
 
 <p class="vh-doc-logo">
-  <img src="assets/voicehub-mark.svg" alt="">
+  <img src="../assets/voicehub-mark.svg" alt="">
 </p>
 
 # VoiceHub: inferencia y entrenamiento de texto a voz
@@ -25,7 +22,7 @@ description: Documentación de VoiceHub para inferencia TTS unificada, preparaci
   </div>
   <span class="vh-doc-teaser__arrow" aria-hidden="true">→</span>
   <div class="vh-doc-teaser__model">
-    <img src="assets/voicehub-mark.svg" alt="">
+    <img src="../assets/voicehub-mark.svg" alt="">
     <strong>VoiceHub</strong>
     <span>ADAPTADOR DE MODELO</span>
   </div>

@@ -1,14 +1,11 @@
 ---
-hide:
-  - navigation
-  - toc
 description: Birleşik TTS çıkarımı, veri hazırlama ve mimariye duyarlı ince ayar için VoiceHub belgeleri.
 ---
 
 <div class="vh-doc-home" markdown>
 
 <p class="vh-doc-logo">
-  <img src="assets/voicehub-mark.svg" alt="">
+  <img src="../assets/voicehub-mark.svg" alt="">
 </p>
 
 # VoiceHub: Metinden Sese Çıkarım ve Eğitim
@@ -25,7 +22,7 @@ description: Birleşik TTS çıkarımı, veri hazırlama ve mimariye duyarlı in
   </div>
   <span class="vh-doc-teaser__arrow" aria-hidden="true">→</span>
   <div class="vh-doc-teaser__model">
-    <img src="assets/voicehub-mark.svg" alt="">
+    <img src="../assets/voicehub-mark.svg" alt="">
     <strong>VoiceHub</strong>
     <span>MODEL ADAPTÖRÜ</span>
   </div>
