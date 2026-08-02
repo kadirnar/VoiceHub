@@ -24,6 +24,11 @@ REQUIRED_AI_FILES = (
 FRONTMATTER_PATTERN = re.compile(r"\A---\n(?P<body>.*?)\n---\n", re.DOTALL)
 
 
+def normalize_pointer_target(target: str) -> str:
+    """Return a repository-relative pointer with portable separators."""
+    return target.replace("\\", "/")
+
+
 class AIGuidanceContractTests(unittest.TestCase):
 
     def test_canonical_guidance_files_exist(self) -> None:
@@ -43,7 +48,10 @@ class AIGuidanceContractTests(unittest.TestCase):
                 else:
                     # Git may materialize a symlink as a text pointer on Windows.
                     actual_target = root_path.read_text(encoding="utf-8").strip()
-                self.assertEqual(actual_target, expected_target)
+                self.assertEqual(normalize_pointer_target(actual_target), expected_target)
+
+    def test_windows_style_pointer_targets_are_portable(self) -> None:
+        self.assertEqual(normalize_pointer_target(r".ai\AGENTS.md"), ".ai/AGENTS.md")
 
     def test_skills_are_well_formed_and_routed(self) -> None:
         agents_text = (AI_ROOT / "AGENTS.md").read_text(encoding="utf-8")
