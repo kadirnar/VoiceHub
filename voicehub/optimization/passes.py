@@ -222,6 +222,27 @@ class OptimizationPass(ABC):
                 f"Optimization pass {self.qualified_id!r} does not support "
                 f"{', '.join(issues)}.")
 
+    def not_applicable_result(
+        self,
+        model: Any,
+        *,
+        reason: str,
+    ) -> PassResult:
+        """Return a reversible, explicitly reported model-preserving result."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("Optimization fallback reasons must be non-empty strings.")
+        return PassResult(
+            model=model,
+            state={
+                "kind": "not-applicable",
+                "model": model,
+            },
+            metadata={
+                "outcome": "not-applicable",
+                "reason": reason.strip(),
+            },
+        )
+
     @abstractmethod
     def apply(self, model: Any, context: OptimizationContext) -> PassResult:
         """Apply the pass after all plan members have validated."""

@@ -50,27 +50,10 @@ theme:
     - toc.follow
 
 nav:
-  - Home: index.md
-  - Quick Start:
+  - Get started:
+      - Overview: index.md
       - Installation: getting-started/installation.md
       - First generation: getting-started/quickstart.md
-  - Guides:
-      - Overview: guides/index.md
-      - TTS inference: guides/inference.md
-      - Speech recognition: guides/speech-recognition.md
-      - Voice activity detection: guides/voice-activity-detection.md
-      - Data preparation: guides/data-preparation.md
-      - ASR and VAD data: guides/speech-data.md
-      - Training: guides/training.md
-      - TTS optimization: guides/tts-optimization.md
-      - Codec optimization: guides/codec-optimization.md
-      - Diffusion and flow optimization: guides/diffusion-optimization.md
-      - VITS-family optimization: guides/vits-optimization.md
-      - LLM TTS serving: guides/llm-serving.md
-      - TTS model benchmarks: guides/tts-model-benchmarks.md
-      - RTX 4090 speech benchmarks: guides/rtx-4090-speech-benchmarks.md
-      - RTX 5090 TTS benchmarks: guides/rtx-5090-tts-benchmarks.md
-  - Notebooks: guides/notebook.md
   - Models:
       - Overview: models/providers/index.md
       # BEGIN GENERATED MODEL GUIDE NAVIGATION
@@ -152,11 +135,27 @@ nav:
           - ASR and VAD support: models/asr-vad-support.md
           - TTS training support: models/training-support.md
           - XTTS v2 native DVAE: models/xtts2.md
-  - Architecture:
+  - Guides:
+      - Overview: guides/index.md
+      - TTS inference: guides/inference.md
+      - Speech recognition: guides/speech-recognition.md
+      - Voice activity detection: guides/voice-activity-detection.md
+      - Data preparation: guides/data-preparation.md
+      - ASR and VAD data: guides/speech-data.md
+      - Training: guides/training.md
+      - TTS optimization: guides/tts-optimization.md
+      - Codec optimization: guides/codec-optimization.md
+      - Diffusion and flow optimization: guides/diffusion-optimization.md
+      - VITS-family optimization: guides/vits-optimization.md
+      - LLM TTS serving: guides/llm-serving.md
+      - TTS model benchmarks: guides/tts-model-benchmarks.md
+      - RTX 4090 speech benchmarks: guides/rtx-4090-speech-benchmarks.md
+      - RTX 5090 TTS benchmarks: guides/rtx-5090-tts-benchmarks.md
+      - Notebooks: guides/notebook.md
+  - API reference: reference/api.md
+  - Project:
       - Library architecture: concepts/architecture.md
       - Trainer architecture: concepts/trainer.md
-  - API Reference: reference/api.md
-  - Contributing:
       - Roadmap: project/roadmap.md
       - Release readiness: project/release-readiness.md
       - Add a TTS model: project/adding-a-model.md
@@ -182,8 +181,7 @@ plugins:
           name: Türkçe
           build: true
           nav_translations:
-            Home: Ana Sayfa
-            Quick Start: Hızlı Başlangıç
+            Get started: Hızlı Başlangıç
             Installation: Kurulum
             First generation: İlk ses üretimi
             Guides: Rehberler
@@ -199,11 +197,10 @@ plugins:
             TTS model catalog: TTS model kataloğu
             ASR and VAD support: ASR ve VAD desteği
             TTS training support: TTS eğitim desteği
-            Architecture: Mimari
             Library architecture: Kütüphane mimarisi
             Trainer architecture: Eğitici mimarisi
-            API Reference: API Referansı
-            Contributing: Katkıda Bulunma
+            API reference: API Referansı
+            Project: Proje
             Add a TTS model: TTS modeli ekleme
             Add an ASR or VAD provider: ASR veya VAD sağlayıcısı ekleme
             Translations: Çeviriler
@@ -212,8 +209,7 @@ plugins:
           name: Español
           build: true
           nav_translations:
-            Home: Inicio
-            Quick Start: Inicio rápido
+            Get started: Inicio rápido
             Installation: Instalación
             First generation: Primera generación
             Guides: Guías
@@ -229,11 +225,10 @@ plugins:
             TTS model catalog: Catálogo de modelos TTS
             ASR and VAD support: Compatibilidad de ASR y VAD
             TTS training support: Compatibilidad de entrenamiento TTS
-            Architecture: Arquitectura
             Library architecture: Arquitectura de la biblioteca
             Trainer architecture: Arquitectura del entrenador
-            API Reference: Referencia de API
-            Contributing: Contribuir
+            API reference: Referencia de API
+            Project: Proyecto
             Add a TTS model: Añadir un modelo TTS
             Add an ASR or VAD provider: Añadir un proveedor de ASR o VAD
             Translations: Traducciones
@@ -242,8 +237,7 @@ plugins:
           name: Français
           build: true
           nav_translations:
-            Home: Accueil
-            Quick Start: Démarrage rapide
+            Get started: Démarrage rapide
             Installation: Installation
             First generation: Première génération
             Guides: Guides
@@ -259,11 +253,10 @@ plugins:
             TTS model catalog: Catalogue des modèles TTS
             ASR and VAD support: Prise en charge ASR et VAD
             TTS training support: Prise en charge de l’entraînement TTS
-            Architecture: Architecture
             Library architecture: Architecture de la bibliothèque
             Trainer architecture: Architecture de l’entraîneur
-            API Reference: Référence API
-            Contributing: Contribuer
+            API reference: Référence API
+            Project: Projet
             Add a TTS model: Ajouter un modèle TTS
             Add an ASR or VAD provider: Ajouter un fournisseur ASR ou VAD
             Translations: Traductions
@@ -272,8 +265,7 @@ plugins:
           name: Deutsch
           build: true
           nav_translations:
-            Home: Startseite
-            Quick Start: Schnellstart
+            Get started: Schnellstart
             Installation: Installation
             First generation: Erste Generierung
             Guides: Anleitungen
@@ -289,11 +281,10 @@ plugins:
             TTS model catalog: TTS-Modellkatalog
             ASR and VAD support: ASR- und VAD-Unterstützung
             TTS training support: TTS-Trainingsunterstützung
-            Architecture: Architektur
             Library architecture: Bibliotheksarchitektur
             Trainer architecture: Trainerarchitektur
-            API Reference: API-Referenz
-            Contributing: Mitwirken
+            API reference: API-Referenz
+            Project: Projekt
             Add a TTS model: TTS-Modell hinzufügen
             Add an ASR or VAD provider: ASR- oder VAD-Anbieter hinzufügen
             Translations: Übersetzungen
@@ -302,8 +293,7 @@ plugins:
           name: Português
           build: true
           nav_translations:
-            Home: Início
-            Quick Start: Início rápido
+            Get started: Início rápido
             Installation: Instalação
             First generation: Primeira geração
             Guides: Guias
@@ -319,11 +309,10 @@ plugins:
             TTS model catalog: Catálogo de modelos TTS
             ASR and VAD support: Suporte a ASR e VAD
             TTS training support: Suporte ao treinamento TTS
-            Architecture: Arquitetura
             Library architecture: Arquitetura da biblioteca
             Trainer architecture: Arquitetura do treinador
-            API Reference: Referência da API
-            Contributing: Contribuir
+            API reference: Referência da API
+            Project: Projeto
             Add a TTS model: Adicionar um modelo TTS
             Add an ASR or VAD provider: Adicionar um provedor ASR ou VAD
             Translations: Traduções
@@ -332,8 +321,7 @@ plugins:
           name: 简体中文
           build: true
           nav_translations:
-            Home: 首页
-            Quick Start: 快速开始
+            Get started: 快速开始
             Installation: 安装
             First generation: 首次生成
             Guides: 指南
@@ -349,11 +337,10 @@ plugins:
             TTS model catalog: TTS 模型目录
             ASR and VAD support: ASR 与 VAD 支持
             TTS training support: TTS 训练支持
-            Architecture: 架构
             Library architecture: 库架构
             Trainer architecture: 训练器架构
-            API Reference: API 参考
-            Contributing: 参与贡献
+            API reference: API 参考
+            Project: 项目
             Add a TTS model: 添加 TTS 模型
             Add an ASR or VAD provider: 添加 ASR 或 VAD 提供程序
             Translations: 翻译
@@ -362,8 +349,7 @@ plugins:
           name: 日本語
           build: true
           nav_translations:
-            Home: ホーム
-            Quick Start: クイックスタート
+            Get started: クイックスタート
             Installation: インストール
             First generation: 最初の生成
             Guides: ガイド
@@ -379,11 +365,10 @@ plugins:
             TTS model catalog: TTS モデルカタログ
             ASR and VAD support: ASR と VAD のサポート
             TTS training support: TTS 学習サポート
-            Architecture: アーキテクチャ
             Library architecture: ライブラリアーキテクチャ
             Trainer architecture: トレーナーアーキテクチャ
-            API Reference: API リファレンス
-            Contributing: コントリビューション
+            API reference: API リファレンス
+            Project: プロジェクト
             Add a TTS model: TTS モデルを追加
             Add an ASR or VAD provider: ASR または VAD プロバイダーを追加
             Translations: 翻訳
@@ -392,8 +377,7 @@ plugins:
           name: 한국어
           build: true
           nav_translations:
-            Home: 홈
-            Quick Start: 빠른 시작
+            Get started: 빠른 시작
             Installation: 설치
             First generation: 첫 음성 생성
             Guides: 가이드
@@ -409,11 +393,10 @@ plugins:
             TTS model catalog: TTS 모델 카탈로그
             ASR and VAD support: ASR 및 VAD 지원
             TTS training support: TTS 학습 지원
-            Architecture: 아키텍처
             Library architecture: 라이브러리 아키텍처
             Trainer architecture: 트레이너 아키텍처
-            API Reference: API 레퍼런스
-            Contributing: 기여하기
+            API reference: API 레퍼런스
+            Project: 프로젝트
             Add a TTS model: TTS 모델 추가
             Add an ASR or VAD provider: ASR 또는 VAD 공급자 추가
             Translations: 번역
@@ -422,8 +405,7 @@ plugins:
           name: Русский
           build: true
           nav_translations:
-            Home: Главная
-            Quick Start: Быстрый старт
+            Get started: Быстрый старт
             Installation: Установка
             First generation: Первый синтез
             Guides: Руководства
@@ -439,11 +421,10 @@ plugins:
             TTS model catalog: Каталог моделей TTS
             ASR and VAD support: Поддержка ASR и VAD
             TTS training support: Поддержка обучения TTS
-            Architecture: Архитектура
             Library architecture: Архитектура библиотеки
             Trainer architecture: Архитектура тренера
-            API Reference: Справочник API
-            Contributing: Участие в разработке
+            API reference: Справочник API
+            Project: Проект
             Add a TTS model: Добавить модель TTS
             Add an ASR or VAD provider: Добавить провайдер ASR или VAD
             Translations: Переводы
@@ -452,8 +433,7 @@ plugins:
           name: العربية
           build: true
           nav_translations:
-            Home: الرئيسية
-            Quick Start: البدء السريع
+            Get started: البدء السريع
             Installation: التثبيت
             First generation: أول توليد صوتي
             Guides: الأدلة
@@ -469,11 +449,10 @@ plugins:
             TTS model catalog: دليل نماذج TTS
             ASR and VAD support: دعم ASR وVAD
             TTS training support: دعم تدريب TTS
-            Architecture: البنية
             Library architecture: بنية المكتبة
             Trainer architecture: بنية المدرّب
-            API Reference: مرجع API
-            Contributing: المساهمة
+            API reference: مرجع API
+            Project: المشروع
             Add a TTS model: إضافة نموذج TTS
             Add an ASR or VAD provider: إضافة موفّر ASR أو VAD
             Translations: الترجمات

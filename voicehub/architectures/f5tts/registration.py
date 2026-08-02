@@ -67,6 +67,7 @@ def create_f5tts_architecture_spec() -> ArchitectureSpec:
             ),
             features=(
                 "diffusion-family",
+                "diffusion-serving-native",
                 "diffusion-kind-conditional-flow-matching",
                 "diffusion-operation-denoiser",
                 "diffusion-operation-classifier-free-guidance",

@@ -14,6 +14,7 @@ from voicehub.neural.backends import FlashAttention4Policy
 from voicehub.optimization import (
     OPTIMIZATION_PASSES,
     AcceleratorStateDictError,
+    CodecKernelPass,
     CustomKernelPass,
     FlashAttention4Pass,
     OptimizationApplicationError,
@@ -185,24 +186,28 @@ class AcceleratorOptimizationTests(unittest.TestCase):
             [KernelBackend.AUTO, KernelBackend.TORCH],
         )
 
-    def test_passes_fail_closed_when_no_reversible_targets_exist(self):
-        model = nn.Linear(2, 2)
+    def test_passes_report_absent_targets_and_fail_closed_on_malformed_targets(self):
         for optimization_pass in (
+                CodecKernelPass(),
                 FlashAttention4Pass(),
                 CustomKernelPass(),
         ):
-            with (
-                    self.subTest(optimization_pass=optimization_pass.pass_id),
-                    self.assertRaisesRegex(
-                        OptimizationCompatibilityError,
-                        "no submodule exposing",
-                    ),
-            ):
-                OptimizationPassManager().apply(
+            with self.subTest(optimization_pass=optimization_pass.pass_id):
+                model = nn.Linear(2, 2)
+                original_keys = tuple(model.state_dict())
+                result = OptimizationPassManager().apply(
                     model,
                     (optimization_pass, ),
                     _context(),
                 )
+                metadata = result.manifest_metadata()[0]["metadata"]
+
+                self.assertIs(result.model, model)
+                self.assertEqual(metadata["outcome"], "not-applicable")
+                self.assertIn("no submodule exposing", metadata["reason"])
+                self.assertEqual(tuple(model.state_dict()), original_keys)
+                self.assertIs(result.restore(), model)
+                self.assertEqual(tuple(model.state_dict()), original_keys)
 
         class MissingState(nn.Module):
 

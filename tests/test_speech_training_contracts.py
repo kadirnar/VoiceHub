@@ -267,7 +267,7 @@ class SpeechTrainingContractTests(unittest.TestCase):
             profiles = {spec.model_type for spec in list_training_specs(task=task)}
             self.assertEqual(profiles, models)
 
-    def test_transformers_providers_use_dynamic_family_adapters(self):
+    def test_transformers_providers_use_declarative_model_adapters(self):
         from voicehub.models.asr_transformers import TransformersASRConfig, TransformersASRForSpeechRecognition
         from voicehub.models.asr_transformers.training_asr_transformers import TransformersASRTrainingAdapter
         from voicehub.models.vad_transformers import TransformersVADConfig, TransformersVADForVoiceActivityDetection

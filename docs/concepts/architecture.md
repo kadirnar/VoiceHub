@@ -22,6 +22,15 @@ reading config does not import a model graph or download weights.
 Model-specific behavior stays with the integration. Code moves into a shared
 layer only when multiple integrations use the same contract.
 
+Shared behavior resolves capabilities, protocols, or declarative registry
+metadata instead of comparing provider names. The repository-wide provider
+independence policy scans every shared Python module, including components,
+training, serving, and optimization. Canonical model names and live aliases are
+allowed in declarative catalogs, provenance, licensing, and model-local code;
+using one in an `if`, conditional expression, loop condition, assertion,
+comprehension filter, comparison, or `match` branch fails the architecture
+contract test.
+
 ## Loading a model
 
 ```python

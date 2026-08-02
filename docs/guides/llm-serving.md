@@ -108,6 +108,53 @@ for support in list_llm_backend_support():
 `get_llm_backend_support(model_type, backend, transport="auto")` resolves one
 pairing without importing or contacting the engine.
 
+Each support record also owns request-shape differences: default task types,
+flat versus `references`-list reference audio, and named non-empty string
+options understood by that exact engine pairing. Its `speech_input_options`,
+`speech_default_options`, and `speech_native_only_options` properties expose the
+resulting request contract. These fields are validated and returned by
+`support.to_dict()` as JSON data. The wrapper and direct HTTP client consume the
+same schema and do not contain model-name or extension-option branches.
+
+Separately distributed integrations can register the same capability without
+editing VoiceHub's client:
+
+```python
+from voicehub import (
+    LLMBackendSupport,
+    register_llm_backend_support,
+)
+
+register_llm_backend_support(
+    LLMBackendSupport(
+        model_type="auroratts",
+        backend="vllm",
+        transports=("speech",),
+        default_transport="speech",
+        engine="Aurora vLLM-Omni plugin",
+        checkpoint_family="acme/aurora-base",
+        task_type_without_reference="Generate",
+        task_type_with_reference="Clone",
+        task_type_aliases=(("clone", "Clone"),),
+        reference_format="references",
+        speech_string_options=("emotion_prompt",),
+    )
+)
+```
+
+Register extensions once during process startup and remove temporary records in
+tests with `unregister_llm_backend_support()`. A declared
+`speech_string_options` entry becomes a recognized wrapper input and a
+generation-default key automatically. It must be verified for that engine and
+must not redefine a typed or request-owned field such as `temperature` or
+`reference_audio`.
+
+When a native architecture has no verified external-engine path, keep the
+specific limitation beside that architecture as
+`metadata={"external_llm_backend_blocker": "..."}` on its
+`ArchitectureSpec`. The shared resolver reads this declaration lazily and uses
+a generic fail-closed message when an architecture does not provide one.
+
 ## Launch an engine
 
 Install and launch these commands in the engine's environment. The commands

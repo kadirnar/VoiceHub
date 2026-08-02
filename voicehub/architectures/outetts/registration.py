@@ -72,6 +72,10 @@ def create_outetts_architecture_spec() -> ArchitectureSpec:
         upstream_revision=OUTETTS_SOURCE_REVISION,
         license_id=OUTETTS_SOURCE_LICENSE,
         metadata={
+            "external_llm_backend_blocker": (
+                "OuteTTS requires its 64-token repetition window. A stock "
+                "engine repetition penalty is not equivalent; use a tested "
+                "custom logits processor before enabling this pairing."),
             "implementation":
             "voicehub-native",
             "tensor_backend":

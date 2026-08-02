@@ -1,35 +1,20 @@
 ---
-description: Inference, data preparation, and training guide for the asr_transformers integration.
+description: Public API, checkpoint, training, and optimization guide for the asr_transformers integration.
 ---
 
 # `asr_transformers` model guide
+
+## Overview
 
 `asr_transformers` is a VoiceHub **automatic speech recognition**
 integration. This page is generated from the model registry and its executable
 data and training contracts, so the documented support stays aligned with code. [Open the `asr_transformers` Colab notebook](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/models/asr_transformers.ipynb).
 
-## Model information
-
-| Property | Value |
-| --- | --- |
-| Task | Automatic speech recognition |
-| Default checkpoint | [`openai/whisper-small`](https://huggingface.co/openai/whisper-small) |
-| Architecture | `native-asr-dispatch` |
-| Runtime | `VoiceHub-native` |
-| Implementation | `voicehub.models.asr_transformers.modeling_asr_transformers.TransformersASRForSpeechRecognition` |
-| Capabilities | `automatic-speech-recognition`, `multilingual`, `timestamps`, `safetensors`, `fine-tuning`, `ctc`, `speech-seq2seq`, `voicehub-native`, `native-runtime` |
-| Reusable components | — |
-| License | Checkpoint-specific |
-
-No VoiceHub-specific license override is registered. Verify the checkpoint and upstream source terms before use.
-
-## Install
+## Quickstart
 
 ```bash
 python -m pip install voicehub
 ```
-
-## Inference
 
 1. Install VoiceHub and the provider extra shown above.
 2. Choose a checkpoint that matches this integration.
@@ -52,15 +37,27 @@ for segment in output.segments:
 ```
 
 Use only authorized recordings for reference voice, transcription, detection,
-or evaluation. Pin a checkpoint revision in production.
+or evaluation. The example selects a concrete device; verify checkpoint-specific
+hardware needs and pin an immutable revision before production use.
 
-## Data preparation
+## Supported tasks and capabilities
 
-The `asr_transformers` contract is **integrated-raw**. Its
-data architecture is **native-dispatch** and its declared sample rate is
-**16,000 Hz**.
+| Property | Value |
+| --- | --- |
+| Task | Automatic speech recognition |
+| Architecture | `native-asr-dispatch` |
+| Runtime | `VoiceHub-native` |
+| Capabilities | `automatic-speech-recognition`, `multilingual`, `timestamps`, `safetensors`, `fine-tuning`, `ctc`, `speech-seq2seq`, `voicehub-native`, `native-runtime` |
+| Reusable components | — |
 
-Checkpoint-dispatched raw and cached inputs for native Transformers ASR families.
+### Data contract
+
+| Property | Value |
+| --- | --- |
+| Readiness | `integrated-raw` |
+| Data architecture | `native-dispatch` |
+| Sample rate | 16,000 Hz |
+| Contract getter | `get_asr_dataset_spec('asr_transformers')` |
 
 | Variant | Required fields | One of | Boundary | Other rules |
 | --- | --- | --- | --- | --- |
@@ -68,41 +65,36 @@ Checkpoint-dispatched raw and cached inputs for native Transformers ASR families
 | `feature-model-ready` | `input_features`, `labels` | — | Prepared | — |
 | `waveform-model-ready` | `input_values`, `labels` | — | Prepared | — |
 
-Follow this process:
+Checkpoint-dispatched raw and cached inputs for native Transformers ASR families. Follow the [shared data workflow](../../guides/speech-data.md) for
+manifest loading, audio validation, leakage-safe splits, and model-owned
+preprocessing.
 
-1. Keep immutable source audio, exact transcripts or labels, stable IDs, consent,
-   license, speaker, and session metadata.
-2. Split by speaker or recording session before model preprocessing.
-3. Match one of the exact variants above. Source variants are processed by the
-   integration; prepared variants must already contain the listed model inputs.
-4. Validate one collated batch, then persist the preprocessing version and hashes.
+## Checkpoints, provenance, and license
 
-```python
-from voicehub import ASRDataset, get_asr_dataset_spec
+| Property | Value |
+| --- | --- |
+| Default checkpoint | [`openai/whisper-small`](https://huggingface.co/openai/whisper-small) |
+| Checkpoint status | Registry default; pin an immutable revision for production and reproducible evidence |
+| Implementation | `voicehub.models.asr_transformers.modeling_asr_transformers.TransformersASRForSpeechRecognition` |
+| Configuration | `voicehub.models.asr_transformers.configuration_asr_transformers.TransformersASRConfig` |
+| Source provenance | `voicehub/architectures/moonshine/SOURCE.json` |
+| License | Checkpoint-specific |
 
-contract = get_asr_dataset_spec('asr_transformers')
-print(contract.architecture, contract.readiness, contract.sample_rate)
-for variant in contract.variants:
-    print(variant.name, variant.required_fields, variant.one_of)
+No VoiceHub-specific license override is registered. Verify the checkpoint and upstream source terms before use.
 
-# Source-record integrations can validate a JSONL manifest directly.
-if contract.accepts_raw_records:
-    records = ASRDataset.from_manifest(
-        "data/manifest.jsonl",
-        model_type='asr_transformers',
-        validate_files=True,
-    )
-    train_records, validation_records = records.train_test_split(
-        validation_fraction=0.1,
-        seed=42,
-        group_by="session_id",
-    )
-```
+The default checkpoint identifies the expected family, not every compatible
+variant. Confirm the selected checkpoint's revision, access terms, provenance,
+and license before downloading or redistributing it.
 
-See the [complete data guide](../../guides/speech-data.md) for manifest aliases, audio validation,
-leakage-safe splits, and model-owned preprocessing.
+## Optimization and training support
 
-## Training
+All public optimizations enter this model through the shared
+`BaseSpeechModel` lifecycle. Use `available_optimization_passes()` to discover
+the public pass registry, then apply, inspect, serialize, or restore a plan
+through the common model API. Application remains fail-closed when the active
+runtime or hardware cannot satisfy a pass.
+
+### Training contract
 
 | Property | Value |
 | --- | --- |
@@ -117,44 +109,24 @@ leakage-safe splits, and model-owned preprocessing.
 | --- | --- | --- | --- | --- |
 | `speech_recognition` | objective | `model` | — | `loss` |
 
-The integration accepts its declared source or prepared contract directly. Start with one optimizer step and verify finite loss, intended
-gradients, frozen components, save, and reload before scaling the run.
+The integration accepts its declared source or prepared contract directly. Call `model.validate_training_support()` before constructing a
+trainer. Follow the [shared training workflow](../../guides/training.md) for a
+one-step smoke test, validation, checkpoint resume, optimization, and portable
+export.
 
-```python
-from voicehub import AutoModelForSpeechRecognition, Trainer, TrainingArguments
+## Public API
 
-model = AutoModelForSpeechRecognition.from_pretrained(
-    'openai/whisper-small',
-    model_type='asr_transformers',
-    device="cuda",
-    lazy_load=True,
-)
-model.validate_training_support()
-train_dataset = model.create_training_dataset(
-    "data/train.jsonl",
-    validate_audio_files=True,
-)
+| Purpose | Public object |
+| --- | --- |
+| Discover | `get_model_spec('asr_transformers')` |
+| Load and run | `AutoModelForSpeechRecognition` |
+| Configure | `TransformersASRConfig` |
+| Model implementation | `TransformersASRForSpeechRecognition` |
+| Normalized output | `ASROutput` |
+| Training contract | `get_training_spec('asr_transformers')` |
+| Optimization lifecycle | `available_optimization_passes`, `apply_optimization_plan`, `optimization_manifest`, `restore_optimization_plan` |
 
-arguments = TrainingArguments(
-    output_dir="runs/asr_transformers-smoke",
-    max_steps=1,
-    per_device_train_batch_size=1,
-    learning_rate=5e-5,
-    logging_steps=1,
-    save_steps=1,
-    report_to="none",
-    seed=42,
-)
-trainer = Trainer(model=model, args=arguments, train_dataset=train_dataset)
-result = trainer.train(resume_from_checkpoint=False)
-print(result.training_loss, result.metrics)
-trainer.save_model("runs/asr_transformers-smoke/final")
-```
-
-See the [training guide](../../guides/training.md) for validation datasets,
-checkpoint resume, mixed precision, optimizations, and portable exports.
-
-## Next steps
+Related shared documentation:
 
 - [All model guides](index.md)
 - [Shared inference guides](../../guides/index.md)

@@ -13,6 +13,7 @@ from voicehub.inference_strategy import InferenceStrategy
 from voicehub.models.registry import (
     MODEL_REGISTRY,
     ModelSpec,
+    get_default_model_spec,
     get_model_spec,
     register_model_spec,
     unregister_model_spec,
@@ -119,7 +120,6 @@ class _BaseAutoModel:
     """Shared implementation for task-constrained speech-model factories."""
 
     task: SpeechTask
-    default_model_type: str | None = None
 
     def __init__(self):
         raise OSError(f"{self.__class__.__name__} must be created with "
@@ -131,6 +131,15 @@ class _BaseAutoModel:
             model_type,
             expected_task=cls.task,
         )
+
+    @classmethod
+    def _get_default_spec(cls) -> ModelSpec:
+        spec = get_default_model_spec(cls.task)
+        if spec is None:
+            raise ValueError(
+                f"{cls.__name__} has no registry-declared default checkpoint. "
+                "Pass a model path or `model_type`.")
+        return spec
 
     @classmethod
     def available_models(cls) -> tuple[ModelSpec, ...]:
@@ -150,6 +159,8 @@ class _BaseAutoModel:
         aliases: tuple[str, ...] = (),
         capabilities: tuple[str, ...] = (),
         architecture: str | None = None,
+        components: tuple[str, ...] = (),
+        default_for_task: bool = False,
         install_extra: str | None = None,
         exist_ok: bool = False,
     ) -> ModelSpec:
@@ -179,6 +190,8 @@ class _BaseAutoModel:
             capabilities=capabilities,
             task=cls.task,
             architecture=architecture,
+            components=components,
+            default_for_task=default_for_task,
         )
         register_model_spec(
             spec,
@@ -326,11 +339,7 @@ class _BaseAutoModel:
         if config is None:
             if model_type is None:
                 if empty_source:
-                    if cls.default_model_type is None:
-                        raise ValueError(
-                            f"{cls.__name__} has no default checkpoint. Pass a "
-                            "model path or `model_type`.")
-                    spec = cls._get_spec(cls.default_model_type)
+                    spec = cls._get_default_spec()
                     config_class = _load_class(
                         spec.config_module,
                         spec.config_class,
@@ -347,9 +356,9 @@ class _BaseAutoModel:
                         )
                         spec = cls._get_spec(config.model_type)
                     except UnknownModelError:
-                        if cls.default_model_type is None:
+                        spec = get_default_model_spec(cls.task)
+                        if spec is None:
                             raise
-                        spec = cls._get_spec(cls.default_model_type)
                         config_class = _load_class(
                             spec.config_module,
                             spec.config_class,
@@ -400,14 +409,12 @@ class AutoModelForSpeechRecognition(_BaseAutoModel):
     """Load a registered automatic speech-recognition model."""
 
     task = SpeechTask.AUTOMATIC_SPEECH_RECOGNITION
-    default_model_type = "asr_transformers"
 
 
 class AutoModelForVoiceActivityDetection(_BaseAutoModel):
     """Load a registered voice-activity-detection model."""
 
     task = SpeechTask.VOICE_ACTIVITY_DETECTION
-    default_model_type = "vad_transformers"
 
 
 _AUTO_MODEL_FACTORY_BY_TASK = {

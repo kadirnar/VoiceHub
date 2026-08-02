@@ -110,7 +110,8 @@ for spec in AutoInferenceModel.available_models():
 | `capabilities` | Open capability tokens. `fine-tuning` is family-level; `default-checkpoint-inference-only` means the training profile names a different differentiable starting checkpoint. |
 | `task` | Canonical `SpeechTask` owned by the provider |
 | `architecture` | Provider/runtime architecture family, when declared |
-| `components` | Shared codecs, vocoders, or other registered components |
+| `components` | Canonical shared codec, vocoder, or neural-component names declared by this model spec |
+| `default_for_task` | Whether this is the registry's unique no-argument default for its task |
 | `license` | `ModelLicenseSpec` when additional model terms are recorded, otherwise `None` |
 | `training` | The model's `ModelTrainingSpec` |
 
@@ -302,7 +303,7 @@ model = AutoModelForTextToSpeech.from_pretrained(
 
 ```python
 AutoInferenceModel.from_pretrained(
-    model_type: str = "orpheustts",
+    model_type: str | None = None,
     model_path: str | Path | None = None,
     device: str = "cuda",
     inference_strategy: str | InferenceStrategy | None = None,
@@ -310,7 +311,11 @@ AutoInferenceModel.from_pretrained(
 )
 ```
 
-When `model_path` is `None`, the registry's `default_model_path` is used.
+When `model_type` is omitted, the registry's unique TTS
+`default_for_task` entry is used. When `model_path` is `None`, that entry's
+`default_model_path` is used. The built-in declaration preserves the legacy
+Orpheus default without embedding a provider name in the compatibility
+factory.
 Prefer `AutoModelForTextToSpeech` in new code because it can infer the model
 type from a saved VoiceHub configuration.
 
@@ -336,6 +341,11 @@ vad = AutoModelForVoiceActivityDetection.from_pretrained(
     model_type="vad_silero",
 )
 ```
+
+Calling a task factory without a checkpoint uses the unique registered
+`ModelSpec` whose `default_for_task` value is true. Tasks without that
+declaration fail with an actionable error instead of relying on a provider name
+embedded in the shared auto factory.
 
 Audio-input pretrained models provide:
 
@@ -442,6 +452,41 @@ PreTrainedTTSModel.from_pretrained(
 
 See [External LLM serving](../guides/llm-serving.md) for the capability
 matrix, server launch commands, request schemas, and lifecycle constraints.
+
+`LLMBackendSupport` is the immutable, JSON-serializable request capability for
+one model/backend pair. In addition to transports and checkpoint metadata, it
+declares default task types with and without reference audio, normalized task
+type aliases,
+`reference_format` (`flat` or `references`), and validated
+`speech_string_options`. The derived `speech_input_options` property is the
+recognized wrapper and client input schema, `speech_default_options` lists the
+keys accepted from `GenerationConfig`, and `speech_native_only_options` lists
+known native-only fields that the external endpoint must reject. Declaring a
+verified extension string option updates both wrapper and client behavior
+without a central allowlist edit. These properties describe request handling,
+not a performance or checkpoint-support claim.
+
+```python
+list_llm_backend_support(*, backend=None, model_type=None)
+get_llm_backend_support(model_type, backend, *, transport="auto")
+register_llm_backend_support(support, *, exist_ok=False) -> None
+unregister_llm_backend_support(
+    model_type,
+    backend,
+    *,
+    missing_ok=False,
+) -> LLMBackendSupport | None
+
+support.to_dict() -> dict[str, object]
+```
+
+`support.to_dict()` includes the three derived option lists so capability
+evidence and downstream tooling can inspect the same fail-closed request
+contract used at runtime.
+
+Extension registrations are process-local. Built-in records cannot be removed,
+and a duplicate pair is accepted with `exist_ok=True` only when its complete
+record is identical.
 
 There is no universal `unload()` or `release()` API. A serving-to-training
 transition uses `load_for_training()`, allowing the active inference strategy
@@ -1096,6 +1141,7 @@ class OptimizationPass:
 
     def manifest_configuration(self) -> Mapping[str, Any]: ...
     def validate(self, model, context) -> None: ...
+    def not_applicable_result(self, model, *, reason) -> PassResult: ...
     def apply(self, model, context) -> PassResult: ...
     def restore(self, model, state, context): ...
     def route_optimizer_parameters(
@@ -1126,12 +1172,17 @@ persistable. Registered wrappers bind the canonical architecture
 automatically; registered model specs with `architecture=None` remain
 agnostic. Before applying any pass, the manager validates pass and architecture
 device/dtype/mode/streaming constraints plus distributed-training capability.
-The pass then validates the loaded runtime structure it needs. A pass may set
-`requires_architecture_support=True` for a manually audited compatibility kind.
-Architecture-bound distributed inference is explicitly unsupported by the
-current schema. The manager rolls back earlier reversible passes after a
-failure and returns ordered application state. Declaring reversibility requires
-an actual `restore()` override.
+The pass then validates any loaded runtime structure it finds. When a model has
+no relevant protocol surface, a public pass returns
+`not_applicable_result(model, reason=...)`; the model is unchanged and the
+manifest records `outcome="not-applicable"` plus the reason. This is an explicit
+universal fallback, not an acceleration claim or a silent skip. A present but
+malformed protocol, an unsupported explicit backend, or incompatible hardware
+still fails before mutation. A pass may set `requires_architecture_support=True`
+for a manually audited compatibility kind. Architecture-bound distributed
+inference is explicitly unsupported by the current schema. The manager rolls
+back earlier reversible passes after a failure and returns ordered application
+state. Declaring reversibility requires an actual `restore()` override.
 
 `manifest_configuration()` is mandatory and must return every effective pass
 option, including defaults, as a strict JSON string-key tree. The manager
@@ -1286,6 +1337,10 @@ speech-input task.
 | `allow_module_discovery` | Opt in to bounded module discovery |
 | `training_default_model_name_or_path` | Recommended differentiable checkpoint |
 | `field_schemas` | Dotted collator paths and their padding schemas |
+| `adapter_factory` | Lazy `module:callable` path for a model-specific training adapter |
+| `dataset_factory` | Lazy `module:callable` path for a source-native dataset builder |
+| `tokenizer_paths` | Ordered wrapper-relative tokenizer paths used by generic exports |
+| `optimization_profile_factory` | Lazy `module:callable` path for a special optimization profile |
 
 Useful properties and methods:
 
@@ -1319,8 +1374,8 @@ native-asr-dispatch
 upstream-native
 ```
 
-A custom non-empty family string is also valid when an adapter factory is
-registered for it.
+A custom non-empty family string is also valid when the profile declares an
+`adapter_factory` or a reusable family factory is registered for it.
 
 ### `TrainingPhaseSpec`
 
@@ -1415,10 +1470,12 @@ AutoTrainingAdapter.from_model(
 The factory chooses, in order:
 
 1. a process-local per-model override;
-2. VoiceHub's built-in specialized adapter for that model; or
+2. the profile's declarative `adapter_factory`; or
 3. the adapter registered for the profile's family.
 
-It constructs an unloaded adapter. `adapter.setup()` or
+The declarative path is resolved only when that model's adapter is requested;
+listing training profiles does not import adapter modules. It constructs an
+unloaded adapter. `adapter.setup()` or
 `adapter.build_training_graph()` performs training validation, calls the
 wrapper's training lifecycle, and resolves trainable components.
 
@@ -1994,6 +2051,9 @@ ASRDatasetSpec(
     readiness=None,
     training_support=None,
     homogeneous_batch_fields=(),
+    field_aliases=(),
+    record_normalizer=None,
+    record_normalizer_phase="after-aliases",
 )
 
 variant.missing(record) -> tuple[str, ...]
@@ -2052,6 +2112,15 @@ sample rate, training support, readiness, and any
 the dataset's epoch-aware `EpochGroupedBatchSampler` automatically, including
 for evaluation.
 
+Architecture-specific source spellings are declarative. `field_aliases`
+contains ordered source/target pairs, while `record_normalizer` is an optional
+lazy `module:attribute` path. Its callable receives a copied record and
+keyword-only `index`, and must return a mapping. `record_normalizer_phase`
+selects `before-aliases` or `after-aliases`. Listing dataset specifications does
+not import these normalizers; `ASRDataset` resolves and validates one only when
+constructing records. Keep the framework-free normalizer beside the owning
+architecture rather than adding a model-name branch to the shared dataset.
+
 `ModelTrainingSpec.dataset_spec` returns a model-specific `ASRDatasetSpec` for
 ASR profiles. Before weights load, use either
 `get_training_spec(model_type).dataset_spec` or
@@ -2094,10 +2163,12 @@ get_tts_dataset_spec(
 ```
 
 `TTSDataset` reads JSON, JSON Lines, CSV, TSV, and LJSpeech metadata without
-importing a tensor framework. It normalizes common text/audio aliases and
-model-specific reference-audio aliases, resolves paths, validates record
-variants, performs deterministic group-disjoint splits, writes portable JSON
-Lines, and fingerprints normalized record content and order.
+importing a tensor framework. It normalizes common text/audio aliases and the
+selected specification's declarative `field_aliases`, resolves paths, validates
+record variants, performs deterministic group-disjoint splits, writes portable
+JSON Lines, and fingerprints normalized record content and order. Ordered
+source/target pairs override shared aliases; an identity pair preserves a
+model-canonical field spelling.
 
 `with_batching(config)` returns a new dataset with an immutable
 `TTSBatchingConfig`. `Trainer` then requests an `EpochLengthBatchSampler`
@@ -2114,8 +2185,8 @@ materialization logic.
 
 `TTSDataArchitecture` values are `codec-lm`, `sequence-to-sequence`,
 `diffusion`, `vits`, `acoustic`, and `hybrid`. A model-specific
-`TTSDatasetSpec` exposes `variants`, `sample_rate`, `training_support`, and
-`readiness`. `TTSDataReadiness` values are:
+`TTSDatasetSpec` exposes `variants`, `sample_rate`, `training_support`,
+`readiness`, and normalized `field_aliases`. `TTSDataReadiness` values are:
 
 | Value | Meaning |
 | --- | --- |
@@ -2131,12 +2202,12 @@ metadata through `requires` or `requires_one_of`. These checks validate the
 portable record boundary; the model processor remains responsible for tensor
 rank, dtype, value range, and sample-rate checks.
 
-For the six built-in TTS training families,
-`ModelTrainingSpec.dataset_spec` lazily returns the corresponding data
-contract. A custom training-family string can select a generic contract
-directly with `get_tts_dataset_spec(architecture=...)`. Generic architecture
-contracts may describe raw corpus structures; model-specific contracts do not
-inherit raw support unless it is integrated.
+For the six built-in TTS training families, `ModelTrainingSpec.dataset_spec`
+lazily resolves the profile's `dataset_spec_factory`. A custom training-family
+string can select a generic contract directly with
+`get_tts_dataset_spec(architecture=...)`. Generic architecture contracts may
+describe raw corpus structures; model-specific contracts do not inherit raw
+support unless it is integrated.
 
 ### Source-specific TTS training profiles
 
@@ -2183,6 +2254,15 @@ existing arguments. See
 [VITS-family optimization](../guides/vits-optimization.md) and
 [TTS optimization](../guides/tts-optimization.md) for the
 pinned recipes and tradeoffs.
+
+For model-specific lookup, the resolver reads
+`ModelTrainingSpec.optimization_profile_factory`. The value is a lazy
+`module:callable` import path whose zero-argument callable must return a profile
+implementing the methods above. A model that shares a verified profile can
+declare that factory in its training specification without adding its name to
+the resolver. A model without a source-verified factory fails explicitly;
+belonging to the same data architecture does not make another model's optimizer
+recipe interchangeable.
 
 ### Specialized TTS objective primitives
 
@@ -2343,6 +2423,23 @@ It attaches a recipe contract to a model type or supports a future
 training-only integration. Aliases cannot collide with canonical model types.
 Inference-alias collisions are rejected by default; `exist_ok=True` permits
 only an alias that resolves to the same canonical target.
+
+`adapter_factory`, `dataset_factory`, and `optimization_profile_factory`, when
+present, must use a validated `module:callable` path. Registration stores these
+paths without importing their modules. `AutoTrainingAdapter` resolves
+`adapter_factory` only when that model's adapter is constructed. A codec-LM
+adapter resolves `dataset_factory` only
+when `create_training_dataset()` is called, then invokes it as
+`factory(model, records, **kwargs)`. Keep that callable beside the model's
+training implementation. Keep a specialized adapter beside the owning model or
+architecture and declare it on the same profile instead of adding the model to
+a shared map. The optimization resolver likewise imports and structurally
+validates its factory only when the profile is requested.
+
+`tokenizer_paths` contains validated dotted attribute paths relative to the
+model wrapper. Generic codec-LM export selects the first resolved object and
+calls its `save_pretrained()` method. Declare a nonstandard layout here instead
+of branching on the model type in a shared adapter.
 
 ```python
 from voicehub import (

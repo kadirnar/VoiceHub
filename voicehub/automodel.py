@@ -9,7 +9,7 @@ from pathlib import Path
 from voicehub.dependencies import import_optional
 from voicehub.inference_strategy import InferenceStrategy
 from voicehub.modeling_utils import PreTrainedTTSModel
-from voicehub.models.registry import MODEL_REGISTRY, ModelSpec, get_model_spec, list_model_specs
+from voicehub.models.registry import MODEL_REGISTRY, ModelSpec, get_default_model_spec, get_model_spec, list_model_specs
 from voicehub.tasks import SpeechTask
 
 
@@ -52,7 +52,7 @@ class AutoInferenceModel:
     @classmethod
     def from_pretrained(
         cls,
-        model_type: str = "orpheustts",
+        model_type: str | None = None,
         model_path: str | Path | None = None,
         device: str = "cuda",
         inference_strategy: str | InferenceStrategy | None = None,
@@ -61,7 +61,8 @@ class AutoInferenceModel:
         """Dynamically load and instantiate the appropriate model class.
 
         Args:
-            model_type: Registry key or documented alias.
+            model_type: Registry key or documented alias. When omitted, use
+                the registry-declared TTS default.
             model_path: Hugging Face id or local path. Each backend has a
                 sensible default when this is omitted.
             device: Target device (``"cuda"`` or ``"cpu"``).
@@ -77,7 +78,14 @@ class AutoInferenceModel:
             UnknownModelError: If *model_type* is not registered.
             OptionalDependencyError: If the selected backend is not installed.
         """
-        spec = get_model_spec(model_type)
+        if model_type is None:
+            spec = get_default_model_spec(SpeechTask.TEXT_TO_SPEECH)
+            if spec is None:
+                raise ValueError(
+                    "AutoInferenceModel has no registry-declared TTS default. "
+                    "Pass `model_type` explicitly.")
+        else:
+            spec = get_model_spec(model_type)
         if spec.task is not SpeechTask.TEXT_TO_SPEECH:
             factory_name = _TASK_FACTORY_NAMES[spec.task]
             raise ValueError(

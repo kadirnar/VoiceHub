@@ -5,11 +5,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from importlib import import_module
 from pathlib import Path
 from threading import RLock
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
+from voicehub.architectures import get_architecture_spec
 from voicehub.base_model import BaseSpeechModel
+from voicehub.modeling_outputs import ASROutput, SpeechSegment, TTSOutput, VADOutput
 from voicehub.optimization import (
     OptimizationApplicationError,
     OptimizationCapabilities,
@@ -24,7 +27,7 @@ from voicehub.optimization import (
     register_optimization_pass,
     unregister_optimization_pass,
 )
-from voicehub.registry import ModelSpec, register_model_spec, unregister_model_spec
+from voicehub.registry import ModelSpec, list_model_specs, register_model_spec, unregister_model_spec
 from voicehub.trainer import Trainer
 from voicehub.trainer_utils import CHECKPOINT_MANIFEST_NAME, MODEL_STATE_NAME, OPTIMIZATION_MANIFEST_NAME
 from voicehub.training.adapters import BaseTrainingAdapter
@@ -139,7 +142,142 @@ class _RegisteredLifecycleModel(_LifecycleModel):
         self.config = SimpleNamespace(model_type="dia")
 
 
+class _RegistrySemanticRuntime:
+
+    def __init__(self, output):
+        self.output = output
+
+    def semantic_output(self):
+        return self.output
+
+    @staticmethod
+    def state_dict():
+        return {"sentinel": 1}
+
+
+def _normalized_output(task):
+    if task.value == "text-to-speech":
+        return TTSOutput(audio=(0.0, ), sample_rate=16_000)
+    if task.value == "automatic-speech-recognition":
+        return ASROutput(text="registry contract")
+    return VADOutput(
+        segments=(SpeechSegment(start=0.0, end=0.5, score=1.0), ),
+        duration=1.0,
+        sample_rate=16_000,
+    )
+
+
 class NativeOptimizationTests(unittest.TestCase):
+
+    def test_every_registered_model_uses_the_shared_public_lifecycle(self):
+        lifecycle_methods = (
+            "available_optimization_passes",
+            "apply_optimization_plan",
+            "optimization_result",
+            "optimization_manifest",
+            "restore_optimization_plan",
+        )
+        specs = list_model_specs(task=None)
+        self.assertTrue(specs)
+
+        for spec in specs:
+            with self.subTest(model_type=spec.model_type):
+                model_class = getattr(
+                    import_module(spec.module),
+                    spec.class_name,
+                )
+                self.assertTrue(
+                    issubclass(model_class, BaseSpeechModel),
+                    f"Registered model {spec.model_type!r} does not inherit "
+                    "VoiceHub's shared speech-model contract.",
+                )
+                for method_name in lifecycle_methods:
+                    owner = next(base for base in model_class.__mro__ if method_name in base.__dict__)
+                    self.assertIs(
+                        owner,
+                        BaseSpeechModel,
+                        f"Registered model {spec.model_type!r} overrides public "
+                        f"optimization lifecycle method {method_name!r} in "
+                        f"{owner.__module__}.{owner.__name__}; extend the shared "
+                        "capability protocols instead.",
+                    )
+
+    def test_every_public_pass_has_a_reported_registry_wide_lifecycle(self):
+        pass_names = BaseSpeechModel.available_optimization_passes()
+        specs = list_model_specs(task=None)
+        self.assertTrue(pass_names)
+        self.assertTrue(specs)
+
+        for spec in specs:
+            architecture = (get_architecture_spec(spec.architecture) if spec.architecture else None)
+            dtype = "float32"
+            if architecture is not None:
+                self.assertTrue(
+                    architecture.capabilities.supports_device("cpu"),
+                    f"{spec.model_type!r} has no CPU-safe architecture contract.",
+                )
+                if not architecture.capabilities.supports_dtype(dtype):
+                    dtype = architecture.capabilities.dtypes[0]
+
+            model_class = getattr(import_module(spec.module), spec.class_name)
+            for pass_name in pass_names:
+                with self.subTest(
+                        model_type=spec.model_type,
+                        optimization_pass=pass_name,
+                ):
+                    model = object.__new__(model_class)
+                    BaseSpeechModel.__init__(model, device="cpu")
+                    model.config = SimpleNamespace(model_type=spec.model_type)
+                    runtime = _RegistrySemanticRuntime(_normalized_output(spec.task))
+                    model.model = runtime
+                    model.load = MethodType(lambda instance: instance.model, model)
+
+                    before_output = runtime.semantic_output()
+                    before_state = runtime.state_dict()
+                    result = model.apply_optimization_plan(
+                        pass_name,
+                        mode="inference",
+                        context=OptimizationContext(
+                            mode="inference",
+                            device="cpu",
+                            dtype=dtype,
+                        ),
+                    )
+                    manifest = model.optimization_manifest(mode="inference")
+                    entry = manifest["passes"][0]
+                    outcome = entry["metadata"]["outcome"]
+
+                    self.assertIs(result.model, runtime)
+                    self.assertEqual(
+                        result.context.architecture,
+                        (None if architecture is None else architecture.architecture_id))
+                    self.assertIn(
+                        outcome,
+                        {
+                            "compiled",
+                            "configured",
+                            "eager-fallback",
+                            "not-applicable",
+                        },
+                    )
+                    self.assertNotEqual(outcome, "skipped")
+                    if outcome in {"eager-fallback", "not-applicable"}:
+                        self.assertTrue(entry["metadata"].get("reason"))
+                    self.assertEqual(
+                        json.loads(json.dumps(manifest, allow_nan=False, sort_keys=True)),
+                        manifest,
+                    )
+                    self.assertIsInstance(runtime.semantic_output(), type(before_output))
+                    self.assertEqual(runtime.semantic_output(), before_output)
+                    self.assertEqual(runtime.state_dict(), before_state)
+
+                    self.assertIs(
+                        model.restore_optimization_plan(mode="inference"),
+                        runtime,
+                    )
+                    self.assertIsNone(model.optimization_result(mode="inference"))
+                    self.assertEqual(runtime.semantic_output(), before_output)
+                    self.assertEqual(runtime.state_dict(), before_state)
 
     def test_plan_validates_every_pass_before_transforming(self):
         add = _AddPass()

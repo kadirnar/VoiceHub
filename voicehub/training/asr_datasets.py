@@ -13,6 +13,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from voicehub.dependencies import resolve_import_path
 from voicehub.training.asr_data_contracts import ASRDataArchitecture, get_asr_dataset_spec
 from voicehub.training.dataset_base import SpeechDataset
 
@@ -36,23 +37,7 @@ _COMMON_ALIASES = MappingProxyType({
     "lang": "language",
     "locale": "language",
 })
-_MODEL_ALIASES = MappingProxyType({
-    "asr_seamless_m4t_v2":
-    MappingProxyType({
-        "target_lang": "target_language",
-    }),
-    "asr_funasr":
-    MappingProxyType({
-        "emo_target": "emotion",
-        "event_target": "event",
-        "source": "audio",
-        "target": "text",
-        "text_language": "language",
-        "with_or_wo_itn": "use_itn",
-    }),
-})
 _PATH_FIELDS = frozenset({"audio"})
-_SENSEVOICE_CONTROL_WRAPPERS = ("<|", "|>")
 
 
 def _field_present(record: Mapping[str, Any], name: str) -> bool:
@@ -189,6 +174,7 @@ class ASRDataset(SpeechDataset):
         self.architecture = self.spec.architecture
         self.root = (None if root is None else Path(root).expanduser().resolve())
         self.aliases = self._normalize_aliases(aliases)
+        self.record_normalizer = self._resolve_record_normalizer()
         self.validate = bool(validate)
         self.validate_files = bool(validate_files)
         if transform_fingerprint is not None and (not isinstance(transform_fingerprint, str) or
@@ -590,7 +576,7 @@ class ASRDataset(SpeechDataset):
         aliases: Mapping[str, str] | None,
     ) -> Mapping[str, str]:
         merged = dict(_COMMON_ALIASES)
-        merged.update(_MODEL_ALIASES.get(self.model_type or "", {}))
+        merged.update(dict(self.spec.field_aliases))
         if aliases is not None:
             if not isinstance(aliases, Mapping):
                 raise TypeError("aliases must be a mapping or None.")
@@ -607,6 +593,38 @@ class ASRDataset(SpeechDataset):
                 normalized[source] = target
         return normalized
 
+    def _resolve_record_normalizer(self, ) -> Callable[..., Mapping[str, Any]] | None:
+        path = self.spec.record_normalizer
+        if path is None:
+            return None
+        try:
+            normalizer = resolve_import_path(path)
+        except (ImportError, AttributeError, TypeError, ValueError) as exc:
+            raise ImportError(
+                f"Could not resolve ASR record normalizer {path!r} for "
+                f"{self.model_type or self.architecture.value!r}: {exc}") from exc
+        if not callable(normalizer):
+            raise TypeError(
+                f"ASR record normalizer {path!r} for "
+                f"{self.model_type or self.architecture.value!r} must be callable.")
+        return normalizer
+
+    def _apply_record_normalizer(
+        self,
+        value: dict[str, Any],
+        *,
+        index: int,
+    ) -> dict[str, Any]:
+        if self.record_normalizer is None:
+            return value
+        normalized = self.record_normalizer(value, index=index)
+        if not isinstance(normalized, Mapping):
+            raise TypeError(
+                f"ASR record normalizer {self.spec.record_normalizer!r} "
+                f"returned {type(normalized).__name__} for record {index}; "
+                "expected a mapping.")
+        return dict(normalized)
+
     def _normalize_record(
         self,
         record: Mapping[str, Any],
@@ -614,8 +632,8 @@ class ASRDataset(SpeechDataset):
         index: int,
     ) -> dict[str, Any]:
         value = dict(record)
-        if self.model_type == "asr_seamless_m4t_v2":
-            value = self._normalize_seamless_record(value, index=index)
+        if self.spec.record_normalizer_phase == "before-aliases":
+            value = self._apply_record_normalizer(value, index=index)
         for source, target in self.aliases.items():
             if source not in value:
                 continue
@@ -624,8 +642,8 @@ class ASRDataset(SpeechDataset):
                     f"ASR record {index} contains both alias {source!r} and "
                     f"canonical field {target!r}.")
             value[target] = value.pop(source)
-        if self.model_type == "asr_funasr":
-            value = self._normalize_sensevoice_record(value, index=index)
+        if self.spec.record_normalizer_phase == "after-aliases":
+            value = self._apply_record_normalizer(value, index=index)
 
         for name in _PATH_FIELDS:
             if name in value:
@@ -663,96 +681,6 @@ class ASRDataset(SpeechDataset):
         if duration is not None and (isinstance(duration, bool) or not isinstance(duration, (int, float)) or
                                      not math.isfinite(float(duration)) or float(duration) <= 0.0):
             raise ValueError(f"ASR record {index} field 'duration' must be a finite positive number.")
-        return value
-
-    @staticmethod
-    def _normalize_sensevoice_record(
-        value: dict[str, Any],
-        *,
-        index: int,
-    ) -> dict[str, Any]:
-        """Translate the official SenseVoice JSONL control-token spellings."""
-
-        def control_name(name: str) -> None:
-            item = value.get(name)
-            if item is None or not isinstance(item, str):
-                return
-            normalized = item.strip()
-            prefix, suffix = _SENSEVOICE_CONTROL_WRAPPERS
-            if normalized.startswith(prefix) and normalized.endswith(suffix):
-                normalized = normalized[len(prefix):-len(suffix)]
-            normalized = normalized.strip().lower()
-            aliases = {
-                "emo_unknown": "unknown",
-                "event_unk": "unknown",
-            }
-            value[name] = aliases.get(normalized, normalized)
-
-        for field_name in ("language", "emotion", "event"):
-            control_name(field_name)
-
-        use_itn = value.get("use_itn")
-        if not isinstance(use_itn, str):
-            return value
-        normalized_itn = use_itn.strip()
-        prefix, suffix = _SENSEVOICE_CONTROL_WRAPPERS
-        if normalized_itn.startswith(prefix) and normalized_itn.endswith(suffix):
-            normalized_itn = normalized_itn[len(prefix):-len(suffix)]
-        normalized_itn = normalized_itn.strip().lower().replace("_", "")
-        if normalized_itn in {"withitn", "true", "1", "yes"}:
-            value["use_itn"] = True
-        elif normalized_itn in {"woitn", "withoutitn", "false", "0", "no"}:
-            value["use_itn"] = False
-        else:
-            raise ValueError(
-                f"ASR record {index} field 'use_itn' must be a boolean or a "
-                "SenseVoice <|withitn|>/<|woitn|> control token.")
-        return value
-
-    @staticmethod
-    def _normalize_seamless_record(
-        value: dict[str, Any],
-        *,
-        index: int,
-    ) -> dict[str, Any]:
-        """Flatten the official SeamlessM4T source/target manifest shape."""
-        source = value.get("source")
-        target = value.get("target")
-        if not isinstance(source, Mapping) and not isinstance(target, Mapping):
-            return value
-        if not isinstance(source, Mapping) or not isinstance(target, Mapping):
-            raise TypeError(f"ASR record {index} Seamless `source` and `target` must both "
-                            "be mappings.")
-        extracted = {
-            "audio":
-            next(
-                (
-                    source[name] for name in (
-                        "audio_local_path",
-                        "audio",
-                        "audio_path",
-                        "audio_filepath",
-                    ) if _field_present(source, name)),
-                None,
-            ),
-            "sampling_rate":
-            source.get("sampling_rate", source.get("sample_rate")),
-            "source_language":
-            source.get("lang", source.get("language")),
-            "target_language":
-            target.get("lang", target.get("language")),
-            "text":
-            target.get("text"),
-        }
-        flattened = {name: item for name, item in extracted.items() if item is not None}
-        for name in flattened:
-            if name in value:
-                raise ValueError(
-                    f"ASR record {index} contains both the official Seamless "
-                    f"nested value and canonical field {name!r}.")
-        value.update(flattened)
-        value.pop("source")
-        value.pop("target")
         return value
 
     def _normalize_audio_value(

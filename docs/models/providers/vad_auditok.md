@@ -1,35 +1,20 @@
 ---
-description: Inference, data preparation, and training guide for the vad_auditok integration.
+description: Public API, checkpoint, training, and optimization guide for the vad_auditok integration.
 ---
 
 # `vad_auditok` model guide
+
+## Overview
 
 `vad_auditok` is a VoiceHub **voice activity detection**
 integration. This page is generated from the model registry and its executable
 data and training contracts, so the documented support stays aligned with code.
 
-## Model information
-
-| Property | Value |
-| --- | --- |
-| Task | Voice activity detection |
-| Default checkpoint | `auditok-energy-vad` |
-| Architecture | `energy-vad` |
-| Runtime | `VoiceHub-native` |
-| Implementation | `voicehub.models.vad_auditok.modeling_vad_auditok.AuditokVADForVoiceActivityDetection` |
-| Capabilities | `voice-activity-detection`, `energy-based`, `adaptive-threshold`, `algorithmic`, `voicehub-native` |
-| Reusable components | — |
-| License | Checkpoint-specific |
-
-No VoiceHub-specific license override is registered. Verify the checkpoint and upstream source terms before use.
-
-## Install
+## Quickstart
 
 ```bash
 python -m pip install voicehub
 ```
-
-## Inference
 
 1. Install VoiceHub and the provider extra shown above.
 2. Choose a checkpoint that matches this integration.
@@ -51,43 +36,56 @@ for segment in output.segments:
 ```
 
 Use only authorized recordings for reference voice, transcription, detection,
-or evaluation. Pin a checkpoint revision in production.
+or evaluation. The example selects a concrete device; verify checkpoint-specific
+hardware needs and pin an immutable revision before production use.
 
-## Data preparation
+## Supported tasks and capabilities
 
-VAD source data should pair authorized audio with clip-, frame-, or
-segment-level speech labels. VoiceHub does not expose a verified training dataset contract for this inference-only provider.
+| Property | Value |
+| --- | --- |
+| Task | Voice activity detection |
+| Architecture | `energy-vad` |
+| Runtime | `VoiceHub-native` |
+| Capabilities | `voice-activity-detection`, `energy-based`, `adaptive-threshold`, `algorithmic`, `voicehub-native` |
+| Reusable components | — |
 
-Follow this process:
+### Data contract
 
-1. Preserve source audio, annotation provenance, consent, and license metadata.
-2. Split complete speakers and sessions before windowing the recordings.
-3. Convert annotations to the frame or clip boundary required by the phase below.
-4. Measure class balance and tune the inference threshold only on validation data.
+| Property | Value |
+| --- | --- |
+| Label boundary | No verified training dataset contract |
+| Required training inputs | — |
 
-```python
-import json
-from pathlib import Path
+Use authorized audio and preserve annotation provenance. Follow the
+[ASR and VAD data workflow](../../guides/speech-data.md) for supported audio
+forms, timestamp labels, frame targets, leakage-safe splits, and evaluation.
 
-from voicehub import SpeechDataset
+## Checkpoints, provenance, and license
 
-manifest = Path("data/vad-train.jsonl")
-source_records = [
-    json.loads(line)
-    for line in manifest.read_text(encoding="utf-8").splitlines()
-    if line.strip()
-]
-records = SpeechDataset(
-    source_records,
-    required_fields=('audio', 'labels'),
-)
-print(len(records), records.column_names)
-```
+| Property | Value |
+| --- | --- |
+| Default checkpoint | `auditok-energy-vad` |
+| Checkpoint status | Registry default; pin an immutable revision for production and reproducible evidence |
+| Implementation | `voicehub.models.vad_auditok.modeling_vad_auditok.AuditokVADForVoiceActivityDetection` |
+| Configuration | `voicehub.models.vad_auditok.configuration_vad_auditok.AuditokVADConfig` |
+| Source provenance | No integration-specific bundled `SOURCE.json` is declared for this registry entry. |
+| License | Checkpoint-specific |
 
-See the [ASR and VAD data guide](../../guides/speech-data.md) for audio input
-forms, timestamp labels, frame targets, and leakage-safe evaluation.
+No VoiceHub-specific license override is registered. Verify the checkpoint and upstream source terms before use.
 
-## Training
+The default checkpoint identifies the expected family, not every compatible
+variant. Confirm the selected checkpoint's revision, access terms, provenance,
+and license before downloading or redistributing it.
+
+## Optimization and training support
+
+All public optimizations enter this model through the shared
+`BaseSpeechModel` lifecycle. Use `available_optimization_passes()` to discover
+the public pass registry, then apply, inspect, serialize, or restore a plan
+through the common model API. Application remains fail-closed when the active
+runtime or hardware cannot satisfy a pass.
+
+### Training contract
 
 | Property | Value |
 | --- | --- |
@@ -108,7 +106,19 @@ attach a generic loss to inference output. Choose a trainable model from the
 [training matrix](../training-support.md), or contribute a tested training
 adapter and data contract.
 
-## Next steps
+## Public API
+
+| Purpose | Public object |
+| --- | --- |
+| Discover | `get_model_spec('vad_auditok')` |
+| Load and run | `AutoModelForVoiceActivityDetection` |
+| Configure | `AuditokVADConfig` |
+| Model implementation | `AuditokVADForVoiceActivityDetection` |
+| Normalized output | `VADOutput` |
+| Training contract | `get_training_spec('vad_auditok')` |
+| Optimization lifecycle | `available_optimization_passes`, `apply_optimization_plan`, `optimization_manifest`, `restore_optimization_plan` |
+
+Related shared documentation:
 
 - [All model guides](index.md)
 - [Shared inference guides](../../guides/index.md)

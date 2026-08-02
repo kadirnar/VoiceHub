@@ -2,7 +2,13 @@
 
 from voicehub.llm_serving.configuration import LLMBackend, LLMBackendConfig, LLMBackendTransport
 from voicehub.llm_serving.protocol import TokenGenerationRequest, TokenGenerationResult
-from voicehub.llm_serving.support import LLMBackendSupport, get_llm_backend_support, list_llm_backend_support
+from voicehub.llm_serving.support import (
+    LLMBackendSupport,
+    get_llm_backend_support,
+    list_llm_backend_support,
+    register_llm_backend_support,
+    unregister_llm_backend_support,
+)
 
 __all__ = [
     "LLMBackend",
@@ -15,6 +21,8 @@ __all__ = [
     "TokenGenerationResult",
     "get_llm_backend_support",
     "list_llm_backend_support",
+    "register_llm_backend_support",
+    "unregister_llm_backend_support",
 ]
 
 

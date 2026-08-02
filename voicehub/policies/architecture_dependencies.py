@@ -33,7 +33,7 @@ _PER_FILE_ALLOWED_IMPORT_ROOTS = {
     "kernels/triton_activations.py": frozenset({"triton"}),
     "neural/backends/flash_attention4.py": frozenset({"flash_attn"}),
 }
-NATIVE_RUNTIME_DIRECTORIES = (
+_CORE_NATIVE_RUNTIME_DIRECTORIES = (
     "architectures",
     "audio.py",
     "base_model.py",
@@ -57,234 +57,61 @@ NATIVE_RUNTIME_DIRECTORIES = (
     "trainer.py",
     "trainer_utils.py",
     "training",
-    "models/asr_hubert",
-    "models/asr_moonshine",
-    "models/asr_nemo",
-    "models/asr_wenet",
-    "models/asr_qwen3",
-    "models/asr_granite_speech",
-    "models/asr_parakeet_tdt",
-    "models/asr_nemotron",
-    "models/asr_cohere",
-    "models/asr_seamless_m4t_v2",
-    "models/asr_vibevoice",
-    "models/asr_medasr",
-    "models/asr_native/nemo.py",
-    "models/asr_native/wenet.py",
-    "models/asr_native/configuration.py",
-    "models/asr_native/espnet.py",
-    "models/asr_native/faster_whisper.py",
-    "models/asr_native/funasr.py",
-    "models/asr_native/openai_whisper.py",
-    "models/asr_native/speechbrain.py",
-    "models/asr_native/speechbrain_training.py",
-    "models/asr_native/_wenet",
-    "models/asr_native/whisper_compat.py",
-    "models/asr_native/whisperx.py",
-    "models/asr_tiron",
-    "models/asr_transformers",
-    "models/asr_transformers_multimodal",
-    "models/asr_transformers_presets",
-    "models/asr_wavlm",
-    "models/asr_wav2vec2",
-    "models/asr_whisper_native",
-    "models/bark",
-    "models/dia",
-    "models/chatterbox/__init__.py",
-    "models/chatterbox/configuration_chatterbox.py",
-    "models/chatterbox/modeling_chatterbox.py",
-    "models/chatterbox/inference.py",
-    "models/chatterbox/tts.py",
-    "models/chatterbox/vc.py",
-    "models/chatterbox/checkpoint.py",
-    "models/chatterbox/native_audio.py",
-    "models/chatterbox/watermark.py",
-    "models/chatterbox/training.py",
-    "models/chatterbox/models",
-    "models/csm/__init__.py",
-    "models/csm/configuration_csm.py",
-    "models/csm/modeling_csm.py",
-    "models/csm/inference.py",
-    "models/csm/training.py",
-    "models/csm/source/moshi/models/__init__.py",
-    "models/csm/source/moshi/models/compression.py",
-    "models/csm/source/moshi/modules",
-    "models/csm/source/moshi/quantization",
-    "models/csm/source/moshi/utils/__init__.py",
-    "models/csm/source/moshi/utils/compile.py",
-    "models/csm/source/moshi/utils/quantize.py",
-    "models/conversationtts/__init__.py",
-    "models/conversationtts/configuration_conversationtts.py",
-    "models/conversationtts/inference.py",
-    "models/conversationtts/modeling_conversationtts.py",
-    "models/conversationtts/runtime.py",
-    "models/conversationtts/source/conversationtts/inference/generator.py",
-    "models/conversationtts/source/conversationtts/models/model_new.py",
-    "models/conversationtts/source/conversationtts/tools/tokenizer/abs_tokenizer.py",
-    "models/conversationtts/source/conversationtts/tools/tokenizer/common.py",
-    "models/conversationtts/source/conversationtts/tools/tokenizer/Text2ID/text_tokenizer.py",
-    "models/conversationtts/source/conversationtts/tools/tokenizer/MimiCodec",
-    "models/echo",
-    "models/f5tts/__init__.py",
-    "models/f5tts/configuration_f5tts.py",
-    "models/f5tts/inference.py",
-    "models/f5tts/modeling_f5tts.py",
-    "models/fishtts/__init__.py",
-    "models/fishtts/configuration_fishtts.py",
-    "models/fishtts/inference.py",
-    "models/fishtts/modeling_fishtts.py",
-    "models/fishtts/training.py",
-    "models/gptsovits/__init__.py",
-    "models/gptsovits/configuration_gptsovits.py",
-    "models/gptsovits/modeling_gptsovits.py",
-    "models/gptsovits/inference.py",
-    "models/gptsovits/training.py",
-    "models/mosstts/__init__.py",
-    "models/mosstts/configuration_mosstts.py",
-    "models/mosstts/modeling_mosstts.py",
-    "models/mosstts/inference.py",
-    "models/mosstts/training.py",
-    "models/higgstts/__init__.py",
-    "models/higgstts/configuration_higgstts.py",
-    "models/higgstts/inference.py",
-    "models/higgstts/modeling_higgstts.py",
-    "models/higgstts/training.py",
-    "models/inflecttts/__init__.py",
-    "models/inflecttts/configuration_inflecttts.py",
-    "models/inflecttts/inference.py",
-    "models/inflecttts/modeling_inflecttts.py",
-    "models/inflecttts/training.py",
-    "models/irodoritts/__init__.py",
-    "models/irodoritts/configuration_irodoritts.py",
-    "models/irodoritts/inference.py",
-    "models/irodoritts/modeling_irodoritts.py",
-    "models/irodoritts/training.py",
-    "models/cosyvoice/__init__.py",
-    "models/cosyvoice/configuration_cosyvoice.py",
-    "models/cosyvoice/inference.py",
-    "models/cosyvoice/modeling_cosyvoice.py",
-    "models/cosyvoice/training.py",
-    "models/cosyvoice_native",
-    "models/xtts/__init__.py",
-    "models/xtts/configuration_xtts.py",
-    "models/xtts/inference.py",
-    "models/xtts/modeling_xtts.py",
-    "models/xtts/training.py",
-    "models/xtts_native",
-    "models/kokoro",
-    "models/llasa/__init__.py",
-    "models/llasa/artifacts.py",
-    "models/llasa/checkpoint.py",
-    "models/llasa/configuration_llasa.py",
-    "models/llasa/inference.py",
-    "models/llasa/modeling_llasa.py",
-    "models/llasa/tokenization_llasa.py",
-    "models/llasa/training.py",
-    "models/llasa/xcodec2.py",
-    "models/melotts/__init__.py",
-    "models/melotts/configuration_melotts.py",
-    "models/melotts/inference.py",
-    "models/melotts/modeling_melotts.py",
-    "models/melotts/training.py",
-    "models/melotts/source/melo/models.py",
-    "models/melotts/source/melo/modules.py",
-    "models/melotts/source/melo/attentions.py",
-    "models/melotts/source/melo/commons.py",
-    "models/melotts/source/melo/transforms.py",
-    "models/melotts/source/melo/monotonic_align",
-    "models/openvoice/__init__.py",
-    "models/openvoice/configuration_openvoice.py",
-    "models/openvoice/modeling_openvoice.py",
-    "models/openvoice/inference.py",
-    "models/openvoice/training.py",
-    "models/openvoice/source/openvoice/models.py",
-    "models/openvoice/source/openvoice/modules.py",
-    "models/openvoice/source/openvoice/commons.py",
-    "models/openvoice/source/openvoice/attentions.py",
-    "models/openvoice/source/openvoice/transforms.py",
-    "models/neutts/__init__.py",
-    "models/neutts/configuration_neutts.py",
-    "models/neutts/modeling_neutts.py",
-    "models/neutts/inference.py",
-    "models/neutts/training.py",
-    "models/outetts/__init__.py",
-    "models/outetts/configuration_outetts.py",
-    "models/outetts/inference.py",
-    "models/outetts/modeling_outetts.py",
-    "models/outetts/training.py",
-    "models/orpheustts",
-    "models/parlertts/__init__.py",
-    "models/parlertts/configuration_parlertts.py",
-    "models/parlertts/modeling_parlertts.py",
-    "models/parlertts/inference.py",
-    "models/parlertts/training.py",
-    "models/qwen3tts/__init__.py",
-    "models/qwen3tts/configuration_qwen3tts.py",
-    "models/qwen3tts/modeling_qwen3tts.py",
-    "models/qwen3tts/inference.py",
-    "models/qwen3tts/lora.py",
-    "models/qwen3tts/lora_config.py",
-    "models/qwen3tts/training.py",
-    "models/speecht5",
-    "models/supertonic/__init__.py",
-    "models/supertonic/configuration_supertonic.py",
-    "models/supertonic/modeling_supertonic.py",
-    "models/supertonic/inference.py",
-    "models/supertonic/training.py",
-    "models/styletts2/__init__.py",
-    "models/styletts2/configuration_styletts2.py",
-    "models/styletts2/modeling_styletts2.py",
-    "models/styletts2/inference.py",
-    "models/styletts2/runtime.py",
-    "models/styletts2/training.py",
-    "models/styletts2/monotonic_align.py",
-    "models/styletts2/source/styletts2/models.py",
-    "models/styletts2/source/styletts2/Modules/hifigan.py",
-    "models/styletts2/source/styletts2/Modules/istftnet.py",
-    "models/styletts2/source/styletts2/Modules/discriminators.py",
-    "models/styletts2/source/styletts2/Modules/utils.py",
-    "models/styletts2/source/styletts2/Modules/diffusion",
-    "models/vits",
-    "models/vui",
-    "models/vibevoice/__init__.py",
-    "models/vibevoice/configuration_vibevoice.py",
-    "models/vibevoice/inference.py",
-    "models/vibevoice/modeling_vibevoice.py",
-    "models/vibevoice/training.py",
-    "models/voxcpm/__init__.py",
-    "models/voxcpm/configuration_voxcpm.py",
-    "models/voxcpm/inference.py",
-    "models/voxcpm/modeling_voxcpm.py",
-    "models/voxcpm/training.py",
-    "models/voxcpm_native",
-    "models/omnivoice/__init__.py",
-    "models/omnivoice/configuration_omnivoice.py",
-    "models/omnivoice/modeling_omnivoice.py",
-    "models/omnivoice/inference.py",
-    "models/omnivoice/training.py",
-    "models/omnivoice_native",
-    "models/zonos/__init__.py",
-    "models/zonos/configuration_zonos.py",
-    "models/zonos/inference.py",
-    "models/zonos/modeling_zonos.py",
-    "models/zonos/training.py",
-    "models/zonos2/__init__.py",
-    "models/zonos2/configuration_zonos2.py",
-    "models/zonos2/inference.py",
-    "models/zonos2/modeling_zonos2.py",
-    "models/zonos2/training.py",
-    "models/vad_auditok",
-    "models/vad_funasr",
-    "models/vad_nemo",
-    "models/vad_sherpa_onnx",
-    "models/vad_silero",
-    "models/vad_transformers",
-    "models/vad_webrtc",
-    "models/vad_pyannote",
-    "models/vad_pyannote_segmentation",
-    "models/vad_pyannote_brouhaha",
-    "models/vad_speechbrain",
 )
+_DYNAMIC_NATIVE_SOURCE_DIRECTORIES = (
+    "models/asr_native/_wenet",
+    "models/chatterbox/models",
+    "models/melotts/source/melo/monotonic_align",
+)
+
+
+def _discover_architecture_reference_files(root: Path) -> tuple[str, ...]:
+    """Resolve literal lazy-component modules from registration source."""
+    package_prefix = f"{root.name}."
+    references = set()
+    for registration_path in sorted((root / "architectures").glob("*/registration.py")):
+        tree = ast.parse(
+            registration_path.read_text(encoding="utf-8"),
+            filename=str(registration_path),
+        )
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                continue
+            module_name, separator, _ = node.value.partition(":")
+            if not separator or not module_name.startswith(package_prefix):
+                continue
+            relative_parts = module_name[len(package_prefix):].split(".")
+            module_path = root.joinpath(*relative_parts).with_suffix(".py")
+            if not module_path.is_file():
+                module_path = root.joinpath(*relative_parts, "__init__.py")
+            if module_path.is_file():
+                references.add(module_path.relative_to(root).as_posix())
+    return tuple(sorted(references))
+
+
+def discover_native_runtime_directories(package_root: str | Path, ) -> tuple[str, ...]:
+    """Derive native-policy seeds without importing model packages.
+
+    Immediate Python files under each model package are public facades,
+    configuration, runtime, and training boundaries. Internal imports
+    expand those seeds to a fixed-point closure. The small explicit
+    source set covers active vendored modules reached through runtime-
+    generated imports.
+    """
+    root = Path(package_root)
+    model_root = root / "models"
+    model_facades = tuple(path.relative_to(root).as_posix() for path in sorted(model_root.glob("*/*.py")))
+    architecture_references = _discover_architecture_reference_files(root)
+    return tuple(
+        dict.fromkeys((
+            *_CORE_NATIVE_RUNTIME_DIRECTORIES,
+            *model_facades,
+            *architecture_references,
+            *_DYNAMIC_NATIVE_SOURCE_DIRECTORIES,
+        )))
+
+
+NATIVE_RUNTIME_DIRECTORIES = discover_native_runtime_directories(Path(__file__).resolve().parents[1], )
 
 
 @dataclass(frozen=True, order=True)
@@ -509,7 +336,7 @@ def _iter_internal_import_names(
 def inspect_native_runtime(
     package_root: str | Path,
     *,
-    directories: Iterable[str] = NATIVE_RUNTIME_DIRECTORIES,
+    directories: Iterable[str] | None = None,
     allowed_roots: Iterable[str] = ALLOWED_NATIVE_IMPORT_ROOTS,
 ) -> tuple[ImportPolicyViolation, ...]:
     """Inspect all present native runtime files and their package initializers.
@@ -545,10 +372,12 @@ def inspect_native_runtime(
 def collect_native_runtime_paths(
     package_root: str | Path,
     *,
-    directories: Iterable[str] = NATIVE_RUNTIME_DIRECTORIES,
+    directories: Iterable[str] | None = None,
 ) -> tuple[Path, ...]:
     """Resolve the complete, auditable file set for a native boundary."""
     root = Path(package_root)
+    resolved_directories = (
+        discover_native_runtime_directories(root) if directories is None else tuple(directories))
     root_init = root / "__init__.py"
     paths: set[Path] = set()
 
@@ -567,7 +396,7 @@ def collect_native_runtime_paths(
             if initializer.is_file():
                 paths.add(initializer)
 
-    for directory in directories:
+    for directory in resolved_directories:
         runtime_path = root / directory
         if runtime_path.is_file():
             runtime_files = (runtime_path, )
@@ -584,7 +413,7 @@ def collect_native_runtime_paths(
 def collect_native_import_closure(
     package_root: str | Path,
     *,
-    directories: Iterable[str] = NATIVE_RUNTIME_DIRECTORIES,
+    directories: Iterable[str] | None = None,
 ) -> tuple[Path, ...]:
     """Resolve the fixed-point VoiceHub import closure of the native boundary.
 
@@ -641,7 +470,7 @@ def collect_native_import_closure(
 def require_native_runtime_independence(
     package_root: str | Path,
     *,
-    directories: Iterable[str] = NATIVE_RUNTIME_DIRECTORIES,
+    directories: Iterable[str] | None = None,
     allowed_roots: Iterable[str] = ALLOWED_NATIVE_IMPORT_ROOTS,
 ) -> None:
     """Raise with every violation instead of failing on only the first."""
@@ -662,6 +491,7 @@ __all__ = [
     "ImportPolicyViolation",
     "collect_native_import_closure",
     "collect_native_runtime_paths",
+    "discover_native_runtime_directories",
     "inspect_native_imports",
     "inspect_native_runtime",
     "require_native_runtime_independence",

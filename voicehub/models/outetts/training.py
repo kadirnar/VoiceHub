@@ -197,16 +197,6 @@ class OuteTTSTrainingAdapter(CodecCausalLMTrainingAdapter):
 
     native_export_semantics = "inference-export"
 
-    def create_dataset(self, records, **kwargs):
-        self.setup()
-        return OuteTTSSFTDataset(
-            records,
-            runtime=self.model.model,
-            completion_only=bool(kwargs.get("completion_only", True)),
-            max_length=kwargs.get("max_length"),
-            prompt_word_count=kwargs.get("prompt_word_count"),
-        )
-
     def save_pretrained(self, save_directory) -> None:
         self.setup()
         export = getattr(self.model, "export_native_pretrained", None)
@@ -235,9 +225,23 @@ class OuteTTSTrainingAdapter(CodecCausalLMTrainingAdapter):
         return manifest
 
 
+def build_training_dataset(model, records, **kwargs) -> OuteTTSSFTDataset:
+    """Build the source-native dataset declared by the training registry."""
+    return OuteTTSSFTDataset(
+        records,
+        runtime=model.model,
+        completion_only=bool(kwargs.get("completion_only", True)),
+        max_length=kwargs.get("max_length"),
+        prompt_word_count=kwargs.get("prompt_word_count"),
+        whisper_model=kwargs.get("whisper_model"),
+        whisper_device=kwargs.get("whisper_device"),
+    )
+
+
 __all__ = [
     "OUTETTS_TRAINING_SOURCE",
     "OUTETTS_TRAINING_SOURCE_REVISION",
     "OuteTTSSFTDataset",
     "OuteTTSTrainingAdapter",
+    "build_training_dataset",
 ]

@@ -66,6 +66,7 @@ def create_dia_architecture_spec() -> ArchitectureSpec:
         upstream_revision=NARI_DIA_SOURCE_REVISION,
         license_id="Apache-2.0",
         metadata={
+            "external_llm_backend_blocker": ("Dia is a multi-channel encoder-decoder with CFG."),
             "family":
             "dia",
             "implementation":

@@ -1,7 +1,10 @@
+import ast
 import base64
 import io
 import json
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 import wave
@@ -21,12 +24,15 @@ from voicehub import (
     LLMBackendCompatibilityError,
     LLMBackendConfig,
     LLMBackendRequestError,
+    LLMBackendSupport,
     LLMBackendTransport,
     PreTrainedTTSModel,
     TTSOutput,
     VoiceHubConfig,
     get_llm_backend_support,
     list_llm_backend_support,
+    register_llm_backend_support,
+    unregister_llm_backend_support,
 )
 from voicehub.generation import GenerationConfig
 from voicehub.llm_serving import LLMServingClient, RemoteCausalLMProxy, TokenGenerationRequest, TokenGenerationResult
@@ -370,6 +376,16 @@ class LLMBackendSupportTests(unittest.TestCase):
         self.assertIs(orpheus_transport, LLMBackendTransport.TOKENS)
         self.assertEqual(qwen.engine, "SGLang-Omni")
         self.assertIs(qwen_transport, LLMBackendTransport.SPEECH)
+        self.assertEqual(qwen.task_type_without_reference, "CustomVoice")
+        self.assertEqual(qwen.task_type_with_reference, "Base")
+        self.assertEqual(
+            get_llm_backend_support("fishtts", "sglang")[0].reference_format,
+            "references",
+        )
+        self.assertEqual(
+            get_llm_backend_support("mosstts", "vllm")[0].speech_string_options,
+            ("ambient_sound", ),
+        )
         sglang_models = {item.model_type for item in list_llm_backend_support(backend="sglang")}
         self.assertIn("fishtts", sglang_models)
         self.assertNotIn("higgstts", sglang_models)
@@ -394,6 +410,265 @@ class LLMBackendSupportTests(unittest.TestCase):
                 "does not use an external",
         ):
             get_llm_backend_support("qwen3tts", "native")
+        with self.assertRaisesRegex(
+                LLMBackendCompatibilityError,
+                "No verified engine adapter exists for this architecture",
+        ):
+            get_llm_backend_support("future-unregistered-tts", "vllm")
+
+    def test_specialized_failure_reasons_are_owned_by_architectures(self):
+        from voicehub.registry import list_model_specs
+
+        blocked = {}
+        for spec in list_model_specs():
+            architecture = spec.native_architecture
+            if architecture is None:
+                continue
+            reason = architecture.metadata.get("external_llm_backend_blocker")
+            if reason is not None:
+                blocked[spec.model_type] = reason
+
+        self.assertEqual(
+            set(blocked),
+            {
+                "bark",
+                "chatterbox",
+                "conversationtts",
+                "csm",
+                "dia",
+                "gptsovits",
+                "neutts",
+                "outetts",
+                "parlertts",
+                "vibevoice",
+                "vui",
+                "xtts",
+                "zonos",
+                "zonos2",
+            },
+        )
+        registered_backends = {}
+        for support in list_llm_backend_support():
+            registered_backends.setdefault(support.model_type, set()).add(support.backend)
+        for model_type, reason in blocked.items():
+            with self.subTest(model_type=model_type):
+                self.assertIsInstance(reason, str)
+                self.assertEqual(reason, reason.strip())
+                backend = next(
+                    candidate for candidate in (
+                        LLMBackend.VLLM,
+                        LLMBackend.SGLANG,
+                    ) if candidate not in registered_backends.get(model_type, set()))
+                with self.assertRaises(LLMBackendCompatibilityError) as raised:
+                    get_llm_backend_support(model_type, backend)
+                self.assertIn(reason, str(raised.exception))
+
+    def test_support_metadata_is_validated_and_json_serializable(self):
+        support = LLMBackendSupport(
+            model_type=" future-remote-tts ",
+            backend="vllm",
+            transports=("speech", ),
+            default_transport="speech",
+            engine=" Future engine ",
+            checkpoint_family=" Future checkpoint ",
+            task_type_without_reference="FutureVoice",
+            task_type_with_reference="FutureClone",
+            task_type_aliases=(("speak", "FutureGenerate"), ),
+            reference_format="references",
+            speech_string_options=("emotion_prompt", ),
+        )
+
+        self.assertEqual(support.model_type, "future-remote-tts")
+        serialized = json.loads(json.dumps(support.to_dict()))
+        self.assertEqual(
+            serialized,
+            {
+                "model_type": "future-remote-tts",
+                "backend": "vllm",
+                "transports": ["speech"],
+                "default_transport": "speech",
+                "engine": "Future engine",
+                "checkpoint_family": "Future checkpoint",
+                "notes": "",
+                "task_type_without_reference": "FutureVoice",
+                "task_type_with_reference": "FutureClone",
+                "task_type_aliases": {
+                    "speak": "FutureGenerate"
+                },
+                "reference_format": "references",
+                "speech_string_options": ["emotion_prompt"],
+                "speech_input_options": list(support.speech_input_options),
+                "speech_default_options": list(support.speech_default_options),
+                "speech_native_only_options": list(support.speech_native_only_options),
+            },
+        )
+        self.assertIn("emotion_prompt", support.speech_input_options)
+        self.assertIn("emotion_prompt", support.speech_default_options)
+        self.assertNotIn("emotion_prompt", support.speech_native_only_options)
+        with self.assertRaisesRegex(ValueError, "concrete transports"):
+            LLMBackendSupport(
+                model_type="bad-auto-transport",
+                backend="vllm",
+                transports=("auto", ),
+                default_transport="auto",
+                engine="engine",
+                checkpoint_family="checkpoint",
+            )
+        with self.assertRaisesRegex(ValueError, "request-owned"):
+            LLMBackendSupport(
+                model_type="bad-owned-field",
+                backend="vllm",
+                transports=("speech", ),
+                default_transport="speech",
+                engine="engine",
+                checkpoint_family="checkpoint",
+                speech_string_options=("input", ),
+            )
+        with self.assertRaisesRegex(ValueError, "request-owned"):
+            LLMBackendSupport(
+                model_type="bad-typed-field",
+                backend="vllm",
+                transports=("speech", ),
+                default_transport="speech",
+                engine="engine",
+                checkpoint_family="checkpoint",
+                speech_string_options=("temperature", ),
+            )
+
+    def test_extension_support_drives_payload_without_shared_model_branch(self):
+        support = LLMBackendSupport(
+            model_type="future-remote-tts",
+            backend="vllm",
+            transports=("speech", ),
+            default_transport="speech",
+            engine="Future engine",
+            checkpoint_family="Future checkpoint",
+            task_type_without_reference="FutureVoice",
+            task_type_with_reference="FutureClone",
+            task_type_aliases=(("speak", "FutureGenerate"), ),
+            reference_format="references",
+            speech_string_options=("emotion_prompt", ),
+        )
+        register_llm_backend_support(support)
+        try:
+            resolved, transport = get_llm_backend_support(
+                "future-remote-tts",
+                "vllm",
+            )
+            self.assertIs(resolved, support)
+            self.assertIs(transport, LLMBackendTransport.SPEECH)
+            client = LLMServingClient(
+                LLMBackendConfig(
+                    backend="vllm",
+                    endpoint="http://localhost:8091",
+                    transport="speech",
+                ))
+            payload = client._speech_payload(
+                "future-remote-tts",
+                {
+                    "text": "Hello",
+                    "reference_audio": "https://example.com/reference.wav",
+                    "reference_text": "Reference",
+                    "mode": "speak",
+                    "emotion_prompt": "A quiet room",
+                },
+            )
+            self.assertEqual(payload["task_type"], "FutureGenerate")
+            self.assertEqual(payload["emotion_prompt"], "A quiet room")
+            self.assertEqual(
+                payload["references"],
+                [{
+                    "audio_path": "https://example.com/reference.wav",
+                    "text": "Reference",
+                }],
+            )
+        finally:
+            self.assertIs(
+                unregister_llm_backend_support("future-remote-tts", "vllm"),
+                support,
+            )
+        self.assertIsNone(unregister_llm_backend_support(
+            "future-remote-tts",
+            "vllm",
+            missing_ok=True,
+        ))
+        with self.assertRaisesRegex(ValueError, "cannot be unregistered"):
+            unregister_llm_backend_support("qwen3tts", "vllm")
+
+    def test_support_listing_remains_backend_and_framework_lazy(self):
+        script = (
+            "import sys;"
+            "from voicehub.llm_serving import list_llm_backend_support;"
+            "print(len(list_llm_backend_support()),"
+            "'torch' in sys.modules,"
+            "'voicehub.llm_serving.backends' in sys.modules)")
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.stdout.strip(), "14 False False")
+
+    def test_architecture_failure_lookup_remains_framework_lazy(self):
+        script = (
+            "import sys\n"
+            "from voicehub import LLMBackendCompatibilityError\n"
+            "from voicehub.llm_serving import get_llm_backend_support\n"
+            "try:\n"
+            "    get_llm_backend_support('outetts', 'vllm')\n"
+            "except LLMBackendCompatibilityError as error:\n"
+            "    print('64-token repetition window' in str(error), "
+            "'torch' in sys.modules, "
+            "'voicehub.models.outetts.modeling_outetts' in sys.modules)\n")
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.stdout.strip(), "True False False")
+
+    def test_shared_support_has_no_provider_keyed_failure_map(self):
+        from voicehub.registry import list_model_specs
+
+        registered = {spec.model_type for spec in list_model_specs()}
+        path = (Path(__file__).parents[1] / "voicehub" / "llm_serving" / "support.py")
+        provider_maps = []
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = {
+                key.value
+                for key in node.keys if isinstance(key, ast.Constant) and isinstance(key.value, str)
+            }
+            matched = sorted(keys & registered)
+            if matched:
+                provider_maps.append((node.lineno, matched))
+
+        self.assertEqual(provider_maps, [])
+
+    def test_shared_runtime_has_no_registered_model_comparisons(self):
+        from voicehub.registry import list_model_specs
+
+        registered = {spec.model_type for spec in list_model_specs()}
+        comparisons = []
+        package = Path(__file__).parents[1] / "voicehub"
+        for path in package.rglob("*.py"):
+            relative = path.relative_to(package)
+            if relative.parts[0] in {"models", "architectures", "components"}:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Compare):
+                    continue
+                for operand in (node.left, *node.comparators):
+                    if (isinstance(operand, ast.Constant) and operand.value in registered):
+                        comparisons.append((str(relative), node.lineno, operand.value), )
+
+        self.assertEqual(comparisons, [])
 
 
 class HTTPBackendTests(unittest.TestCase):
@@ -897,6 +1172,26 @@ class RemoteCausalLMProxyTests(unittest.TestCase):
 
 class SpeechBackendTests(unittest.TestCase):
 
+    def test_direct_speech_client_rejects_unknown_input_from_capability(self):
+        client = LLMServingClient(
+            LLMBackendConfig(
+                backend="vllm",
+                endpoint="http://localhost:8091",
+                transport="speech",
+            ))
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Unsupported external speech option.*temperatur",
+        ):
+            client._speech_payload(
+                "qwen3tts",
+                {
+                    "text": "Hello",
+                    "temperatur": 0.7,
+                },
+            )
+
     def test_vllm_speech_nests_sampling_fields_and_rejects_penalty(self):
         client = LLMServingClient(
             LLMBackendConfig(
@@ -1350,6 +1645,56 @@ class SpeechBackendTests(unittest.TestCase):
 
 
 class PreTrainedTTSLLMServingTests(unittest.TestCase):
+
+    def test_extension_option_drives_wrapper_validation_and_defaults(self):
+
+        class ExtensionConfig(VoiceHubConfig):
+            model_type = "future-wrapper-tts"
+
+        class ExtensionModel(_RemoteSpeechModel):
+            config_class = ExtensionConfig
+
+        support = LLMBackendSupport(
+            model_type="future-wrapper-tts",
+            backend="vllm",
+            transports=("speech", ),
+            default_transport="speech",
+            engine="Future engine",
+            checkpoint_family="Future checkpoint",
+            speech_string_options=("emotion_prompt", ),
+        )
+        register_llm_backend_support(support)
+        try:
+            model = ExtensionModel(
+                ExtensionConfig(
+                    name_or_path="future/checkpoint",
+                    generation_config={"emotion_prompt": "Calm"},
+                ))
+            model.set_llm_backend(
+                "vllm",
+                endpoint="http://localhost:8091",
+                transport="speech",
+            )
+            recording = _RecordingSpeechClient()
+            model._llm_backend_client = recording
+
+            model.generate("Default emotion")
+            model.forward("Explicit emotion", emotion_prompt="Bright")
+            with self.assertRaisesRegex(
+                    ValueError,
+                    "Unsupported external speech option.*emotion_promt",
+            ):
+                model.forward("Misspelled", emotion_promt="Quiet")
+
+            self.assertEqual(
+                [inputs[1]["emotion_prompt"] for inputs in recording.calls],
+                ["Calm", "Bright"],
+            )
+        finally:
+            self.assertIs(
+                unregister_llm_backend_support("future-wrapper-tts", "vllm"),
+                support,
+            )
 
     def test_remote_speech_forward_bypasses_native_load_and_validation(self):
         model = _RemoteSpeechModel(_RemoteSpeechConfig(

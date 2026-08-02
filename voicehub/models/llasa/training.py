@@ -261,8 +261,21 @@ class LlasaTrainingAdapter(CodecCausalLMTrainingAdapter):
         export(save_directory)
 
 
+def build_training_dataset(model, records, **kwargs) -> LlasaSFTDataset:
+    """Build the source-native dataset declared by the training registry."""
+    return LlasaSFTDataset(
+        records,
+        tokenizer=model.tokenizer,
+        codec=model.codec,
+        sample_rate=model.sample_rate,
+        max_length=int(kwargs.get("max_length", 2_048)),
+        truncate=kwargs.get("truncate", True),
+    )
+
+
 __all__ = [
     "LLASA_TRAINING_SOURCE_REVISION",
     "LlasaSFTDataset",
     "LlasaTrainingAdapter",
+    "build_training_dataset",
 ]

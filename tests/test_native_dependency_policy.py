@@ -7,6 +7,7 @@ from pathlib import Path
 from voicehub.policies.architecture_dependencies import (
     collect_native_import_closure,
     collect_native_runtime_paths,
+    discover_native_runtime_directories,
     inspect_native_imports,
     inspect_native_runtime,
     require_native_runtime_independence,
@@ -128,6 +129,39 @@ class NativeDependencyPolicyTests(unittest.TestCase):
 
         self.assertEqual(uncovered, {})
 
+    def test_every_model_package_facade_is_discovered_without_a_provider_list(self):
+        discovered = set(discover_native_runtime_directories(PACKAGE_ROOT))
+        expected = {
+            path.relative_to(PACKAGE_ROOT).as_posix()
+            for path in (PACKAGE_ROOT / "models").glob("*/*.py")
+        }
+
+        self.assertTrue(expected)
+        self.assertEqual(expected - discovered, set())
+
+    def test_new_model_facade_joins_the_default_policy_without_a_central_edit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "voicehub"
+            model_package = root / "models" / "future_speech"
+            model_package.mkdir(parents=True)
+            (root / "__init__.py").write_text("", encoding="utf-8")
+            (root / "models" / "__init__.py").write_text("", encoding="utf-8")
+            (model_package / "__init__.py").write_text("", encoding="utf-8")
+            model_path = model_package / "modeling_future_speech.py"
+            model_path.write_text("import transformers\n", encoding="utf-8")
+
+            discovered = discover_native_runtime_directories(root)
+            violations = inspect_native_runtime(root)
+
+        self.assertIn(
+            "models/future_speech/modeling_future_speech.py",
+            discovered,
+        )
+        self.assertEqual(
+            tuple(violation.module for violation in violations),
+            ("transformers", ),
+        )
+
     def test_every_declared_architecture_component_is_inside_the_policy_boundary(self, ):
         from voicehub.architectures import list_architecture_specs
 
@@ -200,7 +234,7 @@ class NativeDependencyPolicyTests(unittest.TestCase):
         )
 
     def test_melotts_active_graph_is_covered_but_provider_frontends_are_not(self):
-        covered = set(collect_native_runtime_paths(PACKAGE_ROOT))
+        covered = set(collect_native_import_closure(PACKAGE_ROOT))
         expected = {
             *(PACKAGE_ROOT / "architectures/melotts").glob("*.py"),
             PACKAGE_ROOT / "models/melotts/__init__.py",
@@ -231,7 +265,7 @@ class NativeDependencyPolicyTests(unittest.TestCase):
         )
 
     def test_openvoice_active_converter_excludes_optional_upstream_frontends(self):
-        covered = set(collect_native_runtime_paths(PACKAGE_ROOT))
+        covered = set(collect_native_import_closure(PACKAGE_ROOT))
         expected = {
             *(PACKAGE_ROOT / "architectures/openvoice").glob("*.py"),
             PACKAGE_ROOT / "models/openvoice/__init__.py",

@@ -61,6 +61,9 @@ def create_vui_architecture_spec() -> ArchitectureSpec:
         upstream_revision=_SOURCE_REVISION,
         license_id="MIT",
         metadata={
+            "external_llm_backend_blocker":
+            ("Vui samples multiple codebooks through architecture-specific "
+             "heads."),
             "implementation":
             "voicehub-native",
             "tensor_backend":

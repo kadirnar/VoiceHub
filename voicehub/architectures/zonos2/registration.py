@@ -76,6 +76,7 @@ def create_zonos2_architecture_spec() -> ArchitectureSpec:
         upstream_revision=ZONOS2_SOURCE_REVISION,
         license_id=ZONOS2_SOURCE_LICENSE,
         metadata={
+            "external_llm_backend_blocker": ("Zonos2 requires a custom multi-stream engine model."),
             "implementation":
             "voicehub-native",
             "tensor_backend":

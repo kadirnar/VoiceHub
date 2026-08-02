@@ -60,8 +60,8 @@ print([phase.name for phase in spec.phases])
 `preprocessed` profiles. `has_training_recipe` also includes `custom` profiles
 whose source recipe is represented but not generically executable. A `custom`
 profile is deliberately gated before model loading unless VoiceHub provides a
-built-in specialized adapter or `AutoTrainingAdapter.register()` has installed
-one.
+declarative `adapter_factory` or `AutoTrainingAdapter.register()` has installed
+a process-local override.
 
 The profile is the model-type-level boundary. Validate the exact checkpoint,
 variant, quantization settings, and runtime before allocating its weights:
@@ -600,9 +600,15 @@ A production integration should:
    checkpoint round-trip;
 8. document variant/backend exclusions in the model matrix.
 
-`AutoTrainingAdapter.register()` installs a model-specific adapter, and
+Declare a model-specific implementation as the profile's lazy
+`adapter_factory="module:callable"`; this keeps the recipe beside its model and
+requires no edit to a central provider map. `AutoTrainingAdapter.register()`
+installs a process-local model override, and
 `AutoTrainingAdapter.register_family()` installs a reusable adapter for a new
 family string. Dynamic specs can be registered through
-`voicehub.training.specs.register_training_spec`. Keep family adapters narrow:
-when two architectures disagree about target construction or loss semantics,
-that behavior belongs in their model-specific recipes.
+`voicehub.training.specs.register_training_spec`. Keep family adapters
+narrow: when two architectures disagree about target construction or loss
+semantics, that behavior belongs in their model-specific recipes.
+Reusable recipe bases live in `voicehub.training.recipes`. Historical imports
+of the built-in model adapters from that module remain lazy compatibility
+aliases to their model-local implementations.

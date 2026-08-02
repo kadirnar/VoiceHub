@@ -1,19 +1,20 @@
 """Fail-closed capability records for diffusion serving engines.
 
 The visual-diffusion projects in this module are not assumed to support
-speech.  A backend is considered a complete TTS backend only when its
-audio pipeline is explicitly listed here or the caller supplies the
-experimental vLLM-Omni out-of-tree plugin contract.
+speech. A backend is considered a complete TTS backend only when the
+registered model architecture declares a verified serving capability or
+the caller supplies the experimental vLLM-Omni out-of-tree plugin
+contract.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import TYPE_CHECKING
 
 from voicehub.errors import VoiceHubError
-from voicehub.models.registry import normalize_model_type
+from voicehub.models.registry import list_model_specs, normalize_model_type
 
 if TYPE_CHECKING:
     from voicehub.diffusion_serving.vllm_omni import VLLMOmniDiffusionPlugin
@@ -97,17 +98,6 @@ class DiffusionServingCapability:
         return any(modality in {"image", "video"} for modality in self.diffusion_modalities)
 
 
-_NATIVE_TTS_DIFFUSION_MODELS = (
-    "chatterbox",
-    "cosyvoice",
-    "echo",
-    "f5tts",
-    "irodoritts",
-    "styletts2",
-    "supertonic",
-    "voxcpm",
-)
-
 _CAPABILITIES = (
     DiffusionServingCapability(
         backend=DiffusionServingBackend.NATIVE,
@@ -115,7 +105,6 @@ _CAPABILITIES = (
         diffusion_modalities=("audio", ),
         supports_tts=True,
         supports_tts_diffusion=True,
-        verified_tts_models=_NATIVE_TTS_DIFFUSION_MODELS,
         notes=("VoiceHub owns the model-specific denoising/flow loop, "
                "conditioning, and audio decoding."),
     ),
@@ -125,11 +114,11 @@ _CAPABILITIES = (
         diffusion_modalities=("audio", "image", "video"),
         supports_tts=True,
         supports_tts_diffusion=True,
-        verified_tts_models=("cosyvoice", "voxcpm"),
         supports_custom_plugins=True,
         notes=(
-            "CosyVoice and VoxCPM are complete, verified speech pipelines. "
-            "Other VoiceHub TTS architectures require an explicit "
+            "Architectures with the verified vLLM-Omni serving capability "
+            "are complete speech pipelines. Other VoiceHub TTS architectures "
+            "require an explicit "
             "out-of-tree plugin and remain experimental."),
     ),
     DiffusionServingCapability(
@@ -156,6 +145,33 @@ _CAPABILITIES = (
 )
 
 _CAPABILITY_BY_BACKEND = {capability.backend: capability for capability in _CAPABILITIES}
+
+_VERIFIED_MODEL_FEATURE_BY_BACKEND = {
+    DiffusionServingBackend.NATIVE: "diffusion-serving-native",
+    DiffusionServingBackend.VLLM_OMNI: "diffusion-serving-vllm-omni",
+}
+
+
+def _verified_tts_models(backend: DiffusionServingBackend, ) -> tuple[str, ...]:
+    """Derive verified pairings from registered architecture capabilities."""
+    required_feature = _VERIFIED_MODEL_FEATURE_BY_BACKEND.get(backend)
+    if required_feature is None:
+        return ()
+
+    verified_models: list[str] = []
+    for model_spec in list_model_specs(task="text-to-speech", native=True):
+        architecture = model_spec.native_architecture
+        if (architecture is not None and architecture.capabilities.has_feature(required_feature)):
+            verified_models.append(model_spec.model_type)
+    return tuple(sorted(verified_models))
+
+
+def _with_registered_models(capability: DiffusionServingCapability, ) -> DiffusionServingCapability:
+    """Return a current snapshot without freezing the extensible registry."""
+    return replace(
+        capability,
+        verified_tts_models=_verified_tts_models(capability.backend),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,7 +205,7 @@ def list_diffusion_serving_capabilities(
     if (supports_visual_diffusion is not None and not isinstance(supports_visual_diffusion, bool)):
         raise TypeError("`supports_visual_diffusion` must be a boolean or None.")
     return tuple(
-        capability for capability in _CAPABILITIES
+        _with_registered_models(capability) for capability in _CAPABILITIES
         if (supports_tts is None or capability.supports_tts is supports_tts) and (
             supports_visual_diffusion is None or
             capability.supports_visual_diffusion is supports_visual_diffusion))
@@ -197,7 +213,8 @@ def list_diffusion_serving_capabilities(
 
 def get_diffusion_serving_capability(backend: str | DiffusionServingBackend, ) -> DiffusionServingCapability:
     """Return one dependency-free backend capability record."""
-    return _CAPABILITY_BY_BACKEND[DiffusionServingBackend.coerce(backend)]
+    capability = _CAPABILITY_BY_BACKEND[DiffusionServingBackend.coerce(backend)]
+    return _with_registered_models(capability)
 
 
 def resolve_diffusion_tts_backend(

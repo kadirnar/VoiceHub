@@ -74,11 +74,13 @@ class FishTTSConfig(VoiceHubConfig):
         training_lora_config: Mapping[str, Any] | None = None,
         model_kwargs: Mapping[str, Any] | None = None,
         tokenizer_kwargs: Mapping[str, Any] | None = None,
+        generation_config: Mapping[str, Any] | None = None,
         sample_rate: int = 44_100,
         **kwargs: Any,
     ) -> None:
         reject_serialized_secrets(
             {
+                "generation_config": generation_config,
                 "model_kwargs": model_kwargs,
                 "tokenizer_kwargs": tokenizer_kwargs,
                 **kwargs,
@@ -91,6 +93,10 @@ class FishTTSConfig(VoiceHubConfig):
             "top_k": top_k,
             "top_p": top_p,
         }
+        if generation_config is not None:
+            if not isinstance(generation_config, Mapping):
+                raise TypeError("`generation_config` must be a mapping.")
+            defaults.update(dict(generation_config))
         super().__init__(
             sample_rate=sample_rate,
             generation_config=defaults,

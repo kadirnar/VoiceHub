@@ -722,11 +722,13 @@ class TorchCompilePass(OptimizationPass):
         )
 
     def validate(self, model: Any, context: OptimizationContext) -> None:
+        targets = self._execution_targets(model, context)
+        if (not targets and self.config.requirement is TorchCompileRequirement.AUTO):
+            return
         super().validate(model, context)
         architecture_issue = self._architecture_incompatibility(context)
         if (architecture_issue is not None and self.config.requirement is TorchCompileRequirement.REQUIRED):
             raise OptimizationCompatibilityError(architecture_issue)
-        targets = self._execution_targets(model, context)
         report = inspect_torch_compile(self.config.backend)
         issues = []
         if not targets:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from voicehub.dependencies import resolve_import_path
 from voicehub.models.registry import normalize_model_type
 from voicehub.training.adapters import (
     AcousticTrainingAdapter,
@@ -22,7 +23,6 @@ from voicehub.training.adapters import (
     UpstreamNativeTrainingAdapter,
     VITSTrainingAdapter,
 )
-from voicehub.training.recipes import BUILTIN_MODEL_ADAPTERS
 from voicehub.training.specs import ModelTrainingSpec, TrainingFamily, get_training_spec, list_training_specs
 
 AdapterFactory = Callable[[Any, ModelTrainingSpec], BaseTrainingAdapter]
@@ -43,6 +43,20 @@ def _validate_adapter_factory(factory) -> None:
         return
     if not callable(factory):
         raise TypeError("Training adapter factories must be adapter classes or callables.")
+
+
+def _resolve_adapter_factory(spec: ModelTrainingSpec) -> AdapterFactory | None:
+    path = spec.adapter_factory
+    if path is None:
+        return None
+    try:
+        factory = resolve_import_path(path)
+    except (ImportError, AttributeError, TypeError, ValueError) as exc:
+        raise ImportError(
+            f"Could not resolve training adapter factory {path!r} for "
+            f"{spec.model_type!r}: {exc}") from exc
+    _validate_adapter_factory(factory)
+    return factory
 
 
 _FAMILY_ADAPTERS: dict[str, AdapterFactory] = {
@@ -89,11 +103,10 @@ class AutoTrainingAdapter:
         if not isinstance(spec, ModelTrainingSpec):
             raise TypeError("spec must be a ModelTrainingSpec.")
 
-        is_specialized = (
-            spec.model_type in cls._model_overrides or spec.model_type in BUILTIN_MODEL_ADAPTERS)
+        is_specialized = (spec.model_type in cls._model_overrides or spec.adapter_factory is not None)
         factory = cls._model_overrides.get(spec.model_type)
         if factory is None:
-            factory = BUILTIN_MODEL_ADAPTERS.get(spec.model_type)
+            factory = _resolve_adapter_factory(spec)
         if factory is None:
             family_key = _family_key(spec.family)
             try:

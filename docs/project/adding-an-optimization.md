@@ -15,7 +15,6 @@ from voicehub.optimization import (
     OptimizationCapabilities,
     OptimizationMode,
     OptimizationPass,
-    OptimizationCompatibilityError,
     PassResult,
     register_optimization_pass,
 )
@@ -35,15 +34,24 @@ class AcmeEvalModePass(OptimizationPass):
 
     def validate(self, model, context):
         super().validate(model, context)
-        if not callable(getattr(model, "eval", None)):
-            raise OptimizationCompatibilityError("model has no eval() method")
 
     def apply(self, model, context):
+        if not callable(getattr(model, "eval", None)):
+            return self.not_applicable_result(
+                model,
+                reason=f"{type(model).__name__} has no eval() method",
+            )
         was_training = bool(getattr(model, "training", False))
         model.eval()
-        return PassResult(model=model, state={"was_training": was_training})
+        return PassResult(
+            model=model,
+            state={"was_training": was_training},
+            metadata={"outcome": "configured"},
+        )
 
     def restore(self, model, state, context):
+        if state.get("kind") == "not-applicable":
+            return state.get("model", model)
         model.train(state["was_training"])
         return model
 ```
@@ -61,10 +69,14 @@ result = model.apply_optimization_plan("acme-eval-mode", mode="inference")
 print(result.manifest())
 ```
 
-The same method exists on TTS, ASR, and VAD wrappers. Registration means the
-pass can be requested everywhere; `validate()` decides whether one concrete
-runtime is compatible. All validations finish before the first pass mutates
-the model, and earlier reversible passes roll back if a later pass fails.
+The same method exists on TTS, ASR, and VAD wrappers. A public pass must have a
+tested path for every registered model. If the relevant protocol is absent,
+return `not_applicable_result()` so the manifest explicitly records an
+unchanged model, `outcome="not-applicable"`, and an actionable reason. Do not
+silently skip the model or describe that result as acceleration. A present but
+malformed protocol, an explicit backend that cannot run, and unsupported
+hardware must still fail before mutation. Earlier reversible passes roll back
+if a later pass fails.
 
 ## Declare capabilities honestly
 
@@ -82,14 +94,17 @@ manually audited architecture contract that runtime inspection cannot prove.
 Most extension passes should validate a protocol or module surface directly,
 which avoids editing every model when the pass is added.
 
-## Test four paths
+## Test the full lifecycle
 
 Test that:
 
 1. registration is lazy;
-2. validation rejects an incompatible runtime before mutation;
-3. application produces deterministic manifest metadata;
-4. restoration returns the original runtime and state keys.
+2. every registered model either configures the pass or reports an explicit
+   model-preserving `not-applicable` fallback;
+3. malformed protocols and required unsupported hardware fail before mutation;
+4. application produces deterministic strict-JSON manifest metadata;
+5. normalized task outputs and checkpoint keys remain semantically stable; and
+6. restoration returns the original runtime and state keys.
 
 Use an isolated `OptimizationPassRegistry` in unit tests when global
 registration is unnecessary. See [Library architecture](../concepts/architecture.md)

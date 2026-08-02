@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -61,19 +61,34 @@ COMPONENT_REGISTRY: Mapping[str,
                             ComponentSpec] = MappingProxyType({spec.name: spec
                                                                for spec in _COMPONENT_SPECS})
 
-MODEL_COMPONENTS: Mapping[str, tuple[str, ...]] = MappingProxyType({
-    "bark": ("encodec", ),
-    "chatterbox": ("conformer", ),
-    "cosyvoice": ("conformer", ),
-    "dia": ("dac", ),
-    "f5tts": ("vocos", ),
-    "fishtts": ("dac", ),
-    "openvoice": ("wavmark", ),
-    "outetts": ("dac", ),
-    "parlertts": ("dac", ),
-    "zonos": ("dac", ),
-    "zonos2": ("dac", ),
-})
+
+class _ModelComponents(Mapping[str, tuple[str, ...]]):
+    """Read-only live view of component links declared by model specs."""
+
+    def __getitem__(self, model_type: str) -> tuple[str, ...]:
+        from voicehub.errors import UnknownModelError
+        from voicehub.models.registry import get_model_spec
+
+        try:
+            components = get_model_spec(model_type).components
+        except (TypeError, ValueError, UnknownModelError):
+            raise KeyError(model_type) from None
+        if not components:
+            raise KeyError(model_type)
+        return components
+
+    def __iter__(self) -> Iterator[str]:
+        from voicehub.models.registry import list_model_specs
+
+        return iter(tuple(sorted(spec.model_type for spec in list_model_specs() if spec.components)))
+
+    def __len__(self) -> int:
+        from voicehub.models.registry import list_model_specs
+
+        return sum(bool(spec.components) for spec in list_model_specs())
+
+
+MODEL_COMPONENTS: Mapping[str, tuple[str, ...]] = _ModelComponents()
 
 
 def get_component_spec(name: str) -> ComponentSpec:

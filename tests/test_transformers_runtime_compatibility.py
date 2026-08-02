@@ -1,7 +1,12 @@
 import importlib
 import importlib.util
+import subprocess
+import sys
+import textwrap
 import unittest
-from unittest.mock import patch
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _modules_are_available(*names):
@@ -20,19 +25,43 @@ XTTS_RUNTIME_AVAILABLE = _modules_are_available(
     "torchaudio",
     "transformers",
 )
-MELO_RUNTIME_AVAILABLE = _modules_are_available(
-    "MeCab",
-    "pykakasi",
-    "transformers",
-    "unidic_lite",
-)
 PARLER_RUNTIME_AVAILABLE = _modules_are_available("torch", "transformers")
-OUTE_RUNTIME_AVAILABLE = _modules_are_available(
-    "loguru",
-    "polars",
-    "torch",
-    "transformers",
-)
+
+
+def _assert_imports_without_dependencies(
+    *,
+    modules: tuple[str, ...],
+    blocked: tuple[str, ...],
+) -> None:
+    script = textwrap.dedent(
+        f"""
+        import importlib
+        import importlib.abc
+        import sys
+
+        blocked = {blocked!r}
+        modules = {modules!r}
+
+        class RejectDormantProviderDependency(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname.split('.', 1)[0] in blocked:
+                    raise AssertionError(
+                        f'Native runtime imported dormant dependency {{fullname}}')
+                return None
+
+        sys.meta_path.insert(0, RejectDormantProviderDependency())
+        for module_name in modules:
+            importlib.import_module(module_name)
+    """)
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode:
+        raise AssertionError(completed.stdout + completed.stderr)
 
 
 @unittest.skipUnless(
@@ -125,41 +154,36 @@ class ParlerTransformersCompatibilityTests(unittest.TestCase):
         self.assertEqual(output.shape, scores.shape)
 
 
-@unittest.skipUnless(
-    MELO_RUNTIME_AVAILABLE,
-    "MeloTTS language runtime dependencies are unavailable",
-)
-class MeloImportCompatibilityTests(unittest.TestCase):
+class NativeProviderDependencyCompatibilityTests(unittest.TestCase):
 
-    def test_japanese_frontend_import_does_not_download_a_tokenizer(self):
-        from transformers import AutoTokenizer
+    def test_native_melotts_imports_without_dormant_language_frontends(self):
+        _assert_imports_without_dependencies(
+            modules=(
+                "voicehub.architectures.melotts.frontend",
+                "voicehub.architectures.melotts.runtime",
+                "voicehub.models.melotts.inference",
+            ),
+            blocked=(
+                "MeCab",
+                "pykakasi",
+                "transformers",
+                "unidic_lite",
+            ),
+        )
 
-        with patch.object(
-                AutoTokenizer,
-                "from_pretrained",
-                side_effect=AssertionError("tokenizer download during import"),
-        ) as loader:
-            runtime = importlib.import_module("voicehub.models.melotts.source.melo.text.japanese")
-            importlib.reload(runtime)
-
-        loader.assert_not_called()
-        self.assertEqual(runtime.text2kata("こんにちは"), "コンニチワ")
-
-
-@unittest.skipUnless(
-    OUTE_RUNTIME_AVAILABLE,
-    "OuteTTS runtime dependencies are unavailable",
-)
-class OuteBackendCompatibilityTests(unittest.TestCase):
-
-    def test_gguf_dependency_is_checked_only_when_the_backend_is_used(self):
-        runtime = importlib.import_module("voicehub.models.outetts.source.outetts.models.gguf_model")
-        if runtime._GGUF_AVAILABLE:
-            self.assertTrue(callable(runtime.Llama))
-            return
-
-        with self.assertRaisesRegex(ImportError, "llama-cpp-python"):
-            runtime.GGUFModel("model.gguf")
+    def test_native_outetts_imports_without_dormant_backend_dependencies(self):
+        _assert_imports_without_dependencies(
+            modules=(
+                "voicehub.architectures.outetts.runtime",
+                "voicehub.models.outetts.inference",
+            ),
+            blocked=(
+                "llama_cpp",
+                "loguru",
+                "polars",
+                "transformers",
+            ),
+        )
 
 
 if __name__ == "__main__":

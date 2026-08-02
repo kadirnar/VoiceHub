@@ -36,106 +36,6 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
     base_model_prefix = "tts_model"
     supports_gradient_checkpointing = False
     passthrough_generation_options: frozenset[str] | None = None
-    _REMOTE_SPEECH_OPTIONS = frozenset({
-        "ambient_sound",
-        "audio_repetition_penalty",
-        "audio_temperature",
-        "audio_top_k",
-        "audio_top_p",
-        "cfg_value",
-        "chunk_length",
-        "class_temperature",
-        "denoise",
-        "duration",
-        "duration_tokens",
-        "flow_steps",
-        "force_audio_gen",
-        "guidance_scale",
-        "inference_timesteps",
-        "initial_codec_chunk_frames",
-        "instruct",
-        "instruction",
-        "instructions",
-        "iterative_prompt",
-        "language",
-        "layer_penalty_factor",
-        "max_len",
-        "max_new_tokens",
-        "min_len",
-        "min_new_tokens",
-        "mode",
-        "non_streaming_mode",
-        "normalize",
-        "normalize_text",
-        "num_samples",
-        "num_step",
-        "num_steps",
-        "output_file",
-        "position_temperature",
-        "postprocess_output",
-        "preprocess_prompt",
-        "prompt_audio_path",
-        "prompt_features",
-        "prompt_speech_tokens",
-        "quality",
-        "ras_win_len",
-        "ras_win_max_num_repeat",
-        "ref_audio",
-        "ref_text",
-        "reference_audio",
-        "reference_codes",
-        "reference_sampling_rate",
-        "reference_text",
-        "repetition_penalty",
-        "retry_badcase",
-        "scene_prompt",
-        "seed",
-        "sound_event",
-        "speaker",
-        "speaker_audio",
-        "speaker_audio_codes",
-        "speaker_audio_path",
-        "speaker_embedding",
-        "speed",
-        "stage_params",
-        "system_prompt",
-        "t_shift",
-        "task_type",
-        "temperature",
-        "text_temperature",
-        "text_top_k",
-        "text_top_p",
-        "time_shift",
-        "token_count",
-        "top_k",
-        "top_p",
-        "use_kv_cache",
-        "voice",
-        "x_vector_only_mode",
-    })
-    _REMOTE_SPEECH_DEFAULT_OPTIONS = frozenset({
-        "duration_tokens",
-        "initial_codec_chunk_frames",
-        "instruct",
-        "instruction",
-        "instructions",
-        "language",
-        "max_new_tokens",
-        "mode",
-        "non_streaming_mode",
-        "repetition_penalty",
-        "seed",
-        "speaker",
-        "speed",
-        "stage_params",
-        "task_type",
-        "temperature",
-        "token_count",
-        "top_k",
-        "top_p",
-        "voice",
-        "x_vector_only_mode",
-    })
 
     def __init__(
         self,
@@ -930,6 +830,19 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         finally:
             self._release_llm_backend(backend_config)
 
+    def _llm_speech_support(self, backend_config):
+        """Resolve the immutable speech capability for one backend snapshot."""
+        if backend_config is None:
+            return None
+        from voicehub.llm_serving import LLMBackendTransport, get_llm_backend_support
+
+        support, transport = get_llm_backend_support(
+            self.config.model_type,
+            backend_config.backend,
+            transport=backend_config.transport,
+        )
+        return support if transport is LLMBackendTransport.SPEECH else None
+
     def _forward_with_llm_backend(
         self,
         text: str,
@@ -945,11 +858,13 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         transport = (LLMBackendTransport.AUTO if backend_config is None else backend_config.transport)
         uses_speech_backend = transport is LLMBackendTransport.SPEECH
         uses_token_backend = transport is LLMBackendTransport.TOKENS
+        speech_support = (self._llm_speech_support(backend_config) if uses_speech_backend else None)
         model_inputs = self.prepare_inputs_for_generation(text, **kwargs)
         with self._lifecycle_lock:
             self._validate_model_kwargs(
                 model_inputs,
                 uses_llm_speech_backend=uses_speech_backend,
+                llm_backend_support=speech_support,
             )
             self._validate_common_generation_inputs(model_inputs)
             if not uses_speech_backend:
@@ -988,18 +903,23 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         model_kwargs: dict[str, Any],
         *,
         uses_llm_speech_backend: bool | None = None,
+        llm_backend_support=None,
     ) -> None:
         """Reject misspelled generation options with an actionable error."""
         if uses_llm_speech_backend is None:
             uses_llm_speech_backend = self.uses_llm_speech_backend
         if uses_llm_speech_backend:
-            unknown = sorted(set(model_kwargs) - self._REMOTE_SPEECH_OPTIONS - {"text"})
+            support = llm_backend_support or self._llm_speech_support(self._llm_backend_config)
+            if support is None:
+                raise RuntimeError("The configured external speech capability is missing.")
+            recognized_options = set(support.speech_input_options)
+            unknown = sorted(set(model_kwargs) - recognized_options - {"text"})
             if unknown:
-                supported = ", ".join(sorted(self._REMOTE_SPEECH_OPTIONS))
+                recognized = ", ".join(support.speech_input_options)
                 invalid = ", ".join(unknown)
                 raise ValueError(
                     f"Unsupported external speech option(s): {invalid}. "
-                    f"Accepted options: {supported}.")
+                    f"Recognized options: {recognized}.")
             return
         parameters = signature(self._generate).parameters
         has_passthrough = any(parameter.kind is Parameter.VAR_KEYWORD for parameter in parameters.values())
@@ -1030,12 +950,11 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         **kwargs,
     ) -> TTSOutput:
         """Generate speech with one signature shared by every architecture."""
-        from voicehub.llm_serving import LLMBackendTransport
-
         backend_config, backend_client = self._reserve_llm_backend()
         try:
             defaults = self.generation_config.to_dict()
-            if (backend_config is not None and backend_config.transport is LLMBackendTransport.SPEECH):
+            speech_support = self._llm_speech_support(backend_config)
+            if speech_support is not None:
                 # Architecture-native defaults frequently contain controls for
                 # local vocoders or custom logits processors. The external server
                 # owns those defaults; carry only fields represented by the
@@ -1043,7 +962,7 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
                 # closed in the backend adapter when they cannot be preserved.
                 defaults = {
                     name: value
-                    for name, value in defaults.items() if name in self._REMOTE_SPEECH_DEFAULT_OPTIONS
+                    for name, value in defaults.items() if name in speech_support.speech_default_options
                 }
             if generation_config is not None:
                 if not isinstance(generation_config, TTSGenerationConfig):

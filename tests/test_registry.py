@@ -9,6 +9,7 @@ from importlib import import_module
 from pathlib import Path
 
 from voicehub import AutoInferenceModel, PreTrainedTTSModel
+from voicehub.components import MODEL_COMPONENTS, components_for_model
 from voicehub.dependencies import import_optional
 from voicehub.errors import OptionalDependencyError, UnknownModelError
 from voicehub.registry import get_model_spec
@@ -214,19 +215,63 @@ class RegistryTests(unittest.TestCase):
     def test_shared_components_are_connected_to_models(self):
         expected = {
             "bark": ("encodec", ),
+            "chatterbox": ("conformer", ),
+            "cosyvoice": ("conformer", ),
             "dia": ("dac", ),
             "f5tts": ("vocos", ),
             "fishtts": ("dac", ),
             "openvoice": ("wavmark", ),
+            "outetts": ("dac", ),
+            "parlertts": ("dac", ),
             "zonos": ("dac", ),
             "zonos2": ("dac", ),
         }
+        self.assertEqual(dict(MODEL_COMPONENTS), expected)
         for model_type, components in expected.items():
             with self.subTest(model_type=model_type):
                 self.assertEqual(
                     get_model_spec(model_type).components,
                     components,
                 )
+                self.assertEqual(
+                    tuple(spec.name for spec in components_for_model(model_type)),
+                    components,
+                )
+
+    def test_component_registry_has_no_provider_keyed_mapping(self):
+        source_path = REPOSITORY_ROOT / "voicehub" / "components" / "registry.py"
+        source = source_path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        model_types = {spec.model_type for spec in AutoInferenceModel.available_models()}
+        provider_keyed_dicts = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            keys = {
+                key.value
+                for key in node.keys if isinstance(key, ast.Constant) and key.value in model_types
+            }
+            if keys:
+                provider_keyed_dicts.append((node.lineno, sorted(keys)))
+
+        self.assertEqual(provider_keyed_dicts, [])
+        with self.assertRaises(TypeError):
+            MODEL_COMPONENTS["new-model"] = ("dac", )
+
+    def test_component_links_remain_framework_lazy(self):
+        script = (
+            "import sys;"
+            "from voicehub.components import MODEL_COMPONENTS, components_for_model;"
+            "assert MODEL_COMPONENTS['f5tts'] == ('vocos',);"
+            "assert components_for_model('f5-tts')[0].name == 'vocos';"
+            "print('torch' in sys.modules, 'transformers' in sys.modules)")
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.stdout.strip(), "False False")
 
     def test_checkpoint_specific_training_boundaries_are_discoverable(self):
         for model_type in ("qwen3tts", "vibevoice", "neutts"):

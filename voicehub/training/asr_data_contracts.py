@@ -10,10 +10,12 @@ loading a model.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from types import MappingProxyType
 from typing import Any
+
+from voicehub.dependencies import normalize_import_path, resolve_import_path
 
 
 def _field_names(values: Iterable[str], *, owner: str) -> tuple[str, ...]:
@@ -34,6 +36,29 @@ def _field_present(record: Mapping[str, Any], name: str) -> bool:
         return False
     value = record[name]
     return not isinstance(value, (str, bytes, bytearray)) or bool(value.strip())
+
+
+def _field_aliases(values: Mapping[str, str] | Iterable[tuple[str, str]], ) -> tuple[tuple[str, str], ...]:
+    items = tuple(values.items()) if isinstance(values, Mapping) else tuple(values)
+    normalized = []
+    seen = set()
+    for item in items:
+        if not isinstance(item, (tuple, list)) or len(item) != 2:
+            raise TypeError("ASR field_aliases entries must be source/target pairs.")
+        source, target = item
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError("ASR field alias sources must be non-empty strings.")
+        if not isinstance(target, str) or not target.strip():
+            raise ValueError("ASR field alias targets must be non-empty strings.")
+        source = source.strip()
+        target = target.strip()
+        if source == target:
+            raise ValueError(f"ASR field alias {source!r} cannot target itself.")
+        if source in seen:
+            raise ValueError(f"ASR field_aliases repeats source {source!r}.")
+        seen.add(source)
+        normalized.append((source, target))
+    return tuple(normalized)
 
 
 class ASRDataArchitecture(str, Enum):
@@ -241,6 +266,9 @@ class ASRDatasetSpec:
     readiness: ASRDataReadiness | None = None
     training_support: str | None = None
     homogeneous_batch_fields: tuple[tuple[str, ...], ...] = ()
+    field_aliases: Mapping[str, str] | tuple[tuple[str, str], ...] = ()
+    record_normalizer: str | None = None
+    record_normalizer_phase: str = "after-aliases"
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -293,6 +321,24 @@ class ASRDatasetSpec:
             "homogeneous_batch_fields",
             tuple(homogeneous_groups),
         )
+        object.__setattr__(
+            self,
+            "field_aliases",
+            _field_aliases(self.field_aliases),
+        )
+        normalizer = self.record_normalizer
+        if normalizer is not None:
+            normalizer = normalize_import_path(
+                normalizer,
+                name="ASR record_normalizer",
+            )
+        object.__setattr__(self, "record_normalizer", normalizer)
+        phase = self.record_normalizer_phase
+        if phase not in {"before-aliases", "after-aliases"}:
+            raise ValueError("ASR record_normalizer_phase must be 'before-aliases' or "
+                             "'after-aliases'.")
+        if normalizer is None and phase != "after-aliases":
+            raise ValueError("ASR record_normalizer_phase requires record_normalizer.")
 
     def match_variant(self, record: Mapping[str, Any], *, index: int | None = None) -> str:
         """Validate a record and return its most specific matching variant.
@@ -538,21 +584,27 @@ _ARCHITECTURE_SPECS: Mapping[ASRDataArchitecture, ASRDatasetSpec] = MappingProxy
 })
 
 
-def _override(
-        architecture: ASRDataArchitecture,
-        variants: tuple[ASRRecordVariant, ...],
-        description: str,
-        *,
-        sample_rate: int = 16_000,
-        homogeneous_batch_fields: tuple[tuple[str, ...], ...] = (),
-) -> dict[str, Any]:
-    return {
-        "architecture": architecture,
-        "variants": variants,
-        "description": description,
-        "sample_rate": sample_rate,
-        "homogeneous_batch_fields": homogeneous_batch_fields,
-    }
+def _model_spec(
+    architecture: ASRDataArchitecture,
+    variants: tuple[ASRRecordVariant, ...],
+    description: str,
+    *,
+    sample_rate: int = 16_000,
+    homogeneous_batch_fields: tuple[tuple[str, ...], ...] = (),
+    field_aliases: tuple[tuple[str, str], ...] = (),
+    record_normalizer: str | None = None,
+    record_normalizer_phase: str = "after-aliases",
+) -> ASRDatasetSpec:
+    return ASRDatasetSpec(
+        architecture=architecture,
+        variants=variants,
+        description=description,
+        sample_rate=sample_rate,
+        homogeneous_batch_fields=homogeneous_batch_fields,
+        field_aliases=field_aliases,
+        record_normalizer=record_normalizer,
+        record_normalizer_phase=record_normalizer_phase,
+    )
 
 
 _WHISPER_VARIANTS = (
@@ -599,9 +651,11 @@ _NEMO_CTC_VARIANTS = (
     ),
 )
 
-_MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
-    "asr_transformers":
-    _override(
+
+def build_asr_transformers_dataset_spec() -> ASRDatasetSpec:
+    """Return the source-data contract for the checkpoint-dispatch ASR
+    backend."""
+    return _model_spec(
         ASRDataArchitecture.NATIVE_DISPATCH,
         (
             _raw_audio(),
@@ -617,15 +671,21 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
             ),
         ),
         "Checkpoint-dispatched raw and cached inputs for native Transformers ASR families.",
-    ),
-    "asr_whisper":
-    _override(
+    )
+
+
+def build_asr_whisper_dataset_spec() -> ASRDatasetSpec:
+    """Return the native Whisper source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.SPEECH_SEQUENCE_TO_SEQUENCE,
         _WHISPER_VARIANTS,
         "Native Whisper transcription or translation fine-tuning records.",
-    ),
-    "asr_tiron":
-    _override(
+    )
+
+
+def build_asr_tiron_dataset_spec() -> ASRDatasetSpec:
+    """Return the Tiron source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.SPEECH_SEQUENCE_TO_SEQUENCE,
         (
             _raw_audio(
@@ -640,9 +700,12 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
             ),
         ),
         "Speaker-aware Whisper fine-tuning with Tiron's inline timestamp grammar.",
-    ),
-    "asr_qwen3":
-    _override(
+    )
+
+
+def build_asr_qwen3_dataset_spec() -> ASRDatasetSpec:
+    """Return the Qwen3-ASR source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.PROMPTED_MULTIMODAL,
         (
             _raw_audio(
@@ -663,9 +726,12 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
             ),
         ),
         "Qwen3-ASR completion-only multimodal fine-tuning records.",
-    ),
-    "asr_vibevoice":
-    _override(
+    )
+
+
+def build_asr_vibevoice_dataset_spec() -> ASRDatasetSpec:
+    """Return the VibeVoice ASR source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.PROMPTED_MULTIMODAL,
         (
             _variant(
@@ -697,9 +763,12 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
         ),
         "VibeVoice structured long-form ASR targets and multimodal prompt inputs.",
         sample_rate=24_000,
-    ),
-    "asr_granite_speech":
-    _override(
+    )
+
+
+def build_asr_granite_speech_dataset_spec() -> ASRDatasetSpec:
+    """Return the Granite Speech source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.PROMPTED_MULTIMODAL,
         (
             _raw_audio(
@@ -722,9 +791,12 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
             ),
         ),
         "Prompt-conditioned Granite Speech multimodal fine-tuning records.",
-    ),
-    "asr_parakeet_tdt":
-    _override(
+    )
+
+
+def build_asr_parakeet_tdt_dataset_spec() -> ASRDatasetSpec:
+    """Return the Parakeet TDT source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.TDT,
         (
             _raw_audio(),
@@ -741,9 +813,12 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
             ),
         ),
         "Parakeet token-duration transducer audio and transcript records.",
-    ),
-    "asr_nemotron":
-    _override(
+    )
+
+
+def build_asr_nemotron_dataset_spec() -> ASRDatasetSpec:
+    """Return the Nemotron ASR source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.RNNT,
         (
             _raw_audio(description="Audio/transcript pair with optional language prompting.", ),
@@ -762,9 +837,12 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
             ),
         ),
         "Language-prompted Nemotron RNN-T fine-tuning records.",
-    ),
-    "asr_cohere":
-    _override(
+    )
+
+
+def build_asr_cohere_dataset_spec() -> ASRDatasetSpec:
+    """Return the Cohere ASR source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.SPEECH_SEQUENCE_TO_SEQUENCE,
         (
             _raw_audio(
@@ -788,9 +866,12 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
         ),
         "Language- and punctuation-conditioned Cohere ASR records.",
         homogeneous_batch_fields=(("language", ), ("punctuation", )),
-    ),
-    "asr_medasr":
-    _override(
+    )
+
+
+def build_asr_medasr_dataset_spec() -> ASRDatasetSpec:
+    """Return the MedASR source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.CTC,
         (
             _raw_audio(),
@@ -802,27 +883,39 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
             ),
         ),
         "MedASR native LASR feature and CTC transcript records.",
-    ),
-    "asr_wav2vec2":
-    _override(
+    )
+
+
+def build_asr_wav2vec2_dataset_spec() -> ASRDatasetSpec:
+    """Return the Wav2Vec2 source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.CTC,
         _CTC_WAVEFORM_VARIANTS,
         "Wav2Vec2 waveform and CTC transcript records.",
-    ),
-    "asr_hubert":
-    _override(
+    )
+
+
+def build_asr_hubert_dataset_spec() -> ASRDatasetSpec:
+    """Return the HuBERT source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.CTC,
         _CTC_WAVEFORM_VARIANTS,
         "HuBERT waveform and CTC transcript records.",
-    ),
-    "asr_wavlm":
-    _override(
+    )
+
+
+def build_asr_wavlm_dataset_spec() -> ASRDatasetSpec:
+    """Return the WavLM source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.CTC,
         _CTC_WAVEFORM_VARIANTS,
         "WavLM waveform and CTC transcript records.",
-    ),
-    "asr_moonshine":
-    _override(
+    )
+
+
+def build_asr_moonshine_dataset_spec() -> ASRDatasetSpec:
+    """Return the Moonshine source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.SPEECH_SEQUENCE_TO_SEQUENCE,
         (
             _raw_audio(),
@@ -834,9 +927,12 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
             ),
         ),
         "Moonshine waveform-to-sequence fine-tuning records.",
-    ),
-    "asr_seamless_m4t_v2":
-    _override(
+    )
+
+
+def build_asr_seamless_m4t_v2_dataset_spec() -> ASRDatasetSpec:
+    """Return the SeamlessM4T-v2 source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.SPEECH_SEQUENCE_TO_SEQUENCE,
         (
             _raw_audio(
@@ -852,33 +948,51 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
         ),
         "SeamlessM4T-v2 multilingual speech-to-text records.",
         homogeneous_batch_fields=(("target_language", "language"), ),
-    ),
-    "asr_faster_whisper":
-    _override(
+        field_aliases=(("target_lang", "target_language"), ),
+        record_normalizer=("voicehub.architectures.seamless_m4t_v2.data:normalize_record"),
+        record_normalizer_phase="before-aliases",
+    )
+
+
+def build_asr_faster_whisper_dataset_spec() -> ASRDatasetSpec:
+    """Return the Faster-Whisper-compatible source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.SPEECH_SEQUENCE_TO_SEQUENCE,
         _WHISPER_VARIANTS,
         "Faster-Whisper-compatible records trained through the native Whisper graph.",
-    ),
-    "asr_whisperx":
-    _override(
+    )
+
+
+def build_asr_whisperx_dataset_spec() -> ASRDatasetSpec:
+    """Return the WhisperX-compatible source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.SPEECH_SEQUENCE_TO_SEQUENCE,
         _WHISPER_VARIANTS,
         "WhisperX-compatible records trained through the native Whisper graph.",
-    ),
-    "asr_openai_whisper":
-    _override(
+    )
+
+
+def build_asr_openai_whisper_dataset_spec() -> ASRDatasetSpec:
+    """Return the OpenAI Whisper-compatible source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.SPEECH_SEQUENCE_TO_SEQUENCE,
         _WHISPER_VARIANTS,
         "OpenAI Whisper-compatible records trained through the native Whisper graph.",
-    ),
-    "asr_nemo":
-    _override(
+    )
+
+
+def build_asr_nemo_dataset_spec() -> ASRDatasetSpec:
+    """Return the NeMo CTC source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.CTC,
         _NEMO_CTC_VARIANTS,
         "NeMo QuartzNet waveform and CTC transcript records.",
-    ),
-    "asr_speechbrain":
-    _override(
+    )
+
+
+def build_asr_speechbrain_dataset_spec() -> ASRDatasetSpec:
+    """Return the SpeechBrain ASR source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.HYBRID_CTC_ATTENTION,
         (
             _raw_audio(
@@ -901,9 +1015,12 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
             ),
         ),
         "SpeechBrain CRDNN joint CTC/attention fine-tuning records.",
-    ),
-    "asr_funasr":
-    _override(
+    )
+
+
+def build_asr_funasr_dataset_spec() -> ASRDatasetSpec:
+    """Return the FunASR SenseVoice source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.CTC,
         (
             _raw_audio(
@@ -934,9 +1051,21 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
             ),
         ),
         "SenseVoice CTC records with language, emotion, event, and ITN control.",
-    ),
-    "asr_espnet":
-    _override(
+        field_aliases=(
+            ("emo_target", "emotion"),
+            ("event_target", "event"),
+            ("source", "audio"),
+            ("target", "text"),
+            ("text_language", "language"),
+            ("with_or_wo_itn", "use_itn"),
+        ),
+        record_normalizer=("voicehub.architectures.sensevoice.data:normalize_record"),
+    )
+
+
+def build_asr_espnet_dataset_spec() -> ASRDatasetSpec:
+    """Return the ESPnet source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.HYBRID_CTC_ATTENTION,
         (
             _raw_audio(
@@ -973,9 +1102,12 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
             ),
         ),
         "ESPnet Transformer joint CTC/attention raw and cached records.",
-    ),
-    "asr_wenet":
-    _override(
+    )
+
+
+def build_asr_wenet_dataset_spec() -> ASRDatasetSpec:
+    """Return the WeNet source-data contract."""
+    return _model_spec(
         ASRDataArchitecture.HYBRID_CTC_ATTENTION,
         (
             _raw_audio(),
@@ -1004,8 +1136,8 @@ _MODEL_DATA_OVERRIDES: Mapping[str, dict[str, Any]] = MappingProxyType({
             ),
         ),
         "WeNet U2++ joint CTC/attention fine-tuning records.",
-    ),
-})
+    )
+
 
 _TRAINING_FAMILY_TO_DATA_ARCHITECTURE = MappingProxyType({
     "native-asr-dispatch": ASRDataArchitecture.NATIVE_DISPATCH,
@@ -1014,6 +1146,37 @@ _TRAINING_FAMILY_TO_DATA_ARCHITECTURE = MappingProxyType({
     "rnnt": ASRDataArchitecture.RNNT,
     "tdt": ASRDataArchitecture.TDT,
 })
+
+
+def _load_model_dataset_spec(training_spec: Any) -> ASRDatasetSpec | None:
+    factory_path = training_spec.dataset_spec_factory
+    if factory_path is None:
+        return None
+    try:
+        factory = resolve_import_path(factory_path)
+    except (AttributeError, ImportError) as exc:
+        raise ImportError(
+            f"Could not resolve ASR dataset spec factory {factory_path!r} "
+            f"for {training_spec.model_type!r}.") from exc
+    if not callable(factory):
+        raise TypeError(
+            f"ASR dataset spec factory {factory_path!r} for "
+            f"{training_spec.model_type!r} must be callable.")
+    spec = factory()
+    if not isinstance(spec, ASRDatasetSpec):
+        raise TypeError(
+            f"ASR dataset spec factory {factory_path!r} for "
+            f"{training_spec.model_type!r} returned {type(spec).__name__}; "
+            "expected ASRDatasetSpec.")
+    if spec.model_type not in (None, training_spec.model_type):
+        raise ValueError(
+            f"ASR dataset spec factory {factory_path!r} returned a contract for "
+            f"{spec.model_type!r}, not {training_spec.model_type!r}.")
+    if spec.training_support not in (None, training_spec.support.value):
+        raise ValueError(
+            f"ASR dataset spec factory {factory_path!r} declares training support "
+            f"{spec.training_support!r}, not {training_spec.support.value!r}.")
+    return spec
 
 
 def get_asr_dataset_spec(
@@ -1025,7 +1188,7 @@ def get_asr_dataset_spec(
     architecture."""
     canonical_model_type = None
     training_support = None
-    override: Mapping[str, Any] = {}
+    model_spec = None
     if model_type is not None:
         if not isinstance(model_type, str) or not model_type.strip():
             raise ValueError("model_type must be a non-empty string or None.")
@@ -1038,9 +1201,9 @@ def get_asr_dataset_spec(
             raise ValueError(
                 f"{canonical_model_type!r} is registered for "
                 f"{training_spec.task.value}, not ASR.")
-        override = _MODEL_DATA_OVERRIDES.get(canonical_model_type, {})
-        if "architecture" in override:
-            resolved_architecture = ASRDataArchitecture.coerce(override["architecture"], )
+        model_spec = _load_model_dataset_spec(training_spec)
+        if model_spec is not None:
+            resolved_architecture = model_spec.architecture
         else:
             try:
                 resolved_architecture = _TRAINING_FAMILY_TO_DATA_ARCHITECTURE[training_spec.family_name]
@@ -1058,35 +1221,28 @@ def get_asr_dataset_spec(
     else:
         resolved_architecture = ASRDataArchitecture.coerce(architecture)
 
-    base = _ARCHITECTURE_SPECS[resolved_architecture]
+    base = model_spec or _ARCHITECTURE_SPECS[resolved_architecture]
     if canonical_model_type is None:
         variants = base.variants
         readiness = None
     else:
-        variants = tuple(override.get("variants", base.variants))
+        variants = base.variants
         if training_support == "inference-only":
             readiness = ASRDataReadiness.UNAVAILABLE
-        elif "readiness" in override:
-            readiness = ASRDataReadiness.coerce(override["readiness"])
+        elif base.readiness is not None:
+            readiness = base.readiness
         elif any(not variant.preprocessed for variant in variants):
             readiness = ASRDataReadiness.INTEGRATED
         elif training_support == "custom":
             readiness = ASRDataReadiness.CUSTOM
         else:
             readiness = ASRDataReadiness.PREPROCESSED
-    return ASRDatasetSpec(
-        architecture=resolved_architecture,
+    return replace(
+        base,
         variants=variants,
         model_type=canonical_model_type,
-        sample_rate=override.get("sample_rate", base.sample_rate),
-        description=str(override.get("description", base.description)),
         readiness=readiness,
         training_support=training_support,
-        homogeneous_batch_fields=tuple(
-            override.get(
-                "homogeneous_batch_fields",
-                base.homogeneous_batch_fields,
-            )),
     )
 
 

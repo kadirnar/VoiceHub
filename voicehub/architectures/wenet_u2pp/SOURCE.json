@@ -25,6 +25,13 @@
     },
     "filename": "20210728_u2pp_conformer_exp.tar.gz",
     "license": "NOT DECLARED",
+    "availability": {
+      "checked_at": "2026-08-02",
+      "status": "unavailable",
+      "http_status": 404,
+      "https_error": "certificate-hostname-mismatch",
+      "source_listing": "https://github.com/wenet-e2e/wenet/blob/a50d4208f13bbf3a0746e606ac29176cd2e87e6b/examples/gigaspeech/s0/README.md#conformer-u2-result"
+    },
     "sha256": "061ccfa51d64ebe7ea091a5a13ae31e37d9c36f4eface5c7bafc80bd4a06b26e",
     "tensor_inventory": {
       "fingerprint": "c1956c8a895e342aa4f53f824b1729f41fa3a861b6b08a1fe5e3d55b48ff45c3",

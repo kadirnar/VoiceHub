@@ -102,7 +102,10 @@ _MODEL_LICENSES = (
         "asr_wenet",
         "NOT DECLARED",
         None,
-        "http://mobvoi-speech-public.ufile.ucloud.cn/public/wenet/gigaspeech/20210728_u2pp_conformer_exp.tar.gz",
+        (
+            "https://github.com/wenet-e2e/wenet/blob/"
+            "a50d4208f13bbf3a0746e606ac29176cd2e87e6b/"
+            "examples/gigaspeech/s0/README.md#conformer-u2-result"),
         "The published GigaSpeech checkpoint archive does not declare a "
         "checkpoint license. The VoiceHub-owned architecture port is "
         "Apache-2.0, but that source license is not assumed for the weights.",

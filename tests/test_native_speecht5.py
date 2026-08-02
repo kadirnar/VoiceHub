@@ -481,8 +481,13 @@ class NativeSpeechT5TrainingAndRuntimeTests(unittest.TestCase):
         self.assertEqual(training.support.value, "native")
         self.assertEqual(training.default_phase, "spectrogram")
         self.assertEqual(
+            training.adapter_factory,
+            ("voicehub.models.speecht5.training:"
+             "NativeSpeechT5TrainingAdapter"),
+        )
+        self.assertEqual(
             BUILTIN_MODEL_ADAPTERS["speecht5"].__name__,
-            "_native_speecht5_adapter",
+            "NativeSpeechT5TrainingAdapter",
         )
 
     def test_native_training_adapter_accepts_raw_audio_and_backpropagates(self):

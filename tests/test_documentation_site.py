@@ -4,6 +4,8 @@ import json
 import os
 import re
 import runpy
+import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -30,6 +32,7 @@ MODEL_NOTEBOOK_GENERATOR_PATH = REPOSITORY_ROOT / "scripts" / "generate_model_no
 MODEL_PAGE_DIR = DOCS_ROOT / "models" / "providers"
 MODEL_PAGE_INDEX_PATH = MODEL_PAGE_DIR / "index.md"
 MODEL_PAGE_GENERATOR_PATH = REPOSITORY_ROOT / "scripts" / "generate_model_pages.py"
+ADDING_MODEL_PATH = DOCS_ROOT / "project" / "adding-a-model.md"
 NOTEBOOK_GALLERY_PATH = DOCS_ROOT / "guides" / "notebook.md"
 README_PATH = REPOSITORY_ROOT / "README.md"
 PYPROJECT_PATH = REPOSITORY_ROOT / "pyproject.toml"
@@ -37,6 +40,13 @@ THEME_OVERRIDE_PATH = REPOSITORY_ROOT / "overrides" / "main.html"
 STYLESHEET_PATH = DOCS_ROOT / "stylesheets" / "extra.css"
 PUBLIC_SITE_URL = "https://kadirnar.github.io/voicehub/"
 LOCALIZED_HOME_LOCALES = ("ar", "de", "es", "fr", "ja", "ko", "pt", "ru", "tr", "zh")
+TOP_LEVEL_NAVIGATION = (
+    "Get started",
+    "Models",
+    "Guides",
+    "API reference",
+    "Project",
+)
 GUIDE_PATHS = (
     DOCS_ROOT / "getting-started" / "quickstart.md",
     DOCS_ROOT / "guides" / "inference.md",
@@ -58,7 +68,7 @@ CONCISE_GUIDE_PATHS = (
 PROCESS_PAGE_STEPS = (
     (DOCS_ROOT / "guides" / "index.md", 7),
     (DOCS_ROOT / "guides" / "data-preparation.md", 6),
-    (DOCS_ROOT / "project" / "adding-a-model.md", 7),
+    (ADDING_MODEL_PATH, 7),
 )
 NAVIGATION_PATHS = (
     "index.md",
@@ -83,8 +93,6 @@ NAVIGATION_PATHS = (
     "project/adding-a-model.md",
     "project/adding-speech-provider.md",
     "project/adding-an-optimization.md",
-    "project/roadmap.md",
-    "project/release-readiness.md",
     "project/translations.md",
     "project/model-audit.md",
 )
@@ -104,6 +112,14 @@ PUBLIC_ROUTES = (
 MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 HTML_HREF = re.compile(r"""href=["']([^"']+)["']""")
 PYTHON_BLOCK = re.compile(r"```python\n(.*?)```", re.DOTALL)
+MODEL_PAGE_SECTIONS = (
+    "Overview",
+    "Quickstart",
+    "Supported tasks and capabilities",
+    "Checkpoints, provenance, and license",
+    "Optimization and training support",
+    "Public API",
+)
 
 
 def _cell_source(cell):
@@ -183,11 +199,9 @@ class DocumentationSiteTests(unittest.TestCase):
                                 )
 
     def test_hugging_face_models_have_generated_notebooks(self):
-        from voicehub import list_model_specs
-
-        hub_specs = tuple(
-            spec for spec in list_model_specs(task=None)
-            if re.fullmatch(r"[^/\s]+/[^/\s]+", spec.default_model_path))
+        generator = runpy.run_path(str(MODEL_NOTEBOOK_GENERATOR_PATH))
+        checkpoint_documentation = generator["checkpoint_documentation"]
+        hub_specs = generator["hub_model_specs"]()
         expected_paths = {MODEL_NOTEBOOK_DIR / f"{spec.model_type}.ipynb": spec for spec in hub_specs}
         self.assertEqual(
             set(MODEL_NOTEBOOK_DIR.glob("*.ipynb")),
@@ -206,7 +220,9 @@ class DocumentationSiteTests(unittest.TestCase):
                     spec.model_type,
                 )
                 source = "\n".join(_cell_source(cell) for cell in notebook["cells"])
-                self.assertIn(f"https://huggingface.co/{spec.default_model_path}", source)
+                checkpoint = checkpoint_documentation(spec)
+                self.assertTrue(checkpoint.is_hugging_face)
+                self.assertIn(checkpoint.url, source)
                 self.assertIn(
                     "https://colab.research.google.com/github/"
                     "kadirnar/voicehub/blob/main/notebooks/models/"
@@ -236,13 +252,14 @@ class DocumentationSiteTests(unittest.TestCase):
                 self.assertEqual(namespace["MODEL_TYPE"], spec.model_type)
                 self.assertEqual(namespace["CHECKPOINT"], spec.default_model_path)
 
-        generator = runpy.run_path(str(MODEL_NOTEBOOK_GENERATOR_PATH))
         generated_files = generator["generated_files"]()
         self.assertEqual(generator["check_generated_files"](generated_files), ())
 
     def test_every_registered_model_has_a_generated_guide(self):
         from voicehub import list_model_specs
 
+        notebook_generator = runpy.run_path(str(MODEL_NOTEBOOK_GENERATOR_PATH))
+        checkpoint_documentation = notebook_generator["checkpoint_documentation"]
         specs = tuple(list_model_specs(task=None))
         expected_paths = {MODEL_PAGE_DIR / f"{spec.model_type}.md": spec for spec in specs}
         self.assertEqual(
@@ -257,23 +274,20 @@ class DocumentationSiteTests(unittest.TestCase):
             with self.subTest(model_type=spec.model_type):
                 source = path.read_text(encoding="utf-8")
                 self.assertIn(f"# `{spec.model_type}` model guide", source)
-                self.assertIn("## Model information", source)
-                self.assertIn("## Inference", source)
-                self.assertIn("## Data preparation", source)
-                self.assertIn("## Training", source)
+                sections = tuple(
+                    line.removeprefix("## ") for line in source.splitlines() if line.startswith("## "))
+                self.assertEqual(sections, MODEL_PAGE_SECTIONS)
+                self.assertLessEqual(
+                    len(source.splitlines()),
+                    150,
+                    f"{path.name} should link shared workflows instead of repeating them.",
+                )
                 self.assertIn(spec.task.value.replace("-", " "), source.lower())
                 self.assertIn(spec.training.support.value, source)
-                self.assertIn("| License |", source)
-                if spec.license is None:
-                    self.assertIn("| License | Checkpoint-specific |", source)
-                    self.assertIn(
-                        "Verify the checkpoint and upstream source terms before use.",
-                        source,
-                    )
-                else:
-                    self.assertIn(spec.license.license_id, source)
-                    self.assertIn(spec.license.upstream, source)
-                    self.assertIn(spec.license.notice, source)
+                self.assertIn("Checkpoint status", source)
+                self.assertIn("Source provenance", source)
+                self.assertIn("available_optimization_passes", source)
+                self.assertIn(spec.config_class, source)
                 self.assertIn(f"[`{spec.model_type}`]({path.name})", index)
                 self.assertEqual(
                     config.count(f"models/providers/{path.name}"),
@@ -282,7 +296,7 @@ class DocumentationSiteTests(unittest.TestCase):
                 )
                 if spec.default_model_path:
                     self.assertIn(spec.default_model_path, source)
-                if re.fullmatch(r"[^/\s]+/[^/\s]+", spec.default_model_path):
+                if checkpoint_documentation(spec).is_hugging_face:
                     self.assertIn(
                         "https://colab.research.google.com/github/"
                         "kadirnar/voicehub/blob/main/notebooks/models/"
@@ -291,6 +305,11 @@ class DocumentationSiteTests(unittest.TestCase):
                     )
                 examples = PYTHON_BLOCK.findall(source)
                 self.assertTrue(examples)
+                quickstart = source.split("## Quickstart", 1)[1].split(
+                    "## Supported tasks and capabilities",
+                    1,
+                )[0]
+                self.assertTrue(PYTHON_BLOCK.findall(quickstart))
                 for example_index, example in enumerate(examples, start=1):
                     ast.parse(
                         textwrap.dedent(example),
@@ -303,6 +322,106 @@ class DocumentationSiteTests(unittest.TestCase):
         self.assertIn("- Text to speech:", config)
         self.assertIn("- Automatic speech recognition:", config)
         self.assertIn("- Voice activity detection:", config)
+
+    def test_model_guides_reference_bundled_source_manifests(self):
+        from voicehub import list_model_specs
+
+        generator = runpy.run_path(str(MODEL_PAGE_GENERATOR_PATH))
+        source_provenance = generator["_source_provenance"]
+        expected_examples = {
+            "asr_nemo": "voicehub/architectures/nemo_ctc/SOURCE.json",
+            "asr_speechbrain": ("voicehub/architectures/speechbrain_asr/SOURCE.json"),
+            "asr_wenet": "voicehub/architectures/wenet_u2pp/SOURCE.json",
+            "bark": "voicehub/architectures/bark/SOURCE.json",
+            "vad_webrtc": "voicehub/architectures/webrtc_vad/SOURCE.json",
+            "vits": "voicehub/architectures/vits/SOURCE.json",
+        }
+
+        for spec in list_model_specs(task=None):
+            with self.subTest(model_type=spec.model_type):
+                rendered = source_provenance(spec)
+                if rendered.startswith("`"):
+                    relative = rendered.strip("`")
+                    self.assertTrue((REPOSITORY_ROOT / relative).is_file())
+                    page = (MODEL_PAGE_DIR / f"{spec.model_type}.md").read_text(encoding="utf-8")
+                    self.assertIn(rendered, page)
+
+                if not spec.is_voicehub_native:
+                    continue
+                architecture_manifests = []
+                for reference in spec.native_architecture.component_references.values():
+                    module_path = REPOSITORY_ROOT / Path(*reference.module.split("."))
+                    package = (module_path if module_path.is_dir() else module_path.with_suffix(".py").parent)
+                    manifest = package / "SOURCE.json"
+                    if manifest.is_file():
+                        architecture_manifests.append(manifest)
+                if architecture_manifests:
+                    self.assertFalse(rendered.startswith("No integration-specific"))
+
+        specs = {spec.model_type: spec for spec in list_model_specs(task=None)}
+        for model_type, expected in expected_examples.items():
+            with self.subTest(example=model_type):
+                self.assertEqual(source_provenance(specs[model_type]), f"`{expected}`")
+
+    def test_model_page_source_discovery_remains_backend_lazy(self):
+        code = """
+import json
+import runpy
+import sys
+
+generator = runpy.run_path("scripts/generate_model_pages.py")
+generator["generated_files"]()
+blocked = ("nemo", "safetensors", "sentencepiece", "torch", "transformers")
+print(json.dumps({name: name in sys.modules for name in blocked}))
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=REPOSITORY_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(
+            json.loads(completed.stdout.strip().splitlines()[-1]),
+            {
+                "nemo": False,
+                "safetensors": False,
+                "sentencepiece": False,
+                "torch": False,
+                "transformers": False,
+            },
+        )
+
+    def test_external_archive_checkpoint_is_not_documented_as_hugging_face(self):
+        from voicehub import get_model_spec
+
+        generator = runpy.run_path(str(MODEL_NOTEBOOK_GENERATOR_PATH))
+        spec = get_model_spec("asr_wenet")
+        checkpoint = generator["checkpoint_documentation"](spec)
+        source_record = json.loads(
+            (REPOSITORY_ROOT / "voicehub/architectures/wenet_u2pp/SOURCE.json").read_text(encoding="utf-8"))
+        page = (MODEL_PAGE_DIR / "asr_wenet.md").read_text(encoding="utf-8")
+        index = MODEL_PAGE_INDEX_PATH.read_text(encoding="utf-8")
+        gallery = MODEL_NOTEBOOK_GALLERY_PATH.read_text(encoding="utf-8")
+
+        self.assertEqual(checkpoint.provider, "external-archive")
+        self.assertEqual(checkpoint.example, "path/to/converted-wenet-u2pp")
+        self.assertIn("2026-08-02", checkpoint.status)
+        self.assertIn("github.com/wenet-e2e/wenet/blob/", checkpoint.url)
+        self.assertFalse(checkpoint.is_hugging_face)
+        self.assertEqual(spec.license.upstream, checkpoint.url)
+        self.assertEqual(source_record["artifact"]["availability"]["status"], "unavailable")
+        self.assertEqual(source_record["artifact"]["availability"]["http_status"], 404)
+        self.assertEqual(source_record["artifact"]["availability"]["source_listing"], checkpoint.url)
+        self.assertIn(checkpoint.example, page)
+        self.assertIn(checkpoint.status, page)
+        self.assertIn(checkpoint.url, page)
+        self.assertIn(checkpoint.url, index)
+        self.assertNotIn("https://huggingface.co/wenet/gigaspeech", page)
+        self.assertNotIn("asr_wenet.ipynb", page)
+        self.assertNotIn("asr_wenet.ipynb", gallery)
+        self.assertFalse((MODEL_NOTEBOOK_DIR / "asr_wenet.ipynb").exists())
 
     def test_notebook_code_cells_compile_and_execute_in_smoke_mode(self):
         namespaces = {}
@@ -428,6 +547,35 @@ class DocumentationSiteTests(unittest.TestCase):
                 self.assertIn(relative_path, config)
 
         self.assertFalse((DOCS_ROOT / "tts_workflow.md").exists())
+
+    def test_navigation_uses_five_product_areas(self):
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        navigation = config.split("nav:\n", 1)[1].split("\nplugins:", 1)[0]
+        labels = tuple(
+            line.removeprefix("  - ").split(":", 1)[0] for line in navigation.splitlines()
+            if line.startswith("  - "))
+        self.assertEqual(labels, TOP_LEVEL_NAVIGATION)
+
+        get_started = navigation.split("  - Get started:", 1)[1].split("  - Models:", 1)[0]
+        guides = navigation.split("  - Guides:", 1)[1].split("  - API reference:", 1)[0]
+        project = navigation.split("  - Project:", 1)[1]
+        self.assertIn("index.md", get_started)
+        self.assertIn("getting-started/installation.md", get_started)
+        self.assertIn("getting-started/quickstart.md", get_started)
+        self.assertIn("guides/notebook.md", guides)
+        self.assertIn("concepts/architecture.md", project)
+        self.assertIn("concepts/trainer.md", project)
+        self.assertIn("project/adding-a-model.md", project)
+
+        stale_labels = ("Home", "Quick Start", "Architecture", "API Reference", "Contributing")
+        for locale in LOCALIZED_HOME_LOCALES:
+            with self.subTest(locale=locale):
+                locale_block = config.split(f"        - locale: {locale}\n", 1)[1]
+                locale_block = locale_block.split("        - locale:", 1)[0]
+                for label in TOP_LEVEL_NAVIGATION:
+                    self.assertRegex(locale_block, rf"(?m)^            {re.escape(label)}:")
+                for label in stale_labels:
+                    self.assertNotRegex(locale_block, rf"(?m)^            {re.escape(label)}:")
 
     def test_main_workflow_guides_stay_concise(self):
         for path in CONCISE_GUIDE_PATHS:
@@ -559,6 +707,67 @@ class DocumentationSiteTests(unittest.TestCase):
                 self.assertNotIn("vh-flow-diagram", source)
                 self.assertNotIn("```mermaid", source)
                 self.assertNotIn("tabindex=", source)
+
+    def test_model_contribution_template_covers_the_definition_of_done(self):
+        source = ADDING_MODEL_PATH.read_text(encoding="utf-8")
+
+        required_paths = (
+            "voicehub/models/auroratts/",
+            "configuration_auroratts.py",
+            "modeling_auroratts.py",
+            "registration.py",
+            "runtime.py",
+            "SOURCE.json",
+            "THIRD_PARTY_LICENSE",
+            "tests/test_auroratts.py",
+            "docs/models/providers/auroratts.md",
+            "mkdocs.yml",
+        )
+        required_contracts = (
+            "PreTrainedTTSModel",
+            "PreTrainedASRModel",
+            "PreTrainedVADModel",
+            "TTSOutput",
+            "ASROutput",
+            "VADOutput",
+            "ArchitectureSpec",
+            "ModelSpec",
+            "ModelTrainingSpec",
+            '"builtin": true',
+            "model-integration.json",
+            "voicehub/models/registry.py",
+            "voicehub/training/specs.py",
+            "_profile(",
+            "inference-only",
+            "apply_optimization_plan",
+            "restore_optimization_plan",
+            "scripts/scaffold_model.py create",
+            "scripts/scaffold_model.py catalog",
+            "scripts/scaffold_model.py check",
+            "scripts/generate_model_pages.py --check",
+            "scripts/check_distribution.py",
+            "unverified",
+            "hardware-limited",
+        )
+        for fragment in (*required_paths, *required_contracts):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, source)
+
+        self.assertNotIn("Add optional metadata", source)
+        self.assertIn("authoritative license text", source)
+        self.assertIn("never overwrites an existing", source)
+        self.assertIn("completion gate", source)
+        self.assertIn("quoted name", source)
+        self.assertIn("unsupported-hardware tests", source)
+        self.assertIn("generated navigation entry", source)
+
+        examples = PYTHON_BLOCK.findall(source)
+        self.assertGreaterEqual(len(examples), 4)
+        for index, example in enumerate(examples, start=1):
+            ast.parse(
+                textwrap.dedent(example),
+                filename=f"adding-a-model.md:python-block-{index}",
+            )
 
     def test_internal_markdown_links_resolve(self):
         for source_path in DOCS_ROOT.rglob("*.md"):

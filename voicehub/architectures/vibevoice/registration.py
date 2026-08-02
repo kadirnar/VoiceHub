@@ -191,6 +191,7 @@ def create_vibevoice_tts_architecture_spec() -> ArchitectureSpec:
         upstream_revision=MICROSOFT_VIBEVOICE_SOURCE_REVISION,
         license_id=MICROSOFT_VIBEVOICE_LICENSE,
         metadata={
+            "external_llm_backend_blocker": ("VibeVoice couples language-model hidden states to diffusion."),
             "diffusion_architecture_kind": "denoising-diffusion",
             "diffusion_operations": (
                 "denoiser",

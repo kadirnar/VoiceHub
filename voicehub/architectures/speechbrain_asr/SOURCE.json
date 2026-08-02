@@ -17,6 +17,7 @@
     "normalizer_sha256": "e11bfd7dbe13a266d13c00f6ff042a00fdbd40f3f5973928f9b49c33da32b512",
     "tokenizer": "tokenizer.ckpt",
     "tokenizer_sha256": "37a6cba34cd520b33fd83612d5efc8ba7e351166541eb2726642bb3032234d31",
+    "tokenizer_size": 253217,
     "hyperparams_sha256": "b23fdf3da84c931b6605b0b9669e1579a206ea0d835f04b7753e2b37309f2703",
     "asr_tensor_count": 83,
     "asr_values": 119883564,

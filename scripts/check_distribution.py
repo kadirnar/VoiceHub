@@ -30,8 +30,7 @@ COMPLIANCE_NAME_TOKENS = ("LICENSE", "LICENCE", "NOTICE", "COPYING")
 
 
 def compliance_package_files(repository_root: Path = REPOSITORY_ROOT) -> tuple[str, ...]:
-    """List every provenance manifest and legal notice shipped in
-    ``voicehub``."""
+    """List every provenance manifest and legal notice shipped in VoiceHub."""
     package_root = repository_root / "voicehub"
     return tuple(
         sorted(
@@ -190,9 +189,16 @@ if not all(required.values()):
 
 package_root = Path(str(files("voicehub")))
 compliance_files = sorted(
-    path for path in package_root.rglob("*")
-    if path.is_file() and (path.name == "SOURCE.json" or any(
-        token in path.name.upper() for token in ("LICENSE", "LICENCE", "NOTICE", "COPYING")))
+    path
+    for path in package_root.rglob("*")
+    if path.is_file()
+    and (
+        path.name == "SOURCE.json"
+        or any(
+            token in path.name.upper()
+            for token in ("LICENSE", "LICENCE", "NOTICE", "COPYING")
+        )
+    )
 )
 expected_compliance_files = int(sys.argv[1])
 if len(compliance_files) != expected_compliance_files:

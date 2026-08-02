@@ -25,20 +25,6 @@ _COMMON_ALIASES = MappingProxyType({
     "reference_audio_path": "reference_audio",
     "speaker_audio": "reference_audio",
 })
-_MODEL_ALIASES = MappingProxyType({
-    "cosyvoice":
-    MappingProxyType({
-        # Keep the path form distinct from in-memory ``audio`` so the
-        # CosyVoice contract can require a sampling rate only for arrays.
-        "audio_path": "audio_path",
-    }),
-    "qwen3tts":
-    MappingProxyType({
-        "reference_audio": "ref_audio",
-        "reference_audio_path": "ref_audio",
-        "speaker_audio": "ref_audio",
-    }),
-})
 _PATH_FIELDS = frozenset({
     "audio",
     "audios",
@@ -444,7 +430,7 @@ class TTSDataset(SpeechDataset):
         aliases: Mapping[str, str] | None,
     ) -> Mapping[str, str]:
         merged = dict(_COMMON_ALIASES)
-        merged.update(_MODEL_ALIASES.get(self.model_type or "", {}))
+        merged.update(dict(self.spec.field_aliases))
         if aliases is not None:
             if not isinstance(aliases, Mapping):
                 raise TypeError("aliases must be a mapping or None.")

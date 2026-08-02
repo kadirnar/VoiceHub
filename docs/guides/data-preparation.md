@@ -233,6 +233,13 @@ for variant in contract.variants:
     print(variant.name, variant.required_fields, variant.one_of)
 ```
 
+The training profile selects this model-specific contract through the lazy
+`dataset_spec_factory="module:callable"` boundary. The zero-argument callable
+returns a `TTSDatasetSpec`; VoiceHub attaches the registered model type,
+training support, and derived readiness. Extensions can therefore register an
+exact TTS contract without editing a shared provider table or importing the
+model graph.
+
 The six architecture contracts deliberately stop at different boundaries:
 
 | Architecture | Canonical source record | Typical prepared target |

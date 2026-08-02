@@ -20,6 +20,21 @@ from voicehub.models.orpheustts.protocol import (
     normalize_orpheus_audio_tokens,
 )
 from voicehub.training.data import CausalTokenCollator, load_audio_tensor
+from voicehub.training.recipes import CodecCausalLMTrainingAdapter
+
+
+class OrpheusTrainingAdapter(CodecCausalLMTrainingAdapter):
+    """Fine-tune and export the complete VoiceHub-native Orpheus runtime."""
+
+    native_export_semantics = "inference-export"
+
+    def save_pretrained(self, save_directory) -> None:
+        self.setup()
+        export = getattr(self.model, "export_native_pretrained", None)
+        if not callable(export):
+            raise TypeError("Native Orpheus training requires a wrapper with "
+                            "export_native_pretrained().")
+        export(save_directory)
 
 
 class OrpheusSFTDataset:
@@ -131,3 +146,21 @@ class OrpheusSFTDataset:
             "input_ids": sequence,
             "labels": labels,
         }
+
+
+def build_training_dataset(model, records, **kwargs) -> OrpheusSFTDataset:
+    """Build the source-native dataset declared by the training registry."""
+    return OrpheusSFTDataset(
+        records,
+        tokenizer=model.tokenizer,
+        codec=model.codec,
+        completion_only=bool(kwargs.get("completion_only", False)),
+        max_length=kwargs.get("max_length"),
+    )
+
+
+__all__ = [
+    "OrpheusTrainingAdapter",
+    "OrpheusSFTDataset",
+    "build_training_dataset",
+]

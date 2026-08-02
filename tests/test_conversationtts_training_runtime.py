@@ -568,7 +568,7 @@ class ConversationTTSTrainingRuntimeTests(unittest.TestCase):
             raise AssertionError(f"Unexpected ConversationTTS recipe import: {name}")
 
         with patch(
-                "voicehub.training.recipes.import_optional",
+                "voicehub.models.conversationtts.training.import_optional",
                 side_effect=import_source,
         ):
             yield

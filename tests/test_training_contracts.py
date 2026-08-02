@@ -1,9 +1,15 @@
+import ast
 import copy
 import importlib.util
 import subprocess
 import sys
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
+from voicehub.dependencies import resolve_import_path
+from voicehub.errors import OptionalDependencyError
 from voicehub.training.adapters import (
     BaseTrainingAdapter,
     CausalLMTrainingAdapter,
@@ -18,6 +24,7 @@ from voicehub.training.contracts import (
     TrainingRecipeKind,
     TrainingSupport,
 )
+from voicehub.training.recipes import BUILTIN_MODEL_ADAPTERS, CodecCausalLMTrainingAdapter
 from voicehub.training.specs import (
     MODEL_TRAINING_SPECS,
     ModelTrainingSpec,
@@ -82,6 +89,90 @@ class TrainingContractValidationTests(unittest.TestCase):
             get_training_spec("qwen3tts").training_default_model_name_or_path,
             "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
         )
+        self.assertEqual(
+            {
+                model_type: get_training_spec(model_type).dataset_factory
+                for model_type in (
+                    "orpheustts",
+                    "llasa",
+                    "neutts",
+                    "outetts",
+                )
+            },
+            {
+                "orpheustts": ("voicehub.models.orpheustts.training:"
+                               "build_training_dataset"),
+                "llasa": ("voicehub.models.llasa.training:"
+                          "build_training_dataset"),
+                "neutts": ("voicehub.models.neutts.training:"
+                           "build_training_dataset"),
+                "outetts": ("voicehub.models.outetts.training:"
+                            "build_training_dataset"),
+            },
+        )
+
+    def test_lazy_training_factories_and_tokenizer_paths_are_validated(self):
+        spec = ModelTrainingSpec(
+            model_type="future-codec-tts",
+            family=TrainingFamily.CAUSAL_LM,
+            adapter_factory=(" voicehub.training.adapters:"
+                             "CausalLMTrainingAdapter "),
+            dataset_factory=(" voicehub.models.orpheustts.training:"
+                             "build_training_dataset "),
+            dataset_spec_factory=(" voicehub.training.asr_data_contracts:"
+                                  "build_asr_whisper_dataset_spec "),
+            tokenizer_paths=(
+                " assets.tokenizer ",
+                "model.tokenizer",
+            ),
+        )
+        self.assertEqual(
+            spec.adapter_factory,
+            "voicehub.training.adapters:CausalLMTrainingAdapter",
+        )
+        self.assertEqual(
+            spec.dataset_factory,
+            "voicehub.models.orpheustts.training:build_training_dataset",
+        )
+        self.assertEqual(
+            spec.dataset_spec_factory,
+            "voicehub.training.asr_data_contracts:build_asr_whisper_dataset_spec",
+        )
+        self.assertEqual(
+            spec.tokenizer_paths,
+            ("assets.tokenizer", "model.tokenizer"),
+        )
+
+        with self.assertRaisesRegex(ValueError, "module:attribute"):
+            ModelTrainingSpec(
+                model_type="bad-dataset-factory",
+                family=TrainingFamily.CAUSAL_LM,
+                dataset_factory="voicehub.training.datasets",
+            )
+        with self.assertRaisesRegex(ValueError, "module:attribute"):
+            ModelTrainingSpec(
+                model_type="bad-adapter-factory",
+                family=TrainingFamily.CAUSAL_LM,
+                adapter_factory="voicehub.training.adapters",
+            )
+        with self.assertRaisesRegex(ValueError, "module:attribute"):
+            ModelTrainingSpec(
+                model_type="bad-dataset-spec-factory",
+                family=TrainingFamily.CTC,
+                dataset_spec_factory="voicehub.training.asr_data_contracts",
+            )
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            ModelTrainingSpec(
+                model_type="duplicate-tokenizer-paths",
+                family=TrainingFamily.CAUSAL_LM,
+                tokenizer_paths=("tokenizer", "tokenizer"),
+            )
+        with self.assertRaisesRegex(ValueError, "dotted attribute paths"):
+            ModelTrainingSpec(
+                model_type="bad-tokenizer-path",
+                family=TrainingFamily.CAUSAL_LM,
+                tokenizer_paths=("model..tokenizer", ),
+            )
 
     def test_framework_imports_remain_lazy(self):
         script = (
@@ -90,14 +181,80 @@ class TrainingContractValidationTests(unittest.TestCase):
             "from voicehub.training.specs import list_training_specs;"
             "from voicehub.training.auto import AutoTrainingAdapter;"
             "print(len(list_training_specs()),"
-            "'torch' in sys.modules,'numpy' in sys.modules)")
+            "'torch' in sys.modules,'numpy' in sys.modules,"
+            "any(name in sys.modules for name in ("
+            "'voicehub.models.orpheustts.training',"
+            "'voicehub.models.conversationtts.training',"
+            "'voicehub.models.f5tts.training',"
+            "'voicehub.models.qwen3tts.training_adapter',"
+            "'voicehub.models.llasa.training',"
+            "'voicehub.models.neutts.training',"
+            "'voicehub.models.outetts.training')))")
         completed = subprocess.run(
             [sys.executable, "-c", script],
             check=True,
             capture_output=True,
             text=True,
         )
-        self.assertEqual(completed.stdout.strip(), "34 False False")
+        self.assertEqual(completed.stdout.strip(), "34 False False False")
+
+    def test_builtin_specialized_adapters_are_declarative_and_resolvable(self):
+        specs = tuple(list_training_specs(task=None))
+        declared = {
+            spec.model_type: spec.adapter_factory
+            for spec in specs if spec.adapter_factory is not None
+        }
+        self.assertEqual(len(specs), 68)
+        self.assertEqual(len(declared), 66)
+        self.assertEqual(set(BUILTIN_MODEL_ADAPTERS), set(declared))
+
+        training_root = Path(__file__).parents[1] / "voicehub" / "training"
+        auto_source = (training_root / "auto.py").read_text(encoding="utf-8")
+        recipes_source = (training_root / "recipes.py").read_text(encoding="utf-8")
+        self.assertNotIn("BUILTIN_MODEL_ADAPTERS", auto_source)
+        self.assertNotIn("BUILTIN_MODEL_ADAPTERS = {", recipes_source)
+        wrapper_names = [
+            node.name for node in ast.parse(recipes_source).body
+            if isinstance(node, ast.FunctionDef) and node.name.endswith("_adapter")
+        ]
+        self.assertEqual(wrapper_names, [])
+        adapter_class_names = {
+            node.name
+            for node in ast.parse(recipes_source).body
+            if isinstance(node, ast.ClassDef) and node.name.endswith("TrainingAdapter")
+        }
+        self.assertEqual(
+            adapter_class_names,
+            {
+                "CodecCausalLMTrainingAdapter",
+                "SourceRecipeTrainingAdapter",
+            },
+        )
+        self.assertTrue(all(not path.startswith("voicehub.training.recipes:") for path in declared.values()))
+
+        from voicehub.training import recipes
+
+        compatibility_exports = {
+            "ConversationTTSTrainingAdapter":
+            ("voicehub.models.conversationtts.training:"
+             "ConversationTTSTrainingAdapter"),
+            "F5TTSTrainingAdapter": ("voicehub.models.f5tts.training:F5TTSTrainingAdapter"),
+            "OrpheusTrainingAdapter": ("voicehub.models.orpheustts.training:OrpheusTrainingAdapter"),
+            "Qwen3TTSTrainingAdapter":
+            ("voicehub.models.qwen3tts.training_adapter:"
+             "Qwen3TTSTrainingAdapter"),
+        }
+        for legacy_name, path in compatibility_exports.items():
+            with self.subTest(legacy_name=legacy_name):
+                self.assertIs(getattr(recipes, legacy_name), resolve_import_path(path))
+
+        for model_type, path in declared.items():
+            with self.subTest(model_type=model_type):
+                factory = resolve_import_path(path)
+                self.assertTrue(callable(factory))
+                if isinstance(factory, type):
+                    self.assertTrue(issubclass(factory, BaseTrainingAdapter))
+                self.assertIs(BUILTIN_MODEL_ADAPTERS[model_type], factory)
 
     def test_phase_schedule_must_cover_every_recipe_step(self):
         with self.assertRaisesRegex(ValueError, "cover every recipe step"):
@@ -161,6 +318,125 @@ class TrainingContractValidationTests(unittest.TestCase):
         signature = BaseTrainingAdapter(object(), spec).resume_signature()
 
         self.assertTrue(signature["phases"][0]["optimizer_step_after_phase"], )
+
+
+class CodecDatasetFactoryContractTests(unittest.TestCase):
+
+    class ReadyAdapter(CodecCausalLMTrainingAdapter):
+
+        def setup(self):
+            return self
+
+    def test_extension_dataset_factory_needs_no_shared_model_branch(self):
+        calls = []
+        expected = object()
+
+        def build_dataset(model, records, **kwargs):
+            calls.append((model, records, kwargs))
+            return expected
+
+        model = SimpleNamespace()
+        spec = ModelTrainingSpec(
+            model_type="future-codec-dataset",
+            family=TrainingFamily.CAUSAL_LM,
+            dataset_factory="extension.training:build_dataset",
+        )
+        adapter = self.ReadyAdapter(model, spec)
+        records = [{"text": "hello"}]
+
+        with patch(
+                "voicehub.training.recipes.resolve_import_path",
+                return_value=build_dataset,
+        ) as resolver:
+            dataset = adapter.create_dataset(
+                records,
+                max_length=128,
+            )
+
+        self.assertIs(dataset, expected)
+        resolver.assert_called_once_with("extension.training:build_dataset")
+        self.assertEqual(calls, [(model, records, {"max_length": 128})])
+
+    def test_dataset_factory_resolution_fails_actionably(self):
+        spec = ModelTrainingSpec(
+            model_type="missing-codec-dataset",
+            family=TrainingFamily.CAUSAL_LM,
+            dataset_factory="extension.training:missing",
+        )
+        adapter = self.ReadyAdapter(object(), spec)
+
+        with patch(
+                "voicehub.training.recipes.resolve_import_path",
+                side_effect=AttributeError("missing"),
+        ):
+            with self.assertRaisesRegex(
+                    ImportError,
+                    "Could not resolve training dataset factory.*missing-codec-dataset",
+            ):
+                adapter.create_dataset([])
+        with patch(
+                "voicehub.training.recipes.resolve_import_path",
+                return_value=object(),
+        ):
+            with self.assertRaisesRegex(TypeError, "must be callable"):
+                adapter.create_dataset([])
+        with patch(
+                "voicehub.training.recipes.resolve_import_path",
+                side_effect=ModuleNotFoundError("torch"),
+        ):
+            with self.assertRaisesRegex(
+                    OptionalDependencyError,
+                    r'pip install "voicehub\[training\]"',
+            ):
+                adapter.create_dataset([])
+
+    def test_tokenizer_export_uses_declared_paths(self):
+
+        class Saveable:
+
+            def __init__(self):
+                self.destinations = []
+
+            def save_pretrained(self, destination, **kwargs):
+                self.destinations.append((destination, kwargs))
+
+        primary = Saveable()
+        tokenizer = Saveable()
+        model = SimpleNamespace(assets=SimpleNamespace(tokenizer=tokenizer))
+        spec = ModelTrainingSpec(
+            model_type="future-tokenizer-layout",
+            family=TrainingFamily.CAUSAL_LM,
+            tokenizer_paths=("assets.tokenizer", ),
+        )
+        adapter = self.ReadyAdapter(model, spec)
+        adapter.primary_model = primary
+
+        adapter.save_pretrained("export")
+
+        self.assertEqual(
+            primary.destinations,
+            [(Path("export"), {
+                "safe_serialization": True
+            })],
+        )
+        self.assertEqual(tokenizer.destinations, [(Path("export"), {})])
+
+    def test_shared_codec_adapter_has_no_registered_model_comparisons(self):
+        source = (Path(__file__).parents[1] / "voicehub" / "training" /
+                  "recipes.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        adapter_class = next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "CodecCausalLMTrainingAdapter")
+        compared_strings = {
+            operand.value
+            for node in ast.walk(adapter_class) if isinstance(node, ast.Compare)
+            for operand in (node.left, *node.comparators)
+            if isinstance(operand, ast.Constant) and isinstance(operand.value, str)
+        }
+        registered_models = {spec.model_type for spec in list_training_specs(task=None)}
+
+        self.assertTrue(compared_strings.isdisjoint(registered_models), compared_strings)
 
 
 class DynamicTrainingRegistryTests(unittest.TestCase):
@@ -281,6 +557,39 @@ class DynamicTrainingRegistryTests(unittest.TestCase):
             AutoTrainingAdapter.unregister("future-teardown"),
             self.FutureAdapter,
         )
+
+    def test_declarative_adapter_factory_requires_no_central_registration(self):
+        model_type = "future-declarative-adapter"
+        spec = ModelTrainingSpec(
+            model_type=model_type,
+            family="future-declarative-family",
+            adapter_factory=("voicehub.training.adapters:"
+                             "AcousticTrainingAdapter"),
+        )
+        register_training_spec(spec)
+        try:
+            wrapper = SimpleNamespace(config=SimpleNamespace(model_type=model_type), )
+            adapter = AutoTrainingAdapter.from_model(wrapper)
+
+            self.assertIsInstance(adapter, BaseTrainingAdapter)
+            self.assertEqual(type(adapter).__name__, "AcousticTrainingAdapter")
+            self.assertTrue(adapter._registered_specialization)
+            self.assertNotIn(model_type, AutoTrainingAdapter._model_overrides)
+        finally:
+            unregister_training_spec(model_type, missing_ok=True)
+
+    def test_declarative_adapter_factory_fails_with_actionable_path(self):
+        spec = ModelTrainingSpec(
+            model_type="future-missing-adapter",
+            family="future-missing-family",
+            adapter_factory="voicehub.training.adapters:MissingAdapter",
+        )
+
+        with self.assertRaisesRegex(
+                ImportError,
+                "Could not resolve training adapter factory.*MissingAdapter",
+        ):
+            AutoTrainingAdapter.from_model(object(), spec=spec)
 
 
 @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")

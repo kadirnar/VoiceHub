@@ -10,9 +10,11 @@ choose a profile, inspect it, and pass the returned objects to
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+from voicehub.dependencies import resolve_import_path
 from voicehub.training.data_contracts import TTSDataArchitecture, get_tts_dataset_spec
+from voicehub.training.specs import get_training_spec
 from voicehub.training.tts_batching import TTSBatchingConfig, TTSBatchingStrategy
 from voicehub.training.tts_datasets import TTSDataset
 from voicehub.training_args import TrainingArguments
@@ -196,6 +198,7 @@ class LLMTTSOptimizationConfig:
     use_bf16: bool = True
     gradient_checkpointing: bool = False
     fused_adamw: bool = True
+    lr_scheduler_type: str = "cosine"
     source_url: str = _CONVERSATIONTTS_SOURCE
     techniques: tuple[str, ...] = (
         "offline frozen-codec tokenization",
@@ -221,6 +224,7 @@ class LLMTTSOptimizationConfig:
             per_device_train_batch_size=32,
             token_budget=7_500,
             max_sequence_length=2_048,
+            lr_scheduler_type="constant",
             source_url=_QWEN3TTS_SOURCE,
             techniques=(
                 "offline 12 Hz multi-codebook targets",
@@ -246,7 +250,7 @@ class LLMTTSOptimizationConfig:
             "adam_beta2": self.adam_beta2,
             "adam_epsilon": self.adam_epsilon,
             "max_grad_norm": self.max_grad_norm,
-            "lr_scheduler_type": ("cosine" if self.recipe == "conversationtts" else "constant"),
+            "lr_scheduler_type": self.lr_scheduler_type,
             "warmup_ratio": self.warmup_ratio,
             "bf16": self.use_bf16,
             "gradient_checkpointing": self.gradient_checkpointing,
@@ -429,52 +433,77 @@ TTSTrainingOptimizationProfile = (
     VITSOptimizationConfig | LLMTTSOptimizationConfig | DiffusionTTSOptimizationConfig)
 TTSOptimizationProfile = TTSTrainingOptimizationProfile
 
+_ARCHITECTURE_PROFILE_FACTORIES = {
+    TTSDataArchitecture.VITS: "voicehub.training.tts_optimization:VITSOptimizationConfig",
+    TTSDataArchitecture.CODEC_LM: "voicehub.training.tts_optimization:LLMTTSOptimizationConfig",
+    TTSDataArchitecture.DIFFUSION: "voicehub.training.tts_optimization:DiffusionTTSOptimizationConfig",
+}
+_PROFILE_METHODS = (
+    "acceleration_plan",
+    "batching_config",
+    "prepare_dataset",
+    "to_dict",
+    "training_arguments",
+)
+
+
+def _instantiate_profile(factory_path: str) -> TTSTrainingOptimizationProfile:
+    try:
+        target = resolve_import_path(factory_path)
+    except (ImportError, AttributeError, TypeError, ValueError) as exc:
+        raise ImportError(
+            f"Could not resolve TTS training optimization profile factory "
+            f"{factory_path!r}: {exc}") from exc
+    if not callable(target):
+        raise TypeError(
+            f"TTS training optimization profile factory {factory_path!r} "
+            "must resolve to a callable.")
+    profile = target()
+    missing = tuple(name for name in _PROFILE_METHODS if not callable(getattr(profile, name, None)))
+    if missing:
+        raise TypeError(
+            f"TTS training optimization profile factory {factory_path!r} "
+            "returned an incompatible object; missing callable(s): " + ", ".join(missing))
+    return cast(TTSTrainingOptimizationProfile, profile)
+
 
 def get_tts_training_optimization_profile(
         model_type_or_architecture: str | TTSDataArchitecture) -> TTSTrainingOptimizationProfile:
     """Resolve the applicable special profile for a model or architecture."""
+    model_type = None
     if isinstance(model_type_or_architecture, TTSDataArchitecture):
         architecture = model_type_or_architecture
-        model_type = None
+        factory_path = _ARCHITECTURE_PROFILE_FACTORIES.get(architecture)
     elif isinstance(model_type_or_architecture, str):
         normalized = model_type_or_architecture.strip().lower().replace("_", "-")
         if normalized in {"llm", "codec-lm"}:
             architecture = TTSDataArchitecture.CODEC_LM
-            model_type = None
+            factory_path = _ARCHITECTURE_PROFILE_FACTORIES[architecture]
         elif normalized in {"diffusion", "flow", "flow-matching"}:
             architecture = TTSDataArchitecture.DIFFUSION
-            model_type = None
-        elif normalized in {"gan", "vits"}:
+            factory_path = _ARCHITECTURE_PROFILE_FACTORIES[architecture]
+        elif normalized == "gan":
             architecture = TTSDataArchitecture.VITS
-            model_type = None if normalized == "gan" else "vits"
+            factory_path = _ARCHITECTURE_PROFILE_FACTORIES[architecture]
         else:
-            spec = get_tts_dataset_spec(model_type_or_architecture)
-            architecture = spec.architecture
-            model_type = spec.model_type
+            dataset_spec = get_tts_dataset_spec(model_type_or_architecture)
+            architecture = dataset_spec.architecture
+            model_type = dataset_spec.model_type
+            training_spec = get_training_spec(model_type or model_type_or_architecture)
+            factory_path = training_spec.optimization_profile_factory
     else:
         raise TypeError("TTS optimization target must be a model type or data architecture.")
 
-    if model_type is not None and model_type not in {
-            "vits",
-            "conversationtts",
-            "qwen3tts",
-            "f5tts",
-    }:
+    if factory_path is None and model_type is not None:
         raise ValueError(
             f"No source-verified optimization profile is registered for "
             f"{model_type!r}. Its {architecture.value!r} data architecture "
             "does not make another model's optimizer recipe interchangeable.")
-    if architecture is TTSDataArchitecture.VITS:
-        return VITSOptimizationConfig()
-    if architecture is TTSDataArchitecture.CODEC_LM:
-        if model_type == "qwen3tts":
-            return LLMTTSOptimizationConfig.qwen3tts()
-        return LLMTTSOptimizationConfig()
-    if architecture is TTSDataArchitecture.DIFFUSION:
-        return DiffusionTTSOptimizationConfig()
-    raise ValueError(
-        "Special optimization profiles currently cover VITS, codec/LLM, "
-        f"and diffusion TTS; received {architecture.value!r}.")
+    if factory_path is None:
+        raise ValueError(
+            "Special optimization profiles currently cover VITS, codec/LLM, "
+            f"and diffusion TTS; received {architecture.value!r}.")
+    return _instantiate_profile(factory_path)
 
 
 __all__ = [

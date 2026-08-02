@@ -1,35 +1,20 @@
 ---
-description: Inference, data preparation, and training guide for the asr_nemo integration.
+description: Public API, checkpoint, training, and optimization guide for the asr_nemo integration.
 ---
 
 # `asr_nemo` model guide
+
+## Overview
 
 `asr_nemo` is a VoiceHub **automatic speech recognition**
 integration. This page is generated from the model registry and its executable
 data and training contracts, so the documented support stays aligned with code.
 
-## Model information
-
-| Property | Value |
-| --- | --- |
-| Task | Automatic speech recognition |
-| Default checkpoint | `nvidia/nemo/stt_en_quartznet15x5` |
-| Architecture | `nemo-asr` |
-| Runtime | `VoiceHub-native` |
-| Implementation | `voicehub.models.asr_nemo.NeMoASRForSpeechRecognition` |
-| Capabilities | `automatic-speech-recognition`, `english`, `timestamps`, `safetensors`, `fine-tuning`, `voicehub-native`, `ctc` |
-| Reusable components | — |
-| License | [NVIDIA-NGC-Terms](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/stt_en_quartznet15x5) |
-
-The QuartzNet checkpoint is governed by the NVIDIA NGC Terms of Use; the VoiceHub-owned architecture code is Apache-2.0. Commercial use: **review required**.
-
-## Install
+## Quickstart
 
 ```bash
 python -m pip install voicehub
 ```
-
-## Inference
 
 1. Install VoiceHub and the provider extra shown above.
 2. Choose a checkpoint that matches this integration.
@@ -52,15 +37,27 @@ for segment in output.segments:
 ```
 
 Use only authorized recordings for reference voice, transcription, detection,
-or evaluation. Pin a checkpoint revision in production.
+or evaluation. The example selects a concrete device; verify checkpoint-specific
+hardware needs and pin an immutable revision before production use.
 
-## Data preparation
+## Supported tasks and capabilities
 
-The `asr_nemo` contract is **integrated-raw**. Its
-data architecture is **ctc** and its declared sample rate is
-**16,000 Hz**.
+| Property | Value |
+| --- | --- |
+| Task | Automatic speech recognition |
+| Architecture | `nemo-asr` |
+| Runtime | `VoiceHub-native` |
+| Capabilities | `automatic-speech-recognition`, `english`, `timestamps`, `safetensors`, `fine-tuning`, `voicehub-native`, `ctc` |
+| Reusable components | — |
 
-NeMo QuartzNet waveform and CTC transcript records.
+### Data contract
+
+| Property | Value |
+| --- | --- |
+| Readiness | `integrated-raw` |
+| Data architecture | `ctc` |
+| Sample rate | 16,000 Hz |
+| Contract getter | `get_asr_dataset_spec('asr_nemo')` |
 
 | Variant | Required fields | One of | Boundary | Other rules |
 | --- | --- | --- | --- | --- |
@@ -68,41 +65,36 @@ NeMo QuartzNet waveform and CTC transcript records.
 | `nemo-ctc-waveform-model-ready` | `input_signal`, `input_signal_length`, `labels`, `label_lengths` | — | Prepared | — |
 | `nemo-ctc-feature-model-ready` | `processed_signal`, `processed_signal_length`, `labels`, `label_lengths` | — | Prepared | — |
 
-Follow this process:
+NeMo QuartzNet waveform and CTC transcript records. Follow the [shared data workflow](../../guides/speech-data.md) for
+manifest loading, audio validation, leakage-safe splits, and model-owned
+preprocessing.
 
-1. Keep immutable source audio, exact transcripts or labels, stable IDs, consent,
-   license, speaker, and session metadata.
-2. Split by speaker or recording session before model preprocessing.
-3. Match one of the exact variants above. Source variants are processed by the
-   integration; prepared variants must already contain the listed model inputs.
-4. Validate one collated batch, then persist the preprocessing version and hashes.
+## Checkpoints, provenance, and license
 
-```python
-from voicehub import ASRDataset, get_asr_dataset_spec
+| Property | Value |
+| --- | --- |
+| Default checkpoint | `nvidia/nemo/stt_en_quartznet15x5` |
+| Checkpoint status | Registry default; pin an immutable revision for production and reproducible evidence |
+| Implementation | `voicehub.models.asr_nemo.NeMoASRForSpeechRecognition` |
+| Configuration | `voicehub.models.asr_nemo.NeMoASRConfig` |
+| Source provenance | `voicehub/architectures/nemo_ctc/SOURCE.json` |
+| License | [NVIDIA-NGC-Terms](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/stt_en_quartznet15x5) |
 
-contract = get_asr_dataset_spec('asr_nemo')
-print(contract.architecture, contract.readiness, contract.sample_rate)
-for variant in contract.variants:
-    print(variant.name, variant.required_fields, variant.one_of)
+The QuartzNet checkpoint is governed by the NVIDIA NGC Terms of Use; the VoiceHub-owned architecture code is Apache-2.0. Commercial use: **review required**.
 
-# Source-record integrations can validate a JSONL manifest directly.
-if contract.accepts_raw_records:
-    records = ASRDataset.from_manifest(
-        "data/manifest.jsonl",
-        model_type='asr_nemo',
-        validate_files=True,
-    )
-    train_records, validation_records = records.train_test_split(
-        validation_fraction=0.1,
-        seed=42,
-        group_by="session_id",
-    )
-```
+The default checkpoint identifies the expected family, not every compatible
+variant. Confirm the selected checkpoint's revision, access terms, provenance,
+and license before downloading or redistributing it.
 
-See the [complete data guide](../../guides/speech-data.md) for manifest aliases, audio validation,
-leakage-safe splits, and model-owned preprocessing.
+## Optimization and training support
 
-## Training
+All public optimizations enter this model through the shared
+`BaseSpeechModel` lifecycle. Use `available_optimization_passes()` to discover
+the public pass registry, then apply, inspect, serialize, or restore a plan
+through the common model API. Application remains fail-closed when the active
+runtime or hardware cannot satisfy a pass.
+
+### Training contract
 
 | Property | Value |
 | --- | --- |
@@ -117,44 +109,24 @@ leakage-safe splits, and model-owned preprocessing.
 | --- | --- | --- | --- | --- |
 | `speech_recognition` | objective | `model` | — | `loss` |
 
-The integration accepts its declared source or prepared contract directly. Start with one optimizer step and verify finite loss, intended
-gradients, frozen components, save, and reload before scaling the run.
+The integration accepts its declared source or prepared contract directly. Call `model.validate_training_support()` before constructing a
+trainer. Follow the [shared training workflow](../../guides/training.md) for a
+one-step smoke test, validation, checkpoint resume, optimization, and portable
+export.
 
-```python
-from voicehub import AutoModelForSpeechRecognition, Trainer, TrainingArguments
+## Public API
 
-model = AutoModelForSpeechRecognition.from_pretrained(
-    'nvidia/nemo/stt_en_quartznet15x5',
-    model_type='asr_nemo',
-    device="cuda",
-    lazy_load=True,
-)
-model.validate_training_support()
-train_dataset = model.create_training_dataset(
-    "data/train.jsonl",
-    validate_audio_files=True,
-)
+| Purpose | Public object |
+| --- | --- |
+| Discover | `get_model_spec('asr_nemo')` |
+| Load and run | `AutoModelForSpeechRecognition` |
+| Configure | `NeMoASRConfig` |
+| Model implementation | `NeMoASRForSpeechRecognition` |
+| Normalized output | `ASROutput` |
+| Training contract | `get_training_spec('asr_nemo')` |
+| Optimization lifecycle | `available_optimization_passes`, `apply_optimization_plan`, `optimization_manifest`, `restore_optimization_plan` |
 
-arguments = TrainingArguments(
-    output_dir="runs/asr_nemo-smoke",
-    max_steps=1,
-    per_device_train_batch_size=1,
-    learning_rate=5e-5,
-    logging_steps=1,
-    save_steps=1,
-    report_to="none",
-    seed=42,
-)
-trainer = Trainer(model=model, args=arguments, train_dataset=train_dataset)
-result = trainer.train(resume_from_checkpoint=False)
-print(result.training_loss, result.metrics)
-trainer.save_model("runs/asr_nemo-smoke/final")
-```
-
-See the [training guide](../../guides/training.md) for validation datasets,
-checkpoint resume, mixed precision, optimizations, and portable exports.
-
-## Next steps
+Related shared documentation:
 
 - [All model guides](index.md)
 - [Shared inference guides](../../guides/index.md)

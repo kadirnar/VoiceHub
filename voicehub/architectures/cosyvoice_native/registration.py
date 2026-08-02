@@ -78,6 +78,8 @@ def create_cosyvoice_architecture_spec() -> ArchitectureSpec:
             features=(
                 "llm-tts-codec",
                 "diffusion-family",
+                "diffusion-serving-native",
+                "diffusion-serving-vllm-omni",
                 "diffusion-kind-conditional-flow-matching",
                 "diffusion-operation-denoiser",
                 "diffusion-operation-classifier-free-guidance",

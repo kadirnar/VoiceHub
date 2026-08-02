@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import torch
 
@@ -280,6 +281,43 @@ class NativeTransformersVADProviderTests(unittest.TestCase):
         for values in invalid:
             with self.subTest(values=values), self.assertRaises(ValueError):
                 TransformersVADConfig(**values)
+
+    def test_multiclass_checkpoint_requires_explicit_speech_label(self):
+        wrapper = TransformersVADForVoiceActivityDetection(TransformersVADConfig())
+        wrapper.native_config = SimpleNamespace(id2label={
+            0: "music",
+            1: "noise",
+            2: "silence",
+        })
+
+        with self.assertRaisesRegex(ValueError, "speech_class_id"):
+            wrapper._speech_class_id(3)
+
+    def test_single_logit_and_negative_labels_resolve_the_positive_class(self):
+        wrapper = TransformersVADForVoiceActivityDetection(TransformersVADConfig())
+        wrapper.native_config = SimpleNamespace(id2label={
+            0: "non-speech",
+            1: "speech",
+        })
+
+        self.assertEqual(wrapper._speech_class_id(1), 0)
+        self.assertEqual(wrapper._speech_class_id(2), 1)
+
+    def test_frame_geometry_prefers_checkpoint_logit_stride(self):
+        wrapper = TransformersVADForVoiceActivityDetection(TransformersVADConfig())
+        wrapper.native_config = SimpleNamespace(inputs_to_logits_ratio=320)
+
+        self.assertEqual(
+            wrapper._frame_geometry(
+                frame_count=4,
+                waveform_samples=16_000,
+            ),
+            (320, 320),
+        )
+
+    def test_training_audio_batch_cannot_be_empty(self):
+        with self.assertRaisesRegex(ValueError, "cannot be empty"):
+            TransformersVADForVoiceActivityDetection._audio_batch([])
 
 
 if __name__ == "__main__":
