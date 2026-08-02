@@ -1,0 +1,4 @@
+interface:
+  display_name: "Match Transformers Docs"
+  short_description: "Enforce Transformers documentation parity"
+  default_prompt: "Use $match-transformers-docs to align this VoiceHub documentation page with its official Transformers reference."

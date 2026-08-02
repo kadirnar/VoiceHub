@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prepare Release Evidence"
+  short_description: "Build honest cross-platform release evidence"
+  default_prompt: "Use $prepare-release-evidence to evaluate this VoiceHub release candidate without overstating any gate."
