@@ -1,6 +1,7 @@
-______________________________________________________________________
-
-## name: match-transformers-docs description: Align VoiceHub documentation structure, navigation, page layout, interactions, responsive behavior, model pages, and API presentation with the current official Hugging Face Transformers documentation. Use for documentation UI, theme, navigation, generated pages, model display names, accessibility, or visual parity work.
+---
+name: match-transformers-docs
+description: Align VoiceHub documentation structure, navigation, page layout, interactions, responsive behavior, model pages, and API presentation with the current official Hugging Face Transformers documentation. Use for documentation UI, theme, navigation, generated pages, model display names, accessibility, or visual parity work.
+---
 
 # Match Transformers Documentation
 

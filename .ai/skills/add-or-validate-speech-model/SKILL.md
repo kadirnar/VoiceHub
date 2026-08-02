@@ -1,6 +1,7 @@
-______________________________________________________________________
-
-## name: add-or-validate-speech-model description: Add, complete, or audit a VoiceHub TTS, ASR, or VAD model integration across configuration, runtime, registry, processing, serialization, provenance, licensing, tests, optimization, and Transformers-style documentation. Use whenever model packages, checkpoints, model pages, aliases, or contribution scaffolds change.
+---
+name: add-or-validate-speech-model
+description: Add, complete, or audit a VoiceHub TTS, ASR, or VAD model integration across configuration, runtime, registry, processing, serialization, provenance, licensing, tests, optimization, and Transformers-style documentation. Use whenever model packages, checkpoints, model pages, aliases, or contribution scaffolds change.
+---
 
 # Add Or Validate A Speech Model
 

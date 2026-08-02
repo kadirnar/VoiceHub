@@ -1,6 +1,7 @@
-______________________________________________________________________
-
-## name: prepare-release-evidence description: Evaluate and document VoiceHub release readiness for an exact commit across tests, Python versions, operating systems, documentation, packaging, provenance, checkpoints, CI, and publication gates. Use for release reports, failed CI, distribution checks, benchmark evidence, tags, GitHub releases, or PyPI readiness.
+---
+name: prepare-release-evidence
+description: Evaluate and document VoiceHub release readiness for an exact commit across tests, Python versions, operating systems, documentation, packaging, provenance, checkpoints, CI, and publication gates. Use for release reports, failed CI, distribution checks, benchmark evidence, tags, GitHub releases, or PyPI readiness.
+---
 
 # Prepare Release Evidence
 
