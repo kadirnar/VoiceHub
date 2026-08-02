@@ -158,6 +158,7 @@ nav:
       - Trainer architecture: concepts/trainer.md
       - Roadmap: project/roadmap.md
       - Release readiness: project/release-readiness.md
+      - Transformers parity: project/transformers-parity.md
       - Add a TTS model: project/adding-a-model.md
       - Add an ASR or VAD provider: project/adding-speech-provider.md
       - Add an optimization: project/adding-an-optimization.md
@@ -482,6 +483,9 @@ markdown_extensions:
 
 extra_css:
   - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mobile-drawer.js
 
 extra:
   social:

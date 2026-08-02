@@ -19,11 +19,12 @@ contract.
 | Gate | Current evidence | Status |
 | --- | --- | --- |
 | Source, docs, benchmark, and PyPI candidate alignment | Local check identified 0.3.0 as a new candidate over PyPI 0.1.6 | Passed |
-| Full CPU-safe suite | Fresh default-offline Python 3.10.19 and 3.11.15 macOS environments each reported 2,434 passed, 15 skipped, 3,383 subtests, and 35 warnings; the fullest locally available Python 3.12.12 opt-in run reported 2,442 passed, 7 skipped, 3,521 subtests, and 35 warnings | Passed locally with full current-tree coverage on every supported interpreter; the ESPNet, SenseVoice, and SpeechBrain release assets, TEN-VAD and QuartzNet checkpoint oracles, and three default-runtime paths passed their explicit gates, while five CUDA/Triton and two inaccessible WeNet paths remain unverified |
-| Formatting and lint | A fresh repository-wide `pre-commit run --all-files` after the checkpoint-documentation, SpeechBrain release-asset, and supported-version slices passed every hook without a rewrite | Passed on the current working tree |
-| Documentation | Strict multilingual build completed locally and in [main Docs run 30710518245](https://github.com/kadirnar/voicehub/actions/runs/30710518245) | Passed |
-| Wheel, sdist, and editable installs | Current clean probes reported 68 models, 81 pinned/license-bearing source manifests, 193 installed provenance/legal files, required data present, zero dependency violations, and no eager PyTorch import; [main Package CI run 30710518275](https://github.com/kadirnar/voicehub/actions/runs/30710518275) passed independently | Passed |
-| Python 3.10–3.12 on Linux, macOS, and Windows | The current tree passed complete suites on Python 3.10.19, 3.11.15, and 3.12.12 on macOS; commit `f2d6332` passed all nine platform/version matrix jobs in [CI run 30710518249](https://github.com/kadirnar/voicehub/actions/runs/30710518249), plus runtime smokes, default-runtime, training, and lint jobs | Passed locally on every supported interpreter; the tagged nine-job matrix now enables the complete default-runtime gate, but Linux and Windows execution of the current uncommitted tree remains pending |
+| Full CPU-safe suite | PR 69 exact head `3a3e224` passed the supported Linux, macOS, and Windows test matrix in [CI run 30742766090](https://github.com/kadirnar/voicehub/actions/runs/30742766090). The current uncommitted Python 3.12.12 tree reported 2,444 passed, 15 skipped, 3,406 subtests, and 35 warnings in 116.03 seconds | Passed remotely on Python 3.10-3.12 for `3a3e224` and locally on Python 3.12 for the uncommitted tree; five CUDA/Triton plus two inaccessible WeNet paths remain explicitly unverified |
+| Formatting and lint | PR 70 exact head `9bae722` passed `pre-commit.ci`; the current selected hook run first let YAPF format the new regression and exited nonzero, then passed every hook on the formatted files | Passed remotely for the merged source and locally on the current changed files; the failed formatter run is excluded |
+| Documentation | [Main Docs run 30745818292](https://github.com/kadirnar/voicehub/actions/runs/30745818292) passed for exact head `6a75eda`; the current uncommitted slice passed 30 documentation contracts with 1,132 subtests, 43 combined documentation/release/guidance tests with 1,143 subtests, and a strict eleven-language build | Passed remotely for the merged source and locally for the uncommitted slice; the reference mobile light render and remaining representative page matrix remain pending |
+| Wheel, sdist, and editable installs | [Main Package CI run 30745818302](https://github.com/kadirnar/voicehub/actions/runs/30745818302) passed for exact head `6a75eda`; the current local probe reported 68 models, 81 provenance manifests, 193 compliance files, required package data, zero dependency violations, and no eager PyTorch import from wheel, sdist, and editable installs | Passed remotely for the merged source and locally for the uncommitted slice; local wheel was 57,186,791 bytes and sdist was 55,427,312 bytes |
+| Python 3.10–3.12 on Linux, macOS, and Windows | PR 69 exact head `3a3e224` passed all nine version/platform jobs, both runtime smokes, default runtime, training, and lint in [CI run 30742766090](https://github.com/kadirnar/voicehub/actions/runs/30742766090) | Passed for exact head `3a3e224`; later uncommitted documentation changes are not covered by this remote run |
+| Canonical AI guidance | PR 69 exact head `3a3e224` passed the canonical guidance contract in every supported platform matrix job; the current tree's merged guidance change passed 13 local tests and 11 subtests | Passed cross-platform for `3a3e224` and locally for the current tree; the later guidance change has no exact-head platform matrix |
 | Released-checkpoint TTS, ASR, and VAD evidence | Dated RTX 4090 JSON and guide; see matrix below | Passed for the listed representatives |
 | Pinned small release assets | The official ESPNet configuration plus SenseVoice and SpeechBrain tokenizers at immutable revisions matched declared sizes, file fingerprints, extracted tokens, and published encoding vectors | Passed locally; Package CI and the tagged release build now repeat all three opt-in online gates |
 | TEN-VAD checkpoint oracle | The official 315,449-byte ONNX graph at immutable revision `22a3bcd4509d0faaa8eef4881e8af5f39c178950` converted to native Safetensors and matched ONNX Runtime across 25 recurrent steps | Passed locally with pinned ONNX Runtime 1.22.1; Package CI and the tagged build now repeat the isolated development oracle |
@@ -433,7 +434,7 @@ metadata and size, and transfers those exact artifacts to a separate publish
 job.
 
 The latest clean-install build produced a 57,186,791-byte wheel and a
-55,426,668-byte source distribution. Fresh builds passed embedded name/version
+55,427,312-byte source distribution. Fresh builds passed embedded name/version
 checks; gzip timestamps can change archive bytes, so release hashes are recorded
 from the exact workflow artifacts rather than copied from a local build.
 
@@ -486,20 +487,92 @@ regression proves that the no-argument factory follows replaced registry
 metadata without changing `voicehub/auto.py`; missing and ambiguous defaults
 fail explicitly.
 
+PR 68 was merged as main commit `679d5bd` before its required matrix was green.
+PR 69 head `b6de7b5` subsequently repaired its canonical AI skill frontmatter
+and normalized materialized root-guidance pointers. CI run 30741892984 then
+passed every Linux and macOS Python job, both runtime smokes, default runtime,
+training, and lint. Windows 3.10, 3.11, and 3.12 each failed only the same two
+scaffold-checker assertions: actionable diagnostics rendered temporary
+repository-relative paths with native `\` separators while the public
+cross-platform contract expected stable `/` separators. Each Windows job
+otherwise reported 2,437 passes, 16 explicit skips, 3,392 subtests, and 35
+warnings.
+
+The bounded correction centralizes repository-relative display through
+`PurePath.as_posix()` and includes a dependency-free `PureWindowsPath`
+regression. The focused scaffold file reported 20 passes and 35 subtests; the
+related registry, model-page, optimization, release, and AI-guidance slice
+reported 113 passes and 1,849 subtests; selected pre-commit hooks, all 68
+generated model pages, all 59 notebooks, and release alignment also passed.
+The complete Python 3.12.12 suite reported 2,439 passes, 15 explicit skips,
+3,394 subtests, and 35 warnings in 115.67 seconds. That correction is now PR 69
+head `3a3e224`; [CI run 30742766090](https://github.com/kadirnar/voicehub/actions/runs/30742766090)
+passed every Linux, macOS, and Windows Python 3.10-3.12 job, both runtime
+smokes, default runtime, training, and lint.
+
+The following documentation-parity slices record the official Transformers
+`main` commit and toctree fingerprint, map representative routes, and restore
+the left navigation and right table of contents on all eleven localized home
+sources. Rendered checks at 1440 x 900, 1024 x 768, and 390 x 844 verified the
+desktop shell, mobile collapse, both VoiceHub palettes at all three viewports,
+and the absence of horizontal overflow. The tablet slice then matched the
+reference region behavior at 1024 x 768: a persistent 270-pixel left
+navigation, hidden right table of contents, 739-pixel content region inside the
+1,009-pixel main region, and no redundant drawer button. The mobile drawer and
+desktop three-column shell remained structurally unchanged. The drawer backdrop now excludes the
+242-pixel panel itself, leaving a 133 x 844 pointer target at 390 x 844. A real
+backdrop click in both LTR and RTL layouts and Escape in the LTR layout cleared
+the drawer checkbox and returned the panel off-canvas with no horizontal
+overflow. Initial probes against
+the full-width backdrop and the preexisting Escape behavior did not close the
+drawer; those failed checks are not counted. The final 30 documentation
+contracts reported 1,132 subtests, the related registry and optimization slice
+reported 70 passes and 310 subtests, all 68 generated model pages and 59
+notebooks were current, and the strict multilingual build completed. Release
+alignment, 13 AI-guidance and release-readiness tests with 11
+subtests, and selected hooks also passed. Fresh wheel, source-distribution, and
+editable probes passed with the inventory recorded above. The earlier shell
+slice's first selected hook run let YAPF format its regression and exited
+nonzero; the formatted regression and second hook run passed, so the failed run
+is not counted as passing evidence.
+
 The distribution gate inventories every `SOURCE.json`, license, licence,
 NOTICE, and COPYING file under the installed package. Each of the 81 source
 manifests must contain a pinned revision/release and explicit license metadata;
 all 193 compliance files plus the project-level Apache-2.0 license must survive
 both wheel and source-distribution builds.
 
-Remote main commit `f2d6332` passed Continuous Integration, Package CI, and the
-strict documentation build in
-[runs 30710518249](https://github.com/kadirnar/voicehub/actions/runs/30710518249),
-[30710518275](https://github.com/kadirnar/voicehub/actions/runs/30710518275), and
-[30710518245](https://github.com/kadirnar/voicehub/actions/runs/30710518245).
-The local branch is three commits behind that SHA and has later uncommitted
-changes, so those remote results are not attributed to the current working
-tree.
+PR 69 exact head `3a3e224` passed every required job in CI run 30742766090.
+Current main head `6a75eda` subsequently passed Package CI and the strict
+documentation build in [runs 30745818302](https://github.com/kadirnar/voicehub/actions/runs/30745818302)
+and [30745818292](https://github.com/kadirnar/voicehub/actions/runs/30745818292).
+The local checkout is at `6a75eda` with a later uncommitted
+documentation-parity slice and this evidence update, so those remote results
+are not attributed to the uncommitted changes.
+
+The next left-navigation state slice maps the Transformers and VoiceHub
+Installation routes. At the available 1280 x 720 viewport, the reference
+current item rendered as a filled rounded control while VoiceHub's baseline
+was transparent text. VoiceHub now renders a 219 x 34-pixel filled and bordered
+active item in both light and dark themes, keeps the current `Get started`
+branch checked, exposes a two-pixel keyboard focus outline with a two-pixel
+offset, and has no horizontal overflow. The focused source regression first
+failed before the state styles existed. A rendered keyboard probe then exposed
+Material's `focus-visible` compatibility class; the first selector did not
+draw an outline, and that failed probe is not counted. The compatibility
+selector and focused regression now pass. The documentation file reported 30
+passes and 1,132 subtests, the related registry and universal-optimization
+files reported 46 passes and 236 subtests, all 68 model pages and 59 model
+notebooks were current, release alignment found all five benchmark files, the
+strict multilingual documentation and fresh wheel, source-distribution, and
+editable probes passed. The complete Python 3.12.12
+suite reported 2,444 passes, 15 explicit skips, 3,406 subtests, and 35 warnings
+in 116.03 seconds. The first selected hook run let YAPF format the new
+regression and exited nonzero; the formatted second run passed, so the first is
+not counted. The requested 1440 x 900, 1024 x 768, and 390 x 844 reruns remain
+pending: the responsive viewport override continued to expose 1280 x 720 and
+the Chrome fallback did not become controllable. Those inaccessible checks are
+not reported as passed.
 
 ## One-time publisher configuration
 

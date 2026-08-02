@@ -1,7 +1,4 @@
 ---
-hide:
-  - navigation
-  - toc
 description: VoiceHub documentation for unified TTS, ASR, and VAD inference, data preparation, and architecture-aware fine-tuning.
 ---
 

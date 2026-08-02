@@ -1,14 +1,11 @@
 ---
-hide:
-  - navigation
-  - toc
 description: 統一された TTS 推論、データ準備、アーキテクチャを考慮したファインチューニングのための VoiceHub ドキュメント。
 ---
 
 <div class="vh-doc-home" markdown>
 
 <p class="vh-doc-logo">
-  <img src="assets/voicehub-mark.svg" alt="">
+  <img src="../assets/voicehub-mark.svg" alt="">
 </p>
 
 # VoiceHub：音声合成の推論と学習
@@ -25,7 +22,7 @@ description: 統一された TTS 推論、データ準備、アーキテクチ�
   </div>
   <span class="vh-doc-teaser__arrow" aria-hidden="true">→</span>
   <div class="vh-doc-teaser__model">
-    <img src="assets/voicehub-mark.svg" alt="">
+    <img src="../assets/voicehub-mark.svg" alt="">
     <strong>VoiceHub</strong>
     <span>モデルアダプター</span>
   </div>

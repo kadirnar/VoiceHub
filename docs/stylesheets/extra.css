@@ -339,8 +339,20 @@ body {
 }
 
 .md-nav__link--active {
+  margin-inline: -0.45rem 0;
+  padding: 0.3rem 0.45rem;
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--vh-indigo) 11%, var(--vh-surface));
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--vh-indigo) 22%, transparent);
   color: var(--vh-indigo);
-  font-weight: 650;
+  font-weight: 700;
+}
+
+.md-nav__link[href]:focus-visible,
+.md-nav__link[href].focus-visible {
+  outline: 2px solid var(--vh-indigo);
+  outline-offset: 2px;
 }
 
 .md-footer {
@@ -651,6 +663,121 @@ body {
   color: var(--vh-muted);
   font-size: 0.82rem;
   line-height: 1.5;
+}
+
+/* Keep the mobile backdrop's pointer target outside the open drawer. */
+
+@media screen and (max-width: 59.984375em) {
+  [dir="ltr"] [data-md-toggle="drawer"]:checked ~ .md-overlay {
+    right: 0;
+    left: 12.1rem;
+    width: calc(100% - 12.1rem);
+  }
+
+  [dir="rtl"] [data-md-toggle="drawer"]:checked ~ .md-overlay {
+    right: 12.1rem;
+    left: 0;
+    width: calc(100% - 12.1rem);
+  }
+}
+
+/* Keep the documentation navigation persistent at the reference tablet width. */
+
+@media screen and (min-width: 60em) and (max-width: 76.234375em) {
+  .md-header__button[for="__drawer"] {
+    display: none;
+  }
+
+  [dir="ltr"] .md-sidebar--primary,
+  [dir="rtl"] .md-sidebar--primary {
+    position: sticky;
+    top: 3.2rem;
+    right: auto;
+    left: auto;
+    width: 13.5rem;
+    height: 0;
+    background-color: transparent;
+    transform: none;
+    transition: none;
+    z-index: auto;
+  }
+
+  .md-sidebar--primary .md-sidebar__scrollwrap {
+    position: static;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    left: auto;
+    height: calc(100vh - 7.1rem);
+    overflow-y: auto;
+    scroll-snap-type: y mandatory;
+    touch-action: pan-y;
+  }
+
+  .md-nav--primary,
+  .md-nav--primary .md-nav {
+    position: static;
+    height: auto;
+    background-color: transparent;
+  }
+
+  .md-nav--primary {
+    display: block;
+  }
+
+  .md-nav--primary > .md-nav__title {
+    display: none;
+  }
+
+  .md-nav--primary > .md-nav__list {
+    flex: none;
+    height: auto;
+    overflow: visible;
+    padding-inline: 0.6rem 0;
+  }
+
+  .md-nav--primary .md-nav__item {
+    border-top: 0;
+    font-size: 0.76rem;
+    line-height: 1.45;
+  }
+
+  .md-nav--primary .md-nav__link {
+    margin-top: 0.625em;
+    padding: 0;
+  }
+
+  .md-nav--primary .md-nav__link--active {
+    margin-inline: -0.45rem 0;
+    padding: 0.3rem 0.45rem;
+  }
+
+  .md-nav__toggle ~ .md-nav {
+    display: grid;
+    grid-template-rows: minmax(0.4rem, 0fr);
+    opacity: 0;
+    transform: none;
+    visibility: collapse;
+  }
+
+  .md-nav__toggle ~ .md-nav > .md-nav__list {
+    overflow: hidden;
+  }
+
+  .md-nav__toggle.md-toggle--indeterminate ~ .md-nav,
+  .md-nav__toggle:checked ~ .md-nav {
+    grid-template-rows: minmax(0.4rem, 1fr);
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .md-nav__item--nested > .md-nav > .md-nav__title {
+    display: none;
+  }
+
+  .md-sidebar--secondary:not([hidden]) {
+    display: none;
+  }
 }
 
 @media screen and (max-width: 44.984375em) {
