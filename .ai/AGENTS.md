@@ -29,9 +29,9 @@ Complete one highest-impact bounded gap per iteration. Define observable
 completion evidence before editing, and do not create cosmetic work merely to
 keep a loop active.
 
-Write user-facing explanations in Turkish. Keep source code, identifiers,
-comments, docstrings, configuration, commit messages, pull request content, and
-repository documentation in English.
+Write all user-facing explanations and final reports in English. Keep source
+code, identifiers, comments, docstrings, configuration, commit messages, pull
+request content, and repository documentation in English.
 
 Preserve every existing user change. Never modify, stage, delete, regenerate,
 or overwrite the untracked `uv.lock` file.
