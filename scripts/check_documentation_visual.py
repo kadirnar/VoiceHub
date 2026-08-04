@@ -3374,22 +3374,47 @@ def _validate_quickstart_tabs(page: Page, case: str) -> None:
             raise DocumentationVisualError(
                 f"{case}: Quickstart tab set {set_index + 1} has an input without an id.")
         inputs.first.focus()
-        for _ in range(target_index):
+        for step_index in range(1, target_index + 1):
             page.keyboard.press("ArrowRight")
+            step_target = inputs.nth(step_index)
+            page.wait_for_function(
+                "input => input.checked && document.activeElement === input",
+                arg=step_target.element_handle(),
+            )
         target_handle = target.element_handle()
         page.wait_for_function(
-            """input => {
-              const label = input.parentElement?.querySelector(
-                `.tabbed-labels > label[for='${input.id}']`
-              );
-              const bounds = label?.getBoundingClientRect();
+            """async input => {
+              const readState = () => {
+                const label = input.parentElement?.querySelector(
+                  `.tabbed-labels > label[for='${input.id}']`
+                );
+                const bounds = label?.getBoundingClientRect();
+                return bounds ? {
+                  bottom: bounds.bottom,
+                  height: bounds.height,
+                  left: bounds.left,
+                  right: bounds.right,
+                  top: bounds.top,
+                  width: bounds.width,
+                } : null;
+              };
+              const before = readState();
+              await new Promise(resolve => requestAnimationFrame(
+                () => requestAnimationFrame(resolve)
+              ));
+              const after = readState();
               const viewportTolerance = 1;
+              const stableTolerance = 0.25;
               return input.checked && document.activeElement === input &&
-                bounds && bounds.width > 0 && bounds.height > 0 &&
-                bounds.left >= -viewportTolerance &&
-                bounds.right <= innerWidth + viewportTolerance &&
-                bounds.top >= -viewportTolerance &&
-                bounds.bottom <= innerHeight + viewportTolerance;
+                before && after && after.width > 0 && after.height > 0 &&
+                Math.abs(after.left - before.left) <= stableTolerance &&
+                Math.abs(after.right - before.right) <= stableTolerance &&
+                Math.abs(after.top - before.top) <= stableTolerance &&
+                Math.abs(after.bottom - before.bottom) <= stableTolerance &&
+                after.left >= -viewportTolerance &&
+                after.right <= innerWidth + viewportTolerance &&
+                after.top >= -viewportTolerance &&
+                after.bottom <= innerHeight + viewportTolerance;
             }""",
             arg=target_handle,
         )

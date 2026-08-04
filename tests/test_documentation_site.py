@@ -1344,8 +1344,12 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             "def _validate_quickstart_tabs(",
             1,
         )[1].split("def _validate_quickstart_page_copy", 1)[0]
+        self.assertIn("for step_index in range(1, target_index + 1):", quickstart_tabs)
         self.assertIn('page.keyboard.press("ArrowRight")', quickstart_tabs)
+        self.assertIn("step_target.element_handle()", quickstart_tabs)
         self.assertIn("document.activeElement === input", quickstart_tabs)
+        self.assertIn("requestAnimationFrame", quickstart_tabs)
+        self.assertIn("const stableTolerance = 0.25", quickstart_tabs)
         self.assertIn("const viewportTolerance = 1", quickstart_tabs)
         self.assertNotIn("target.focus()", quickstart_tabs)
 
@@ -1357,6 +1361,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn("_reset_quickstart_tabs(page)", quickstart_interaction)
 
         stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        self.assertIn("scroll-margin: 0.25rem;", stylesheet)
         for declaration in (
                 "--vh-content-gutter: 24px;",
                 "margin-inline: var(--vh-content-gutter);",
@@ -2088,6 +2093,11 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             'label.scrollIntoView({ behavior: "instant", block: "nearest", inline: "nearest" })',
             script,
         )
+        self.assertIn("const keepLabelInViewport = (label) =>", script)
+        self.assertIn("const viewportMargin = 4", script)
+        self.assertIn('labels.scrollBy({ behavior: "instant"', script)
+        self.assertIn('window.scrollBy({ behavior: "instant"', script)
+        self.assertIn("requestAnimationFrame(() => keepLabelInViewport(label))", script)
         self.assertIn(
             'region.setAttribute("aria-label", `Scrollable options ${index + 1}`)',
             script,

@@ -856,6 +856,10 @@ body.vh-search-open {
   outline-offset: 2px;
 }
 
+.md-typeset .tabbed-labels > label {
+  scroll-margin: 0.25rem;
+}
+
 .md-typeset .tabbed-labels > label.vh-content-tab--focus {
   outline: 2px solid var(--vh-indigo);
   outline-offset: 2px;

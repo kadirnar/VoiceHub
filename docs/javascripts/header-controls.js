@@ -358,6 +358,38 @@
   };
 
   const initializeContentTabFocus = () => {
+    const keepLabelInViewport = (label) => {
+      if (!(label instanceof HTMLLabelElement)) return;
+      const labels = label.parentElement;
+      const viewportMargin = 4;
+      let bounds = label.getBoundingClientRect();
+      if (labels instanceof HTMLElement) {
+        if (bounds.left < viewportMargin) {
+          labels.scrollBy({ behavior: "instant", left: bounds.left - viewportMargin });
+        } else if (bounds.right > window.innerWidth - viewportMargin) {
+          labels.scrollBy({
+            behavior: "instant",
+            left: bounds.right - (window.innerWidth - viewportMargin),
+          });
+        }
+      }
+
+      bounds = label.getBoundingClientRect();
+      const header = document.querySelector(".md-header");
+      const headerBottom = header instanceof HTMLElement
+        ? header.getBoundingClientRect().bottom
+        : 0;
+      const viewportTop = Math.max(viewportMargin, headerBottom + viewportMargin);
+      if (bounds.top < viewportTop) {
+        window.scrollBy({ behavior: "instant", top: bounds.top - viewportTop });
+      } else if (bounds.bottom > window.innerHeight - viewportMargin) {
+        window.scrollBy({
+          behavior: "instant",
+          top: bounds.bottom - (window.innerHeight - viewportMargin),
+        });
+      }
+    };
+
     document.querySelectorAll('.tabbed-set > input[type="radio"][id]').forEach((input) => {
       if (!(input instanceof HTMLInputElement) || !(input.parentElement instanceof HTMLElement)) return;
       const label = Array.from(
@@ -366,7 +398,11 @@
       if (!(label instanceof HTMLLabelElement)) return;
 
       input.addEventListener("focus", () => {
-        label.scrollIntoView({ behavior: "instant", block: "nearest", inline: "nearest" });
+        requestAnimationFrame(() => {
+          label.scrollIntoView({ behavior: "instant", block: "nearest", inline: "nearest" });
+          keepLabelInViewport(label);
+          requestAnimationFrame(() => keepLabelInViewport(label));
+        });
         label.classList.add("vh-content-tab--focus");
       });
       input.addEventListener("blur", () => {
