@@ -37,13 +37,25 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --no-deps -e .
           python -m pip install "nbformat>=5.10" numpy pytest soundfile \
-            "mkdocs-material==9.7.7" "mkdocs-static-i18n==1.3.1"
+            "axe-playwright-python==0.1.8" \
+            "mkdocs-material==9.7.7" "mkdocs-static-i18n==1.3.1" \
+            "pillow==12.3.0" \
+            "playwright==1.62.0"
+
+      - name: Install documentation browser
+        run: python -m playwright install --with-deps chromium
 
       - name: Validate documentation sources
         run: python -m pytest tests/test_documentation_site.py
 
       - name: Build documentation
         run: mkdocs build --strict --clean --site-dir site
+
+      - name: Validate rendered documentation DOM
+        run: python scripts/check_documentation_dom.py site
+
+      - name: Validate responsive documentation and keyboard behavior
+        run: python scripts/check_documentation_visual.py site
 
       - name: Upload GitHub Pages artifact
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

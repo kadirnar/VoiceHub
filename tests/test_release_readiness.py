@@ -189,6 +189,12 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Verify the NVIDIA QuartzNet checkpoint conversion", source)
         self.assertIn("stt_en_quartznet15x5/versions/1.0.0rc1", source)
         self.assertIn("VOICEHUB_TEST_NEMO_QUARTZNET_CHECKPOINT", source)
+        self.assertIn("Verify the WeNet GigaSpeech checkpoint and tokenizer", source)
+        self.assertIn("openspeech/wenet-models/resolve/90acd57d17169a15d5ceab462c6e7db3bd003921", source)
+        self.assertIn("061ccfa51d64ebe7ea091a5a13ae31e37d9c36f4eface5c7bafc80bd4a06b26e", source)
+        self.assertIn("VOICEHUB_TEST_WENET_CHECKPOINT", source)
+        self.assertIn("VOICEHUB_TEST_WENET_ASSETS", source)
+        self.assertIn("real_tokenizer_uses_sorted_wenet_unit_ids", source)
         self.assertIn("name: pypi", source)
         self.assertIn("id-token: write", source)
         self.assertIn(
@@ -216,6 +222,12 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Verify the NVIDIA QuartzNet checkpoint conversion", source)
         self.assertIn("stt_en_quartznet15x5/versions/1.0.0rc1", source)
         self.assertIn("VOICEHUB_TEST_NEMO_QUARTZNET_CHECKPOINT", source)
+        self.assertIn("Verify the WeNet GigaSpeech checkpoint and tokenizer", source)
+        self.assertIn("openspeech/wenet-models/resolve/90acd57d17169a15d5ceab462c6e7db3bd003921", source)
+        self.assertIn("061ccfa51d64ebe7ea091a5a13ae31e37d9c36f4eface5c7bafc80bd4a06b26e", source)
+        self.assertIn("VOICEHUB_TEST_WENET_CHECKPOINT", source)
+        self.assertIn("VOICEHUB_TEST_WENET_ASSETS", source)
+        self.assertIn("real_tokenizer_uses_sorted_wenet_unit_ids", source)
         self.assertIn("Import every integration from the installed wheel", source)
 
     def test_release_script_cli_report_is_json(self):

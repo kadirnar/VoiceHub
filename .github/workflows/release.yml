@@ -81,6 +81,9 @@ jobs:
           python -m pip install --upgrade pip uv
           uv pip install --system --torch-backend cpu -e ".[test,training,docs]"
 
+      - name: Install documentation browser
+        run: python -m playwright install --with-deps chromium
+
       - name: Verify source, tag, benchmark, and PyPI candidate state
         run: >-
           python scripts/check_release.py
@@ -124,11 +127,36 @@ jobs:
             python -m pytest -q tests/test_native_nemo_ctc.py \
             -k real_archive_converts_with_exact_namespace
 
+      - name: Verify the WeNet GigaSpeech checkpoint and tokenizer
+        run: |
+          curl --fail --location --retry 3 \
+            --header "Accept-Encoding: identity" \
+            --output "${RUNNER_TEMP}/gigaspeech_u2pp_conformer_exp.tar.gz" \
+            "https://huggingface.co/openspeech/wenet-models/resolve/90acd57d17169a15d5ceab462c6e7db3bd003921/gigaspeech_u2pp_conformer_exp.tar.gz"
+          echo "061ccfa51d64ebe7ea091a5a13ae31e37d9c36f4eface5c7bafc80bd4a06b26e  ${RUNNER_TEMP}/gigaspeech_u2pp_conformer_exp.tar.gz" \
+            | sha256sum --check
+          mkdir "${RUNNER_TEMP}/wenet-tokenizer"
+          tar -xzf "${RUNNER_TEMP}/gigaspeech_u2pp_conformer_exp.tar.gz" \
+            -C "${RUNNER_TEMP}/wenet-tokenizer" --strip-components=1 \
+            20210728_u2pp_conformer_exp/train_xl_unigram5000.model \
+            20210728_u2pp_conformer_exp/units.txt
+          VOICEHUB_TEST_WENET_CHECKPOINT="${RUNNER_TEMP}/gigaspeech_u2pp_conformer_exp.tar.gz" \
+          VOICEHUB_TEST_WENET_ASSETS="${RUNNER_TEMP}/wenet-tokenizer" \
+            python -m pytest -q tests/test_native_wenet_u2pp.py \
+            -k "real_checkpoint_converts_with_exact_namespace or \
+            real_tokenizer_uses_sorted_wenet_unit_ids"
+
       - name: Run repository-wide formatting and lint checks
         run: pre-commit run --all-files
 
       - name: Build strict documentation
         run: mkdocs build --strict --clean --site-dir site
+
+      - name: Validate rendered documentation DOM
+        run: python scripts/check_documentation_dom.py site
+
+      - name: Validate responsive documentation and keyboard behavior
+        run: python scripts/check_documentation_visual.py site
 
       - name: Validate wheel, sdist, and editable installations
         run: python scripts/check_distribution.py
