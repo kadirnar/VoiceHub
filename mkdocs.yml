@@ -233,6 +233,33 @@ plugins:
             Add an ASR or VAD provider: ASR veya VAD sağlayıcısı ekleme
             Translations: Çeviriler
             Model audit: Model denetimi
+            Add an optimization: Optimizasyon ekleme
+            Architecture: Mimari
+            Auto Classes: Otomatik sınıflar
+            Automatic speech recognition: Otomatik konuşma tanıma
+            Benchmarks: Karşılaştırmalar
+            Catalogs and support: Kataloglar ve destek
+            Codec optimization: Kodek optimizasyonu
+            Diffusion and flow optimization: Difüzyon ve akış optimizasyonu
+            Fine-tuning: İnce ayar
+            LLM TTS serving: LLM TTS sunumu
+            Model support: Model desteği
+            Notebooks with examples: Örnek not defterleri
+            Pipeline API: İşlem hattı API'si
+            Preprocessors: Ön işleyiciler
+            RTX 4090 speech benchmarks: RTX 4090 konuşma karşılaştırmaları
+            RTX 5090 TTS benchmarks: RTX 5090 TTS karşılaştırmaları
+            Release readiness: Sürüm hazırlığı
+            Roadmap: Yol haritası
+            Serving: Sunum
+            TTS capabilities: TTS yetenekleri
+            TTS model benchmarks: TTS model karşılaştırmaları
+            TTS optimization workflow: TTS optimizasyon iş akışı
+            Text to speech: Metinden konuşmaya
+            Trainer overview: Eğiticiye genel bakış
+            Transformers parity: Transformers eşdeğerliği
+            VITS-family optimization: VITS ailesi optimizasyonu
+            XTTS v2 native DVAE: XTTS v2 yerel DVAE
         - locale: es
           name: Español
           build: true
@@ -271,6 +298,33 @@ plugins:
             Add an ASR or VAD provider: Añadir un proveedor de ASR o VAD
             Translations: Traducciones
             Model audit: Auditoría de modelos
+            Add an optimization: Añadir una optimización
+            Architecture: Arquitectura
+            Auto Classes: Clases automáticas
+            Automatic speech recognition: Reconocimiento automático del habla
+            Benchmarks: Pruebas de rendimiento
+            Catalogs and support: Catálogos y compatibilidad
+            Codec optimization: Optimización de códecs
+            Diffusion and flow optimization: Optimización de difusión y flujo
+            Fine-tuning: Ajuste fino
+            LLM TTS serving: Servicio de TTS con LLM
+            Model support: Compatibilidad de modelos
+            Notebooks with examples: Cuadernos con ejemplos
+            Pipeline API: API de Pipeline
+            Preprocessors: Preprocesadores
+            RTX 4090 speech benchmarks: Pruebas de voz con RTX 4090
+            RTX 5090 TTS benchmarks: Pruebas de TTS con RTX 5090
+            Release readiness: Preparación de la versión
+            Roadmap: Hoja de ruta
+            Serving: Servicio
+            TTS capabilities: Capacidades de TTS
+            TTS model benchmarks: Pruebas de modelos TTS
+            TTS optimization workflow: Flujo de optimización de TTS
+            Text to speech: Texto a voz
+            Trainer overview: Descripción general del entrenador
+            Transformers parity: Paridad con Transformers
+            VITS-family optimization: Optimización de la familia VITS
+            XTTS v2 native DVAE: DVAE nativo de XTTS v2
         - locale: fr
           name: Français
           build: true
@@ -309,6 +363,33 @@ plugins:
             Add an ASR or VAD provider: Ajouter un fournisseur ASR ou VAD
             Translations: Traductions
             Model audit: Audit des modèles
+            Add an optimization: Ajouter une optimisation
+            Architecture: Architecture
+            Auto Classes: Classes automatiques
+            Automatic speech recognition: Reconnaissance automatique de la parole
+            Benchmarks: Bancs d’essai
+            Catalogs and support: Catalogues et prise en charge
+            Codec optimization: Optimisation des codecs
+            Diffusion and flow optimization: Optimisation de la diffusion et du flux
+            Fine-tuning: Ajustement fin
+            LLM TTS serving: Service TTS avec LLM
+            Model support: Prise en charge des modèles
+            Notebooks with examples: Notebooks avec exemples
+            Pipeline API: API de pipeline
+            Preprocessors: Préprocesseurs
+            RTX 4090 speech benchmarks: Bancs d’essai vocaux RTX 4090
+            RTX 5090 TTS benchmarks: Bancs d’essai TTS RTX 5090
+            Release readiness: Préparation de la version
+            Roadmap: Feuille de route
+            Serving: Service
+            TTS capabilities: Capacités TTS
+            TTS model benchmarks: Bancs d’essai des modèles TTS
+            TTS optimization workflow: Flux d’optimisation TTS
+            Text to speech: Synthèse vocale
+            Trainer overview: Vue d’ensemble de l’entraîneur
+            Transformers parity: Parité avec Transformers
+            VITS-family optimization: Optimisation de la famille VITS
+            XTTS v2 native DVAE: DVAE natif de XTTS v2
         - locale: de
           name: Deutsch
           build: true
@@ -347,6 +428,33 @@ plugins:
             Add an ASR or VAD provider: ASR- oder VAD-Anbieter hinzufügen
             Translations: Übersetzungen
             Model audit: Modell-Audit
+            Add an optimization: Optimierung hinzufügen
+            Architecture: Architektur
+            Auto Classes: Auto-Klassen
+            Automatic speech recognition: Automatische Spracherkennung
+            Benchmarks: Benchmarks
+            Catalogs and support: Kataloge und Unterstützung
+            Codec optimization: Codec-Optimierung
+            Diffusion and flow optimization: Diffusions- und Flussoptimierung
+            Fine-tuning: Feinabstimmung
+            LLM TTS serving: LLM-TTS-Bereitstellung
+            Model support: Modellunterstützung
+            Notebooks with examples: Notebooks mit Beispielen
+            Pipeline API: Pipeline-API
+            Preprocessors: Präprozessoren
+            RTX 4090 speech benchmarks: RTX-4090-Sprachbenchmarks
+            RTX 5090 TTS benchmarks: RTX-5090-TTS-Benchmarks
+            Release readiness: Release-Bereitschaft
+            Roadmap: Roadmap
+            Serving: Bereitstellung
+            TTS capabilities: TTS-Fähigkeiten
+            TTS model benchmarks: TTS-Modellbenchmarks
+            TTS optimization workflow: TTS-Optimierungsablauf
+            Text to speech: Text-zu-Sprache
+            Trainer overview: Trainer-Überblick
+            Transformers parity: Transformers-Parität
+            VITS-family optimization: Optimierung der VITS-Familie
+            XTTS v2 native DVAE: Native DVAE von XTTS v2
         - locale: pt
           name: Português
           build: true
@@ -385,6 +493,33 @@ plugins:
             Add an ASR or VAD provider: Adicionar um provedor ASR ou VAD
             Translations: Traduções
             Model audit: Auditoria de modelos
+            Add an optimization: Adicionar uma otimização
+            Architecture: Arquitetura
+            Auto Classes: Classes automáticas
+            Automatic speech recognition: Reconhecimento automático de fala
+            Benchmarks: Benchmarks
+            Catalogs and support: Catálogos e suporte
+            Codec optimization: Otimização de codecs
+            Diffusion and flow optimization: Otimização de difusão e fluxo
+            Fine-tuning: Ajuste fino
+            LLM TTS serving: Serviço de TTS com LLM
+            Model support: Suporte a modelos
+            Notebooks with examples: Notebooks com exemplos
+            Pipeline API: API de pipeline
+            Preprocessors: Pré-processadores
+            RTX 4090 speech benchmarks: Benchmarks de fala com RTX 4090
+            RTX 5090 TTS benchmarks: Benchmarks de TTS com RTX 5090
+            Release readiness: Preparação da versão
+            Roadmap: Roteiro
+            Serving: Serviço
+            TTS capabilities: Recursos de TTS
+            TTS model benchmarks: Benchmarks de modelos TTS
+            TTS optimization workflow: Fluxo de otimização de TTS
+            Text to speech: Texto para fala
+            Trainer overview: Visão geral do treinador
+            Transformers parity: Paridade com Transformers
+            VITS-family optimization: Otimização da família VITS
+            XTTS v2 native DVAE: DVAE nativo do XTTS v2
         - locale: zh
           name: 简体中文
           build: true
@@ -423,6 +558,33 @@ plugins:
             Add an ASR or VAD provider: 添加 ASR 或 VAD 提供程序
             Translations: 翻译
             Model audit: 模型审核
+            Add an optimization: 添加优化
+            Architecture: 架构
+            Auto Classes: 自动类
+            Automatic speech recognition: 自动语音识别
+            Benchmarks: 基准测试
+            Catalogs and support: 目录与支持
+            Codec optimization: 编解码器优化
+            Diffusion and flow optimization: 扩散与流优化
+            Fine-tuning: 微调
+            LLM TTS serving: LLM TTS 服务
+            Model support: 模型支持
+            Notebooks with examples: 示例笔记本
+            Pipeline API: 流水线 API
+            Preprocessors: 预处理器
+            RTX 4090 speech benchmarks: RTX 4090 语音基准测试
+            RTX 5090 TTS benchmarks: RTX 5090 TTS 基准测试
+            Release readiness: 发布准备
+            Roadmap: 路线图
+            Serving: 服务
+            TTS capabilities: TTS 功能
+            TTS model benchmarks: TTS 模型基准测试
+            TTS optimization workflow: TTS 优化工作流
+            Text to speech: 文本转语音
+            Trainer overview: 训练器概览
+            Transformers parity: Transformers 对齐
+            VITS-family optimization: VITS 系列优化
+            XTTS v2 native DVAE: XTTS v2 原生 DVAE
         - locale: ja
           name: 日本語
           build: true
@@ -461,6 +623,33 @@ plugins:
             Add an ASR or VAD provider: ASR または VAD プロバイダーを追加
             Translations: 翻訳
             Model audit: モデル監査
+            Add an optimization: 最適化を追加
+            Architecture: アーキテクチャ
+            Auto Classes: Auto クラス
+            Automatic speech recognition: 自動音声認識
+            Benchmarks: ベンチマーク
+            Catalogs and support: カタログとサポート
+            Codec optimization: コーデック最適化
+            Diffusion and flow optimization: 拡散・フロー最適化
+            Fine-tuning: ファインチューニング
+            LLM TTS serving: LLM TTS サービング
+            Model support: モデルサポート
+            Notebooks with examples: サンプルノートブック
+            Pipeline API: パイプライン API
+            Preprocessors: 前処理
+            RTX 4090 speech benchmarks: RTX 4090 音声ベンチマーク
+            RTX 5090 TTS benchmarks: RTX 5090 TTS ベンチマーク
+            Release readiness: リリース準備状況
+            Roadmap: ロードマップ
+            Serving: サービング
+            TTS capabilities: TTS 機能
+            TTS model benchmarks: TTS モデルベンチマーク
+            TTS optimization workflow: TTS 最適化ワークフロー
+            Text to speech: テキスト読み上げ
+            Trainer overview: トレーナー概要
+            Transformers parity: Transformers との整合性
+            VITS-family optimization: VITS ファミリー最適化
+            XTTS v2 native DVAE: XTTS v2 ネイティブ DVAE
         - locale: ko
           name: 한국어
           build: true
@@ -499,6 +688,33 @@ plugins:
             Add an ASR or VAD provider: ASR 또는 VAD 공급자 추가
             Translations: 번역
             Model audit: 모델 감사
+            Add an optimization: 최적화 추가
+            Architecture: 아키텍처
+            Auto Classes: 자동 클래스
+            Automatic speech recognition: 자동 음성 인식
+            Benchmarks: 벤치마크
+            Catalogs and support: 카탈로그 및 지원
+            Codec optimization: 코덱 최적화
+            Diffusion and flow optimization: 확산 및 플로 최적화
+            Fine-tuning: 미세 조정
+            LLM TTS serving: LLM TTS 서빙
+            Model support: 모델 지원
+            Notebooks with examples: 예제 노트북
+            Pipeline API: 파이프라인 API
+            Preprocessors: 전처리기
+            RTX 4090 speech benchmarks: RTX 4090 음성 벤치마크
+            RTX 5090 TTS benchmarks: RTX 5090 TTS 벤치마크
+            Release readiness: 릴리스 준비 상태
+            Roadmap: 로드맵
+            Serving: 서빙
+            TTS capabilities: TTS 기능
+            TTS model benchmarks: TTS 모델 벤치마크
+            TTS optimization workflow: TTS 최적화 워크플로
+            Text to speech: 텍스트 음성 변환
+            Trainer overview: 트레이너 개요
+            Transformers parity: Transformers 동등성
+            VITS-family optimization: VITS 계열 최적화
+            XTTS v2 native DVAE: XTTS v2 네이티브 DVAE
         - locale: ru
           name: Русский
           build: true
@@ -537,6 +753,33 @@ plugins:
             Add an ASR or VAD provider: Добавить провайдер ASR или VAD
             Translations: Переводы
             Model audit: Аудит моделей
+            Add an optimization: Добавить оптимизацию
+            Architecture: Архитектура
+            Auto Classes: Автоматические классы
+            Automatic speech recognition: Автоматическое распознавание речи
+            Benchmarks: Тесты производительности
+            Catalogs and support: Каталоги и поддержка
+            Codec optimization: Оптимизация кодеков
+            Diffusion and flow optimization: Оптимизация диффузии и потока
+            Fine-tuning: Тонкая настройка
+            LLM TTS serving: Обслуживание LLM TTS
+            Model support: Поддержка моделей
+            Notebooks with examples: Ноутбуки с примерами
+            Pipeline API: API конвейеров
+            Preprocessors: Препроцессоры
+            RTX 4090 speech benchmarks: Речевые тесты RTX 4090
+            RTX 5090 TTS benchmarks: Тесты TTS RTX 5090
+            Release readiness: Готовность к выпуску
+            Roadmap: Дорожная карта
+            Serving: Обслуживание
+            TTS capabilities: Возможности TTS
+            TTS model benchmarks: Тесты моделей TTS
+            TTS optimization workflow: Процесс оптимизации TTS
+            Text to speech: Синтез речи
+            Trainer overview: Обзор тренера
+            Transformers parity: Паритет с Transformers
+            VITS-family optimization: Оптимизация семейства VITS
+            XTTS v2 native DVAE: Нативный DVAE XTTS v2
         - locale: ar
           name: العربية
           build: true
@@ -575,6 +818,33 @@ plugins:
             Add an ASR or VAD provider: إضافة موفّر ASR أو VAD
             Translations: الترجمات
             Model audit: تدقيق النماذج
+            Add an optimization: إضافة تحسين
+            Architecture: البنية
+            Auto Classes: الفئات التلقائية
+            Automatic speech recognition: التعرّف التلقائي على الكلام
+            Benchmarks: الاختبارات المعيارية
+            Catalogs and support: الكتالوجات والدعم
+            Codec optimization: تحسين برامج الترميز
+            Diffusion and flow optimization: تحسين الانتشار والتدفق
+            Fine-tuning: الضبط الدقيق
+            LLM TTS serving: خدمة TTS بنموذج لغوي كبير
+            Model support: دعم النماذج
+            Notebooks with examples: دفاتر أمثلة
+            Pipeline API: API لمسار المعالجة
+            Preprocessors: المعالجات المسبقة
+            RTX 4090 speech benchmarks: اختبارات الكلام على RTX 4090
+            RTX 5090 TTS benchmarks: اختبارات TTS على RTX 5090
+            Release readiness: جاهزية الإصدار
+            Roadmap: خارطة الطريق
+            Serving: الخدمة
+            TTS capabilities: قدرات TTS
+            TTS model benchmarks: اختبارات نماذج TTS
+            TTS optimization workflow: سير عمل تحسين TTS
+            Text to speech: تحويل النص إلى كلام
+            Trainer overview: نظرة عامة على المدرّب
+            Transformers parity: التكافؤ مع Transformers
+            VITS-family optimization: تحسين عائلة VITS
+            XTTS v2 native DVAE: DVAE أصلي لـ XTTS v2
 
 markdown_extensions:
   - admonition

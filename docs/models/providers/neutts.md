@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the neutts integration.
 ---
 
-# NeuTTS
+# NeuTTS {.vh-model-title}
 
 ## Usage
 
@@ -61,9 +61,14 @@ contracts, so the documented support stays aligned with code. [Open the `neutts`
 | Task | Text to speech |
 | Architecture | `neutts` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `text-to-speech`, `voice-cloning`, `multilingual`, `emotion`, `safetensors`, `fine-tuning`, `default-checkpoint-inference-only`, `raw-audio-training`, `preencoded-code-training`, `voicehub-native`, `native-runtime` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

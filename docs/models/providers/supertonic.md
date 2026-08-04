@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the supertonic integration.
 ---
 
-# Supertonic
+# Supertonic {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,19 @@ contracts, so the documented support stays aligned with code. [Open the `superto
 | Task | Text to speech |
 | Architecture | `supertonic` |
 | Runtime | `VoiceHub-native` |
+| Languages | 32 enumerated languages |
 | Capabilities | `text-to-speech`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime`, `preprocessed-training` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>32 documented languages</summary>
+
+`ar`, `bg`, `cs`, `da`, `de`, `el`, `en`, `es`, `et`, `fi`, `fr`, `hi`, `hr`, `hu`, `id`, `it`, `ja`, `ko`, `lt`, `lv`, `na`, `nl`, `pl`, `pt`, `ro`, `ru`, `sk`, `sl`, `sv`, `tr`, `uk`, `vi`
+
+</details>
 
 ## Configuration
 

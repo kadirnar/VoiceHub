@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the conversationtts integration.
 ---
 
-# ConversationTTS
+# ConversationTTS {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,14 @@ contracts, so the documented support stays aligned with code. [Open the `convers
 | Task | Text to speech |
 | Architecture | `conversationtts` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `text-to-speech`, `voice-cloning`, `conversation`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime`, `raw-audio-fine-tuning`, `preencoded-code-fine-tuning`, `noncommercial` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the vad_funasr integration.
 ---
 
-# FunASRVAD
+# FunASRVAD {.vh-model-title}
 
 ## Usage
 
@@ -45,9 +45,14 @@ contracts, so the documented support stays aligned with code. [Open the `vad_fun
 | Task | Voice activity detection |
 | Architecture | `fsmn-vad` |
 | Runtime | `VoiceHub-native` |
+| Languages | Not text-language conditioned |
 | Capabilities | `voice-activity-detection`, `voicehub-native`, `safetensors`, `trusted-checkpoint-conversion`, `frame-scores`, `streaming`, `fine-tuning`, `modelscope-compatible` |
 | Reusable components | — |
 | Normalized output | `VADOutput` |
+
+### Language support
+
+The public VAD contract does not select a spoken language; validate checkpoint acoustic coverage on the target languages and recording conditions.
 
 ## Configuration
 

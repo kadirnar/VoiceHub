@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the outetts integration.
 ---
 
-# OuteTTS
+# OuteTTS {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,14 @@ contracts, so the documented support stays aligned with code. [Open the `outetts
 | Task | Text to speech |
 | Architecture | `outetts` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `text-to-speech`, `voice-cloning`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime`, `preprocessed-training`, `speaker-profile-training` |
 | Reusable components | `dac` |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

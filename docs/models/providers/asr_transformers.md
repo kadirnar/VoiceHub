@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the asr_transformers integration.
 ---
 
-# TransformersASR
+# TransformersASR {.vh-model-title}
 
 ## Usage
 
@@ -46,9 +46,14 @@ contracts, so the documented support stays aligned with code. [Open the `asr_tra
 | Task | Automatic speech recognition |
 | Architecture | `native-asr-dispatch` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `automatic-speech-recognition`, `multilingual`, `timestamps`, `safetensors`, `fine-tuning`, `ctc`, `speech-seq2seq`, `voicehub-native`, `native-runtime` |
 | Reusable components | — |
 | Normalized output | `ASROutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

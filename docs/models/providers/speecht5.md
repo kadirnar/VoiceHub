@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the speecht5 integration.
 ---
 
-# SpeechT5
+# SpeechT5 {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,19 @@ contracts, so the documented support stays aligned with code. [Open the `speecht
 | Task | Text to speech |
 | Architecture | `speecht5` |
 | Runtime | `VoiceHub-native` |
+| Languages | `en` |
 | Capabilities | `text-to-speech`, `speaker-embedding`, `safetensors`, `fine-tuning`, `voicehub-native`, `native-runtime`, `raw-audio-fine-tuning`, `inference-reloadable-training-export` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>1 documented language</summary>
+
+`en`
+
+</details>
 
 ## Configuration
 

@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the asr_nemo integration.
 ---
 
-# NeMoASR
+# NeMoASR {.vh-model-title}
 
 ## Usage
 
@@ -46,9 +46,19 @@ contracts, so the documented support stays aligned with code.
 | Task | Automatic speech recognition |
 | Architecture | `nemo-asr` |
 | Runtime | `VoiceHub-native` |
+| Languages | `en` |
 | Capabilities | `automatic-speech-recognition`, `english`, `timestamps`, `safetensors`, `fine-tuning`, `voicehub-native`, `ctc` |
 | Reusable components | — |
 | Normalized output | `ASROutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>1 documented language</summary>
+
+`en`
+
+</details>
 
 ## Configuration
 

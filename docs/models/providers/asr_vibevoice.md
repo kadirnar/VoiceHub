@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the asr_vibevoice integration.
 ---
 
-# VibeVoice
+# VibeVoice {.vh-model-title}
 
 ## Usage
 
@@ -46,9 +46,14 @@ contracts, so the documented support stays aligned with code. [Open the `asr_vib
 | Task | Automatic speech recognition |
 | Architecture | `vibevoice-asr` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `automatic-speech-recognition`, `multilingual`, `speaker-attribution`, `timestamps`, `hotwords`, `long-form`, `safetensors`, `fine-tuning`, `voicehub-native`, `native-runtime` |
 | Reusable components | — |
 | Normalized output | `ASROutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the kokoro integration.
 ---
 
-# Kokoro
+# Kokoro {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,19 @@ contracts, so the documented support stays aligned with code. [Open the `kokoro`
 | Task | Text to speech |
 | Architecture | `kokoro` |
 | Runtime | `VoiceHub-native` |
+| Languages | 9 enumerated languages |
 | Capabilities | `text-to-speech`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>9 documented languages</summary>
+
+`en-US`, `en-GB`, `es`, `fr`, `hi`, `it`, `pt-BR`, `ja`, `zh`
+
+</details>
 
 ## Configuration
 

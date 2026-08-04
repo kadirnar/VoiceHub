@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the cosyvoice integration.
 ---
 
-# CosyVoice
+# CosyVoice {.vh-model-title}
 
 ## Usage
 
@@ -61,9 +61,21 @@ contracts, so the documented support stays aligned with code. [Open the `cosyvoi
 | Task | Text to speech |
 | Architecture | `cosyvoice-native` |
 | Runtime | `VoiceHub-native` |
+| Languages | 9 enumerated languages |
 | Capabilities | `text-to-speech`, `voice-cloning`, `multilingual`, `fine-tuning`, `flow-matching`, `adversarial-vocoder-training`, `safetensors`, `voicehub-native`, `native-runtime`, `precomputed-speaker-embedding`, `preencoded-speech-token-fine-tuning` |
 | Reusable components | `conformer` |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>9 documented languages</summary>
+
+`zh`, `en`, `ja`, `ko`, `de`, `es`, `fr`, `it`, `ru`
+
+The registered family also documents 18 Chinese dialect variants.
+
+</details>
 
 ## Configuration
 

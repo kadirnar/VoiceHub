@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the inflecttts integration.
 ---
 
-# InflectTTS
+# InflectTTS {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,19 @@ contracts, so the documented support stays aligned with code. [Open the `inflect
 | Task | Text to speech |
 | Architecture | `inflecttts` |
 | Runtime | `VoiceHub-native` |
+| Languages | `en-US` |
 | Capabilities | `text-to-speech`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime`, `preprocessed-training`, `vits-warm-start`, `explicit-phonemes` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>1 documented language</summary>
+
+`en-US`
+
+</details>
 
 ## Configuration
 

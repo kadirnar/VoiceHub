@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the chatterbox integration.
 ---
 
-# Chatterbox
+# Chatterbox {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,19 @@ contracts, so the documented support stays aligned with code. [Open the `chatter
 | Task | Text to speech |
 | Architecture | `chatterbox` |
 | Runtime | `VoiceHub-native` |
+| Languages | `en` |
 | Capabilities | `text-to-speech`, `voice-cloning`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime`, `raw-audio-fine-tuning` |
 | Reusable components | `conformer` |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>1 documented language</summary>
+
+`en`
+
+</details>
 
 ## Configuration
 

@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the vad_silero integration.
 ---
 
-# SileroVAD
+# SileroVAD {.vh-model-title}
 
 ## Usage
 
@@ -45,9 +45,14 @@ contracts, so the documented support stays aligned with code. [Open the `vad_sil
 | Task | Voice activity detection |
 | Architecture | `silero-vad` |
 | Runtime | `VoiceHub-native` |
+| Languages | Not text-language conditioned |
 | Capabilities | `voice-activity-detection`, `voicehub-native`, `safetensors`, `jit-weight-import`, `frame-scores`, `streaming`, `fine-tuning` |
 | Reusable components | — |
 | Normalized output | `VADOutput` |
+
+### Language support
+
+The public VAD contract does not select a spoken language; validate checkpoint acoustic coverage on the target languages and recording conditions.
 
 ## Configuration
 

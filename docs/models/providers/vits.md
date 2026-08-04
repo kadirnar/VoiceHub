@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the vits integration.
 ---
 
-# Vits
+# Vits {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,14 @@ contracts, so the documented support stays aligned with code. [Open the `vits` C
 | Task | Text to speech |
 | Architecture | `vits` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `text-to-speech`, `multilingual`, `mms-tts`, `safetensors`, `fine-tuning`, `voicehub-native`, `native-runtime`, `raw-audio-training`, `preprocessed-training`, `adversarial-training`, `generator-warm-start`, `explicit-acoustic-training-config` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the vibevoice integration.
 ---
 
-# VibeVoice
+# VibeVoice {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,14 @@ contracts, so the documented support stays aligned with code. [Open the `vibevoi
 | Task | Text to speech |
 | Architecture | `vibevoice-tts` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `text-to-speech`, `voice-prompt`, `fine-tuning`, `default-checkpoint-inference-only`, `safetensors`, `voicehub-native`, `native-runtime`, `preprocessed-training`, `verified-low-level-realtime-stages`, `high-level-generation-fails-closed` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

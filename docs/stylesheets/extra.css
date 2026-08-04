@@ -1,14 +1,16 @@
 :root {
-  --vh-indigo: #4051b5;
-  --vh-indigo-dark: #2f3e8f;
-  --vh-wave: #168ba5;
-  --vh-ink: #292b32;
-  --vh-muted: #62656f;
+  --vh-indigo: #2563eb;
+  --vh-indigo-dark: #1e40af;
+  --vh-wave: #0891b2;
+  --vh-ink: #172033;
+  --vh-muted: #596579;
   --vh-surface: #ffffff;
-  --vh-surface-soft: #f6f7fa;
-  --vh-line: #e1e3e8;
-  --vh-header-start: #293a93;
-  --vh-header-end: #4051b5;
+  --vh-surface-soft: #f3f7ff;
+  --vh-line: #dce6f5;
+  --vh-header-start: #123a9d;
+  --vh-header-end: #2878ed;
+  --vh-model-accent: #047092;
+  --vh-optimization-accent: #6840f2;
   --vh-tabs-surface: rgba(255, 255, 255, 0.97);
   --vh-tabs-text: #505461;
   --vh-tabs-active: #eef0ff;
@@ -20,12 +22,12 @@
 }
 
 [data-md-color-scheme="default"] {
-  --md-primary-fg-color: #4051b5;
-  --md-primary-fg-color--light: #6573c8;
-  --md-primary-fg-color--dark: #2f3e8f;
-  --md-accent-fg-color: #4051b5;
-  --md-typeset-a-color: #4051b5;
-  --md-code-bg-color: #f4f5f8;
+  --md-primary-fg-color: #2563eb;
+  --md-primary-fg-color--light: #60a5fa;
+  --md-primary-fg-color--dark: #1e40af;
+  --md-accent-fg-color: #2563eb;
+  --md-typeset-a-color: #1d5fd1;
+  --md-code-bg-color: #f1f6ff;
   --md-code-fg-color: #343642;
   --md-code-hl-operator-color: #5d3bb3;
   --md-code-hl-variable-color: #686a72;
@@ -42,6 +44,8 @@
   --vh-line: #393c47;
   --vh-header-start: #202b66;
   --vh-header-end: #303f8f;
+  --vh-model-accent: #55d6ef;
+  --vh-optimization-accent: #b4a4ff;
   --vh-tabs-surface: rgba(31, 33, 41, 0.97);
   --vh-tabs-text: #bfc2cc;
   --vh-tabs-active: #2b3043;
@@ -63,6 +67,14 @@ html {
 
 body {
   color: var(--vh-ink);
+  background-color: var(--vh-surface);
+  background-image:
+    radial-gradient(circle at 78% 0, rgba(74, 144, 255, 0.1), transparent 25rem),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--vh-indigo) 4%, var(--vh-surface)) 0,
+      var(--vh-surface) 22rem
+    );
   font-family:
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
     sans-serif;
@@ -71,11 +83,9 @@ body {
 
 .md-header {
   border-bottom: 1px solid rgba(255, 255, 255, 0.14);
-  background: linear-gradient(
-    112deg,
-    var(--vh-header-start),
-    var(--vh-header-end)
-  );
+  background:
+    radial-gradient(circle at 72% -120%, rgba(125, 211, 252, 0.68), transparent 38%),
+    linear-gradient(112deg, var(--vh-header-start), var(--vh-header-end));
   box-shadow: 0 0.3rem 1rem rgba(27, 36, 88, 0.18);
 }
 
@@ -103,6 +113,7 @@ body {
 }
 
 .md-header__title {
+  min-width: 0;
   letter-spacing: -0.01em;
   font-weight: 650;
 }
@@ -135,6 +146,7 @@ body {
 }
 
 .md-header__button.md-logo {
+  flex: 0 0 auto;
   margin-inline-end: 0.2rem;
   padding: 0.35rem;
   background: rgba(255, 255, 255, 0.1);
@@ -651,11 +663,61 @@ body.vh-search-open {
 
 .md-typeset table:not([class]) {
   border: 1px solid var(--vh-line);
-  border-radius: 0.25rem;
+  border-radius: 0.65rem;
   background: var(--vh-surface);
-  box-shadow: none;
+  box-shadow: 0 0.3rem 1.1rem rgba(30, 64, 175, 0.06);
   font-size: 0.74rem;
   line-height: 1.5;
+}
+
+.md-typeset .vh-model-title {
+  width: fit-content;
+  max-width: 100%;
+  color: var(--vh-model-accent);
+  background: linear-gradient(92deg, var(--vh-indigo-dark), var(--vh-model-accent));
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.md-typeset .vh-language-support {
+  max-width: 48rem;
+  border-color: color-mix(in srgb, var(--vh-model-accent) 28%, var(--vh-line));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--vh-model-accent) 7%, var(--vh-surface)),
+    var(--vh-surface)
+  );
+}
+
+.md-typeset .vh-language-support > summary {
+  color: var(--vh-model-accent);
+  font-weight: 700;
+}
+
+.md-typeset .vh-model-catalog tbody td:first-child code,
+.md-typeset .vh-language-support code,
+.md-nav__link.vh-model-link {
+  color: var(--vh-model-accent);
+}
+
+.md-typeset .vh-model-catalog tbody td:first-child code {
+  border: 1px solid color-mix(in srgb, var(--vh-model-accent) 24%, transparent);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--vh-model-accent) 9%, var(--vh-surface));
+  font-weight: 750;
+}
+
+.md-typeset code.vh-optimization-term,
+.md-nav__link.vh-optimization-link {
+  color: var(--vh-optimization-accent);
+}
+
+.md-typeset code.vh-optimization-term {
+  border: 1px solid color-mix(in srgb, var(--vh-optimization-accent) 22%, transparent);
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, var(--vh-optimization-accent) 8%, var(--vh-surface));
+  font-weight: 650;
 }
 
 .md-typeset table:not([class]) th {
@@ -1296,11 +1358,9 @@ body.vh-search-open {
     inset: 0;
     z-index: 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.14);
-    background: linear-gradient(
-      112deg,
-      var(--vh-header-start),
-      var(--vh-header-end)
-    );
+    background:
+      radial-gradient(circle at 72% -120%, rgba(125, 211, 252, 0.68), transparent 38%),
+      linear-gradient(112deg, var(--vh-header-start), var(--vh-header-end));
     box-shadow: 0 0.3rem 1rem rgba(27, 36, 88, 0.18);
     content: "";
     pointer-events: none;
@@ -1328,10 +1388,15 @@ body.vh-search-open {
   .vh-global-brand {
     display: inline-flex;
     align-items: center;
+    min-width: 0;
+    max-width: min(12rem, 22vw);
+    overflow: hidden;
     color: #ffffff;
     font-size: 0.84rem;
     font-weight: 700;
     letter-spacing: -0.01em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     transform: translateY(calc(-1 * var(--vh-shell-scroll-offset)));
   }
 
@@ -1346,7 +1411,8 @@ body.vh-search-open {
     padding: 0.6rem 0.8rem 0.55rem;
     border-inline-end: 1px solid var(--vh-line);
     border-bottom: 1px solid var(--vh-line);
-    background: var(--vh-surface);
+    background:
+      linear-gradient(155deg, color-mix(in srgb, var(--vh-indigo) 7%, var(--vh-surface)), var(--vh-surface));
     color: var(--vh-ink);
     z-index: 5;
   }
@@ -1362,6 +1428,9 @@ body.vh-search-open {
     color: var(--vh-ink);
     font-size: 0.82rem;
     line-height: 1.15rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .vh-doc-rail-controls [data-md-component="header-topic"] {

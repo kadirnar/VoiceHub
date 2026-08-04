@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the qwen3tts integration.
 ---
 
-# Qwen3TTS
+# Qwen3TTS {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,19 @@ contracts, so the documented support stays aligned with code. [Open the `qwen3tt
 | Task | Text to speech |
 | Architecture | `qwen3-tts` |
 | Runtime | `VoiceHub-native` |
+| Languages | 10 enumerated languages |
 | Capabilities | `text-to-speech`, `voice-cloning`, `voice-design`, `multilingual`, `fine-tuning`, `lora-fine-tuning`, `default-checkpoint-inference-only`, `safetensors`, `voicehub-native`, `native-runtime` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>10 documented languages</summary>
+
+`zh`, `en`, `ja`, `ko`, `de`, `fr`, `ru`, `pt`, `es`, `it`
+
+</details>
 
 ## Configuration
 

@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the asr_qwen3 integration.
 ---
 
-# Qwen3ASR
+# Qwen3ASR {.vh-model-title}
 
 ## Usage
 
@@ -46,9 +46,14 @@ contracts, so the documented support stays aligned with code. [Open the `asr_qwe
 | Task | Automatic speech recognition |
 | Architecture | `qwen3-asr` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `automatic-speech-recognition`, `multilingual`, `language-identification`, `hotwords`, `long-form`, `safetensors`, `fine-tuning`, `lora`, `voicehub-native`, `native-runtime` |
 | Reusable components | — |
 | Normalized output | `ASROutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

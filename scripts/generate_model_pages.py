@@ -21,6 +21,7 @@ from generate_model_notebooks import (  # noqa: E402
 )
 
 from voicehub import list_model_specs  # noqa: E402
+from voicehub.models.language_support import model_language_support  # noqa: E402
 
 MODEL_PAGE_DIR = REPOSITORY_ROOT / "docs" / "models" / "providers"
 SITE_CONFIG_PATH = REPOSITORY_ROOT / "mkdocs.yml"
@@ -61,6 +62,31 @@ def _cell(value) -> str:
 def _code_list(values) -> str:
     items = tuple(values)
     return ", ".join(f"`{_cell(item)}`" for item in items) if items else "—"
+
+
+def _language_summary(spec) -> str:
+    support = model_language_support(spec)
+    if support.kind == "enumerated":
+        if len(support.codes) == 1:
+            return f"`{support.codes[0]}`"
+        return f"{len(support.codes)} enumerated languages"
+    if support.kind == "not-text-conditioned":
+        return "Not text-language conditioned"
+    return "Checkpoint-defined; not exhaustively enumerated"
+
+
+def _language_details(spec) -> str:
+    support = model_language_support(spec)
+    if support.kind == "enumerated":
+        codes = _code_list(support.codes)
+        note = f"\n\n{support.note}" if support.note else ""
+        return f'''<details class="vh-language-support" markdown>
+<summary>{len(support.codes)} documented language{'s' if len(support.codes) != 1 else ''}</summary>
+
+{codes}{note}
+
+</details>'''
+    return support.note or "Language support is not declared."
 
 
 def _checkpoint(spec) -> tuple[str, str]:
@@ -413,7 +439,7 @@ def render_page(spec) -> str:
 description: Public API, checkpoint, training, and optimization guide for the {spec.model_type} integration.
 ---
 
-# {spec.display_name}
+# {spec.display_name} {{.vh-model-title}}
 
 ## Usage
 
@@ -443,9 +469,14 @@ contracts, so the documented support stays aligned with code.{notebook}
 | Task | {TASK_LABELS[spec.task.value]} |
 | Architecture | `{architecture}` |
 | Runtime | `{'VoiceHub-native' if spec.is_voicehub_native else 'provider adapter'}` |
+| Languages | {_language_summary(spec)} |
 | Capabilities | {_code_list(spec.capabilities)} |
 | Reusable components | {components} |
 | Normalized output | `{output}` |
+
+### Language support
+
+{_language_details(spec)}
 
 ## Configuration
 
@@ -685,8 +716,10 @@ def render_index(specs) -> str:
         lines.extend((
             f"### {TASK_LABELS[task]}",
             "",
-            "| Model | Default checkpoint | Training | Notebook |",
-            "| --- | --- | --- | --- |",
+            "<div class=\"vh-model-catalog\" markdown>",
+            "",
+            "| Model | Languages | Default checkpoint | Training | Notebook |",
+            "| --- | --- | --- | --- | --- |",
         ))
         for spec in task_specs:
             _, checkpoint = _checkpoint(spec)
@@ -695,9 +728,10 @@ def render_index(specs) -> str:
                 f"[Colab]({COLAB_ROOT}/{spec.model_type}.ipynb)"
                 if checkpoint_metadata.is_hugging_face else "—")
             lines.append(
-                f"| [`{spec.display_name}`]({spec.model_type}.md) | {checkpoint} | "
+                f"| [`{spec.display_name}`]({spec.model_type}.md) | "
+                f"{_language_summary(spec)} | {checkpoint} | "
                 f"`{spec.training.support.value}` | {notebook} |")
-        lines.append("")
+        lines.extend(("", "</div>", ""))
     return "\n".join(lines)
 
 
