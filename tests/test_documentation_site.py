@@ -36,6 +36,8 @@ DOCUMENTATION_DOM_CHECK_PATH = REPOSITORY_ROOT / "scripts" / "check_documentatio
 DOCUMENTATION_VISUAL_CHECK_PATH = REPOSITORY_ROOT / "scripts" / "check_documentation_visual.py"
 DOCUMENTATION_SCREENSHOT_BASELINES_PATH = (
     REPOSITORY_ROOT / "tests" / "fixtures" / "documentation_screenshot_signatures.json")
+DOCUMENTATION_LINUX_SCREENSHOT_BASELINES_PATH = (
+    REPOSITORY_ROOT / "tests" / "fixtures" / "documentation_screenshot_signatures_linux.json")
 ADDING_MODEL_PATH = DOCS_ROOT / "project" / "adding-a-model.md"
 INSTALLATION_PATH = DOCS_ROOT / "getting-started" / "installation.md"
 QUICKSTART_PATH = DOCS_ROOT / "getting-started" / "quickstart.md"
@@ -1957,14 +1959,32 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             )
 
     def test_representative_routes_have_a_screenshot_pixel_regression_contract(self):
-        self.assertTrue(DOCUMENTATION_SCREENSHOT_BASELINES_PATH.is_file())
-        baselines = json.loads(DOCUMENTATION_SCREENSHOT_BASELINES_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(baselines["schema_version"], 1)
-        self.assertEqual(len(baselines["cases"]), 60)
+        manifests = []
+        for path in (
+                DOCUMENTATION_SCREENSHOT_BASELINES_PATH,
+                DOCUMENTATION_LINUX_SCREENSHOT_BASELINES_PATH,
+        ):
+            self.assertTrue(path.is_file())
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["schema_version"], 1)
+            self.assertEqual(len(manifest["cases"]), 60)
+            manifests.append(manifest)
+
+        darwin_manifest, linux_manifest = manifests
+        self.assertEqual(darwin_manifest["playwright"], linux_manifest["playwright"])
+        self.assertEqual(darwin_manifest["chromium"], linux_manifest["chromium"])
+        self.assertEqual(darwin_manifest["cases"].keys(), linux_manifest["cases"].keys())
+        for key, darwin_case in darwin_manifest["cases"].items():
+            linux_case = linux_manifest["cases"][key]
+            for field in ("width", "height", "hash_bits"):
+                self.assertEqual(darwin_case[field], linux_case[field])
 
         checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
         for fragment in (
-                "SCREENSHOT_BASELINES_PATH",
+                "SCREENSHOT_BASELINES_PATHS",
+                '"darwin"',
+                '"linux"',
+                "sys.platform",
                 "SCREENSHOT_SIGNATURE_WIDTH",
                 "SCREENSHOT_MAX_HAMMING_RATIO",
                 "Image.open(BytesIO(screenshot))",

@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -37,14 +38,25 @@ except ImportError as error:  # pragma: no cover - exercised by the documented s
         "Pillow is required for screenshot regression checks. Install the docs extra.") from error
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-SCREENSHOT_BASELINES_PATH = (
-    REPOSITORY_ROOT / "tests" / "fixtures" / "documentation_screenshot_signatures.json")
+SCREENSHOT_BASELINES_PATHS = {
+    "darwin": REPOSITORY_ROOT / "tests" / "fixtures" / "documentation_screenshot_signatures.json",
+    "linux": REPOSITORY_ROOT / "tests" / "fixtures" / "documentation_screenshot_signatures_linux.json",
+}
 SCREENSHOT_SIGNATURE_WIDTH = 64
-# Keep the reviewed signatures portable across Chromium's macOS and Linux glyph
-# rasterizers while still rejecting a change to one tenth of the visual hash.
-SCREENSHOT_MAX_HAMMING_RATIO = 0.09
+SCREENSHOT_MAX_HAMMING_RATIO = 0.08
 SCREENSHOT_MAX_MEAN_CHANNEL_DELTA = 6.0
 SCREENSHOT_SCHEMA_VERSION = 1
+
+
+def _platform_screenshot_baselines_path() -> Path:
+    try:
+        return SCREENSHOT_BASELINES_PATHS[sys.platform]
+    except KeyError as error:
+        raise DocumentationVisualError(
+            f"No reviewed screenshot baseline is available for platform {sys.platform!r}. "
+            "Pass --screenshot-baselines explicitly or capture and review one with "
+            "--update-screenshot-baselines.") from error
+
 
 VIEWPORTS = (
     {
@@ -3409,7 +3421,7 @@ def _validate_quickstart_page_copy(page: Page, case: str, key: str) -> None:
 def validate_site(
     site_directory: Path,
     *,
-    screenshot_baselines_path: Path = SCREENSHOT_BASELINES_PATH,
+    screenshot_baselines_path: Path | None = None,
     update_screenshot_baselines: bool = False,
 ) -> dict[str, Any]:
     if not site_directory.is_dir():
@@ -3492,6 +3504,8 @@ def validate_site(
     interactive_accessibility_cases = 0
     screenshot_cases = 0
     screenshot_signatures: dict[str, dict[str, Any]] = {}
+    if screenshot_baselines_path is None and not update_screenshot_baselines:
+        screenshot_baselines_path = _platform_screenshot_baselines_path()
     screenshot_baselines = (
         None if update_screenshot_baselines else _load_screenshot_baselines(screenshot_baselines_path))
     chromium_version = "unknown"
@@ -4187,8 +4201,7 @@ def main() -> int:
     parser.add_argument(
         "--screenshot-baselines",
         type=Path,
-        default=SCREENSHOT_BASELINES_PATH,
-        help="Screenshot signature manifest (default: repository fixture)",
+        help="Screenshot signature manifest (default: reviewed fixture for this platform)",
     )
     parser.add_argument(
         "--update-screenshot-baselines",
