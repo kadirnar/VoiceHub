@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from importlib import import_module
@@ -14,15 +13,26 @@ from typing import Any
 from voicehub.base_model import BaseTTSModel
 from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.generation_configuration import TTSGenerationConfig
+from voicehub.hub import read_json_file
 from voicehub.inference_strategy import InferenceStrategy, get_inference_strategy
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.path_utils import normalize_model_source
 from voicehub.processing_utils import VoiceHubProcessor
+from voicehub.serialization_utils import reject_serialized_secrets
 from voicehub.trainer_utils import NATIVE_EXPORT_DIR
 
 
 class PreTrainedSpeechModel(ABC):
     """Marker base shared by task-specific pretrained speech wrappers."""
+
+    @staticmethod
+    def _validated_portable_model_state(state: Any) -> Any:
+        """Reject credentials before applying deserialized portable state."""
+        reject_serialized_secrets(
+            state,
+            owner="VoiceHub portable model state",
+        )
+        return state
 
 
 class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
@@ -418,7 +428,7 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
         model_state_path = source / "model_state.pt"
         has_voicehub_state = source.is_dir() and model_state_path.is_file()
         if has_voicehub_state:
-            saved_config = json.loads((source / "config.json").read_text(encoding="utf-8"))
+            saved_config = read_json_file(source / "config.json")
             base_model = saved_config.get("name_or_path")
             if isinstance(base_model, str) and base_model.strip():
                 config.name_or_path = base_model
@@ -633,6 +643,7 @@ class PreTrainedTTSModel(BaseTTSModel, PreTrainedSpeechModel, ABC):
                 )
             except TypeError:
                 state = torch.load(state_path, map_location=self.device)
+            state = self._validated_portable_model_state(state)
 
             if (isinstance(state, Mapping) and "__voicehub_training_adapter__" in state):
                 adapter = self.get_training_adapter()

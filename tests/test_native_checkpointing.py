@@ -12,6 +12,7 @@ except ModuleNotFoundError:
     torch = None
 
 from voicehub.checkpointing import (
+    MANIFEST_NAME,
     ArtifactFile,
     CheckpointFormatError,
     CheckpointIntegrityError,
@@ -126,6 +127,27 @@ class SafeTensorTests(unittest.TestCase):
             with self.assertRaisesRegex(CheckpointFormatError, "require 8"):
                 SafeTensorReader(path)
 
+    def test_reader_rejects_non_finite_header_numbers_before_tensor_access(self):
+        headers = {
+            "constant": (
+                b'{"weight":{"dtype":"F32","shape":[1],"data_offsets":[NaN,4]}}',
+                "non-finite.*NaN",
+            ),
+            "overflow": (
+                b'{"weight":{"dtype":"F32","shape":[1],"data_offsets":[0,1e400]}}',
+                r"\$\.weight\.data_offsets\[1\].*non-finite",
+            ),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, (encoded, message) in headers.items():
+                with self.subTest(name=name):
+                    path = root / f"{name}.safetensors"
+                    path.write_bytes(struct.pack("<Q", len(encoded)) + encoded + b"\0" * 4)
+
+                    with self.assertRaisesRegex(CheckpointFormatError, message):
+                        SafeTensorReader(path)
+
     def test_sharded_index_loads_selected_tensors(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -177,6 +199,37 @@ class SafeTensorTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(CheckpointFormatError, "Unsafe"):
                 SafeTensorIndex.from_file(index_path)
+
+    def test_sharded_index_rejects_ambiguous_json_before_shard_access(self):
+        documents = {
+            "duplicate": (
+                '{"weight_map":{"weight":"part.safetensors",'
+                '"weight":"discarded-secret-value"}}',
+                "(?i)duplicate.*weight",
+            ),
+            "constant": (
+                '{"metadata":{"total_size":Infinity},'
+                '"weight_map":{"weight":"part.safetensors"}}',
+                "non-finite.*Infinity",
+            ),
+            "overflow": (
+                '{"metadata":{"total_size":1e400},'
+                '"weight_map":{"weight":"part.safetensors"}}',
+                r"\$\.metadata\.total_size.*non-finite",
+            ),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, (document, message) in documents.items():
+                with self.subTest(name=name):
+                    index_path = root / f"{name}.index.json"
+                    index_path.write_text(document, encoding="utf-8")
+
+                    with self.assertRaisesRegex(CheckpointFormatError, message) as raised:
+                        SafeTensorIndex.from_file(index_path)
+
+                    self.assertIn(index_path.name, str(raised.exception))
+                    self.assertNotIn("discarded-secret-value", str(raised.exception))
 
     def test_sharded_hugging_face_snapshot_symlinks_keep_logical_parent(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -285,10 +338,24 @@ class NumpyTensorTests(unittest.TestCase):
                 load_numpy_tensor(trailing_path)
 
 
+class UnsafeManifest(VoiceHubManifest):
+
+    def to_dict(self):
+        payload = super().to_dict()
+        payload["metadata"]["api_key"] = "must-not-be-persisted"
+        return payload
+
+
 class ManifestTests(unittest.TestCase):
 
-    def _manifest(self, files=(), processor_assets=()):
-        return VoiceHubManifest(
+    def _manifest(
+            self,
+            files=(),
+            processor_assets=(),
+            metadata=None,
+            manifest_class=VoiceHubManifest,
+    ):
+        return manifest_class(
             architecture="whisper",
             architecture_version="1.0.0",
             checkpoint_format="safetensors",
@@ -300,7 +367,7 @@ class ManifestTests(unittest.TestCase):
             processor_assets=processor_assets,
             training_recipe="whisper-seq2seq-v1",
             files=files,
-            metadata={"task": "asr"},
+            metadata={"task": "asr"} if metadata is None else metadata,
         )
 
     def test_manifest_round_trip_and_integrity_verification(self):
@@ -337,6 +404,95 @@ class ManifestTests(unittest.TestCase):
     def test_manifest_rejects_unsafe_paths(self):
         with self.assertRaisesRegex(ValueError, "relative and safe"):
             ArtifactFile(path="../secret", size=0, sha256="0" * 64)
+
+    def test_manifest_rejects_runtime_secrets_at_construction(self):
+        with self.assertRaisesRegex(ValueError, "runtime secrets"):
+            self._manifest(
+                metadata={
+                    "provider_options": {
+                        "headers": {
+                            "authorization": "Bearer must-not-be-persisted",
+                        },
+                    },
+                }, )
+
+    def test_manifest_rejects_secrets_added_after_construction_before_writing(self):
+        manifest = self._manifest(
+            metadata={
+                "task": "asr",
+                "token_count": 12,
+            }, )
+        manifest.metadata["provider_options"] = {
+            "api_key": "must-not-be-persisted",
+        }
+
+        with self.assertRaisesRegex(ValueError, "runtime secrets"):
+            manifest.to_dict()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "artifact"
+            with self.assertRaisesRegex(ValueError, "runtime secrets"):
+                manifest.save(root)
+
+            self.assertFalse((root / MANIFEST_NAME).exists())
+            self.assertEqual(list(root.glob(f".{MANIFEST_NAME}.*.tmp")), [])
+
+    def test_manifest_rejects_secret_from_untrusted_checkpoint(self):
+        payload = self._manifest().to_dict()
+        payload["metadata"] = {
+            "provider_options": {
+                "token": "must-not-be-persisted",
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / MANIFEST_NAME
+            path.write_text(
+                json.dumps(payload),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(CheckpointFormatError, "runtime secrets"):
+                VoiceHubManifest.load(path)
+
+    def test_manifest_reader_rejects_ambiguous_json_before_construction(self):
+        payload = self._manifest(metadata={"task": "asr", "token_count": 12}).to_dict()
+        encoded = json.dumps(payload)
+        documents = {
+            "duplicate": (
+                '{"architecture":"discarded-secret-value",' + encoded[1:],
+                "(?i)duplicate.*architecture",
+            ),
+            "constant": (
+                json.dumps(payload).replace('"token_count": 12', '"token_count": NaN'),
+                "non-finite.*NaN",
+            ),
+            "overflow": (
+                json.dumps(payload).replace('"token_count": 12', '"token_count": 1e400'),
+                r"\$\.metadata\.token_count.*non-finite",
+            ),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, (document, message) in documents.items():
+                with self.subTest(name=name):
+                    path = root / f"{name}.json"
+                    path.write_text(document, encoding="utf-8")
+
+                    with self.assertRaisesRegex(CheckpointFormatError, message) as raised:
+                        VoiceHubManifest.load(path)
+
+                    self.assertIn(path.name, str(raised.exception))
+                    self.assertNotIn("discarded-secret-value", str(raised.exception))
+
+    def test_manifest_save_validates_final_subclass_payload(self):
+        manifest = self._manifest(manifest_class=UnsafeManifest)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "artifact"
+            with self.assertRaisesRegex(ValueError, "runtime secrets"):
+                manifest.save(root)
+
+            self.assertFalse((root / MANIFEST_NAME).exists())
+            self.assertEqual(list(root.glob(f".{MANIFEST_NAME}.*.tmp")), [])
 
 
 if __name__ == "__main__":

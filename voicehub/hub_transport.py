@@ -25,6 +25,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from voicehub.json_utils import parse_json_object, parse_json_value
+
 _HUGGING_FACE_ENDPOINT = "https://huggingface.co"
 _DEFAULT_REVISION = "main"
 _USER_AGENT = "voicehub"
@@ -507,12 +509,8 @@ def get_cached_hugging_face_commit(
     )
     if cached is None:
         return None
-    try:
-        with metadata_path.open(encoding="utf-8") as handle:
-            metadata = json.load(handle)
-    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
-        return None
-    if not isinstance(metadata, dict):
+    metadata = _read_cached_json_object(metadata_path)
+    if metadata is None:
         return None
     commit = metadata.get("commit")
     if not isinstance(commit, str) or not _COMMIT_HASH.fullmatch(commit):
@@ -664,9 +662,12 @@ def _request_hub_json(
             raise HubDownloadError("The Hub API response is too large.")
 
     try:
-        payload = json.loads(content.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        raise HubDownloadError("The Hub API returned invalid JSON.") from None
+        payload = parse_json_value(
+            content,
+            source=f"Hub API response for {context}",
+        )
+    except ValueError as error:
+        raise HubDownloadError(f"The Hub API returned invalid JSON for {context}: {error}") from None
     return payload, response_headers
 
 
@@ -779,12 +780,8 @@ def _read_cached_snapshot(
     ignore_patterns: tuple[str, ...],
     expected_commit: str | None = None,
 ) -> Path | None:
-    try:
-        with manifest_path.open(encoding="utf-8") as handle:
-            manifest = json.load(handle)
-    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
-        return None
-    if not isinstance(manifest, dict):
+    manifest = _read_cached_json_object(manifest_path)
+    if manifest is None:
         return None
     if (manifest.get("version") != 1 or manifest.get("repo_id") != repo_id or
             manifest.get("revision") != revision or manifest.get("allow_patterns") != list(allow_patterns) or
@@ -1040,12 +1037,8 @@ def _read_cached_file(
     revision: str,
     relative_file: PurePosixPath,
 ) -> _CachedFile | None:
-    try:
-        with metadata_path.open(encoding="utf-8") as handle:
-            metadata = json.load(handle)
-    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
-        return None
-    if not isinstance(metadata, dict):
+    metadata = _read_cached_json_object(metadata_path)
+    if metadata is None:
         return None
     if (metadata.get("version") != 1 or metadata.get("repo_id") != repo_id or
             metadata.get("revision") != revision or
@@ -1083,6 +1076,13 @@ def _read_cached_file(
     if not isinstance(sha256, str) or not _HEX_SHA256.fullmatch(sha256):
         sha256 = None
     return _CachedFile(path=path, etag=etag, size=size, sha256=sha256)
+
+
+def _read_cached_json_object(path: Path) -> dict[str, Any] | None:
+    try:
+        return parse_json_object(path.read_bytes(), source=path)
+    except (OSError, ValueError):
+        return None
 
 
 def _find_legacy_cached_file(

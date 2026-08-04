@@ -3,74 +3,15 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from voicehub.hub import read_json_file, resolve_pretrained_file, write_json_file
 from voicehub.path_utils import normalize_model_source
-from voicehub.serialization_utils import serialize_paths
+from voicehub.serialization_utils import reject_serialized_secrets, serialize_paths
 
 CONFIG_NAME = "config.json"
-
-_SERIALIZED_SECRET_FIELDS = frozenset({
-    "access_token",
-    "api_key",
-    "apikey",
-    "auth_token",
-    "authorization",
-    "credential",
-    "credentials",
-    "hf_token",
-    "huggingface_token",
-    "password",
-    "secret",
-    "token",
-    "use_auth_token",
-})
-
-
-def _secret_paths(
-        value: Any,
-        *,
-        path: tuple[str, ...] = (),
-) -> tuple[str, ...]:
-    """Return paths to credential-shaped fields without reading their
-    values."""
-    matches: list[str] = []
-    is_non_string_sequence = (isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)))
-    if isinstance(value, Mapping):
-        for key, nested in value.items():
-            key_name = str(key)
-            normalized = key_name.strip().lower().replace("-", "_")
-            nested_path = (*path, key_name)
-            if normalized in _SERIALIZED_SECRET_FIELDS:
-                matches.append(".".join(nested_path))
-                continue
-            matches.extend(_secret_paths(nested, path=nested_path))
-    elif is_non_string_sequence:
-        for index, nested in enumerate(value):
-            matches.extend(_secret_paths(
-                nested,
-                path=(*path, f"[{index}]"),
-            ))
-    return tuple(matches)
-
-
-def reject_serialized_secrets(
-    value: Any,
-    *,
-    owner: str,
-) -> None:
-    """Reject credentials before they can be persisted in a public artifact."""
-    paths = _secret_paths(value)
-    if not paths:
-        return
-    fields = ", ".join(paths)
-    raise ValueError(
-        f"{owner} cannot store runtime secrets ({fields}). Pass credentials "
-        "to the model constructor or from_pretrained() call instead.")
 
 
 class VoiceHubConfig:
@@ -79,6 +20,7 @@ class VoiceHubConfig:
 
     model_type = "voicehub"
     is_composition = False
+    _RUNTIME_ONLY_FIELDS = frozenset({"token"})
 
     def __init__(
         self,
@@ -92,6 +34,13 @@ class VoiceHubConfig:
         generation_config: dict[str, Any] | None = None,
         **kwargs,
     ):
+        reject_serialized_secrets(
+            {
+                "generation_config": generation_config,
+                **kwargs,
+            },
+            owner=self.__class__.__name__,
+        )
         self.sample_rate = sample_rate
         self.architectures = architectures or []
         self.name_or_path = name_or_path
@@ -104,7 +53,14 @@ class VoiceHubConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a deep-copied JSON-serializable representation."""
-        output = serialize_paths(deepcopy(self.__dict__))
+        values = deepcopy(self.__dict__)
+        for field_name in self._RUNTIME_ONLY_FIELDS:
+            values.pop(field_name, None)
+        reject_serialized_secrets(
+            values,
+            owner=self.__class__.__name__,
+        )
+        output = serialize_paths(values)
         output["model_type"] = self.model_type
         return output
 
@@ -160,12 +116,21 @@ class VoiceHubConfig:
     def save_pretrained(self, save_directory: str | Path) -> Path:
         """Save this configuration as ``config.json``."""
         output_path = Path(save_directory).expanduser() / CONFIG_NAME
-        write_json_file(output_path, self.to_dict())
+        values = self.to_dict()
+        reject_serialized_secrets(
+            values,
+            owner=self.__class__.__name__,
+        )
+        write_json_file(output_path, values)
         return output_path
 
     def to_json_string(self, *, use_diff: bool = False) -> str:
         """Serialize this configuration as stable, readable JSON."""
         values = self.to_diff_dict() if use_diff else self.to_dict()
+        reject_serialized_secrets(
+            values,
+            owner=self.__class__.__name__,
+        )
         return json.dumps(
             values,
             ensure_ascii=False,
@@ -191,9 +156,14 @@ class VoiceHubConfig:
     def to_diff_dict(self) -> dict[str, Any]:
         """Return values that differ from the common base configuration."""
         defaults = VoiceHubConfig().to_dict()
+        values = self.to_dict()
+        reject_serialized_secrets(
+            values,
+            owner=self.__class__.__name__,
+        )
         return {
             key: value
-            for key, value in self.to_dict().items() if key == "model_type" or defaults.get(key) != value
+            for key, value in values.items() if key == "model_type" or defaults.get(key) != value
         }
 
     def update(self, values: dict[str, Any]) -> None:
@@ -202,5 +172,10 @@ class VoiceHubConfig:
             setattr(self, key, value)
 
     def __repr__(self) -> str:
-        fields = ", ".join(f"{key}={value!r}" for key, value in self.to_dict().items())
+        values = self.to_dict()
+        reject_serialized_secrets(
+            values,
+            owner=self.__class__.__name__,
+        )
+        fields = ", ".join(f"{key}={value!r}" for key, value in values.items())
         return f"{self.__class__.__name__}({fields})"

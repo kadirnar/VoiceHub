@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import base64
 import binascii
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from numbers import Integral
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
+
+from voicehub.json_utils import parse_json_value
 
 DEFAULT_MAX_ASSET_BYTES = 64 * 1024 * 1024
 DEFAULT_MAX_TOKENS = 2_000_000
@@ -160,11 +161,8 @@ def load_huggingface_byte_bpe(
         _positive_limit(value, name=name)
     payload = read_bounded_asset(path, max_bytes=max_bytes)
     try:
-        document = json.loads(
-            payload.decode("utf-8"),
-            parse_constant=lambda value: _reject_json_constant(value),
-        )
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+        document = parse_json_value(payload, source=Path(path).expanduser())
+    except (ValueError, RecursionError) as error:
         raise TokenizerAssetError(f"Invalid tokenizer JSON: {error}.") from error
     _validate_json_bounds(
         document,
@@ -429,7 +427,3 @@ def _positive_limit(value: Any, *, name: str) -> int:
     if normalized <= 0:
         raise ValueError(f"`{name}` must be greater than zero.")
     return normalized
-
-
-def _reject_json_constant(value: str) -> None:
-    raise TokenizerAssetError(f"Non-finite JSON constant {value!r} is not allowed.")

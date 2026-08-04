@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from voicehub.architectures.seamless_m4t_v2.languages import SEAMLESS_M4T_V2_LANGUAGE_TO_ID
 from voicehub.configuration_utils import VoiceHubConfig, reject_serialized_secrets
 from voicehub.inference_configuration import ASRInferenceConfig
 
@@ -105,8 +106,6 @@ class SeamlessM4Tv2ASRConfig(VoiceHubConfig):
             raise ValueError("The published SeamlessM4T-v2 frontend requires 16 kHz audio.")
         if not isinstance(self.target_language, str) or not self.target_language.strip():
             raise ValueError("`target_language` must be a non-empty code.")
-        from voicehub.architectures.seamless_m4t_v2.tokenization import SEAMLESS_M4T_V2_LANGUAGE_TO_ID
-
         language = self.target_language.strip()
         if language.startswith("__") and language.endswith("__"):
             language = language[2:-2]
