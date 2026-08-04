@@ -1340,6 +1340,22 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         ):
             self.assertIn(fragment, checker)
 
+        quickstart_tabs = checker.split(
+            "def _validate_quickstart_tabs(",
+            1,
+        )[1].split("def _validate_quickstart_page_copy", 1)[0]
+        self.assertIn('page.keyboard.press("ArrowRight")', quickstart_tabs)
+        self.assertIn("document.activeElement === input", quickstart_tabs)
+        self.assertIn("const viewportTolerance = 1", quickstart_tabs)
+        self.assertNotIn("target.focus()", quickstart_tabs)
+
+        quickstart_interaction = checker.split(
+            "if relative_path == QUICKSTART_ROUTE:",
+            3,
+        )[3].split("if relative_path == PIPELINE_ROUTE:", 1)[0]
+        self.assertIn('page.reload(wait_until="networkidle")', quickstart_interaction)
+        self.assertIn("_reset_quickstart_tabs(page)", quickstart_interaction)
+
         stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
         for declaration in (
                 "--vh-content-gutter: 24px;",

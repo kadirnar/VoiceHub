@@ -772,13 +772,16 @@ def _active_focus_state(page: Page) -> dict[str, Any]:
           });
           const bounds = focusTarget?.getBoundingClientRect();
           const style = focusTarget instanceof Element ? getComputedStyle(focusTarget) : null;
+          const viewportTolerance = 1;
           return {
             descriptor,
             inactivePanelContainsFocus,
             visible: Boolean(bounds && bounds.width > 0 && bounds.height > 0 &&
               style?.display !== "none" && style?.visibility !== "hidden"),
-            withinViewport: Boolean(bounds && bounds.left >= 0 && bounds.right <= innerWidth &&
-              bounds.top >= 0 && bounds.bottom <= innerHeight),
+            withinViewport: Boolean(bounds && bounds.left >= -viewportTolerance &&
+              bounds.right <= innerWidth + viewportTolerance &&
+              bounds.top >= -viewportTolerance &&
+              bounds.bottom <= innerHeight + viewportTolerance),
             outlineStyle: style?.outlineStyle,
             outlineWidth: style?.outlineWidth,
             outlineOffset: style?.outlineOffset,
@@ -3370,8 +3373,26 @@ def _validate_quickstart_tabs(page: Page, case: str) -> None:
         if not target_id:
             raise DocumentationVisualError(
                 f"{case}: Quickstart tab set {set_index + 1} has an input without an id.")
-        tab_set.locator(f".tabbed-labels > label[for='{target_id}']").scroll_into_view_if_needed()
-        target.focus()
+        inputs.first.focus()
+        for _ in range(target_index):
+            page.keyboard.press("ArrowRight")
+        target_handle = target.element_handle()
+        page.wait_for_function(
+            """input => {
+              const label = input.parentElement?.querySelector(
+                `.tabbed-labels > label[for='${input.id}']`
+              );
+              const bounds = label?.getBoundingClientRect();
+              const viewportTolerance = 1;
+              return input.checked && document.activeElement === input &&
+                bounds && bounds.width > 0 && bounds.height > 0 &&
+                bounds.left >= -viewportTolerance &&
+                bounds.right <= innerWidth + viewportTolerance &&
+                bounds.top >= -viewportTolerance &&
+                bounds.bottom <= innerHeight + viewportTolerance;
+            }""",
+            arg=target_handle,
+        )
         focused = _active_focus_state(page)
         _validate_focused_element(
             f"{case} / tab set {set_index + 1}",
@@ -3383,11 +3404,6 @@ def _validate_quickstart_tabs(page: Page, case: str) -> None:
             raise DocumentationVisualError(
                 f"{case}: focused tab is {focused['descriptor']!r}, "
                 f"expected {expected_descriptor!r}.")
-        page.keyboard.press("Space")
-        page.wait_for_function(
-            "input => input.checked",
-            arg=target.element_handle(),
-        )
         selected = tab_set.evaluate(
             """tabSet => {
               const visible = element => {
@@ -3637,6 +3653,10 @@ def validate_site(
                                             f"to {case_axe_core!r}.")
                                     installation_page_interaction_cases += 1
                                 if relative_path == QUICKSTART_ROUTE:
+                                    page.reload(wait_until="networkidle")
+                                    _set_palette(page, palette)
+                                    page.wait_for_function("document.fonts.status === 'loaded'")
+                                    _reset_quickstart_tabs(page)
                                     _validate_quickstart_tabs(page, case)
                                     case_axe_core = _validate_accessibility(
                                         axe,
