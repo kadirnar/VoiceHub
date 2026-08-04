@@ -1977,6 +1977,14 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         ):
             self.assertIn(fragment, checker)
 
+        hamming_ratio_match = re.search(
+            r"^SCREENSHOT_MAX_HAMMING_RATIO = (?P<ratio>[0-9.]+)$",
+            checker,
+            flags=re.MULTILINE,
+        )
+        self.assertIsNotNone(hamming_ratio_match)
+        self.assertLess(float(hamming_ratio_match.group("ratio")), 0.10)
+
         pyproject = PYPROJECT_PATH.read_text(encoding="utf-8")
         self.assertIn('"pillow==12.3.0"', pyproject)
         docs_workflow = (REPOSITORY_ROOT / ".github" / "workflows" / "docs.yml").read_text(encoding="utf-8")

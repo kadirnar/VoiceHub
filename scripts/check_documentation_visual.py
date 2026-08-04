@@ -40,7 +40,9 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 SCREENSHOT_BASELINES_PATH = (
     REPOSITORY_ROOT / "tests" / "fixtures" / "documentation_screenshot_signatures.json")
 SCREENSHOT_SIGNATURE_WIDTH = 64
-SCREENSHOT_MAX_HAMMING_RATIO = 0.08
+# Keep the reviewed signatures portable across Chromium's macOS and Linux glyph
+# rasterizers while still rejecting a change to one tenth of the visual hash.
+SCREENSHOT_MAX_HAMMING_RATIO = 0.09
 SCREENSHOT_MAX_MEAN_CHANNEL_DELTA = 6.0
 SCREENSHOT_SCHEMA_VERSION = 1
 
