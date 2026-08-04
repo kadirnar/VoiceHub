@@ -3901,3 +3901,37 @@ Exact-current remote lint, Linux, macOS, Windows, tagged-workflow, publisher,
 publication, and five hardware gates remain open. No protected action was
 taken, and the untracked `uv.lock` remained unchanged at SHA-256
 `48f7d98d6eab756580348b081e8fc891d3a5dd2847433e41766b3b45854a70b1`.
+
+## Pull-request release-candidate parity evidence
+
+The final comparison refresh retrieved Transformers `main` commit
+`ff2421c67f35cc83a0fbabbc2633c96734685918` on 2026-08-04. VoiceHub
+implementation commit `aead0611b9eafa0e20d32900568c063073976741` is the
+reviewed head of [pull request 73](https://github.com/kadirnar/voicehub/pull/73).
+It changes no approved parity mapping and preserves the modern VoiceHub color
+palette as the only default visual deviation.
+
+Local documentation evidence passed 64 source tests and 1,480 subtests plus a
+complete Playwright 1.62.0/Axe 4.12.1 matrix of 60 rendered and screenshot
+cases, 60 accessibility cases, 342 keyboard cases, and 4,591 focus steps. The
+content-tab regression now validates native radio-group ArrowRight activation
+from a clean route state instead of programmatically focusing an unchecked
+radio while Material's selected-tab animation is still active.
+
+The exact-head [documentation run](https://github.com/kadirnar/voicehub/actions/runs/30875378385)
+passed the strict eleven-language build, ten-route DOM inventory, all eight
+ordered navigation roots, the reviewed Linux screenshot signatures, 60
+accessibility cases, 342 keyboard cases, and 4,587 focus steps. Exact-head
+[package](https://github.com/kadirnar/voicehub/actions/runs/30875378415) and
+[cross-platform CI](https://github.com/kadirnar/voicehub/actions/runs/30875378456)
+also passed wheel/source-distribution/editable validation, Linux/macOS/Windows,
+Python 3.10/3.11/3.12, full-runtime, training, lint, and runtime-smoke gates.
+The generated inventory remains 68 model pages, 59 model notebooks, 261 public
+exports, six optimizations over 408 model/pass pairs, ten representative page
+pairs, and five benchmark records.
+
+Three Triton and two compiled CUDA-extension paths remain hardware-limited and
+unpassed. Pull-request Pages deployment was skipped and is not counted. No tag,
+merge, release, publisher change, or PyPI publication was performed. The
+protected untracked `uv.lock` remained unchanged at SHA-256
+`48f7d98d6eab756580348b081e8fc891d3a5dd2847433e41766b3b45854a70b1`.

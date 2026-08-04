@@ -6580,6 +6580,72 @@ publication approval, and the five hardware gates remain open. No protected
 action was taken, and the untracked `uv.lock` remained unchanged at SHA-256
 `48f7d98d6eab756580348b081e8fc891d3a5dd2847433e41766b3b45854a70b1`.
 
+## Pull-request release-candidate verification
+
+This final candidate iteration retrieved Transformers `main` at commit
+`ff2421c67f35cc83a0fbabbc2633c96734685918` on 2026-08-04; the official
+Transformers documentation route returned HTTP 200. VoiceHub implementation
+commit `aead0611b9eafa0e20d32900568c063073976741` is the reviewed head of
+[pull request 73](https://github.com/kadirnar/voicehub/pull/73) on
+`codex/voicehub-0.3-rc`. The worktree contained only the protected untracked
+`uv.lock`, which retained SHA-256
+`48f7d98d6eab756580348b081e8fc891d3a5dd2847433e41766b3b45854a70b1`.
+
+The local focused Quickstart source regression passed two tests, three
+subtests, and 62 deselections. The complete documentation source suite passed
+64 tests and 1,480 subtests. The final Playwright 1.62.0/Axe 4.12.1 run passed
+60 rendered cases, 60 screenshot signatures, 60 accessibility cases, 342
+keyboard cases, and 4,591 focus steps across ten representative routes, three
+viewports, and two palettes. Every applicable pre-commit hook passed for the
+two changed checker files. Two preceding complete visual commands timed out in
+the Quickstart interaction after exposing state left by the preceding full
+focus cycle; they are failed diagnostic runs and are not counted. The passing
+checker reloads the route before its independent content-tab interaction,
+uses native radio-group ArrowRight activation, waits for focus and selection
+to settle, and retains a one-CSS-pixel fractional viewport tolerance.
+
+Exact-head GitHub Actions then passed every required pull-request job:
+
+- [Documentation run 30875378385](https://github.com/kadirnar/voicehub/actions/runs/30875378385)
+  passed in 45 minutes 34 seconds. Its Python 3.12.13 Linux job passed 64
+  documentation-source tests, the strict eleven-language build in 74.81
+  seconds, the ten-route DOM validator with all eight ordered navigation
+  roots, 60 Linux screenshot signatures, 60 accessibility cases, 342 keyboard
+  cases, and 4,587 focus steps. The Pages deployment job was skipped on the
+  pull request and is not counted as passed.
+- [Package run 30875378415](https://github.com/kadirnar/voicehub/actions/runs/30875378415)
+  passed in 2 minutes 43 seconds. Wheel, source-distribution, and editable
+  validation each found 68 models, 81 provenance manifests, 193 compliance
+  files, all required package data, zero runtime-dependency violations, and no
+  eager PyTorch import. The exact artifacts were a 57,195,308-byte wheel and a
+  55,457,609-byte source distribution. All seven pinned asset/oracle gates,
+  including both WeNet paths, executed and passed separately in this run.
+- [Continuous Integration run 30875378456](https://github.com/kadirnar/voicehub/actions/runs/30875378456)
+  passed lint, training, full-dependency runtime, both cross-platform runtime
+  smokes, and the full suite on Python 3.10, 3.11, and 3.12 on Ubuntu, macOS,
+  and Windows. Every ordinary matrix job executed 2,581 tests and 4,657
+  subtests with 16 explicit skips. The full-dependency job executed 2,584 tests
+  and 4,795 subtests with 13 explicit skips. The separate pre-commit.ci check
+  also passed on the exact head.
+
+The refreshed generated inventories remain 68 models (34 TTS, 23 ASR, and 11
+VAD), 102 aliases, zero invalid display names, 68 model pages, 59 model
+notebooks, six public optimizations over 408 model/pass pairs, ten
+representative page pairs, eight top-level navigation roots, eight contribution
+steps, 261 public exports, and five benchmark records. The direct model-page
+and model-notebook generator checks passed. A bare local public-API generator
+probe lacked the installed VoiceHub/PyTorch runtime and failed before
+validation; it is not a pass and is superseded by the exact-head full-runtime,
+package, and complete-suite jobs above.
+
+Five native-kernel paths remain explicitly unpassed: three Triton tests require
+`VOICEHUB_TEST_TRITON_KERNELS=1` on a Triton CUDA host, and two compiled
+CUDA-extension tests require `VOICEHUB_TEST_CUDA_EXTENSIONS=1` on a CUDA
+toolkit host. No tag or tagged-release workflow was created, the pull request
+was not merged, publisher configuration was not changed, and no GitHub release
+or PyPI publication was attempted. Those maintainer-controlled actions remain
+outside release-candidate verification and require explicit approval.
+
 ## One-time publisher configuration
 
 Before the first 0.3 publication:
