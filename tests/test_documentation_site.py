@@ -1989,9 +1989,20 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn('"pillow==12.3.0"', pyproject)
         docs_workflow = (REPOSITORY_ROOT / ".github" / "workflows" / "docs.yml").read_text(encoding="utf-8")
         self.assertIn('"pillow==12.3.0"', docs_workflow)
-        for workflow_name in ("docs.yml", "release.yml"):
-            workflow = (REPOSITORY_ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
-            self.assertNotIn("--update-screenshot-baselines", workflow)
+        self.assertEqual(docs_workflow.count("--update-screenshot-baselines"), 1)
+        self.assertIn(
+            "> documentation-screenshot-signatures-linux.json",
+            docs_workflow,
+        )
+        self.assertIn("name: documentation-screenshot-signatures-linux", docs_workflow)
+        self.assertLess(
+            docs_workflow.index("--update-screenshot-baselines"),
+            docs_workflow.index("run: python scripts/check_documentation_visual.py site"),
+        )
+
+        release_workflow = (REPOSITORY_ROOT / ".github" / "workflows" /
+                            "release.yml").read_text(encoding="utf-8")
+        self.assertNotIn("--update-screenshot-baselines", release_workflow)
 
     def test_representative_routes_have_a_rendered_axe_accessibility_contract(self):
         checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")

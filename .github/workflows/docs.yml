@@ -54,6 +54,19 @@ jobs:
       - name: Validate rendered documentation DOM
         run: python scripts/check_documentation_dom.py site
 
+      - name: Capture Linux documentation screenshot signatures
+        run: >-
+          python scripts/check_documentation_visual.py site
+          --update-screenshot-baselines
+          > documentation-screenshot-signatures-linux.json
+
+      - name: Upload Linux documentation screenshot signatures
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: documentation-screenshot-signatures-linux
+          path: documentation-screenshot-signatures-linux.json
+          retention-days: 14
+
       - name: Validate responsive documentation and keyboard behavior
         run: python scripts/check_documentation_visual.py site
 
