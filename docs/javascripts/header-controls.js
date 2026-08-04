@@ -366,7 +366,7 @@
       if (!(label instanceof HTMLLabelElement)) return;
 
       input.addEventListener("focus", () => {
-        label.scrollIntoView({ block: "nearest", inline: "nearest" });
+        label.scrollIntoView({ behavior: "instant", block: "nearest", inline: "nearest" });
         label.classList.add("vh-content-tab--focus");
       });
       input.addEventListener("blur", () => {
