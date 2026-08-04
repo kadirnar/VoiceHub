@@ -2,8 +2,10 @@
   <title id="title">VoiceHub waveform</title>
   <defs>
     <linearGradient id="voicehub-gradient" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#8b5cf6"/>
-      <stop offset="1" stop-color="#1fb6c9"/>
+      <stop stop-color="#86198f"/>
+      <stop offset="0.34" stop-color="#be123c"/>
+      <stop offset="0.68" stop-color="#c2410c"/>
+      <stop offset="1" stop-color="#047857"/>
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="15" fill="url(#voicehub-gradient)"/>
