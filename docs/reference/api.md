@@ -8,6 +8,9 @@ This page documents the public Python surface exported by `voicehub`. VoiceHub
 keeps registry discovery and configuration lightweight; model runtimes and
 PyTorch are imported only when the selected operation needs them.
 
+For the generated object-by-object source, signature, summary, and lazy-export
+map, see the [public exports inventory](public-api.md).
+
 The default package installs every built-in inference runtime. Add the
 independent `training` extra for fine-tuning:
 
@@ -28,6 +31,7 @@ python -m pip install "voicehub[training]"
 | --- | --- |
 | Discovery | `list_model_specs()`, `SpeechTask`, `AutoInferenceModel.available_models()`, `ModelSpec` |
 | Configuration | `AutoConfig`, `VoiceHubConfig`, `AutoProcessor`, `VoiceHubProcessor`, `AudioProcessor` |
+| Task pipeline | `pipeline()`, `Pipeline`, `TextToSpeechPipeline`, `AutomaticSpeechRecognitionPipeline`, `VoiceActivityDetectionPipeline` |
 | TTS inference | `AutoModelForTextToSpeech`, `TTSGenerationConfig`, `TTSOutput` |
 | ASR inference | `AutoModelForSpeechRecognition`, `ASRInferenceConfig`, `ASROutput` |
 | VAD inference | `AutoModelForVoiceActivityDetection`, `VADInferenceConfig`, `VADOutput` |
@@ -105,6 +109,7 @@ for spec in AutoInferenceModel.available_models():
 | `model_type` | Canonical model identifier used by factories |
 | `module` / `class_name` | Lazy import target for the model wrapper |
 | `config_module` / `config_class` | Lazy import target for its configuration |
+| `processor_module` / `processor_class` | Lazy import target for its task-default or explicitly registered processor |
 | `default_model_path` | Default Hub identifier or local artifact name |
 | `install_extra` | `None` for built-in inference; optional setup identifier reserved for external/future runtimes |
 | `capabilities` | Open capability tokens. `fine-tuning` is family-level; `default-checkpoint-inference-only` means the training profile names a different differentiable starting checkpoint. |
@@ -141,7 +146,10 @@ AutoConfig.from_pretrained(
 
 Pass `model_type` when the source cannot identify its architecture, including a
 raw checkpoint file. When `model_type` is omitted, `config.json` must contain
-it.
+it. Loader options such as `subfolder`, `cache_dir`, `revision`, `token`, and
+`local_files_only` apply to both automatic model-type discovery and the
+concrete configuration load. Pass those options through `config_kwargs` when
+using an auto model or processor factory.
 
 ```python
 from voicehub import AutoConfig
@@ -170,7 +178,25 @@ VoiceHubConfig(
 ```
 
 Concrete integrations normally provide a subclass with a canonical
-`model_type`. Additional keyword arguments are retained as attributes.
+`model_type`. Additional keyword arguments are retained as attributes, but
+credential-shaped fields are not configuration data. Construction rejects
+top-level or nested runtime secrets, and dictionary, diff, JSON, representation,
+and file serialization revalidate the final payload. A top-level Hub `token`
+accepted by a concrete loader remains runtime-only and is omitted; fields such
+as `pad_token_id` remain normal serializable model settings. Pass credentials
+only to `from_pretrained()` or the model constructor.
+
+Hub API responses and VoiceHub's cached file and snapshot metadata use the
+same strict JSON decoder as local configuration artifacts. Duplicate object
+keys and non-finite numbers are rejected before a remote commit or repository
+tree is interpreted. Ambiguous cache metadata is treated as a cache miss, and
+diagnostics include the source context without including discarded values or
+authentication tokens.
+
+The shared declarative Byte-BPE and SentencePiece-BPE tokenizer loaders apply
+the same policy before interpreting the model graph, vocabulary, merges, or
+added tokens. Their existing byte, token, merge, nesting, and node limits still
+apply after strict JSON decoding.
 
 | Method | Contract |
 | --- | --- |
@@ -196,14 +222,22 @@ AutoProcessor.from_pretrained(
     *,
     model_type: str | None = None,
     config: VoiceHubConfig | None = None,
+    config_kwargs: Mapping[str, object] | None = None,
     **kwargs,
 ) -> VoiceHubProcessor
 ```
 
 `from_config()` selects the processor class registered by the model wrapper.
-`from_pretrained()` restores `processor_config.json` from a local VoiceHub
-artifact when present. Pass `model_type` or `config` when the source does not
-provide a VoiceHub `config.json`.
+`from_pretrained()` delegates a local directory, direct
+`processor_config.json`, or Hub source to that processor's artifact loader.
+The base processor falls back to construction options when its optional
+processor configuration is absent. Pass `model_type` or `config` when the
+source does not provide a VoiceHub `config.json`. Use `config_kwargs` for
+configuration loading or overrides such as `revision` and
+`local_files_only`; supported Hub loader values are reused for processor
+artifact resolution without becoming processor state. Remaining keyword
+arguments are reserved for processor construction and restoration. Pass either
+a complete `config` or `config_kwargs`, not both.
 
 The base `VoiceHubProcessor` API is:
 
@@ -219,6 +253,14 @@ Architecture-specific processors may perform additional validation or
 conversion. `BatchFeature` is a dictionary whose `.to(device)` method moves
 tensor-like values in place.
 
+Processor artifacts contain construction settings, not credentials.
+Construction and untrusted `processor_config.json` loading reject top-level or
+nested runtime secrets, and dictionary conversion rechecks mutable state.
+`save_pretrained()` also validates the final mapping returned by a subclass,
+so a rejected save creates neither the processor file nor its artifact
+directory. Hub `token` values remain loader-only, while ordinary settings such
+as `normalization` round-trip normally.
+
 Audio-input ASR and VAD models use `AudioProcessor`:
 
 ```python
@@ -233,6 +275,50 @@ processor(
 It validates the dependency-light input envelope. `load_audio()` performs
 decoding, mono downmixing, and optional resampling lazily when inference
 begins.
+
+## Pipeline
+
+`pipeline()` selects the task-specific auto factory and preserves the model's
+normalized `TTSOutput`, `ASROutput`, or `VADOutput`:
+
+```python
+pipeline(
+    task: SpeechTask | str,
+    model=None,
+    *,
+    model_type: str | None = None,
+    config: VoiceHubConfig | None = None,
+    device: str | None = None,
+    inference_strategy: str | InferenceStrategy | None = None,
+    config_kwargs: Mapping[str, object] | None = None,
+    model_kwargs: Mapping[str, object] | None = None,
+) -> Pipeline
+```
+
+Pass a repository ID or local artifact as `model` to load it through
+`AutoModelForTextToSpeech`, `AutoModelForSpeechRecognition`, or
+`AutoModelForVoiceActivityDetection`. Passing `None` selects the registry
+default for the task when one is declared. Loading remains lazy unless
+`model_kwargs={"lazy_load": False}` is explicit.
+
+An already configured model object can be wrapped without changing its device
+or runtime state:
+
+```python
+from voicehub import pipeline
+
+speech_pipeline = pipeline("tts", model=model)
+output = speech_pipeline("A normalized pipeline output.")
+speech_pipeline.load()
+speech_pipeline.save_pretrained("artifacts/model")
+```
+
+Task aliases are normalized by `SpeechTask.coerce()`. A registry-owned model
+must match the requested task and implement its callable contract:
+`generate()` for TTS, `transcribe()` for ASR, or `detect()` for VAD.
+`Pipeline.processor`, `.device`, and `.model_type` expose the wrapped model's
+declared values. See the [Pipeline guide](../guides/inference.md) for complete
+workflows and the explicit batching boundary.
 
 ## Model factories
 
@@ -357,6 +443,14 @@ Audio-input pretrained models provide:
 | `stream(*, sampling_rate, **kwargs)` | Create an isolated session; the base session buffers until `flush()` |
 | `load()` / `load_for_training()` | Enter the inference or differentiable lifecycle |
 | `save_pretrained(directory, include_native_export=True)` | Save configuration, inference configuration, processor, and optional native export |
+
+`ASRInferenceConfig` and `VADInferenceConfig` are safe to persist as public
+task settings. Construction and untrusted checkpoint loading reject nested or
+top-level credentials, and dictionary conversion rechecks mutable state.
+Representation and `save_pretrained()` also validate the final serialized
+payload, so an unsafe subclass fails before a task configuration file or its
+artifact directory is created. Hub `token` values remain runtime-only, while
+ordinary inference fields such as `max_new_tokens` round-trip normally.
 
 See the [ASR guide](../guides/speech-recognition.md),
 [VAD guide](../guides/voice-activity-detection.md), and
@@ -522,6 +616,14 @@ The configuration is extensible: extra keyword arguments are retained for a
 backend. A common field is not a promise that every backend implements it.
 Generation input validation rejects unsupported options when the backend
 exposes a finite generation signature.
+
+Credential-shaped values are runtime state, not generation defaults.
+Construction and checkpoint loading reject top-level or nested secrets;
+dictionary, representation, and file serialization revalidate the payload.
+The Hub `token` accepted by `from_pretrained()` is used only to resolve the
+artifact and is never stored. Model settings such as `pad_token_id`,
+`eos_token_id`, and `max_new_tokens` remain serializable. Pass credentials to
+the model or loader call instead of `TTSGenerationConfig`.
 
 Generation values are merged in this exact order, with later sources winning:
 
@@ -1194,6 +1296,14 @@ declarations do not register executable pass factories. Use
 reversible. `OptimizationResult.portable_state_dict(model=None)` returns
 canonical save state, optionally from a strategy-unwrapped execution handle.
 
+Optimization manifests are portable artifacts, not credential stores. The
+shared strict-JSON boundary rejects nested credential-shaped fields in pass
+configuration before mutation, in result metadata before publishing an
+application, and in mutable runtime status before manifest output. Invalid
+result metadata rolls the pass back. Descriptive fields such as `token_count`
+remain serializable; pass credentials through a runtime-only constructor or
+loader boundary.
+
 Register extension passes globally with a function or decorator:
 
 ```python
@@ -1666,6 +1776,14 @@ arguments.save_json(path) -> Path
 TrainingArguments.from_json_file(path)
 ```
 
+Training arguments and their subclasses are portable configuration, not a
+credential store. Construction, untrusted JSON loading, dictionary/string
+conversion, file writes, and `Trainer.save_model()` preflight reject nested
+credential-shaped fields. Keep Hub and reporting credentials in their
+runtime-only loader, SDK, or environment boundary; safe metadata such as
+`token_count` remains serializable. Loading also rejects duplicate object keys
+and non-finite numbers before constructing the argument object.
+
 `device` resolves to CPU when `use_cpu=True`; otherwise it selects CUDA, MPS,
 then CPU.
 
@@ -1825,6 +1943,29 @@ Stateful callbacks should return exact-continuation configuration from
 `resume_fingerprint()`, mutable checkpoint state from `state_dict()`, and
 restore it in `load_state_dict()`.
 
+Exact-resume fingerprints and checkpoint manifests are portable artifacts,
+not credential stores. Dataset, collator, callback, optimizer, and scheduler
+fingerprints reject nested credential-shaped fields after normalization. The
+complete manifest is checked again before its atomic write, including values
+added by a `Trainer` subclass, and untrusted manifests are checked before any
+model or runtime state is restored. Trainer-owned model, optimizer, scheduler,
+random-generator, gradient-scaler, callback, sampler, and strategy state
+mappings are checked at their final binary write boundary. They are checked
+again after deserialization and before `load_state_dict()` or any other
+checkpoint state application. Keep credentials in runtime-only model or
+service configuration. Safe identity and metric fields such as `dataset_id`
+and `token_count` remain valid fingerprint and checkpoint data.
+
+Checkpoint discovery and restoration reject duplicate keys and non-finite
+numbers in the checkpoint, optimization, and Trainer-state JSON documents.
+Discovery ignores such an invalid candidate, and explicit resume fails with
+the artifact source and duplicate key or numeric path before model or runtime
+state restoration.
+
+The post-deserialization check does not make Python pickle safe. Resume only
+from a trusted VoiceHub checkpoint, and retain the versioned manifest and its
+file-integrity records.
+
 `EarlyStoppingCallback` is provided:
 
 ```python
@@ -1846,6 +1987,14 @@ optionally uploads complete model artifacts, and closes only runs it owns.
 `max_steps`, interval values, `log_history`, best metric/checkpoint, and exact
 dataloader cursor fields. Use `save_to_json(path)` and
 `TrainerState.load_from_json(path)` for state-only serialization.
+
+Trainer logs and state files are portable artifacts, not credential stores.
+`Trainer.log()`, `TrainerState` construction, untrusted state loading, and the
+final state write reject nested credential-shaped fields before callback
+dispatch, state mutation, or filesystem creation. Keep access tokens and
+provider credentials in runtime-only model or service configuration. Metric
+names such as `token_count` remain valid. State loading also rejects duplicate
+keys and non-finite values before constructing `TrainerState`.
 
 ## Data collators
 
@@ -2088,6 +2237,18 @@ or import a simple Kaldi/ESPnet `wav.scp` plus `text` directory. Native
 preprocessors decode PCM WAVE; custom transforms can materialize other
 encodings. Kaldi shell pipelines are rejected.
 
+JSON objects in JSON manifests, JSON Lines records, and JSON-shaped CSV/TSV
+fields use the shared strict decoder. Duplicate keys, `NaN`, infinities, and
+numeric overflow fail before dataset construction with file, line, and field
+context where available. A malformed JSON-shaped tabular value remains a
+string for backward-compatible scalar coercion. A `.json` file falls back to
+NeMo-style JSON Lines only after a syntax error, never after a strict-decoder
+violation.
+
+ASR manifest loading and `to_jsonl()` apply the same credential boundary as
+TTS. Nested credentials fail before dataset construction or destination
+mutation, while descriptive fields such as `token_count` remain portable.
+
 The dataset exposes:
 
 | Member | Contract |
@@ -2169,6 +2330,18 @@ record variants, performs deterministic group-disjoint splits, writes portable
 JSON Lines, and fingerprints normalized record content and order. Ordered
 source/target pairs override shared aliases; an identity pair preserves a
 model-canonical field spelling.
+
+JSON objects in JSON manifests, JSON Lines records, and JSON-shaped CSV/TSV
+fields use the shared strict decoder. Duplicate keys, `NaN`, infinities, and
+numeric overflow fail before dataset construction with file, line, and field
+context where available. A malformed JSON-shaped tabular value remains a
+string for backward-compatible scalar coercion.
+
+Portable dataset manifests are not credential stores. TTS manifest loading and
+`to_jsonl()` reject nested credential-shaped fields; export validates and
+serializes every record before creating or truncating the destination. Keep
+dataset-service credentials in runtime-only loaders. Descriptive metadata such
+as `token_count` remains portable.
 
 `with_batching(config)` returns a new dataset with an immutable
 `TTSBatchingConfig`. `Trainer` then requests an `EpochLengthBatchSampler`
@@ -2498,9 +2671,52 @@ native_export/             # optional, backend-defined
 Exactly one of the three task configuration files is written by a normal
 task-specific wrapper.
 
+JSON documents routed through the shared configuration, processor, native-
+export, or Trainer writer are encoded as finite JSON before their parent
+directory is created. The encoded document is flushed to a temporary sibling
+and atomically replaces the destination. A serialization or replacement
+failure therefore preserves an existing document and removes the temporary
+file. This is a per-document guarantee; a backend that writes several native
+files must still use its staging-directory or manifest contract for an atomic
+multi-file export.
+
+The shared reader rejects duplicate object keys, `NaN`, positive or negative
+`Infinity`, and exponent overflow before configuration or model dispatch,
+Trainer object construction, checkpoint discovery, or exact-resume state
+restoration. Diagnostics identify the source and duplicate key or numeric path
+without printing discarded values. Ordinary JSON syntax errors retain their
+parser error type, and finite descriptive metadata such as `token_count`
+continues to round-trip.
+
+Shared JSON artifacts are also bounded to 64 MiB before decoding. Internal
+loaders that own a smaller format may lower the byte ceiling explicitly. A file
+that is already larger than the ceiling, or grows past it while being read,
+fails with source and size-or-limit context without including document content.
+
+The same strict decoder protects `VoiceHubManifest.load()`, bounded
+Safetensors headers, and sharded Safetensors indexes. Ambiguous or non-finite
+checkpoint metadata therefore fails before manifest construction, tensor
+materialization, or shard lookup. Valid deterministic Safetensors files and
+manifest metadata retain their existing format.
+
+Portable `model_state.pt` restoration also validates the sibling `config.json`
+through this decoder even when the caller supplies an explicit configuration.
+Both the TTS and audio-input base loaders fail before wrapper construction on
+an ambiguous artifact, while a valid saved `name_or_path` continues to restore
+the original base-checkpoint identity.
+
 The common method does not itself write a generic `model_state.pt`.
 Backend-specific `_save_pretrained()` hooks may write native artifacts under
 `native_export/`.
+
+Native artifacts use `VoiceHubManifest` for portable architecture, checkpoint,
+provenance, file-integrity, and additional metadata. Manifest `metadata` must
+contain finite JSON values and cannot contain top-level or nested
+credential-shaped fields. Construction, untrusted manifest loading,
+`to_dict()`, and `save()` all enforce that boundary, including the final
+mapping returned by a subclass. Pass credentials only at runtime; a rejected
+save creates neither `voicehub_manifest.json` nor a temporary manifest file.
+Legitimate descriptive fields such as `token_count` remain serializable.
 
 ### Portable trained artifact
 
@@ -2527,10 +2743,18 @@ native_export/             # optional; semantics declared by the adapter
 
 `model_state.pt` contains canonical state for a fresh runtime. The training
 recipe manifest records model family, recipe identity, phases, base model, and
-native-export semantics. If an active topology/name-changing pass has no
-declared canonical export, the default portable save fails before writing the
-artifact. `portable=False` is reserved for Trainer's exact checkpoint path,
-which may store persistent transformed state for same-plan resume.
+native-export semantics. It is not a credential store: the exact mapping
+returned by an adapter is checked before model or native-export state is
+written or the destination is created, and the final mapping is checked again
+before output. On reload, every public pretrained speech-model base checks the
+deserialized mapping again before adapter or runtime `load_state_dict()` can
+mutate the fresh model. This credential check does not make Python pickle a
+safe untrusted-input format; load only trusted VoiceHub artifacts. Safe
+metadata such as `token_count` remains serializable. If an active
+topology/name-changing pass has no declared canonical export, the default
+portable save fails before writing the artifact. `portable=False` is reserved
+for Trainer's exact checkpoint path, which may store persistent transformed
+state for same-plan resume.
 
 Reload through the matching checkpoint-first factory:
 

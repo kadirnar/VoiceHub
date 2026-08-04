@@ -54,12 +54,16 @@
           {% include ".icons/" ~ icon ~ ".svg" %}
         </button>
       </nav>
+      <kbd class="vh-search-shortcut" data-vh-search-shortcut aria-hidden="true">
+        <span data-vh-search-shortcut-primary>⌘K</span>
+        <span class="vh-search-shortcut__expanded">ESC</span>
+      </kbd>
       {% if "search.suggest" in features %}
         <div class="md-search__suggest" data-md-component="search-suggest"></div>
       {% endif %}
     </form>
     <div class="md-search__output">
-      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+      <div class="md-search__scrollwrap" tabindex="-1" data-md-scrollfix>
         <div class="md-search-result" data-md-component="search-result">
           <div class="md-search-result__meta">
             {{ lang.t("search.result.initializer") }}

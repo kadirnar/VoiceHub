@@ -8,11 +8,11 @@ description: VoiceHub documentation for unified TTS, ASR, and VAD inference, dat
   <img src="assets/voicehub-mark.svg" alt="">
 </p>
 
-# VoiceHub: One Speech Model Lifecycle
+# VoiceHub
 
 <p class="vh-doc-tagline">
-  A task-aware Python library for inference, data preparation, and
-  model-specific fine-tuning across modern TTS, ASR, and VAD families.
+  One speech model lifecycle for inference, data preparation, and
+  architecture-aware fine-tuning across modern TTS, ASR, and VAD families.
 </p>
 
 <div class="vh-doc-teaser" role="img" aria-label="Text passes through a VoiceHub model adapter and becomes an audio waveform">
@@ -49,8 +49,6 @@ description: VoiceHub documentation for unified TTS, ASR, and VAD inference, dat
   </a>
 </p>
 
-## What is VoiceHub?
-
 VoiceHub presents text-to-speech, automatic speech recognition, and voice
 activity detection through shared configuration, processor, model, typed
 output, and trainer APIs. Implementations remain architecture-aware: codec
@@ -72,6 +70,42 @@ installed with VoiceHub. Checkpoint weights are downloaded lazily or provided
 as local paths. Add only `voicehub[training]` for fine-tuning and reporting.
 The Apache-2.0 license covers VoiceHub itself; integrated source, checkpoints,
 codecs, datasets, and generated audio may have separate terms.
+
+## Features
+
+VoiceHub provides the shared lifecycle needed for inference and training with
+pretrained speech models. Its main entry points are:
+
+- [Pipeline](guides/inference.md): discover a TTS, ASR, or VAD integration,
+  load its checkpoint, and receive a normalized task output.
+- [Trainer](guides/trainer.md): validate training support before delegating to
+  an integration's native objective, checkpoint, and evaluation boundaries.
+- [generate](reference/api.md#generation): configure reproducible speech
+  generation while preserving model-specific conditioning and output rules.
+
+## Design
+
+!!! tip
+    Read the [library architecture](concepts/architecture.md) to see how the
+    registry, task factories, processors, models, and portable artifacts fit
+    together.
+
+VoiceHub is designed for speech-model users, integration authors, and training
+engineers. Its main design principles are:
+
+1. **Fast and easy to use:** each registered integration exposes a focused
+   configuration, model, and processor contract, then enters inference or
+   training through `Pipeline` or `Trainer`.
+2. **Pretrained models:** reuse checkpoint artifacts through explicit
+   provenance, license, optional-dependency, hardware, and verification
+   boundaries instead of hiding provider-specific requirements.
+
+## Learn
+
+Start with the [Quickstart](getting-started/quickstart.md) for the shortest
+working TTS, ASR, and VAD paths. Continue with a focused guide or reference
+below when you need deeper lifecycle, training, optimization, or contribution
+details.
 
 <div class="grid cards" markdown>
 

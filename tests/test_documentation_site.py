@@ -32,27 +32,50 @@ MODEL_NOTEBOOK_GENERATOR_PATH = REPOSITORY_ROOT / "scripts" / "generate_model_no
 MODEL_PAGE_DIR = DOCS_ROOT / "models" / "providers"
 MODEL_PAGE_INDEX_PATH = MODEL_PAGE_DIR / "index.md"
 MODEL_PAGE_GENERATOR_PATH = REPOSITORY_ROOT / "scripts" / "generate_model_pages.py"
+DOCUMENTATION_DOM_CHECK_PATH = REPOSITORY_ROOT / "scripts" / "check_documentation_dom.py"
+DOCUMENTATION_VISUAL_CHECK_PATH = REPOSITORY_ROOT / "scripts" / "check_documentation_visual.py"
+DOCUMENTATION_SCREENSHOT_BASELINES_PATH = (
+    REPOSITORY_ROOT / "tests" / "fixtures" / "documentation_screenshot_signatures.json")
 ADDING_MODEL_PATH = DOCS_ROOT / "project" / "adding-a-model.md"
+INSTALLATION_PATH = DOCS_ROOT / "getting-started" / "installation.md"
+QUICKSTART_PATH = DOCS_ROOT / "getting-started" / "quickstart.md"
+INFERENCE_GUIDE_PATH = DOCS_ROOT / "guides" / "inference.md"
+TRAINER_OVERVIEW_PATH = DOCS_ROOT / "guides" / "trainer.md"
+OPTIMIZATION_OVERVIEW_PATH = DOCS_ROOT / "guides" / "optimization-overview.md"
+MODEL_API_PATH = DOCS_ROOT / "reference" / "models.md"
 NOTEBOOK_GALLERY_PATH = DOCS_ROOT / "guides" / "notebook.md"
 README_PATH = REPOSITORY_ROOT / "README.md"
+HOME_PATH = DOCS_ROOT / "index.md"
 PYPROJECT_PATH = REPOSITORY_ROOT / "pyproject.toml"
 THEME_OVERRIDE_PATH = REPOSITORY_ROOT / "overrides" / "main.html"
+HEADER_OVERRIDE_PATH = REPOSITORY_ROOT / "overrides" / "partials" / "header.html"
+SEARCH_OVERRIDE_PATH = REPOSITORY_ROOT / "overrides" / "partials" / "search.html"
+LANGUAGE_OVERRIDE_PATH = REPOSITORY_ROOT / "overrides" / "partials" / "alternate.html"
+PALETTE_OVERRIDE_PATH = REPOSITORY_ROOT / "overrides" / "partials" / "palette.html"
+SOURCE_OVERRIDE_PATH = REPOSITORY_ROOT / "overrides" / "partials" / "source.html"
 STYLESHEET_PATH = DOCS_ROOT / "stylesheets" / "extra.css"
+HEADER_CONTROL_SCRIPT_PATH = DOCS_ROOT / "javascripts" / "header-controls.js"
+PAGE_ACTION_SCRIPT_PATH = DOCS_ROOT / "javascripts" / "page-actions.js"
 MOBILE_DRAWER_SCRIPT_PATH = DOCS_ROOT / "javascripts" / "mobile-drawer.js"
+PAGE_ACTIONS_OVERRIDE_PATH = REPOSITORY_ROOT / "overrides" / "partials" / "actions.html"
 PUBLIC_SITE_URL = "https://kadirnar.github.io/voicehub/"
 LOCALIZED_HOME_LOCALES = ("ar", "de", "es", "fr", "ja", "ko", "pt", "ru", "tr", "zh")
 TOP_LEVEL_NAVIGATION = (
     "Get started",
-    "Models",
-    "Guides",
-    "API reference",
-    "Project",
+    "Base classes",
+    "Inference",
+    "Training",
+    "Quantization and optimization",
+    "Ecosystem integrations",
+    "Resources",
+    "API",
 )
 GUIDE_PATHS = (
     DOCS_ROOT / "getting-started" / "quickstart.md",
     DOCS_ROOT / "guides" / "inference.md",
     DOCS_ROOT / "guides" / "speech-recognition.md",
     DOCS_ROOT / "guides" / "voice-activity-detection.md",
+    DOCS_ROOT / "guides" / "optimization-overview.md",
     DOCS_ROOT / "guides" / "tts-optimization.md",
     DOCS_ROOT / "guides" / "data-preparation.md",
     DOCS_ROOT / "guides" / "speech-data.md",
@@ -64,12 +87,13 @@ CONCISE_GUIDE_PATHS = (
     DOCS_ROOT / "guides" / "speech-recognition.md",
     DOCS_ROOT / "guides" / "voice-activity-detection.md",
     DOCS_ROOT / "guides" / "training.md",
+    DOCS_ROOT / "guides" / "optimization-overview.md",
     DOCS_ROOT / "guides" / "tts-optimization.md",
 )
 PROCESS_PAGE_STEPS = (
     (DOCS_ROOT / "guides" / "index.md", 7),
     (DOCS_ROOT / "guides" / "data-preparation.md", 6),
-    (ADDING_MODEL_PATH, 7),
+    (ADDING_MODEL_PATH, 8),
 )
 NAVIGATION_PATHS = (
     "index.md",
@@ -81,7 +105,9 @@ NAVIGATION_PATHS = (
     "guides/voice-activity-detection.md",
     "guides/data-preparation.md",
     "guides/speech-data.md",
+    "guides/trainer.md",
     "guides/training.md",
+    "guides/optimization-overview.md",
     "guides/rtx-5090-tts-benchmarks.md",
     "guides/notebook.md",
     "models/index.md",
@@ -97,6 +123,9 @@ NAVIGATION_PATHS = (
     "project/transformers-parity.md",
     "project/translations.md",
     "project/model-audit.md",
+    "reference/models.md",
+    "reference/public-api.md",
+    "reference/api.md",
 )
 PUBLIC_ROUTES = (
     "guides/inference/",
@@ -115,11 +144,13 @@ MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 HTML_HREF = re.compile(r"""href=["']([^"']+)["']""")
 PYTHON_BLOCK = re.compile(r"```python\n(.*?)```", re.DOTALL)
 MODEL_PAGE_SECTIONS = (
+    "Usage",
     "Overview",
-    "Quickstart",
-    "Supported tasks and capabilities",
-    "Checkpoints, provenance, and license",
-    "Optimization and training support",
+    "Configuration",
+    "Processing",
+    "Inference",
+    "Training and optimization",
+    "Checkpoints, provenance, license, and limitations",
     "Public API",
 )
 
@@ -262,6 +293,8 @@ class DocumentationSiteTests(unittest.TestCase):
 
         notebook_generator = runpy.run_path(str(MODEL_NOTEBOOK_GENERATOR_PATH))
         checkpoint_documentation = notebook_generator["checkpoint_documentation"]
+        generator = runpy.run_path(str(MODEL_PAGE_GENERATOR_PATH))
+        module_source_path = generator["_module_source_path"]
         specs = tuple(list_model_specs(task=None))
         expected_paths = {MODEL_PAGE_DIR / f"{spec.model_type}.md": spec for spec in specs}
         self.assertEqual(
@@ -275,13 +308,14 @@ class DocumentationSiteTests(unittest.TestCase):
         for path, spec in expected_paths.items():
             with self.subTest(model_type=spec.model_type):
                 source = path.read_text(encoding="utf-8")
-                self.assertIn(f"# `{spec.model_type}` model guide", source)
+                self.assertIn(f"# {spec.display_name}", source)
+                self.assertIn(f"`{spec.model_type}`", source)
                 sections = tuple(
                     line.removeprefix("## ") for line in source.splitlines() if line.startswith("## "))
                 self.assertEqual(sections, MODEL_PAGE_SECTIONS)
                 self.assertLessEqual(
                     len(source.splitlines()),
-                    150,
+                    250,
                     f"{path.name} should link shared workflows instead of repeating them.",
                 )
                 self.assertIn(spec.task.value.replace("-", " "), source.lower())
@@ -290,7 +324,19 @@ class DocumentationSiteTests(unittest.TestCase):
                 self.assertIn("Source provenance", source)
                 self.assertIn("available_optimization_passes", source)
                 self.assertIn(spec.config_class, source)
-                self.assertIn(f"[`{spec.model_type}`]({path.name})", index)
+                for fragment in (
+                        "### Limitations",
+                        "Optional dependency extra",
+                        "Hardware and runtime",
+                        "Real-checkpoint evidence",
+                        "https://github.com/kadirnar/voicehub/blob/main/",
+                ):
+                    self.assertIn(fragment, source)
+                for module in (spec.config_module, spec.module):
+                    source_path = module_source_path(module)
+                    self.assertTrue((REPOSITORY_ROOT / source_path).is_file())
+                    self.assertIn(source_path.as_posix(), source)
+                self.assertIn(f"[`{spec.display_name}`]({path.name})", index)
                 self.assertEqual(
                     config.count(f"models/providers/{path.name}"),
                     1,
@@ -306,9 +352,9 @@ class DocumentationSiteTests(unittest.TestCase):
                         source,
                     )
                 examples = PYTHON_BLOCK.findall(source)
-                self.assertTrue(examples)
-                quickstart = source.split("## Quickstart", 1)[1].split(
-                    "## Supported tasks and capabilities",
+                self.assertGreaterEqual(len(examples), 4)
+                quickstart = source.split("## Usage", 1)[1].split(
+                    "## Overview",
                     1,
                 )[0]
                 self.assertTrue(PYTHON_BLOCK.findall(quickstart))
@@ -318,12 +364,136 @@ class DocumentationSiteTests(unittest.TestCase):
                         filename=f"{path.name}:python-block-{example_index}",
                     )
 
-        generator = runpy.run_path(str(MODEL_PAGE_GENERATOR_PATH))
         generated_files = generator["generated_files"]()
         self.assertEqual(generator["check_generated_files"](generated_files), ())
         self.assertIn("- Text to speech:", config)
         self.assertIn("- Automatic speech recognition:", config)
         self.assertIn("- Voice activity detection:", config)
+
+    def test_model_index_matches_transformers_auto_classes_contract(self):
+        from voicehub import list_model_specs
+
+        specs = tuple(list_model_specs(task=None))
+        self.assertEqual(len(specs), 68)
+        index = MODEL_PAGE_INDEX_PATH.read_text(encoding="utf-8")
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+
+        headings = (
+            "# Auto Classes",
+            "## Choose an Auto class",
+            "## AutoConfig",
+            "## AutoProcessor",
+            "## Task-specific AutoModel classes",
+            "## Registered models",
+            "### Text to speech",
+            "### Automatic speech recognition",
+            "### Voice activity detection",
+        )
+        positions = tuple(index.index(heading) for heading in headings)
+        self.assertEqual(positions, tuple(sorted(positions)))
+        for fragment in (
+                "from voicehub import (",
+                "AutoConfig",
+                "AutoModelForSpeechRecognition",
+                "AutoModelForTextToSpeech",
+                "AutoModelForVoiceActivityDetection",
+                "AutoProcessor",
+                ".available_models()",
+                "from_pretrained(",
+                "same eight required sections",
+        ):
+            self.assertIn(fragment, index)
+        self.assertNotIn("same six required sections", index)
+        self.assertIn("- Auto Classes: models/providers/index.md", config)
+        for example_index, example in enumerate(PYTHON_BLOCK.findall(index), start=1):
+            ast.parse(
+                textwrap.dedent(example),
+                filename=f"models/providers/index.md:python-block-{example_index}",
+            )
+
+        for spec in specs:
+            with self.subTest(model_type=spec.model_type):
+                self.assertTrue(spec.display_name[0].isupper())
+                self.assertNotEqual(spec.display_name, spec.model_type)
+                page = (MODEL_PAGE_DIR / f"{spec.model_type}.md").read_text(encoding="utf-8")
+                self.assertIn(f"# {spec.display_name}", page)
+                self.assertIn(f"[`{spec.display_name}`]({spec.model_type}.md)", index)
+                self.assertIn(
+                    f'- "{spec.display_name}": models/providers/{spec.model_type}.md',
+                    config,
+                )
+
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "MODEL_INDEX_ROUTE",
+                "MODEL_INDEX_HEADINGS",
+                "MODEL_INDEX_TABLE_ROWS",
+                "def _validate_model_index_state(",
+                "def _validate_model_index_page_copy(",
+                '"model_index_cases"',
+                '"model_index_interaction_cases"',
+        ):
+            self.assertIn(fragment, checker)
+
+    def test_speecht5_model_detail_matches_transformers_contract(self):
+        source = (MODEL_PAGE_DIR / "speecht5.md").read_text(encoding="utf-8")
+        headings = (
+            "# SpeechT5",
+            "## Usage",
+            "## Overview",
+            "## Configuration",
+            "## Processing",
+            "## Inference",
+            "## Training and optimization",
+            "## Checkpoints, provenance, license, and limitations",
+            "### Limitations",
+            "## Public API",
+            "### `SpeechT5Config`",
+            "### `SpeechT5ForTextToSpeech`",
+        )
+        positions = tuple(source.index(heading) for heading in headings)
+        self.assertEqual(positions, tuple(sorted(positions)))
+        self.assertEqual(
+            next(line for line in source.splitlines() if line.startswith("## ")),
+            "## Usage",
+        )
+
+        for fragment in (
+                "from voicehub import AutoConfig",
+                "from voicehub import AutoProcessor",
+                "AutoModelForTextToSpeech.from_pretrained(",
+                "SpeechT5Config(**config_kwargs)",
+                "AutoProcessor.from_pretrained(",
+                "model_type='speecht5'",
+                "Normalized output",
+                "Optional dependency extra",
+                "Checkpoint status",
+                "Hardware and runtime",
+                "Real-checkpoint evidence",
+                "voicehub/models/speecht5/configuration_speecht5.py",
+                "voicehub/models/speecht5/modeling_speecht5.py",
+        ):
+            self.assertIn(fragment, source)
+
+        examples = PYTHON_BLOCK.findall(source)
+        self.assertGreaterEqual(len(examples), 4)
+        for example_index, example in enumerate(examples, start=1):
+            ast.parse(
+                textwrap.dedent(example),
+                filename=f"speecht5.md:python-block-{example_index}",
+            )
+
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "SPEECHT5_ROUTE",
+                "SPEECHT5_HEADINGS",
+                "SPEECHT5_TABLE_ROWS",
+                "def _validate_speecht5_state(",
+                "def _validate_speecht5_page_copy(",
+                '"speecht5_cases"',
+                '"speecht5_interaction_cases"',
+        ):
+            self.assertIn(fragment, checker)
 
     def test_model_guides_reference_bundled_source_manifests(self):
         from voicehub import list_model_specs
@@ -395,7 +565,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             },
         )
 
-    def test_external_archive_checkpoint_is_not_documented_as_hugging_face(self):
+    def test_external_archive_checkpoint_records_the_verified_mirror(self):
         from voicehub import get_model_spec
 
         generator = runpy.run_path(str(MODEL_NOTEBOOK_GENERATOR_PATH))
@@ -409,12 +579,24 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
 
         self.assertEqual(checkpoint.provider, "external-archive")
         self.assertEqual(checkpoint.example, "path/to/converted-wenet-u2pp")
-        self.assertIn("2026-08-02", checkpoint.status)
+        self.assertIn("2026-08-04", checkpoint.status)
+        self.assertIn("openspeech/wenet-models", checkpoint.status)
         self.assertIn("github.com/wenet-e2e/wenet/blob/", checkpoint.url)
         self.assertFalse(checkpoint.is_hugging_face)
         self.assertEqual(spec.license.upstream, checkpoint.url)
-        self.assertEqual(source_record["artifact"]["availability"]["status"], "unavailable")
+        self.assertEqual(
+            source_record["artifact"]["availability"]["status"],
+            "available-via-verified-mirror",
+        )
         self.assertEqual(source_record["artifact"]["availability"]["http_status"], 404)
+        self.assertEqual(
+            source_record["artifact"]["availability"]["mirror"]["revision"],
+            "90acd57d17169a15d5ceab462c6e7db3bd003921",
+        )
+        self.assertEqual(
+            source_record["artifact"]["availability"]["mirror"]["repository"],
+            "openspeech/wenet-models",
+        )
         self.assertEqual(source_record["artifact"]["availability"]["source_listing"], checkpoint.url)
         self.assertIn(checkpoint.example, page)
         self.assertIn(checkpoint.status, page)
@@ -550,7 +732,120 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
 
         self.assertFalse((DOCS_ROOT / "tts_workflow.md").exists())
 
-    def test_navigation_uses_five_product_areas(self):
+    def test_homepage_matches_current_transformers_representative_contract(self):
+        source = HOME_PATH.read_text(encoding="utf-8")
+        normalized_source = " ".join(source.split())
+        headings = tuple(line for line in source.splitlines() if line.startswith(("# ", "## ", "### ")))
+        self.assertEqual(
+            headings,
+            (
+                "# VoiceHub",
+                "## Features",
+                "## Design",
+                "## Learn",
+            ),
+        )
+        self.assertEqual(source.count("-   **"), 13)
+        for fragment in (
+                "[Pipeline](guides/inference.md)",
+                "[Trainer](guides/trainer.md)",
+                "[generate](reference/api.md#generation)",
+                "!!! tip",
+                "configuration, model, and processor",
+                "**68 integrations**",
+                "**34 TTS backends**",
+                "**23 ASR providers**",
+                "**11 VAD providers**",
+                '<div class="grid cards" markdown>',
+                "https://github.com/kadirnar/voicehub/actions/workflows/ci.yml",
+                "https://github.com/kadirnar/voicehub/actions/workflows/docs.yml",
+                "https://github.com/kadirnar/voicehub/blob/main/pyproject.toml",
+                "https://github.com/kadirnar/voicehub/blob/main/LICENSE",
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, normalized_source)
+
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "HOME_ROUTE",
+                "HOME_HEADINGS",
+                "HOME_FEATURE_TARGETS",
+                "HOME_CARD_TARGETS",
+                "HOME_BADGE_TARGETS",
+                "def _validate_home_state(",
+                "def _validate_home_page_copy(",
+                '"home_cases"',
+                '"home_interaction_cases"',
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, checker)
+
+    def test_installation_matches_current_transformers_workflow(self):
+        source = INSTALLATION_PATH.read_text(encoding="utf-8")
+        headings = tuple(line for line in source.splitlines() if line.startswith(("# ", "## ", "### ")))
+        self.assertEqual(
+            headings,
+            (
+                "# Installation",
+                "## Virtual environment",
+                "## Python",
+                "### Source install",
+                "### Editable install",
+                "## conda",
+                "## Set up",
+                "### Cache directory",
+                "### Offline mode",
+            ),
+        )
+        self.assertNotIn('=== "', source)
+        for fragment in (
+                "uv venv .venv",
+                "uv pip install voicehub",
+                'uv pip install "voicehub[training]"',
+                "uv pip install \"voicehub @ git+https://github.com/kadirnar/voicehub.git@main\"",
+                "uv pip install -e \".[test,training,docs]\"",
+                "conda create -n voicehub python=3.12",
+                "HF_HUB_CACHE",
+                "HUGGINGFACE_HUB_CACHE",
+                "HF_HOME",
+                "XDG_CACHE_HOME",
+                "VOICEHUB_OFFLINE=1",
+                "local_files_only=True",
+                "../project/release-readiness.md",
+                "https://docs.astral.sh/uv/",
+                "https://docs.astral.sh/uv/getting-started/installation/",
+                "https://pytorch.org/get-started/locally/",
+                "https://docs.conda.io/projects/conda/en/stable/",
+                "[quickstart](quickstart.md)",
+                "[model catalog](../models/index.md)",
+        ):
+            self.assertIn(fragment, source)
+        self.assertNotIn("conda install conda-forge::voicehub", source)
+
+        examples = PYTHON_BLOCK.findall(source)
+        self.assertGreaterEqual(len(examples), 2)
+        for example_index, example in enumerate(examples, start=1):
+            ast.parse(
+                textwrap.dedent(example),
+                filename=f"getting-started/installation.md:python-block-{example_index}",
+            )
+
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "INSTALLATION_ROUTE",
+                "INSTALLATION_HEADINGS",
+                "INSTALLATION_EXTERNAL_TARGETS",
+                "INSTALLATION_INTERNAL_TARGETS",
+                "def _validate_installation_state(",
+                "def _validate_installation_code_copy(",
+                "def _validate_installation_page_copy(",
+                '"installation_cases"',
+                '"installation_code_interaction_cases"',
+                '"installation_page_interaction_cases"',
+        ):
+            self.assertIn(fragment, checker)
+
+    def test_navigation_uses_transformers_information_architecture(self):
         config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
         navigation = config.split("nav:\n", 1)[1].split("\nplugins:", 1)[0]
         labels = tuple(
@@ -558,16 +853,28 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             if line.startswith("  - "))
         self.assertEqual(labels, TOP_LEVEL_NAVIGATION)
 
-        get_started = navigation.split("  - Get started:", 1)[1].split("  - Models:", 1)[0]
-        guides = navigation.split("  - Guides:", 1)[1].split("  - API reference:", 1)[0]
-        project = navigation.split("  - Project:", 1)[1]
+        sections = {}
+        for index, label in enumerate(TOP_LEVEL_NAVIGATION):
+            start = f"  - {label}:"
+            end = (
+                f"  - {TOP_LEVEL_NAVIGATION[index + 1]}:" if index + 1 < len(TOP_LEVEL_NAVIGATION) else None)
+            section = navigation.split(start, 1)[1]
+            sections[label] = section if end is None else section.split(end, 1)[0]
+
+        get_started = sections["Get started"]
         self.assertIn("index.md", get_started)
         self.assertIn("getting-started/installation.md", get_started)
         self.assertIn("getting-started/quickstart.md", get_started)
-        self.assertIn("guides/notebook.md", guides)
-        self.assertIn("concepts/architecture.md", project)
-        self.assertIn("concepts/trainer.md", project)
-        self.assertIn("project/adding-a-model.md", project)
+        self.assertNotIn("models/providers/index.md", sections["Base classes"])
+        self.assertIn("models/providers/index.md", sections["API"])
+        self.assertIn("guides/inference.md", sections["Inference"])
+        self.assertIn("guides/trainer.md", sections["Training"])
+        self.assertIn("guides/training.md", sections["Training"])
+        self.assertIn("guides/tts-optimization.md", sections["Quantization and optimization"])
+        self.assertIn("guides/notebook.md", sections["Ecosystem integrations"])
+        self.assertIn("project/adding-a-model.md", sections["Base classes"])
+        self.assertNotIn("project/adding-a-model.md", sections["Resources"])
+        self.assertIn("reference/api.md", sections["API"])
 
         stale_labels = ("Home", "Quick Start", "Architecture", "API Reference", "Contributing")
         for locale in LOCALIZED_HOME_LOCALES:
@@ -578,6 +885,802 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                     self.assertRegex(locale_block, rf"(?m)^            {re.escape(label)}:")
                 for label in stale_labels:
                     self.assertNotRegex(locale_block, rf"(?m)^            {re.escape(label)}:")
+
+    def test_model_guides_follow_transformers_api_navigation_hierarchy(self):
+        from voicehub import list_model_specs
+
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        base_navigation = config.split("  - Base classes:\n", 1)[1].split(
+            "  - Inference:\n",
+            1,
+        )[0]
+        api_navigation = config.split("  - API:\n", 1)[1].split("\nplugins:", 1)[0]
+        main_classes = api_navigation.split("      - Main Classes:\n", 1)[1].split(
+            "      - Models:\n",
+            1,
+        )[0]
+        model_guides = api_navigation.split("      - Models:\n", 1)[1].split(
+            "      - Full API reference:",
+            1,
+        )[0]
+
+        self.assertNotIn("models/providers/index.md", base_navigation)
+        self.assertNotIn("BEGIN GENERATED MODEL GUIDE NAVIGATION", base_navigation)
+        self.assertIn("- Auto Classes: models/providers/index.md", main_classes)
+        self.assertIn("- Models: reference/models.md", main_classes)
+        self.assertIn("- Public exports: reference/public-api.md", main_classes)
+        self.assertIn("# BEGIN GENERATED MODEL GUIDE NAVIGATION", model_guides)
+        self.assertIn("# END GENERATED MODEL GUIDE NAVIGATION", model_guides)
+        self.assertIn("- Text to speech:", model_guides)
+        self.assertIn("- Automatic speech recognition:", model_guides)
+        self.assertIn("- Voice activity detection:", model_guides)
+        self.assertLess(
+            api_navigation.index("      - Main Classes:"),
+            api_navigation.index("      - Models:"),
+        )
+        self.assertLess(
+            api_navigation.index("      - Models:"),
+            api_navigation.index("      - Full API reference:"),
+        )
+
+        for spec in list_model_specs(task=None):
+            entry = f"models/providers/{spec.model_type}.md"
+            with self.subTest(model_type=spec.model_type):
+                self.assertEqual(config.count(entry), 1)
+                self.assertIn(entry, model_guides)
+
+        dom_checker = DOCUMENTATION_DOM_CHECK_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            'expanded_branches=("API", "Main Classes")',
+            dom_checker,
+        )
+        self.assertIn(
+            'expanded_branches=("API", "Models", "Text to speech")',
+            dom_checker,
+        )
+
+    def test_model_api_reference_matches_transformers_contract(self):
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        api_navigation = config.split("  - API:\n", 1)[1].split("\nplugins:", 1)[0]
+        self.assertIn("- Main Classes:", api_navigation)
+        self.assertIn("- Models: reference/models.md", api_navigation)
+        self.assertIn("- Public exports: reference/public-api.md", api_navigation)
+        self.assertIn("- Full API reference: reference/api.md", api_navigation)
+        self.assertLess(
+            api_navigation.index("- Models: reference/models.md"),
+            api_navigation.index("- Public exports: reference/public-api.md"),
+        )
+        self.assertLess(
+            api_navigation.index("- Public exports: reference/public-api.md"),
+            api_navigation.index("- Full API reference: reference/api.md"),
+        )
+        self.assertEqual(config.count("reference/models.md"), 1)
+        self.assertEqual(config.count("reference/public-api.md"), 1)
+        self.assertEqual(config.count("reference/api.md"), 1)
+        for locale in LOCALIZED_HOME_LOCALES:
+            with self.subTest(locale=locale):
+                locale_block = config.split(f"        - locale: {locale}\n", 1)[1]
+                locale_block = locale_block.split("        - locale:", 1)[0]
+                self.assertRegex(locale_block, r"(?m)^            Main Classes:")
+                self.assertRegex(locale_block, r"(?m)^            Full API reference:")
+                self.assertRegex(locale_block, r"(?m)^            Public exports:")
+
+        source = MODEL_API_PATH.read_text(encoding="utf-8")
+        normalized_source = " ".join(source.split())
+        headings = tuple(line for line in source.splitlines() if line.startswith("#"))
+        self.assertEqual(
+            headings,
+            (
+                "# Models",
+                "## `PreTrainedSpeechModel`",
+                "## Task-specific pretrained models",
+                "## Model outputs",
+                "## Loading, saving, and sharing",
+            ),
+        )
+        for fragment in (
+                "PreTrainedSpeechModel",
+                "PreTrainedTTSModel",
+                "PreTrainedAudioModel",
+                "PreTrainedASRModel",
+                "PreTrainedVADModel",
+                "TTSOutput",
+                "ASROutput",
+                "VADOutput",
+                "from_pretrained",
+                "save_pretrained",
+                "load_for_training",
+                "validate_training_support",
+                "https://github.com/kadirnar/voicehub/blob/main/voicehub/modeling_utils.py",
+                "https://github.com/kadirnar/voicehub/blob/main/voicehub/audio_modeling_utils.py",
+                "https://github.com/kadirnar/voicehub/blob/main/voicehub/modeling_outputs.py",
+                "[full API reference](api.md)",
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, source)
+        self.assertIn("does not expose a public `push_to_hub()` method", normalized_source)
+        examples = PYTHON_BLOCK.findall(source)
+        self.assertGreaterEqual(len(examples), 2)
+        for example_index, example in enumerate(examples, start=1):
+            ast.parse(
+                textwrap.dedent(example),
+                filename=f"reference/models.md:python-block-{example_index}",
+            )
+        self.assertLessEqual(len(source.splitlines()), 240)
+
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "MODEL_API_ROUTE",
+                "MODEL_API_HEADINGS",
+                "MODEL_API_SOURCE_TARGETS",
+                "MODEL_API_INTERNAL_TARGETS",
+                "def _validate_model_api_state(",
+                "def _validate_model_api_page_copy(",
+                '"model_api_cases"',
+                '"model_api_interaction_cases"',
+        ):
+            self.assertIn(fragment, checker)
+
+        parity = (DOCS_ROOT / "project" / "transformers-parity.md").read_text(encoding="utf-8")
+        api_inventory = parity.split("## API main-class route inventory\n", 1)[1].split("\n## ", 1)[0]
+        upstream_titles = (
+            "Auto Classes",
+            "Backbones",
+            "Callbacks",
+            "Configuration",
+            "Continuous batching",
+            "Data Collator",
+            "Logging",
+            "Models",
+            "Text Generation",
+            "Optimization",
+            "Model outputs",
+            "PEFT",
+            "Pipelines",
+            "Processors",
+            "Exporters",
+            "Quantization",
+            "Tokenizer",
+            "Trainer",
+            "DeepSpeed",
+            "ExecuTorch",
+            "Feature Extractor",
+            "Image Processor",
+            "Video Processor",
+            "Kernels",
+        )
+        for title in upstream_titles:
+            with self.subTest(upstream_title=title):
+                self.assertEqual(api_inventory.count(f"| {title} |"), 1)
+
+    def test_trainer_overview_matches_transformers_representative_contract(self):
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        training_navigation = config.split("  - Training:\n", 1)[1].split(
+            "  - Quantization and optimization:\n",
+            1,
+        )[0]
+        overview_entry = "- Trainer overview: guides/trainer.md"
+        fine_tuning_entry = "- Fine-tuning: guides/training.md"
+        self.assertIn(overview_entry, training_navigation)
+        self.assertIn(fine_tuning_entry, training_navigation)
+        self.assertLess(
+            training_navigation.index(overview_entry),
+            training_navigation.index(fine_tuning_entry),
+        )
+        self.assertEqual(config.count("guides/trainer.md"), 1)
+        self.assertEqual(config.count("guides/training.md"), 1)
+
+        source = TRAINER_OVERVIEW_PATH.read_text(encoding="utf-8")
+        normalized_source = " ".join(source.split())
+        self.assertTrue(source.startswith("---\n"))
+        self.assertIn("description:", source.split("---", 2)[1])
+        headings = tuple(line for line in source.splitlines() if line.startswith("#"))
+        self.assertEqual(headings, ("# Trainer", "## Next steps"))
+        for fragment in (
+                "`Trainer`",
+                "`TrainingArguments`",
+                "training and evaluation loop",
+                "model-owned objective",
+                "batching",
+                "gradient accumulation",
+                "evaluation",
+                "checkpoint",
+                "[fine-tuning tutorial](training.md)",
+                "[Trainer architecture](../concepts/trainer.md)",
+                "[training support matrix](../models/training-support.md)",
+                "[data preparation guide](data-preparation.md)",
+        ):
+            self.assertIn(fragment, normalized_source)
+        self.assertLessEqual(len(source.splitlines()), 45)
+        self.assertNotIn("```", source)
+        self.assertNotIn("<table", source)
+
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "TRAINER_ROUTE",
+                "TRAINER_HEADINGS",
+                "TRAINER_NEXT_STEP_PATHS",
+                "def _validate_trainer_state(",
+                "def _validate_trainer_page_copy(",
+                '"trainer_cases"',
+                '"trainer_interaction_cases"',
+        ):
+            self.assertIn(fragment, checker)
+
+    def test_optimization_overview_matches_transformers_representative_contract(self):
+        from voicehub.optimization import OPTIMIZATION_PASSES
+
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        optimization_navigation = config.split(
+            "  - Quantization and optimization:\n",
+            1,
+        )[1].split("  - Ecosystem integrations:\n", 1)[0]
+        overview_entry = "- Overview: guides/optimization-overview.md"
+        workflow_entry = "- TTS optimization workflow: guides/tts-optimization.md"
+        self.assertIn(overview_entry, optimization_navigation)
+        self.assertIn(workflow_entry, optimization_navigation)
+        self.assertLess(
+            optimization_navigation.index(overview_entry),
+            optimization_navigation.index(workflow_entry),
+        )
+        self.assertEqual(config.count("guides/optimization-overview.md"), 1)
+        self.assertEqual(config.count("guides/tts-optimization.md"), 1)
+
+        source = OPTIMIZATION_OVERVIEW_PATH.read_text(encoding="utf-8")
+        normalized_source = " ".join(source.split())
+        self.assertTrue(source.startswith("---\n"))
+        self.assertIn("description:", source.split("---", 2)[1])
+        headings = tuple(line for line in source.splitlines() if line.startswith("#"))
+        self.assertEqual(
+            headings,
+            (
+                "# Optimization overview",
+                "## Compilation",
+                "## Attention backends",
+                "## Kernels",
+                "## Diffusion caching",
+                "## Diffusion sampling",
+                "## Boundaries",
+                "## Next steps",
+            ),
+        )
+        for pass_name in OPTIMIZATION_PASSES.list():
+            with self.subTest(pass_name=pass_name):
+                self.assertEqual(source.count(f"`{pass_name}`"), 1)
+        for fragment in (
+                "available_optimization_passes()",
+                "apply_optimization_plan(",
+                "optimization_manifest(",
+                "restore_optimization_plan(",
+                "validation happens before mutation",
+                "no registry-wide public quantization pass",
+                "Parallelism is a training or serving topology",
+                "Continuous batching belongs to a serving scheduler",
+                "[TTS optimization workflow](tts-optimization.md)",
+                "[optimization API](../reference/api.md#optimization)",
+        ):
+            self.assertIn(fragment, normalized_source)
+        examples = PYTHON_BLOCK.findall(source)
+        self.assertEqual(len(examples), 1)
+        ast.parse(
+            textwrap.dedent(examples[0]),
+            filename="guides/optimization-overview.md:python-block-1",
+        )
+        self.assertLessEqual(len(source.splitlines()), 150)
+
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "OPTIMIZATION_ROUTE",
+                "OPTIMIZATION_HEADINGS",
+                "OPTIMIZATION_PASS_NAMES",
+                "OPTIMIZATION_NEXT_STEP_TARGETS",
+                "def _validate_optimization_state(",
+                "def _validate_optimization_page_copy(",
+                '"optimization_cases"',
+                '"optimization_interaction_cases"',
+        ):
+            self.assertIn(fragment, checker)
+
+    def test_model_contribution_matches_current_modular_transformers_contract(self):
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        base_navigation = config.split("  - Base classes:\n", 1)[1].split(
+            "  - Inference:\n",
+            1,
+        )[0]
+        resources_navigation = config.split("  - Resources:\n", 1)[1].split(
+            "  - API:",
+            1,
+        )[0]
+        contribute_entry = "- Contribute:"
+        add_model_entry = "- Add a model: project/adding-a-model.md"
+        speech_provider_entry = "- Add an ASR or VAD provider: project/adding-speech-provider.md"
+        optimization_entry = "- Add an optimization: project/adding-an-optimization.md"
+        for entry in (
+                contribute_entry,
+                add_model_entry,
+                speech_provider_entry,
+                optimization_entry,
+        ):
+            self.assertIn(entry, base_navigation)
+        self.assertLess(base_navigation.index(add_model_entry), base_navigation.index(speech_provider_entry))
+        self.assertLess(
+            base_navigation.index(speech_provider_entry), base_navigation.index(optimization_entry))
+        self.assertNotIn("project/adding-a-model.md", resources_navigation)
+        self.assertNotIn("- Add a TTS model:", config)
+        self.assertEqual(config.count("project/adding-a-model.md"), 1)
+
+        for locale in LOCALIZED_HOME_LOCALES:
+            with self.subTest(locale=locale):
+                locale_block = config.split(f"        - locale: {locale}\n", 1)[1]
+                locale_block = locale_block.split("        - locale:", 1)[0]
+                self.assertRegex(locale_block, r"(?m)^            Contribute:")
+                self.assertRegex(locale_block, r"(?m)^            Add a model:")
+
+        source = ADDING_MODEL_PATH.read_text(encoding="utf-8")
+        normalized_source = " ".join(source.split())
+        self.assertIn(
+            "https://huggingface.co/docs/transformers/main/en/modular_transformers",
+            source,
+        )
+        self.assertIn("legacy `add_new_model` guide", normalized_source)
+        self.assertIn('class="vh-process vh-process--eight"', source)
+        titles = (
+            "Create the package",
+            "Record provenance and license",
+            "Define the config",
+            "Implement the task wrapper",
+            "Register once",
+            "Declare training and optimization support",
+            "Test the contract",
+            "Generate the model page",
+        )
+        headings = tuple(f"## {index}. {title}" for index, title in enumerate(titles, start=1))
+        positions = tuple(source.index(heading) for heading in headings)
+        self.assertEqual(positions, tuple(sorted(positions)))
+        for step in headings:
+            with self.subTest(step=step):
+                self.assertIn(f"| {step.removeprefix('## ')} |", source)
+        for fragment in (
+                "explicit standalone files",
+                "composition",
+                "voicehub/models/<model_type>/",
+                "voicehub/architectures/<model_type>/",
+                "tests/test_<model_type>.py",
+                "docs/models/providers/<model_type>.md",
+                "generated navigation block in `mkdocs.yml`",
+        ):
+            self.assertIn(fragment, normalized_source)
+
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "CONTRIBUTION_ROUTE",
+                "CONTRIBUTION_HEADINGS",
+                "CONTRIBUTION_PROCESS_LABELS",
+                "CONTRIBUTION_FINAL_TARGETS",
+                "def _validate_contribution_state(",
+                "def _validate_contribution_page_copy(",
+                '"contribution_cases"',
+                '"contribution_interaction_cases"',
+        ):
+            self.assertIn(fragment, checker)
+
+    def test_quickstart_matches_transformers_representative_contract(self):
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        self.assertIn("- Quickstart: getting-started/quickstart.md", config)
+        self.assertNotIn("- First generation: getting-started/quickstart.md", config)
+
+        quickstart = QUICKSTART_PATH.read_text(encoding="utf-8")
+        headings = tuple(line for line in quickstart.splitlines() if line.startswith(("# ", "## ", "### ")))
+        self.assertEqual(
+            headings,
+            (
+                "# Quickstart",
+                "## Set up",
+                "## Agent skills",
+                "## Pretrained models",
+                "## Pipeline",
+                "## Trainer",
+                "## Next steps",
+            ),
+        )
+        introduction = quickstart.split("## Set up", 1)[0]
+        for outcome in (
+                "load a pretrained speech model",
+                "run inference with `pipeline()`",
+                "inspect training support before constructing a `Trainer`",
+        ):
+            self.assertIn(outcome, introduction)
+        for fragment in (
+                '=== "uv"',
+                '=== "pip"',
+                '=== "Codex"',
+                '=== "Other agents"',
+                '=== "Text to speech"',
+                '=== "Automatic speech recognition"',
+                '=== "Voice activity detection"',
+                ".ai/skills/add-or-validate-speech-model/SKILL.md",
+                "from voicehub import pipeline",
+                'task="text-to-speech"',
+                'task="automatic-speech-recognition"',
+                'task="voice-activity-detection"',
+                "!!! tip",
+                "[Installation](installation.md)",
+                "https://github.com/kadirnar/voicehub/blob/main/.ai/skills/",
+                "[Pipeline guide](../guides/inference.md)",
+                "[training guide](../guides/training.md)",
+                "[Quantization and optimization](../guides/optimization-overview.md)",
+        ):
+            self.assertIn(fragment, quickstart)
+        self.assertEqual(quickstart.count('=== "'), 7)
+        self.assertEqual(quickstart.count("!!! tip"), 2)
+
+        examples = PYTHON_BLOCK.findall(quickstart)
+        self.assertGreaterEqual(len(examples), 7)
+        for example_index, example in enumerate(examples, start=1):
+            ast.parse(
+                textwrap.dedent(example),
+                filename=f"getting-started/quickstart.md:python-block-{example_index}",
+            )
+
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "QUICKSTART_ROUTE",
+                "QUICKSTART_HEADINGS",
+                "QUICKSTART_TAB_LABELS",
+                "QUICKSTART_EXTERNAL_TARGETS",
+                "QUICKSTART_INTERNAL_TARGETS",
+                "def _validate_quickstart_state(",
+                "def _validate_quickstart_tabs(",
+                "def _validate_quickstart_page_copy(",
+                '"quickstart_cases"',
+                '"quickstart_interaction_cases"',
+                '"quickstart_page_interaction_cases"',
+        ):
+            self.assertIn(fragment, checker)
+
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        for declaration in (
+                "--vh-content-gutter: 24px;",
+                "margin-inline: var(--vh-content-gutter);",
+                "font-size: 0.84rem;",
+                "font-size: 1.2rem;",
+                "line-height: 1.6rem;",
+                "font-size: 1rem;",
+                "line-height: 1.4rem;",
+        ):
+            self.assertIn(declaration, stylesheet)
+        desktop_shell = stylesheet.split("@media screen and (min-width: 60em) {", 1)[1]
+        self.assertIn("--vh-content-gutter: 48px;", desktop_shell)
+        mobile_shell = stylesheet.split("@media screen and (max-width: 59.984375em) {", 1)[1]
+        self.assertIn("margin-inline: -12px;", mobile_shell)
+        self.assertIn(".md-typeset .tabbed-labels {", mobile_shell)
+        self.assertIn("width: calc(100% + 2rem);", mobile_shell)
+
+        self.assertTrue(PAGE_ACTIONS_OVERRIDE_PATH.is_file())
+        actions = PAGE_ACTIONS_OVERRIDE_PATH.read_text(encoding="utf-8")
+        self.assertIn("data-vh-copy-page", actions)
+        self.assertIn("Copy page", actions)
+        self.assertIn('aria-live="polite"', actions)
+        self.assertTrue(PAGE_ACTION_SCRIPT_PATH.is_file())
+        script = PAGE_ACTION_SCRIPT_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "initializePageActions",
+                'querySelector("[data-vh-copy-page]")',
+                "const copyPage = async ({ restoreKeyboardFocus = false } = {}) =>",
+                "navigator.clipboard.writeText",
+                'label.textContent = "Copied"',
+                'button.addEventListener("keydown"',
+                'event.key !== "Enter" && event.key !== " "',
+                "event.preventDefault()",
+                "void copyPage({ restoreKeyboardFocus: true })",
+                "const keyboardActivation = event.detail === 0",
+                "void copyPage({ restoreKeyboardFocus: keyboardActivation })",
+                "let copyInProgress = false",
+                'button.setAttribute("aria-busy", "true")',
+                'document.execCommand("copy")',
+                "button.focus({ preventScroll: true })",
+                'button.classList.add("focus-visible")',
+                'button.classList.remove("focus-visible")',
+        ):
+            self.assertIn(fragment, script)
+        self.assertEqual(script.count("event.preventDefault()"), 1)
+        self.assertEqual(script.count("void copyPage("), 2)
+        self.assertNotIn("button.disabled", script)
+        self.assertIn(
+            ".md-content__button.vh-copy-page:is(:focus-visible, .focus-visible)",
+            stylesheet,
+        )
+        self.assertIn('.md-content__button.vh-copy-page[aria-busy="true"]', stylesheet)
+        self.assertIn("- javascripts/page-actions.js", config)
+
+    def test_pipeline_guide_matches_transformers_representative_contract(self):
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        self.assertIn("- Pipeline: guides/inference.md", config)
+        self.assertNotIn("- TTS inference: guides/inference.md", config)
+        self.assertEqual(config.count("            Pipeline:"), len(LOCALIZED_HOME_LOCALES))
+
+        guide_index = (DOCS_ROOT / "guides" / "index.md").read_text(encoding="utf-8")
+        self.assertIn("[Pipeline guide](inference.md)", guide_index)
+        self.assertNotIn("[TTS inference guide](inference.md)", guide_index)
+        self.assertIn(
+            "[Pipeline](https://kadirnar.github.io/voicehub/guides/inference/)",
+            README_PATH.read_text(encoding="utf-8"),
+        )
+
+        guide = INFERENCE_GUIDE_PATH.read_text(encoding="utf-8")
+        headings = (
+            "# Pipeline",
+            "## Tasks",
+            "### Text to speech",
+            "### Automatic speech recognition",
+            "### Voice activity detection",
+            "## Parameters",
+            "### Device",
+            "### Batch inference",
+            "### Task-specific parameters",
+            "## Chunking and streaming",
+            "## Large inputs",
+            "## Large models",
+            "## Save and reload",
+            "## Troubleshooting",
+        )
+        positions = tuple(guide.index(heading) for heading in headings)
+        self.assertEqual(positions, tuple(sorted(positions)))
+        for fragment in (
+                "from voicehub import pipeline",
+                'task="text-to-speech"',
+                'task="automatic-speech-recognition"',
+                'task="voice-activity-detection"',
+                "TTSOutput",
+                "ASROutput",
+                "VADOutput",
+                "duration < 10",
+                "does not provide a universal vectorized batch contract",
+        ):
+            self.assertIn(fragment, guide)
+
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "PIPELINE_ROUTE",
+                "PIPELINE_HEADINGS",
+                "def _validate_pipeline_state(",
+                "def _validate_pipeline_code_copy(",
+                '"pipeline_cases"',
+                '"pipeline_interaction_cases"',
+        ):
+            self.assertIn(fragment, checker)
+
+    def test_header_controls_follow_transformers_product_order(self):
+        header = HEADER_OVERRIDE_PATH.read_text(encoding="utf-8")
+        control_order = ("product", "search", "version", "language", "theme", "source")
+        positions = tuple(header.index(f'data-vh-header-control="{name}"') for name in control_order)
+        self.assertEqual(positions, tuple(sorted(positions)))
+
+        self.assertIn("data-vh-version-control", header)
+        self.assertIn('aria-label="Documentation version"', header)
+        self.assertNotIn('aria-haspopup="menu"', header)
+        self.assertNotIn('role="menu"', header)
+        self.assertNotIn('role="menuitem"', header)
+        self.assertIn('aria-expanded="false"', header)
+        self.assertIn("vh-header-product__compact", header)
+        self.assertIn("config.extra.docs_version.label }} ·", header)
+        self.assertIn("Release candidate status", header)
+        self.assertIn("Published package", header)
+
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        for fragment in ("toggle", "pointerdown", "Enter", "Escape", "aria-expanded"):
+            self.assertIn(fragment, script)
+
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        self.assertIn("- javascripts/header-controls.js", config)
+        self.assertIn("docs_version:", config)
+        self.assertIn('release: "0.3.0"', config)
+        self.assertIn('published: "0.1.6"', config)
+
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        self.assertIn(".md-header__button:is(:focus-visible, .focus-visible)", stylesheet)
+        self.assertIn('[dir="rtl"] .vh-header-version__menu', stylesheet)
+
+    def test_desktop_documentation_controls_use_transformers_left_rail(self):
+        header = HEADER_OVERRIDE_PATH.read_text(encoding="utf-8")
+        self.assertIn('class="vh-global-brand"', header)
+        self.assertIn('class="vh-doc-rail-controls"', header)
+        self.assertIn('class="vh-doc-rail-utility"', header)
+
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        self.assertNotRegex(config, r"(?m)^\s+- navigation\.tabs(?:\.sticky)?$")
+
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        for declaration in (
+                "--vh-global-header-height: 3.25rem;",
+                "--vh-doc-rail-width: 13.5rem;",
+                "--vh-doc-rail-controls-height: 6.4rem;",
+        ):
+            self.assertIn(declaration, stylesheet)
+        desktop_shell = stylesheet.split(
+            "@media screen and (min-width: 60em) {",
+            1,
+        )[1].split(
+            "@media screen and (min-width: 60em) and (max-width: 76.234375em)",
+            1,
+        )[0]
+        for selector in (
+                ".vh-doc-rail-controls {",
+                ".vh-doc-rail-utility {",
+                ".md-sidebar--primary {",
+                ".md-sidebar--secondary {",
+                ".md-main__inner {",
+        ):
+            self.assertIn(selector, desktop_shell)
+        self.assertIn(
+            "top: calc(var(--vh-global-header-height) - var(--vh-shell-scroll-offset));",
+            desktop_shell,
+        )
+        self.assertIn("width: var(--vh-doc-rail-width);", desktop_shell)
+        self.assertIn("height: var(--vh-doc-rail-controls-height);", desktop_shell)
+        self.assertIn("padding-top: var(--vh-doc-rail-controls-height);", desktop_shell)
+        self.assertIn("max-width: none;", desktop_shell)
+
+    def test_desktop_documentation_shell_tracks_the_reference_scroll_offset(self):
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "initializeShellScrollTracking",
+                "Math.min(window.scrollY, header.offsetHeight)",
+                'document.documentElement.style.setProperty("--vh-shell-scroll-offset"',
+                'window.addEventListener("scroll"',
+                "requestAnimationFrame(updateShellScrollOffset)",
+                "{ passive: true }",
+        ):
+            self.assertIn(fragment, script)
+
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        desktop_shell = stylesheet.split(
+            "@media screen and (min-width: 60em) {",
+            1,
+        )[1].split(
+            "@media screen and (min-width: 60em) and (max-width: 76.234375em)",
+            1,
+        )[0]
+        for declaration in (
+                "transform: translateY(calc(-1 * var(--vh-shell-scroll-offset)));",
+                "top: calc(var(--vh-global-header-height) - var(--vh-shell-scroll-offset)) !important;",
+                "height: calc(100vh - var(--vh-global-header-height) + var(--vh-shell-scroll-offset));",
+                "height: auto !important;",
+                "flex: 1 1 auto;",
+                "z-index: auto;",
+                ".vh-doc-rail-controls .md-header__topic:first-child {",
+                ".vh-doc-rail-controls .md-search__form:focus-within {",
+        ):
+            self.assertIn(declaration, desktop_shell)
+
+        tablet_shell = stylesheet.split(
+            "@media screen and (min-width: 60em) and (max-width: 76.234375em)",
+            1,
+        )[1].split("@media screen and (max-width: 44.984375em)", 1)[0]
+        self.assertIn("top: var(--vh-doc-rail-controls-height);", tablet_shell)
+        self.assertIn(
+            "height: calc(100% - var(--vh-doc-rail-controls-height)) !important;",
+            tablet_shell,
+        )
+
+    def test_search_dialog_matches_transformers_interaction_contract(self):
+        header = HEADER_OVERRIDE_PATH.read_text(encoding="utf-8")
+        self.assertIn("data-vh-search-trigger", header)
+        self.assertIn('<button\n            type="button"', header)
+        self.assertNotIn('role="button"', header)
+        self.assertIn('aria-controls="__search"', header)
+        self.assertIn('aria-expanded="false"', header)
+
+        search = SEARCH_OVERRIDE_PATH.read_text(encoding="utf-8")
+        self.assertIn("data-vh-search-shortcut", search)
+        self.assertIn("data-vh-search-shortcut-primary", search)
+        self.assertIn("vh-search-shortcut__expanded", search)
+
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "initializeSearchControl",
+                'querySelector("#__search")',
+                'querySelector("[data-vh-search-trigger]")',
+                'trigger.addEventListener("click"',
+                'event.key.toLowerCase() === "k"',
+                'event.key === "Escape"',
+                "event.stopImmediatePropagation()",
+                'document.body.classList.toggle("vh-search-open"',
+                'trigger.setAttribute("aria-expanded"',
+                "focusClosedSearchTarget",
+                "closeFocusTarget.focus()",
+        ):
+            self.assertIn(fragment, script)
+
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        self.assertIn("#__search:checked ~ .md-header .md-search", stylesheet)
+        self.assertIn("top: 3.2rem;", stylesheet)
+        self.assertIn("width: min(25rem, calc(100vw - 2rem));", stylesheet)
+        self.assertIn("body.vh-search-open", stylesheet)
+        self.assertIn(
+            "body.vh-search-open .md-header__inner > :not(.vh-doc-rail-controls)",
+            stylesheet,
+        )
+        self.assertIn(
+            "body.vh-search-open .vh-doc-rail-controls > :not(.md-search)",
+            stylesheet,
+        )
+        self.assertIn("height: 100vh;", stylesheet)
+        self.assertIn("top: 64px;", stylesheet)
+        self.assertIn("right: 16px;", stylesheet)
+        self.assertIn("left: 16px;", stylesheet)
+        self.assertIn("height: 72px;", stylesheet)
+        self.assertIn(".vh-search-shortcut", stylesheet)
+        self.assertIn(".md-search__form:focus-within", stylesheet)
+
+    def test_language_control_matches_transformers_native_select_contract(self):
+        header = HEADER_OVERRIDE_PATH.read_text(encoding="utf-8")
+        self.assertIn('data-vh-header-control="language"', header)
+
+        language = LANGUAGE_OVERRIDE_PATH.read_text(encoding="utf-8")
+        self.assertIn("data-vh-language-select", language)
+        self.assertIn('aria-label="{{ lang.t(\'select.language\') }}"', language)
+        self.assertIn("alt.lang | upper", language)
+        self.assertIn("alt.lang == config.theme.language", language)
+
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertIn("initializeLanguageControl", script)
+        self.assertIn('querySelector("[data-vh-language-select]")', script)
+        self.assertIn('select.addEventListener("keydown"', script)
+        self.assertIn('event.key === "ArrowDown"', script)
+        self.assertIn("select.selectedIndex = nextIndex", script)
+        self.assertIn('select.addEventListener("change"', script)
+        self.assertIn('sessionStorage.setItem(paletteTransferKey', script)
+        self.assertIn('sessionStorage.removeItem(paletteTransferKey)', script)
+        self.assertIn("window.location.assign(select.value)", script)
+
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        self.assertIn(".vh-language-select", stylesheet)
+        language_style = stylesheet.split(".vh-language-select {", 1)[1].split("}", 1)[0]
+        self.assertIn("width: 2.4rem;", language_style)
+        self.assertIn("height: 1.3rem;", language_style)
+        self.assertIn("color: var(--vh-ink);", language_style)
+        self.assertIn(".vh-language-select:focus-visible", stylesheet)
+        self.assertIn('[data-vh-header-control="language"],', stylesheet)
+
+    def test_theme_and_source_controls_match_transformers_compact_contract(self):
+        palette = PALETTE_OVERRIDE_PATH.read_text(encoding="utf-8")
+        self.assertIn('data-vh-theme-toggle', palette)
+        self.assertIn('aria-label="{{ option.toggle.name }}"', palette)
+        self.assertIn('type="button"', palette)
+        self.assertIn('data-vh-theme-target', palette)
+        self.assertNotIn('role="button"', palette)
+
+        source = SOURCE_OVERRIDE_PATH.read_text(encoding="utf-8")
+        self.assertIn('class="md-source vh-source-link"', source)
+        self.assertIn('aria-label="Open VoiceHub source repository"', source)
+        self.assertIn('data-md-component="source"', source)
+
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        theme_style = stylesheet.split(".md-header__button.vh-theme-toggle {", 1)[1].split("}", 1)[0]
+        self.assertIn("width: 1.7rem;", theme_style)
+        self.assertIn("height: 1.2rem;", theme_style)
+        self.assertIn("margin: 0;", theme_style)
+        self.assertIn(".md-header__button.vh-theme-toggle[hidden]", stylesheet)
+        source_style = stylesheet.split(".vh-source-link {", 1)[1].split("}", 1)[0]
+        self.assertIn("width: 2.75rem;", source_style)
+        self.assertIn("height: 0.8rem;", source_style)
+        self.assertIn(".vh-source-link:is(:focus-visible, .focus-visible)", stylesheet)
+        self.assertIn('[data-vh-header-control="theme"],', stylesheet)
+        self.assertIn('[data-vh-header-control="source"] {', stylesheet)
+
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertIn("initializeThemeControl", script)
+        self.assertIn("initializeSourceControl", script)
+        self.assertIn('querySelector(\'[data-vh-header-control="theme"]\')', script)
+        self.assertIn('querySelector(\'[data-vh-header-control="source"] a[href]\')', script)
+        self.assertIn("toggle instanceof HTMLButtonElement", script)
+        self.assertIn("toggle.dataset.vhThemeTarget", script)
+        self.assertIn("target.checked = true", script)
+        self.assertIn('addEventListener("change", focusVisibleToggle)', script)
+        self.assertIn('querySelector("[data-vh-theme-toggle]:not([hidden])")', script)
+        self.assertIn("visibleToggle.focus()", script)
+        self.assertIn("window.location.assign(link.href)", script)
 
     def test_main_workflow_guides_stay_concise(self):
         for path in CONCISE_GUIDE_PATHS:
@@ -681,7 +1784,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn('[dir="rtl"] .vh-doc-teaser', stylesheet)
         self.assertIn(".md-tabs__item--active > .md-tabs__link", stylesheet)
         self.assertNotIn(".md-tabs__link--active", stylesheet)
-        self.assertIn(".md-typeset .vh-process", stylesheet)
+        self.assertEqual(stylesheet.count(".md-typeset .vh-process:not([hidden]) {"), 2)
         self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", stylesheet)
         self.assertNotIn(".vh-flow-diagram", stylesheet)
         self.assertNotIn("name: mermaid", config)
@@ -714,24 +1817,508 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                     "index.md" else "../assets/voicehub-mark.svg")
                 self.assertEqual(source.count(f'src="{expected_mark_path}"'), 2)
 
-    def test_tablet_shell_keeps_primary_navigation_in_the_layout(self):
+    def test_desktop_and_tablet_shell_collapse_inactive_navigation_branches(self):
         stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        desktop_shell = stylesheet.split(
+            "@media screen and (min-width: 60em) {",
+            1,
+        )[1].split(
+            "@media screen and (min-width: 60em) and (max-width: 76.234375em)",
+            1,
+        )[0]
         tablet_shell = stylesheet.split(
             "@media screen and (min-width: 60em) and (max-width: 76.234375em)",
             1,
         )[1].split("@media screen and (max-width: 44.984375em)", 1)[0]
 
-        self.assertIn('.md-header__button[for="__drawer"]', tablet_shell)
-        self.assertIn('[dir="ltr"] .md-sidebar--primary', tablet_shell)
-        self.assertIn("position: sticky", tablet_shell)
-        self.assertIn("width: 13.5rem", tablet_shell)
-        self.assertIn(".md-sidebar--primary .md-sidebar__scrollwrap", tablet_shell)
-        self.assertIn("overflow-y: auto", tablet_shell)
+        self.assertIn('.md-header__button[data-vh-drawer-trigger]', desktop_shell)
+        self.assertIn('[dir="ltr"] .md-sidebar--primary', desktop_shell)
+        self.assertIn("position: sticky", desktop_shell)
+        self.assertIn("width: var(--vh-doc-rail-width)", desktop_shell)
+        self.assertIn(".md-sidebar--primary .md-sidebar__scrollwrap", desktop_shell)
+        self.assertIn("overflow-y: auto", desktop_shell)
+        navigation_button = desktop_shell.split(
+            ".md-sidebar--primary button.md-nav__link[data-vh-nav-toggle] {",
+            1,
+        )[1].split("}", 1)[0]
+        self.assertIn("pointer-events: auto;", navigation_button)
+        self.assertIn("cursor: pointer;", stylesheet)
+        collapsed_navigation = desktop_shell.split(
+            ".md-nav__toggle ~ .md-nav {",
+            1,
+        )[1].split("}", 1)[0]
+        self.assertIn("display: none;", collapsed_navigation)
+        self.assertNotIn("opacity", collapsed_navigation)
+        self.assertNotIn("visibility", collapsed_navigation)
+        expanded_navigation = desktop_shell.split(
+            ".md-nav__toggle.md-toggle--indeterminate ~ .md-nav,",
+            1,
+        )[1].split("}", 1)[0]
+        self.assertIn(".md-nav__toggle:checked ~ .md-nav {", expanded_navigation)
+        self.assertIn("display: block;", expanded_navigation)
         self.assertIn(".md-nav--primary > .md-nav__title", tablet_shell)
-        self.assertIn(".md-nav__toggle:checked ~ .md-nav", tablet_shell)
-        self.assertIn("visibility: visible", tablet_shell)
         self.assertIn(".md-sidebar--secondary:not([hidden])", tablet_shell)
         self.assertIn("display: none", tablet_shell)
+
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        primary_navigation = script.split(
+            "const initializePrimaryNavigationControl = () => {",
+            1,
+        )[1].split("const initializeTableOfContentsTracking = () => {", 1)[0]
+        for fragment in (
+                'querySelector(".md-sidebar--primary")',
+                'querySelectorAll("label.md-nav__link[for]")',
+                'document.createElement("button")',
+                'button.dataset.vhNavToggle = toggle.id',
+                'button.setAttribute("aria-controls", panel.id)',
+                'button.setAttribute("aria-expanded", String(toggle.checked))',
+                'toggle.addEventListener("change", synchronizeExpandedState)',
+                'button.addEventListener("click"',
+                "event.preventDefault()",
+                "event.stopImmediatePropagation()",
+                "toggle.checked = !toggle.checked",
+                'toggle.dispatchEvent(new Event("change", { bubbles: true }))',
+        ):
+            self.assertIn(fragment, primary_navigation)
+        self.assertNotIn("label.click()", primary_navigation)
+        self.assertIn("initializePrimaryNavigationControl();", script)
+
+    def test_rendered_representative_navigation_has_a_ci_contract(self):
+        self.assertTrue(DOCUMENTATION_DOM_CHECK_PATH.is_file())
+        checker = DOCUMENTATION_DOM_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "REPRESENTATIVE_ROUTES",
+                "TOP_LEVEL_NAVIGATION",
+                '"getting-started/installation/index.html"',
+                '"getting-started/quickstart/index.html"',
+                '"guides/inference/index.html"',
+                '"models/providers/index.html"',
+                '"models/providers/speecht5/index.html"',
+                '"guides/trainer/index.html"',
+                '"guides/optimization-overview/index.html"',
+                '"project/adding-a-model/index.html"',
+                '"reference/models/index.html"',
+                '"md-sidebar--primary"',
+                '"md-nav__link--active"',
+                '"aria-expanded"',
+                '"checked"',
+        ):
+            self.assertIn(fragment, checker)
+
+        command = "python scripts/check_documentation_dom.py site"
+        for workflow_name in ("docs.yml", "release.yml"):
+            workflow = (REPOSITORY_ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
+            self.assertIn(command, workflow)
+            self.assertLess(
+                workflow.index("mkdocs build --strict --clean --site-dir site"),
+                workflow.index(command),
+            )
+
+    def test_representative_routes_have_a_responsive_visual_ci_contract(self):
+        self.assertTrue(DOCUMENTATION_VISUAL_CHECK_PATH.is_file())
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "REPRESENTATIVE_ROUTES",
+                "VIEWPORTS",
+                "PALETTES",
+                "sync_playwright",
+                '"width": 1440',
+                '"width": 1024',
+                '"width": 390',
+                '"article_x": 318',
+                '"article_width": 804',
+                '"article_width": 658',
+                '"article_x": 24',
+                '"article_width": 342',
+                '"header_height": 65',
+                '"header_height": 64',
+                '"rgb(255, 255, 255)"',
+                '"rgb(30, 33, 41)"',
+                '".md-sidebar--primary"',
+                '".md-sidebar--secondary"',
+                '"a.md-nav__link--active"',
+                '"overflow"',
+        ):
+            self.assertIn(fragment, checker)
+
+        self.assertIn(
+            '"playwright==1.62.0"',
+            PYPROJECT_PATH.read_text(encoding="utf-8"),
+        )
+        command = "python scripts/check_documentation_visual.py site"
+        install_command = "python -m playwright install --with-deps chromium"
+        for workflow_name in ("docs.yml", "release.yml"):
+            workflow = (REPOSITORY_ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
+            self.assertIn(install_command, workflow)
+            self.assertIn(command, workflow)
+            self.assertLess(
+                workflow.index("mkdocs build --strict --clean --site-dir site"),
+                workflow.index(command),
+            )
+
+    def test_representative_routes_have_a_screenshot_pixel_regression_contract(self):
+        self.assertTrue(DOCUMENTATION_SCREENSHOT_BASELINES_PATH.is_file())
+        baselines = json.loads(DOCUMENTATION_SCREENSHOT_BASELINES_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(baselines["schema_version"], 1)
+        self.assertEqual(len(baselines["cases"]), 60)
+
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "SCREENSHOT_BASELINES_PATH",
+                "SCREENSHOT_SIGNATURE_WIDTH",
+                "SCREENSHOT_MAX_HAMMING_RATIO",
+                "Image.open(BytesIO(screenshot))",
+                "ImageFilter.GaussianBlur",
+                "page.screenshot(",
+                "_screenshot_signature",
+                "_compare_screenshot_signature",
+                '"screenshot_cases"',
+                '"--update-screenshot-baselines"',
+        ):
+            self.assertIn(fragment, checker)
+
+        pyproject = PYPROJECT_PATH.read_text(encoding="utf-8")
+        self.assertIn('"pillow==12.3.0"', pyproject)
+        docs_workflow = (REPOSITORY_ROOT / ".github" / "workflows" / "docs.yml").read_text(encoding="utf-8")
+        self.assertIn('"pillow==12.3.0"', docs_workflow)
+        for workflow_name in ("docs.yml", "release.yml"):
+            workflow = (REPOSITORY_ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
+            self.assertNotIn("--update-screenshot-baselines", workflow)
+
+    def test_representative_routes_have_a_rendered_axe_accessibility_contract(self):
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "from axe_playwright_python.sync_playwright import Axe",
+                "def _validate_accessibility(",
+                "axe.run(page)",
+                '"accessibility_cases"',
+                '"axe_core"',
+        ):
+            self.assertIn(fragment, checker)
+
+        pyproject = PYPROJECT_PATH.read_text(encoding="utf-8")
+        docs_workflow = (REPOSITORY_ROOT / ".github" / "workflows" / "docs.yml").read_text(encoding="utf-8")
+        for source in (pyproject, docs_workflow):
+            self.assertIn('"axe-playwright-python==0.1.8"', source)
+
+        header = HEADER_OVERRIDE_PATH.read_text(encoding="utf-8")
+        palette = PALETTE_OVERRIDE_PATH.read_text(encoding="utf-8")
+        self.assertIn('<button\n      type="button"\n      class="md-header__button md-icon"', header)
+        self.assertIn("data-vh-search-trigger", header)
+        self.assertIn("data-vh-theme-target", palette)
+        self.assertNotIn('role="button"', header)
+        self.assertNotIn('role="button"', palette)
+
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertIn('document.createElement("button")', script)
+        self.assertIn('output.setAttribute("aria-hidden", String(!expanded))', script)
+        self.assertIn("output.inert = !expanded", script)
+        self.assertIn("scrollwrap.tabIndex = expanded ? 0 : -1", script)
+        self.assertIn('nav.setAttribute("aria-label", `Code block ${index + 1} actions`)', script)
+        self.assertIn("const initializeScrollableRegions", script)
+        self.assertIn("region.tabIndex = 0", script)
+        self.assertIn(
+            'region.setAttribute("aria-label", `Scrollable table ${index + 1}`)',
+            script,
+        )
+        self.assertIn('querySelectorAll(".md-typeset pre > code")', script)
+        self.assertIn('region.dataset.vhScrollableCode = "true"', script)
+        self.assertIn(
+            'region.setAttribute("aria-label", `Scrollable code block ${index + 1}`)',
+            script,
+        )
+        self.assertIn('querySelectorAll(".md-typeset .tabbed-labels")', script)
+        self.assertIn('region.dataset.vhScrollableTabs = "true"', script)
+        self.assertIn(
+            'region.setAttribute("aria-label", `Scrollable options ${index + 1}`)',
+            script,
+        )
+
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                ".md-typeset p a,",
+                "--md-code-hl-operator-color: #5d3bb3;",
+                "--md-code-hl-variable-color: #686a72;",
+                "--md-code-hl-constant-color: #a18ff0;",
+                "--md-code-hl-keyword-color: #7c9cef;",
+                "--md-code-hl-number-color: #f17b6d;",
+                ".md-copyright {",
+                ".md-typeset__table:focus-visible {",
+                ".md-typeset pre > code:focus-visible,",
+                ".md-typeset .tabbed-labels:focus-visible {",
+                ".md-top {",
+        ):
+            self.assertIn(fragment, stylesheet)
+
+    def test_shared_shell_expanded_states_have_a_rendered_axe_contract(self):
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "INTERACTIVE_ACCESSIBILITY_STATES",
+                "def _prepare_interactive_accessibility_state(",
+                '"search-open"',
+                '"search-results"',
+                '"search-empty"',
+                '"version-open"',
+                '"branch-open"',
+                '"drawer-open"',
+                "Number.parseFloat(getComputedStyle(searchInner).opacity) >= 0.999",
+                '"interactive_accessibility_cases"',
+        ):
+            self.assertIn(fragment, checker)
+
+        header = HEADER_OVERRIDE_PATH.read_text(encoding="utf-8")
+        self.assertNotIn('aria-haspopup="menu"', header)
+        self.assertNotIn('role="menu"', header)
+        self.assertNotIn('role="menuitem"', header)
+
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                'querySelectorAll(".md-search-result article pre > code")',
+                'region.setAttribute("aria-label", `Search result code ${index + 1}`)',
+                "new MutationObserver(normalizeScrollableRegions)",
+                'panel.setAttribute("aria-label"',
+                'panel.removeAttribute("aria-labelledby")',
+        ):
+            self.assertIn(fragment, script)
+
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        self.assertIn(".md-search-result__meta {", stylesheet)
+        self.assertIn("  opacity: 1;", stylesheet)
+        self.assertIn(".md-search-result article pre > code:focus-visible", stylesheet)
+        self.assertIn(
+            ".md-sidebar--primary .md-nav:not(.md-nav--primary) > .md-nav__title",
+            stylesheet,
+        )
+
+    def test_native_keyboard_navigation_has_a_rendered_ci_contract(self):
+        header = HEADER_OVERRIDE_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "data-vh-drawer-trigger",
+                '<button\n      type="button"',
+                'aria-expanded="false"',
+        ):
+            self.assertIn(fragment, header)
+
+        search = SEARCH_OVERRIDE_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            '<div class="md-search__scrollwrap" tabindex="-1" data-md-scrollfix>',
+            search,
+        )
+
+        palette = PALETTE_OVERRIDE_PATH.read_text(encoding="utf-8")
+        self.assertIn('tabindex="-1"', palette)
+
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        primary_navigation = script.split(
+            "const initializePrimaryNavigationControl = () => {",
+            1,
+        )[1].split("const initializeTableOfContentsTracking = () => {", 1)[0]
+        for fragment in (
+                'document.createElement("button")',
+                'button.addEventListener("click"',
+                "event.stopImmediatePropagation()",
+                "toggle.checked = !toggle.checked",
+                'toggle.dispatchEvent(new Event("change", { bubbles: true }))',
+                'window.matchMedia("(max-width: 59.984375em)")',
+                "input.tabIndex = expanded || !mobileViewport.matches ? 0 : -1",
+                'mobileViewport.addEventListener("change", synchronizeExpandedState)',
+        ):
+            self.assertIn(fragment, script)
+        self.assertNotIn("label.click()", primary_navigation)
+
+        drawer_script = MOBILE_DRAWER_SCRIPT_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                'querySelector("[data-vh-drawer-trigger]")',
+                'querySelector(".md-sidebar--primary")',
+                'window.matchMedia("(max-width: 59.984375em)")',
+                "navigation.inert = mobileViewport.matches && !drawer.checked",
+                'trigger.setAttribute("aria-expanded", String(expanded))',
+                'trigger.addEventListener("click"',
+                "event.stopImmediatePropagation()",
+                "firstFocusTarget.focus()",
+                'event.key !== "Escape"',
+                "trigger.focus()",
+        ):
+            self.assertIn(fragment, drawer_script)
+
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        for selector in (
+                ".md-sidebar--primary .md-nav__button:focus-visible,",
+                ".md-sidebar--primary .md-nav__button.focus-visible,",
+                ".md-sidebar--primary button.md-nav__link[data-vh-nav-toggle]:focus-visible,",
+                ".md-sidebar--primary button.md-nav__link[data-vh-nav-toggle].focus-visible,",
+        ):
+            self.assertIn(selector, stylesheet)
+
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "DESKTOP_KEYBOARD_FOCUS_PREFIX",
+                "TABLET_KEYBOARD_FOCUS_PREFIX",
+                "KEYBOARD_FOCUS_PREFIX",
+                "MOBILE_KEYBOARD_FOCUS_PREFIX",
+                "DRAWER_ACTIVATION_CASES",
+                "_focus_prefix_for_viewport",
+                "_validate_focus_cycle",
+                "_validate_root_branch_activation",
+                "_validate_mobile_drawer_activation",
+                'page.keyboard.press("Tab")',
+                '"branch:Base classes"',
+                '"header:drawer"',
+                '"keyboard_cases"',
+                '"focus_steps"',
+                '("Enter", "default")',
+                '("Space", "slate")',
+        ):
+            self.assertIn(fragment, checker)
+
+        command = "python scripts/check_documentation_visual.py site"
+        for workflow_name in ("docs.yml", "release.yml"):
+            workflow = (REPOSITORY_ROOT / ".github" / "workflows" / workflow_name).read_text(encoding="utf-8")
+            self.assertIn("Validate responsive documentation and keyboard behavior", workflow)
+            self.assertIn(command, workflow)
+
+    def test_all_representative_routes_have_complete_native_focus_cycles(self):
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "DESKTOP_KEYBOARD_FOCUS_PREFIX",
+                "TABLET_KEYBOARD_FOCUS_PREFIX",
+                "MOBILE_KEYBOARD_FOCUS_PREFIX",
+                "_focus_prefix_for_viewport",
+                "focusable_count = page.locator(",
+                "focus_cycle_cases = 0",
+                "focus_cycle_cases += 1",
+                '"focus_cycle_cases": focus_cycle_cases',
+                '"keyboard_activation_cases": keyboard_activation_cases',
+        ):
+            self.assertIn(fragment, checker)
+
+        matrix = checker.split("for palette in PALETTES:", 1)[1].split(
+            'page.set_viewport_size({"width": 1440, "height": 900})',
+            1,
+        )[0]
+        self.assertIn("focus_steps += _validate_focus_cycle(", matrix)
+        self.assertIn("_focus_prefix_for_viewport(viewport)", matrix)
+        self.assertNotIn("_validate_keyboard_focus_cycle", checker)
+        self.assertNotIn("_validate_mobile_keyboard_focus_cycle", checker)
+
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        self.assertIn("initializeContentTabFocus", script)
+        self.assertIn('label.classList.add("vh-content-tab--focus")', script)
+        self.assertIn('label.classList.remove("vh-content-tab--focus")', script)
+        self.assertIn("initializeSequentialFocusBoundary", script)
+        self.assertIn("document.activeElement !== document.body", script)
+        self.assertIn("skipLink.focus()", script)
+
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        content_tab_focus = stylesheet.split(
+            ".md-typeset .tabbed-labels > label.vh-content-tab--focus {",
+            1,
+        )[1].split("}", 1)[0]
+        self.assertIn("outline: 2px solid var(--vh-indigo);", content_tab_focus)
+        self.assertIn("outline-offset: 2px;", content_tab_focus)
+
+    def test_all_visible_root_navigation_branches_activate_and_restore(self):
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                'ROOT_BRANCH_ACTIVATION_METHOD_BY_PALETTE = {',
+                '"default": "keyboard"',
+                '"slate": "pointer"',
+                "def _validate_root_branch_activation(",
+                "root_branch_activation_cases = 0",
+                "root_branch_pointer_activation_cases = 0",
+                "root_branch_keyboard_activation_cases = 0",
+                "root_branch_interaction_accessibility_cases = 0",
+                "for viewport in VIEWPORTS[:2]:",
+                "for branch_label in TOP_LEVEL_NAVIGATION:",
+                '"root_branch_activation_cases": root_branch_activation_cases',
+                '"root_branch_pointer_activation_cases": root_branch_pointer_activation_cases',
+                '"root_branch_keyboard_activation_cases": root_branch_keyboard_activation_cases',
+                '"root_branch_interaction_accessibility_cases": '
+                "root_branch_interaction_accessibility_cases",
+        ):
+            self.assertIn(fragment, checker)
+
+        activation = checker.split(
+            "def _validate_root_branch_activation(",
+            1,
+        )[1].split("def _validate_mobile_drawer_activation", 1)[0]
+        for fragment in (
+                '"nav.md-nav--primary > ul.md-nav__list > li.md-nav__item > "',
+                '"button.md-nav__link[data-vh-nav-toggle]"',
+                "TOP_LEVEL_NAVIGATION",
+                'getAttribute("aria-controls")',
+                'getAttribute("aria-expanded")',
+                'getAttribute("aria-label")',
+                "document.activeElement === button",
+                'page.keyboard.press("Enter")',
+                "button.click()",
+                '"Pipeline"',
+                "location.pathname",
+                "document.body.dataset.mdColorScheme",
+                'getComputedStyle(panel).display',
+                '_rendered_state(page)["overflow"] != 0',
+                "_validate_accessibility(axe, page",
+        ):
+            self.assertIn(fragment, activation)
+
+    def test_deep_model_navigation_branches_activate_and_remain_sticky(self):
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                "SPEECHT5_NESTED_BRANCH_STATES = (",
+                '(("API", "Main Classes"), False)',
+                '(("API", "Models"), True)',
+                '(("API", "Models", "Text to speech"), True)',
+                '(("API", "Models", "Text to speech", "SpeechT5"), False)',
+                '(("API", "Models", "Automatic speech recognition"), False)',
+                '(("API", "Models", "Voice activity detection"), False)',
+                "NESTED_BRANCH_ACTIVATION_METHOD_BY_PALETTE = {",
+                "def _validate_nested_branch_activation(",
+                "nested_branch_activation_cases = 0",
+                "nested_branch_pointer_activation_cases = 0",
+                "nested_branch_keyboard_activation_cases = 0",
+                "nested_branch_interaction_accessibility_cases = 0",
+                "for branch_path, expected_initial_expanded in SPEECHT5_NESTED_BRANCH_STATES:",
+                '"nested_branch_activation_cases": nested_branch_activation_cases',
+                '"nested_branch_pointer_activation_cases": '
+                "nested_branch_pointer_activation_cases",
+                '"nested_branch_keyboard_activation_cases": '
+                "nested_branch_keyboard_activation_cases",
+                '"nested_branch_interaction_accessibility_cases": '
+                "nested_branch_interaction_accessibility_cases",
+        ):
+            self.assertIn(fragment, checker)
+
+        activation = checker.split(
+            "def _validate_nested_branch_activation(",
+            1,
+        )[1].split("def _validate_mobile_drawer_activation", 1)[0]
+        for fragment in (
+                "SPEECHT5_ROUTE",
+                "branch_path",
+                'getAttribute("aria-controls")',
+                'getAttribute("aria-expanded")',
+                "document.activeElement === button",
+                'page.keyboard.press("Enter")',
+                "button.click()",
+                '"SpeechT5"',
+                "location.pathname",
+                "document.body.dataset.mdColorScheme",
+                'getComputedStyle(panel).display',
+                'getComputedStyle(navigation).position',
+                "window.scrollTo(0, 320)",
+                '"--vh-shell-scroll-offset"',
+                '_rendered_state(page)["overflow"] != 0',
+                "_validate_accessibility(axe, page",
+        ):
+            self.assertIn(fragment, activation)
+
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                'panel.querySelectorAll("nav.md-nav")',
+                "nestedPanel.getAttribute(\"aria-label\")",
+                "`${sectionName} subsection ${nestedIndex + 1}: ${nestedName}`",
+        ):
+            self.assertIn(fragment, script)
 
     def test_left_navigation_marks_active_and_keyboard_focus_states(self):
         stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
@@ -746,6 +2333,362 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn(".md-nav__link[href].focus-visible", stylesheet)
         self.assertIn("outline: 2px solid var(--vh-indigo)", focus_state)
         self.assertIn("outline-offset: 2px", focus_state)
+
+    def test_right_table_of_contents_tracks_the_active_heading(self):
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        self.assertIn("- navigation.tracking", config)
+        self.assertIn("- toc.follow", config)
+
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        toc_tracking = script.split(
+            "const initializeTableOfContentsTracking = () => {",
+            1,
+        )[1].split("const initializeVersionControl = () => {", 1)[0]
+        for fragment in (
+                'tableOfContents.addEventListener("click"',
+                'event.target.closest(\'.md-nav__link[href^="#"]\')',
+                'window.history.replaceState(window.history.state, "", link.hash)',
+                'trackedLink.classList.toggle("md-nav__link--active", trackedLink === link)',
+                'window.addEventListener("scroll", scheduleSettledAnchor, { passive: true })',
+                'window.removeEventListener("scroll", scheduleSettledAnchor)',
+                'window.setTimeout(preserveSettledAnchor, 500)',
+                'tableOfContents.addEventListener("keydown"',
+                'event.key !== "Enter" || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey',
+                "event.preventDefault()",
+                "link.click()",
+                "link.focus({ preventScroll: true })",
+        ):
+            self.assertIn(fragment, toc_tracking)
+
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        self.assertIn(".md-typeset :target {", stylesheet)
+        target_state = stylesheet.split(".md-typeset :target {", 1)[1].split("}", 1)[0]
+        self.assertIn(
+            "--md-scroll-margin: calc(",
+            target_state,
+        )
+        self.assertIn(
+            "var(--vh-global-header-height) + var(--md-scroll-offset) - 1px",
+            target_state,
+        )
+
+        selector = ".md-sidebar--secondary .md-nav__link--active {"
+        self.assertIn(selector, stylesheet)
+        active_state = stylesheet.split(selector, 1)[1].split("}", 1)[0]
+        for declaration in (
+                "margin-inline: 0;",
+                "padding: 0;",
+                "background: transparent;",
+                "box-shadow: none;",
+                "color: var(--vh-indigo);",
+                "font-weight: 700;",
+        ):
+            self.assertIn(declaration, active_state)
+
+    def test_all_representative_table_of_contents_activate_by_pointer_and_keyboard(self):
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                'TOC_ACTIVATION_METHODS = ("pointer", "keyboard")',
+                "def _validate_table_of_contents_activation(",
+                "toc_activation_cases = 0",
+                "toc_pointer_activation_cases = 0",
+                "toc_keyboard_activation_cases = 0",
+                "toc_interaction_accessibility_cases = 0",
+                "for relative_path in REPRESENTATIVE_ROUTES:",
+                "for activation_method in TOC_ACTIVATION_METHODS:",
+                '"toc_activation_cases": toc_activation_cases',
+                '"toc_pointer_activation_cases": toc_pointer_activation_cases',
+                '"toc_keyboard_activation_cases": toc_keyboard_activation_cases',
+                '"toc_interaction_accessibility_cases": toc_interaction_accessibility_cases',
+        ):
+            self.assertIn(fragment, checker)
+
+        activation = checker.split(
+            "def _validate_table_of_contents_activation(",
+            1,
+        )[1].split("def _reset_quickstart_tabs", 1)[0]
+        for fragment in (
+                '".md-sidebar--secondary a.md-nav__link[href^=\'#\']"',
+                'page.keyboard.press("Enter")',
+                "target_link.click()",
+                "window.location.hash",
+                "md-nav__link--active",
+                "document.activeElement === link",
+                "target?.getBoundingClientRect()",
+                "header?.getBoundingClientRect()",
+                '_rendered_state(page)["overflow"] != 0',
+        ):
+            self.assertIn(fragment, activation)
+
+    def test_all_representative_routes_activate_and_close_the_visible_search_control(self):
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                'SEARCH_ACTIVATION_METHOD_BY_VIEWPORT = {',
+                '"desktop": "keyboard"',
+                '"tablet": "keyboard"',
+                '"mobile": "pointer"',
+                "def _validate_search_activation(",
+                "search_activation_cases = 0",
+                "search_pointer_activation_cases = 0",
+                "search_keyboard_activation_cases = 0",
+                "search_interaction_accessibility_cases = 0",
+                "for relative_path in REPRESENTATIVE_ROUTES:",
+                "SEARCH_ACTIVATION_METHOD_BY_VIEWPORT[viewport[\"name\"]]",
+                '"search_activation_cases": search_activation_cases',
+                '"search_pointer_activation_cases": search_pointer_activation_cases',
+                '"search_keyboard_activation_cases": search_keyboard_activation_cases',
+                '"search_interaction_accessibility_cases": search_interaction_accessibility_cases',
+        ):
+            self.assertIn(fragment, checker)
+
+        activation = checker.split(
+            "def _validate_search_activation(",
+            1,
+        )[1].split("def _validate_table_of_contents_activation", 1)[0]
+        for fragment in (
+                '"[data-vh-search-trigger]"',
+                '".md-search__input"',
+                '".md-search__output"',
+                '".md-search__scrollwrap"',
+                'page.keyboard.press("Control+K")',
+                "trigger.click()",
+                'page.keyboard.press("Escape")',
+                'getAttribute("aria-expanded")',
+                'getAttribute("aria-hidden")',
+                ".inert",
+                "document.activeElement",
+                '_rendered_state(page)["overflow"] != 0',
+        ):
+            self.assertIn(fragment, activation)
+
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+        search_control = script.split(
+            "const initializeSearchControl = () => {",
+            1,
+        )[1].split("const initializeLanguageControl = () => {", 1)[0]
+        self.assertIn("const closeFocusTarget = mobileViewport.matches ? trigger : input", search_control)
+        self.assertIn("if (!restoreFocus) return", search_control)
+        self.assertIn('event.key === "Tab" && document.activeElement === input', search_control)
+        self.assertIn("restoreFocus = false", search_control)
+        self.assertIn("closeFocusTarget.focus()", search_control)
+
+    def test_all_representative_routes_activate_and_close_the_version_control(self):
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                'VERSION_ACTIVATION_METHOD_BY_PALETTE = {',
+                '"default": "keyboard"',
+                '"slate": "pointer"',
+                "def _validate_version_activation(",
+                "version_activation_cases = 0",
+                "version_pointer_activation_cases = 0",
+                "version_keyboard_activation_cases = 0",
+                "version_interaction_accessibility_cases = 0",
+                "for relative_path in REPRESENTATIVE_ROUTES:",
+                "VERSION_ACTIVATION_METHOD_BY_PALETTE[palette]",
+                '"version_activation_cases": version_activation_cases',
+                '"version_pointer_activation_cases": version_pointer_activation_cases',
+                '"version_keyboard_activation_cases": version_keyboard_activation_cases',
+                '"version_interaction_accessibility_cases": version_interaction_accessibility_cases',
+        ):
+            self.assertIn(fragment, checker)
+
+        activation = checker.split(
+            "def _validate_version_activation(",
+            1,
+        )[1].split("def _validate_search_activation", 1)[0]
+        for fragment in (
+                '"[data-vh-version-control]"',
+                '"summary"',
+                '".vh-header-version__menu"',
+                '".md-select__link"',
+                'summary.click()',
+                'page.keyboard.press("Enter")',
+                'page.keyboard.press("Escape")',
+                'getAttribute("aria-expanded")',
+                'getAttribute("aria-current")',
+                "document.activeElement === summary",
+                '_rendered_state(page)["overflow"] != 0',
+        ):
+            self.assertIn(fragment, activation)
+
+    def test_all_visible_representative_language_controls_switch_locale(self):
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                'LANGUAGE_ACTIVATION_METHOD_BY_PALETTE = {',
+                '"default": "keyboard"',
+                '"slate": "pointer"',
+                'LANGUAGE_TARGET_BY_PALETTE = {',
+                '"default": "tr"',
+                '"slate": "ar"',
+                "def _validate_language_activation(",
+                "language_activation_cases = 0",
+                "language_pointer_activation_cases = 0",
+                "language_keyboard_activation_cases = 0",
+                "language_interaction_accessibility_cases = 0",
+                "for viewport in VIEWPORTS[:2]:",
+                "for relative_path in REPRESENTATIVE_ROUTES:",
+                'route_url = f"{base_url}{_localized_route_path(relative_path, \'en\')}"',
+                '"language_activation_cases": language_activation_cases',
+                '"language_pointer_activation_cases": language_pointer_activation_cases',
+                '"language_keyboard_activation_cases": language_keyboard_activation_cases',
+                '"language_interaction_accessibility_cases": language_interaction_accessibility_cases',
+        ):
+            self.assertIn(fragment, checker)
+
+        activation = checker.split(
+            "def _validate_language_activation(",
+            1,
+        )[1].split("def _validate_version_activation", 1)[0]
+        for fragment in (
+                '"[data-vh-language-select]"',
+                'select.locator("option")',
+                "select.click()",
+                "select.select_option(label=target_locale.upper())",
+                'page.keyboard.press("ArrowDown")',
+                "page.expect_navigation(",
+                "document.documentElement.lang",
+                "document.documentElement.dir",
+                ".selectedOptions",
+                '_rendered_state(page)["overflow"] != 0',
+        ):
+            self.assertIn(fragment, activation)
+
+    def test_all_visible_representative_theme_controls_switch_palette(self):
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                'THEME_ACTIVATION_METHOD_BY_PALETTE = {',
+                '"default": "keyboard"',
+                '"slate": "pointer"',
+                'THEME_TARGET_BY_PALETTE = {',
+                '"default": "slate"',
+                '"slate": "default"',
+                "def _validate_theme_activation(",
+                "theme_activation_cases = 0",
+                "theme_pointer_activation_cases = 0",
+                "theme_keyboard_activation_cases = 0",
+                "theme_interaction_accessibility_cases = 0",
+                "for viewport in VIEWPORTS[:2]:",
+                "for relative_path in REPRESENTATIVE_ROUTES:",
+                '"theme_activation_cases": theme_activation_cases',
+                '"theme_pointer_activation_cases": theme_pointer_activation_cases',
+                '"theme_keyboard_activation_cases": theme_keyboard_activation_cases',
+                '"theme_interaction_accessibility_cases": theme_interaction_accessibility_cases',
+        ):
+            self.assertIn(fragment, checker)
+
+        activation = checker.split(
+            "def _validate_theme_activation(",
+            1,
+        )[1].split("def _validate_language_activation", 1)[0]
+        for fragment in (
+                '"[data-vh-theme-toggle]:not([hidden])"',
+                'page.keyboard.press("Enter")',
+                "toggle.click()",
+                "document.body.dataset.mdColorScheme",
+                "document.activeElement === visibleToggle",
+                "location.pathname",
+                '_rendered_state(page)["overflow"] != 0',
+                "_validate_accessibility(axe, page",
+        ):
+            self.assertIn(fragment, activation)
+
+    def test_all_visible_representative_source_controls_open_repository(self):
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                'SOURCE_REPOSITORY_URL = "https://github.com/kadirnar/voicehub"',
+                'SOURCE_ACTIVATION_METHOD_BY_PALETTE = {',
+                '"default": "keyboard"',
+                '"slate": "pointer"',
+                "def _validate_source_activation(",
+                "source_activation_cases = 0",
+                "source_pointer_activation_cases = 0",
+                "source_keyboard_activation_cases = 0",
+                "source_interaction_accessibility_cases = 0",
+                "for viewport in VIEWPORTS[:2]:",
+                "for relative_path in REPRESENTATIVE_ROUTES:",
+                '"source_activation_cases": source_activation_cases',
+                '"source_pointer_activation_cases": source_pointer_activation_cases',
+                '"source_keyboard_activation_cases": source_keyboard_activation_cases',
+                '"source_interaction_accessibility_cases": source_interaction_accessibility_cases',
+        ):
+            self.assertIn(fragment, checker)
+
+        activation = checker.split(
+            "def _validate_source_activation(",
+            1,
+        )[1].split("def _validate_theme_activation", 1)[0]
+        for fragment in (
+                '[data-vh-header-control="source"] a[href]',
+                '"Open VoiceHub source repository"',
+                "page.route(",
+                "SOURCE_REPOSITORY_URL,",
+                "page.expect_navigation(",
+                'page.keyboard.press("Enter")',
+                "link.click()",
+                "page.unroute(SOURCE_REPOSITORY_URL)",
+                "document.activeElement === link",
+                'location.pathname',
+                '_rendered_state(page)["overflow"] != 0',
+                "_validate_accessibility(axe, page",
+        ):
+            self.assertIn(fragment, activation)
+
+    def test_all_representative_page_actions_activate_exact_targets(self):
+        checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        for fragment in (
+                ':is(.md-content__button[rel="edit"], .md-footer__link, .md-top)'
+                ":is(:focus-visible, .focus-visible)",
+                "outline: 2px solid var(--vh-indigo)",
+                "outline-offset: 2px",
+        ):
+            self.assertIn(fragment, stylesheet)
+        for fragment in (
+                "REPRESENTATIVE_PAGE_ACTIONS = {",
+                "PAGE_ACTION_METHOD_BY_PALETTE = {",
+                '"default": "keyboard"',
+                '"slate": "pointer"',
+                "def _validate_page_actions(",
+                "page_action_cases = 0",
+                "page_action_edit_activations = 0",
+                "page_action_footer_activations = 0",
+                "page_action_back_to_top_activations = 0",
+                "page_action_pointer_cases = 0",
+                "page_action_keyboard_cases = 0",
+                "page_action_interaction_accessibility_cases = 0",
+                "for viewport in VIEWPORTS:",
+                "for relative_path in REPRESENTATIVE_ROUTES:",
+                '"page_action_cases": page_action_cases',
+                '"page_action_edit_activations": page_action_edit_activations',
+                '"page_action_footer_activations": page_action_footer_activations',
+                '"page_action_back_to_top_activations": page_action_back_to_top_activations',
+                '"page_action_pointer_cases": page_action_pointer_cases',
+                '"page_action_keyboard_cases": page_action_keyboard_cases',
+                '"page_action_interaction_accessibility_cases": '
+                "page_action_interaction_accessibility_cases",
+        ):
+            self.assertIn(fragment, checker)
+
+        activation = checker.split(
+            "def _validate_page_actions(",
+            1,
+        )[1].split("def _validate_source_activation", 1)[0]
+        for fragment in (
+                '.md-content__button[rel="edit"]',
+                ".md-footer__link--prev",
+                ".md-footer__link--next",
+                'button[data-md-component="top"]',
+                "page.route(",
+                "page.expect_navigation(",
+                'page.keyboard.press("Enter")',
+                ".click()",
+                "window.scrollY === 0",
+                "document.activeElement === action",
+                "location.pathname",
+                '_rendered_state(page)["overflow"] != 0',
+                "_validate_accessibility(axe, page",
+        ):
+            self.assertIn(fragment, activation)
 
     def test_mobile_drawer_overlay_click_target_stays_outside_the_panel(self):
         stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
@@ -773,7 +2716,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn('document.getElementById("__drawer")', script)
         self.assertIn("!drawer.checked", script)
         self.assertIn("event.preventDefault()", script)
-        self.assertIn("drawer.checked = false", script)
+        self.assertIn("setDrawerState(false)", script)
         self.assertIn('drawer.dispatchEvent(new Event("change", { bubbles: true }))', script)
 
     def test_process_overviews_are_readable_without_horizontal_scrolling(self):

@@ -1,0 +1,151 @@
+{# VoiceHub product header aligned with the Transformers documentation controls. #}
+{% set class = "md-header" %}
+{% if "navigation.tabs.sticky" in features %}
+  {% set class = class ~ " md-header--shadow md-header--lifted" %}
+{% elif "navigation.tabs" not in features %}
+  {% set class = class ~ " md-header--shadow" %}
+{% endif %}
+<header class="{{ class }}" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="{{ lang.t('header') }}">
+    <a
+      href="{{ config.extra.homepage | d(nav.homepage.url, true) | url }}"
+      title="{{ config.site_name | e }}"
+      class="md-header__button md-logo"
+      aria-label="{{ config.site_name }}"
+      data-md-component="logo"
+    >
+      {% include "partials/logo.html" %}
+    </a>
+    <span class="vh-global-brand" aria-hidden="true">VoiceHub</span>
+    <button
+      type="button"
+      class="md-header__button md-icon"
+      data-vh-drawer-trigger
+      aria-label="Documentation navigation"
+      aria-expanded="false"
+    >
+      {% set icon = config.theme.icon.menu or "material/menu" %}
+      {% include ".icons/" ~ icon ~ ".svg" %}
+    </button>
+    <div class="vh-doc-rail-controls">
+      <div
+        class="md-header__title"
+        data-md-component="header-title"
+        data-vh-header-control="product"
+      >
+        <div class="md-header__ellipsis">
+          <div class="md-header__topic">
+            <span class="md-ellipsis">
+              <span class="vh-header-product__full">{{ config.site_name }}</span>
+              <span class="vh-header-product__compact">VoiceHub</span>
+            </span>
+          </div>
+          <div class="md-header__topic" data-md-component="header-topic">
+            <span class="md-ellipsis">
+              {% if page.meta and page.meta.title %}
+                {{ page.meta.title }}
+              {% else %}
+                {{ page.title }}
+              {% endif %}
+            </span>
+          </div>
+        </div>
+      </div>
+      {% if "material/search" in config.plugins %}
+        {% set search = config.plugins["material/search"] | attr("config") %}
+        {% if search.enabled %}
+          <button
+            type="button"
+            class="md-header__button md-icon"
+            data-vh-header-control="search"
+            data-vh-search-trigger
+            aria-label="{{ lang.t('search') }}"
+            aria-controls="__search"
+            aria-expanded="false"
+          >
+            {% set icon = config.theme.icon.search or "material/magnify" %}
+            {% include ".icons/" ~ icon ~ ".svg" %}
+          </button>
+          {% include "partials/search.html" %}
+        {% endif %}
+      {% endif %}
+      <div class="vh-doc-rail-utility">
+        {% if config.extra.docs_version %}
+          <details
+            class="md-header__option md-select vh-header-version"
+            data-vh-header-control="version"
+            data-vh-version-control
+          >
+            <summary
+              class="md-header__button md-icon vh-header-version__button"
+              aria-label="Documentation version"
+              aria-expanded="false"
+            >
+              {% set icon = "material/source-branch" %}
+              {% include ".icons/" ~ icon ~ ".svg" %}
+              <span class="vh-header-version__label">
+                {{ config.extra.docs_version.label }} · {{ config.extra.docs_version.release }}
+              </span>
+              {% set icon = "material/chevron-down" %}
+              {% include ".icons/" ~ icon ~ ".svg" %}
+            </summary>
+            <div class="md-select__inner vh-header-version__menu">
+              <ul class="md-select__list" aria-label="Documentation version">
+                <li class="md-select__item">
+                  <a
+                    href="{{ config.extra.homepage | d(nav.homepage.url, true) | url }}"
+                    class="md-select__link"
+                    aria-current="page"
+                  >
+                    {{ config.extra.docs_version.label }} · {{ config.extra.docs_version.release }} source
+                  </a>
+                </li>
+                <li class="md-select__item">
+                  <a
+                    href="{{ 'project/release-readiness/' | url }}"
+                    class="md-select__link"
+                  >
+                    Release candidate status
+                  </a>
+                </li>
+                <li class="md-select__item">
+                  <a
+                    href="https://pypi.org/project/voicehub/{{ config.extra.docs_version.published }}/"
+                    class="md-select__link"
+                  >
+                    Published package · {{ config.extra.docs_version.published }}
+                  </a>
+                </li>
+              </ul>
+            </div>
+          </details>
+        {% endif %}
+        {% if config.extra.alternate %}
+          <div class="vh-header-control" data-vh-header-control="language">
+            {% include "partials/alternate.html" %}
+          </div>
+        {% endif %}
+        {% if config.theme.palette %}
+          {% if not config.theme.palette is mapping %}
+            <div class="vh-header-control" data-vh-header-control="theme">
+              {% include "partials/palette.html" %}
+            </div>
+          {% endif %}
+        {% endif %}
+        {% if not config.theme.palette is mapping %}
+          {% include "partials/javascripts/palette.html" %}
+        {% endif %}
+        {% if config.repo_url %}
+          <div class="md-header__source" data-vh-header-control="source">
+            {% include "partials/source.html" %}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+  {% if "navigation.tabs.sticky" in features %}
+    {% if "navigation.tabs" in features %}
+      {% include "partials/tabs.html" %}
+    {% endif %}
+  {% endif %}
+</header>

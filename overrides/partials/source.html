@@ -1,0 +1,14 @@
+{# VoiceHub override: expose repository facts through the reference's compact source link. #}
+<a
+  href="{{ config.repo_url }}"
+  title="{{ lang.t('source') }}"
+  aria-label="Open VoiceHub source repository"
+  class="md-source vh-source-link"
+  data-md-component="source"
+>
+  <span class="md-source__icon md-icon">
+    {% set icon = config.theme.icon.repo or "fontawesome/brands/git-alt" %}
+    {% include ".icons/" ~ icon ~ ".svg" %}
+  </span>
+  <span class="md-source__repository">{{ config.repo_name }}</span>
+</a>

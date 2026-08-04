@@ -179,7 +179,7 @@ for expected hardware and opt-in execution flags.
 ## Documentation
 
 - [Quickstart](https://kadirnar.github.io/voicehub/getting-started/quickstart/)
-- [TTS inference](https://kadirnar.github.io/voicehub/guides/inference/)
+- [Pipeline](https://kadirnar.github.io/voicehub/guides/inference/)
 - [Speech recognition](https://kadirnar.github.io/voicehub/guides/speech-recognition/)
 - [Voice activity detection](https://kadirnar.github.io/voicehub/guides/voice-activity-detection/)
 - [Model guides](https://kadirnar.github.io/voicehub/models/providers/)
