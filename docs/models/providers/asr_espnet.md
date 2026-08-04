@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the asr_espnet integration.
 ---
 
-# ESPnetASR
+# ESPnetASR {.vh-model-title}
 
 ## Usage
 
@@ -46,9 +46,19 @@ contracts, so the documented support stays aligned with code. [Open the `asr_esp
 | Task | Automatic speech recognition |
 | Architecture | `espnet-librispeech-transformer-e18` |
 | Runtime | `VoiceHub-native` |
+| Languages | `en` |
 | Capabilities | `automatic-speech-recognition`, `english`, `safetensors`, `fine-tuning`, `voicehub-native`, `native-runtime`, `raw-audio-fine-tuning`, `hybrid-ctc-attention` |
 | Reusable components | — |
 | Normalized output | `ASROutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>1 documented language</summary>
+
+`en`
+
+</details>
 
 ## Configuration
 

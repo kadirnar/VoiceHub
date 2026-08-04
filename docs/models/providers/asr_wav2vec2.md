@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the asr_wav2vec2 integration.
 ---
 
-# Wav2Vec2
+# Wav2Vec2 {.vh-model-title}
 
 ## Usage
 
@@ -46,9 +46,14 @@ contracts, so the documented support stays aligned with code. [Open the `asr_wav
 | Task | Automatic speech recognition |
 | Architecture | `wav2vec2` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `automatic-speech-recognition`, `timestamps`, `safetensors`, `fine-tuning`, `voicehub-native` |
 | Reusable components | — |
 | Normalized output | `ASROutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the csm integration.
 ---
 
-# CSM
+# CSM {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,14 @@ contracts, so the documented support stays aligned with code. [Open the `csm` Co
 | Task | Text to speech |
 | Architecture | `csm` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `text-to-speech`, `voice-cloning`, `conversation`, `safetensors`, `fine-tuning`, `raw-audio-training`, `preencoded-code-training`, `voicehub-native`, `native-runtime` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

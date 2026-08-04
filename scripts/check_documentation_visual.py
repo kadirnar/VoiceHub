@@ -100,10 +100,10 @@ VIEWPORTS = (
 PALETTES = {
     "default": {
         "background": "rgb(255, 255, 255)",
-        "text": "rgb(41, 43, 50)",
+        "text": "rgb(23, 32, 51)",
     },
     "slate": {
-        "background": "rgb(30, 33, 41)",
+        "background": "rgb(31, 33, 41)",
         "text": "rgb(232, 233, 239)",
     },
 }
@@ -200,6 +200,7 @@ SPEECHT5_HEADINGS = (
     ("H1", "SpeechT5"),
     ("H2", "Usage"),
     ("H2", "Overview"),
+    ("H3", "Language support"),
     ("H2", "Configuration"),
     ("H2", "Processing"),
     ("H2", "Inference"),
@@ -212,7 +213,7 @@ SPEECHT5_HEADINGS = (
     ("H3", "SpeechT5Config"),
     ("H3", "SpeechT5ForTextToSpeech"),
 )
-SPEECHT5_TABLE_ROWS = (6, 3, 4, 2, 6, 1, 9, 8)
+SPEECHT5_TABLE_ROWS = (7, 3, 4, 2, 6, 1, 9, 8)
 QUICKSTART_ROUTE = "getting-started/quickstart/index.html"
 QUICKSTART_HEADINGS = (
     ("H1", "Quickstart"),

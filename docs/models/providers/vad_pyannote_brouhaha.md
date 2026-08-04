@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the vad_pyannote_brouhaha integration.
 ---
 
-# PyannoteBrouhahaVAD
+# PyannoteBrouhahaVAD {.vh-model-title}
 
 ## Usage
 
@@ -45,9 +45,14 @@ contracts, so the documented support stays aligned with code. [Open the `vad_pya
 | Task | Voice activity detection |
 | Architecture | `pyannet` |
 | Runtime | `VoiceHub-native` |
+| Languages | Not text-language conditioned |
 | Capabilities | `voice-activity-detection`, `gated-checkpoint`, `voicehub-native`, `trusted-checkpoint-conversion`, `safetensors`, `frame-scores`, `snr`, `c50`, `fine-tuning` |
 | Reusable components | — |
 | Normalized output | `VADOutput` |
+
+### Language support
+
+The public VAD contract does not select a spoken language; validate checkpoint acoustic coverage on the target languages and recording conditions.
 
 ## Configuration
 

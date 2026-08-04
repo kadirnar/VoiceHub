@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the f5tts integration.
 ---
 
-# F5TTS
+# F5TTS {.vh-model-title}
 
 ## Usage
 
@@ -61,9 +61,19 @@ contracts, so the documented support stays aligned with code.
 | Task | Text to speech |
 | Architecture | `f5tts` |
 | Runtime | `VoiceHub-native` |
+| Languages | 2 enumerated languages |
 | Capabilities | `text-to-speech`, `voice-cloning`, `fine-tuning`, `flow-matching`, `safetensors`, `voicehub-native`, `native-runtime` |
 | Reusable components | `vocos` |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>2 documented languages</summary>
+
+`en`, `zh`
+
+</details>
 
 ## Configuration
 

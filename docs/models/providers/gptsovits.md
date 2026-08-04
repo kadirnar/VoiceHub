@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the gptsovits integration.
 ---
 
-# GPTSoVITS
+# GPTSoVITS {.vh-model-title}
 
 ## Usage
 
@@ -63,9 +63,21 @@ contracts, so the documented support stays aligned with code. [Open the `gptsovi
 | Task | Text to speech |
 | Architecture | `gptsovits` |
 | Runtime | `VoiceHub-native` |
+| Languages | 5 enumerated languages |
 | Capabilities | `text-to-speech`, `voice-cloning`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime`, `preprocessed-training`, `gpt-sovits-v1`, `gpt-sovits-v2`, `gpt-sovits-v2-pro`, `gpt-sovits-v2-pro-plus`, `prepared-pro-speaker-conditioning`, `variant-aware-safetensors-export` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>5 documented languages</summary>
+
+`zh`, `en`, `ja`, `ko`, `yue`
+
+Korean and Cantonese support applies to V2 and later variants.
+
+</details>
 
 ## Configuration
 

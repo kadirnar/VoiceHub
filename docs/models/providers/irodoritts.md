@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the irodoritts integration.
 ---
 
-# IrodoriTTS
+# IrodoriTTS {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,14 @@ contracts, so the documented support stays aligned with code. [Open the `irodori
 | Task | Text to speech |
 | Architecture | `irodoritts-rf-dit` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `text-to-speech`, `voice-cloning`, `voice-design`, `multilingual`, `fine-tuning`, `flow-matching`, `safetensors`, `voicehub-native`, `native-runtime`, `raw-audio-fine-tuning`, `preencoded-latent-fine-tuning`, `duration-prediction` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

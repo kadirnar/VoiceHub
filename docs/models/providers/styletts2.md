@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the styletts2 integration.
 ---
 
-# StyleTTS2
+# StyleTTS2 {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,19 @@ contracts, so the documented support stays aligned with code.
 | Task | Text to speech |
 | Architecture | `styletts2` |
 | Runtime | `VoiceHub-native` |
+| Languages | `en-US` |
 | Capabilities | `text-to-speech`, `voice-cloning`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime`, `preprocessed-training`, `explicit-phonemes` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>1 documented language</summary>
+
+`en-US`
+
+</details>
 
 ## Configuration
 

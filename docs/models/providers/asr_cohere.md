@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the asr_cohere integration.
 ---
 
-# Cohere
+# Cohere {.vh-model-title}
 
 ## Usage
 
@@ -46,9 +46,19 @@ contracts, so the documented support stays aligned with code. [Open the `asr_coh
 | Task | Automatic speech recognition |
 | Architecture | `cohere-asr` |
 | Runtime | `VoiceHub-native` |
+| Languages | 14 enumerated languages |
 | Capabilities | `automatic-speech-recognition`, `multilingual`, `long-form`, `punctuation`, `gated-checkpoint`, `safetensors`, `fine-tuning`, `voicehub-native`, `native-runtime` |
 | Reusable components | — |
 | Normalized output | `ASROutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>14 documented languages</summary>
+
+`ar`, `de`, `el`, `en`, `es`, `fr`, `it`, `ja`, `ko`, `nl`, `pl`, `pt`, `vi`, `zh`
+
+</details>
 
 ## Configuration
 

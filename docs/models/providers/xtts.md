@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the xtts integration.
 ---
 
-# XTTS
+# XTTS {.vh-model-title}
 
 ## Usage
 
@@ -61,9 +61,19 @@ contracts, so the documented support stays aligned with code. [Open the `xtts` C
 | Task | Text to speech |
 | Architecture | `xtts2` |
 | Runtime | `VoiceHub-native` |
+| Languages | 17 enumerated languages |
 | Capabilities | `text-to-speech`, `voice-cloning`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime`, `preencoded-code-fine-tuning`, `gpt-fine-tuning`, `restricted-pickle-conversion` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>17 documented languages</summary>
+
+`en`, `es`, `fr`, `de`, `it`, `pt`, `pl`, `tr`, `ru`, `nl`, `cs`, `ar`, `zh-CN`, `hu`, `ko`, `ja`, `hi`
+
+</details>
 
 ## Configuration
 

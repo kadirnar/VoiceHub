@@ -317,7 +317,7 @@ class DocumentationSiteTests(unittest.TestCase):
                 self.assertEqual(sections, MODEL_PAGE_SECTIONS)
                 self.assertLessEqual(
                     len(source.splitlines()),
-                    250,
+                    255,
                     f"{path.name} should link shared workflows instead of repeating them.",
                 )
                 self.assertIn(spec.task.value.replace("-", " "), source.lower())
@@ -878,7 +878,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertNotIn("project/adding-a-model.md", sections["Resources"])
         self.assertIn("reference/api.md", sections["API"])
 
-        stale_labels = ("Home", "Quick Start", "Architecture", "API Reference", "Contributing")
+        stale_labels = ("Home", "Quick Start", "API Reference", "Contributing")
         for locale in LOCALIZED_HOME_LOCALES:
             with self.subTest(locale=locale):
                 locale_block = config.split(f"        - locale: {locale}\n", 1)[1]
@@ -887,6 +887,31 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                     self.assertRegex(locale_block, rf"(?m)^            {re.escape(label)}:")
                 for label in stale_labels:
                     self.assertNotRegex(locale_block, rf"(?m)^            {re.escape(label)}:")
+
+    def test_every_visible_navigation_label_has_a_translation_in_every_locale(self):
+        config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
+        navigation = config.split("nav:\n", 1)[1].split("\nplugins:", 1)[0]
+        required_labels = set()
+        for line in navigation.splitlines():
+            match = re.match(r'^\s+- (?:(?:"([^"]+)")|([^:]+)):(?:\s+(.+))?$', line)
+            if match is None:
+                continue
+            label = match.group(1) or match.group(2).strip()
+            target = (match.group(3) or "").strip()
+            if target.startswith("models/providers/") and target != "models/providers/index.md":
+                continue
+            required_labels.add(label)
+
+        self.assertEqual(len(required_labels), 57)
+        for locale in LOCALIZED_HOME_LOCALES:
+            with self.subTest(locale=locale):
+                locale_block = config.split(f"        - locale: {locale}\n", 1)[1]
+                locale_block = locale_block.split("        - locale:", 1)[0]
+                translated_labels = {
+                    match.group(1)
+                    for match in re.finditer(r"(?m)^            ([^:#][^:]*):\s+.+$", locale_block)
+                }
+                self.assertEqual(required_labels - translated_labels, set())
 
     def test_model_guides_follow_transformers_api_navigation_hierarchy(self):
         from voicehub import list_model_specs
@@ -940,6 +965,59 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             'expanded_branches=("API", "Models", "Text to speech")',
             dom_checker,
         )
+
+    def test_every_model_guide_declares_evidence_bounded_language_support(self):
+        from voicehub import SpeechTask, list_model_specs
+        from voicehub.models.language_support import model_language_support
+
+        index = MODEL_PAGE_INDEX_PATH.read_text(encoding="utf-8")
+        self.assertEqual(index.count('<div class="vh-model-catalog" markdown>'), 3)
+        self.assertEqual(index.count("| Model | Languages | Default checkpoint | Training | Notebook |"), 3)
+
+        for spec in list_model_specs(task=None):
+            with self.subTest(model_type=spec.model_type):
+                support = model_language_support(spec)
+                page = (MODEL_PAGE_DIR / f"{spec.model_type}.md").read_text(encoding="utf-8")
+                self.assertIn(f"# {spec.display_name} {{.vh-model-title}}", page)
+                self.assertIn("| Languages |", page)
+                self.assertIn("### Language support", page)
+                if support.kind == "enumerated":
+                    self.assertTrue(support.codes)
+                    for code in support.codes:
+                        self.assertIn(f"`{code}`", page)
+                    self.assertIn('<details class="vh-language-support" markdown>', page)
+                elif support.kind == "not-text-conditioned":
+                    self.assertIs(spec.task, SpeechTask.VOICE_ACTIVITY_DETECTION)
+                    self.assertIn("Not text-language conditioned", page)
+                    self.assertIn("does not select a spoken language", page)
+                else:
+                    self.assertFalse(support.codes)
+                    self.assertIn("Checkpoint-defined; not exhaustively enumerated", page)
+                    self.assertIn("does not claim one exhaustive language list", page)
+
+    def test_model_and_optimization_highlights_use_semantic_routes(self):
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
+
+        for selector in (
+                ".md-typeset .vh-model-title",
+                ".md-typeset .vh-language-support",
+                ".md-typeset .vh-model-catalog tbody td:first-child code",
+                ".md-typeset code.vh-optimization-term",
+                ".md-nav__link.vh-model-link",
+                ".md-nav__link.vh-optimization-link",
+        ):
+            self.assertIn(selector, stylesheet)
+        for fragment in (
+                "const initializeSemanticHighlights = () => {",
+                'document.body.classList.toggle("vh-optimization-page", isOptimizationPage)',
+                '"vh-model-link",',
+                'link.classList.toggle("vh-optimization-link"',
+                'document.querySelectorAll(".md-typeset code:not(pre code)")',
+                'term.classList.add("vh-optimization-term")',
+                "initializeSemanticHighlights();",
+        ):
+            self.assertIn(fragment, script)
 
     def test_model_api_reference_matches_transformers_contract(self):
         config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
@@ -1960,7 +2038,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 '"header_height": 65',
                 '"header_height": 64',
                 '"rgb(255, 255, 255)"',
-                '"rgb(30, 33, 41)"',
+                '"rgb(31, 33, 41)"',
                 '".md-sidebar--primary"',
                 '".md-sidebar--secondary"',
                 '"a.md-nav__link--active"',

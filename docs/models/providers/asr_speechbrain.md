@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the asr_speechbrain integration.
 ---
 
-# SpeechBrainASR
+# SpeechBrainASR {.vh-model-title}
 
 ## Usage
 
@@ -46,9 +46,19 @@ contracts, so the documented support stays aligned with code. [Open the `asr_spe
 | Task | Automatic speech recognition |
 | Architecture | `speechbrain-crdnn-asr` |
 | Runtime | `VoiceHub-native` |
+| Languages | `en` |
 | Capabilities | `automatic-speech-recognition`, `english`, `beam-search`, `safetensors`, `fine-tuning`, `voicehub-native`, `crdnn`, `ctc-seq2seq`, `rnnlm-shallow-fusion` |
 | Reusable components | — |
 | Normalized output | `ASROutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>1 documented language</summary>
+
+`en`
+
+</details>
 
 ## Configuration
 

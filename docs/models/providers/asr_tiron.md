@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the asr_tiron integration.
 ---
 
-# Tiron
+# Tiron {.vh-model-title}
 
 ## Usage
 
@@ -46,9 +46,14 @@ contracts, so the documented support stays aligned with code. [Open the `asr_tir
 | Task | Automatic speech recognition |
 | Architecture | `whisper` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `automatic-speech-recognition`, `multilingual`, `speaker-attribution`, `timestamps`, `safetensors`, `fine-tuning`, `constrained-decoding`, `voicehub-native` |
 | Reusable components | — |
 | Normalized output | `ASROutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the asr_moonshine integration.
 ---
 
-# Moonshine
+# Moonshine {.vh-model-title}
 
 ## Usage
 
@@ -46,9 +46,19 @@ contracts, so the documented support stays aligned with code. [Open the `asr_moo
 | Task | Automatic speech recognition |
 | Architecture | `moonshine` |
 | Runtime | `VoiceHub-native` |
+| Languages | `en` |
 | Capabilities | `automatic-speech-recognition`, `safetensors`, `fine-tuning`, `compact`, `voicehub-native` |
 | Reusable components | — |
 | Normalized output | `ASROutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>1 documented language</summary>
+
+`en`
+
+</details>
 
 ## Configuration
 

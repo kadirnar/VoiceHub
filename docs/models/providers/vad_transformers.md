@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the vad_transformers integration.
 ---
 
-# TransformersVAD
+# TransformersVAD {.vh-model-title}
 
 ## Usage
 
@@ -45,9 +45,14 @@ contracts, so the documented support stays aligned with code.
 | Task | Voice activity detection |
 | Architecture | `wav2vec2` |
 | Runtime | `VoiceHub-native` |
+| Languages | Not text-language conditioned |
 | Capabilities | `voice-activity-detection`, `frame-scores`, `safetensors`, `fine-tuning`, `voicehub-native`, `native-runtime` |
 | Reusable components | — |
 | Normalized output | `VADOutput` |
+
+### Language support
+
+The public VAD contract does not select a spoken language; validate checkpoint acoustic coverage on the target languages and recording conditions.
 
 ## Configuration
 

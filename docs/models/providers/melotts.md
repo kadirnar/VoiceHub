@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the melotts integration.
 ---
 
-# MeloTTS
+# MeloTTS {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,19 @@ contracts, so the documented support stays aligned with code.
 | Task | Text to speech |
 | Architecture | `melotts` |
 | Runtime | `VoiceHub-native` |
+| Languages | 6 enumerated languages |
 | Capabilities | `text-to-speech`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime`, `preprocessed-training`, `explicit-linguistic-features` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>6 documented languages</summary>
+
+`en`, `fr`, `ja`, `es`, `zh`, `ko`
+
+</details>
 
 ## Configuration
 

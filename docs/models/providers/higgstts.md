@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the higgstts integration.
 ---
 
-# HiggsTTS
+# HiggsTTS {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,14 @@ contracts, so the documented support stays aligned with code. [Open the `higgstt
 | Task | Text to speech |
 | Architecture | `higgs_audio_v2` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `text-to-speech`, `voice-cloning`, `expressive-speech`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime`, `raw-audio-fine-tuning`, `preencoded-code-fine-tuning` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

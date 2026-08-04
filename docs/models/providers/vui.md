@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the vui integration.
 ---
 
-# Vui
+# Vui {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,19 @@ contracts, so the documented support stays aligned with code.
 | Task | Text to speech |
 | Architecture | `vui` |
 | Runtime | `VoiceHub-native` |
+| Languages | `en` |
 | Capabilities | `text-to-speech`, `fine-tuning`, `safetensors`, `standalone-safetensors-export`, `voicehub-native`, `native-runtime`, `preprocessed-training` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>1 documented language</summary>
+
+`en`
+
+</details>
 
 ## Configuration
 

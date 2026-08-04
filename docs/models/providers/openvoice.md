@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the openvoice integration.
 ---
 
-# OpenVoice
+# OpenVoice {.vh-model-title}
 
 ## Usage
 
@@ -60,9 +60,19 @@ contracts, so the documented support stays aligned with code. [Open the `openvoi
 | Task | Text to speech |
 | Architecture | `openvoice-v2-converter` |
 | Runtime | `VoiceHub-native` |
+| Languages | 6 enumerated languages |
 | Capabilities | `text-to-speech`, `voice-cloning`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime`, `paired-waveform-training`, `explicit-base-waveform` |
 | Reusable components | `wavmark` |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>6 documented languages</summary>
+
+`en`, `es`, `fr`, `zh`, `ja`, `ko`
+
+</details>
 
 ## Configuration
 

@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the orpheustts integration.
 ---
 
-# OrpheusTTS
+# OrpheusTTS {.vh-model-title}
 
 ## Usage
 
@@ -57,9 +57,14 @@ contracts, so the documented support stays aligned with code. [Open the `orpheus
 | Task | Text to speech |
 | Architecture | `causal-lm` |
 | Runtime | `VoiceHub-native` |
+| Languages | Checkpoint-defined; not exhaustively enumerated |
 | Capabilities | `text-to-speech`, `expressive-speech`, `safetensors`, `fine-tuning`, `voicehub-native`, `native-runtime` |
 | Reusable components | — |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+VoiceHub does not claim one exhaustive language list across compatible checkpoints; verify the selected checkpoint card and processor metadata.
 
 ## Configuration
 

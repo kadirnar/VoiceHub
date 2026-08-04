@@ -11,19 +11,24 @@ versions use stable language-prefixed routes such as `/tr/`, `/es/`, and
 
 ## Current language coverage
 
+The current source inventory contains 108 canonical English pages. Ten localized
+homepage sources exist, leaving 1,070 locale/page translations outstanding
+across the ten non-English locales. Navigation labels are complete in every
+configured locale, but navigation translation is not page-content translation.
+
 | Language | Locale | Homepage | Navigation and theme | Detailed guides |
 | --- | --- | --- | --- | --- |
 | English | `en` | Native | Native | Native |
-| Turkish | `tr` | Translated | Translated | English fallback |
-| Spanish | `es` | Translated | Translated | English fallback |
-| French | `fr` | Translated | Translated | English fallback |
-| German | `de` | Translated | Translated | English fallback |
-| Portuguese | `pt` | Translated | Translated | English fallback |
-| Simplified Chinese | `zh` | Translated | Translated | English fallback |
-| Japanese | `ja` | Translated | Translated | English fallback |
-| Korean | `ko` | Translated | Translated | English fallback |
-| Russian | `ru` | Translated | Translated | English fallback |
-| Arabic | `ar` | Translated | Translated, RTL | English fallback |
+| Turkish | `tr` | Translated | Complete | English fallback |
+| Spanish | `es` | Translated | Complete | English fallback |
+| French | `fr` | Translated | Complete | English fallback |
+| German | `de` | Translated | Complete | English fallback |
+| Portuguese | `pt` | Translated | Complete | English fallback |
+| Simplified Chinese | `zh` | Translated | Complete | English fallback |
+| Japanese | `ja` | Translated | Complete | English fallback |
+| Korean | `ko` | Translated | Complete | English fallback |
+| Russian | `ru` | Translated | Complete | English fallback |
+| Arabic | `ar` | Translated | Complete, RTL | English fallback |
 
 Fallback pages keep every documented workflow reachable while translations are
 reviewed incrementally. A translated file automatically replaces the English

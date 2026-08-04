@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the bark integration.
 ---
 
-# Bark
+# Bark {.vh-model-title}
 
 ## Usage
 
@@ -56,9 +56,19 @@ contracts, so the documented support stays aligned with code. [Open the `bark` C
 | Task | Text to speech |
 | Architecture | `bark` |
 | Runtime | `VoiceHub-native` |
+| Languages | 13 enumerated languages |
 | Capabilities | `text-to-speech`, `expressive-speech`, `voice-prompt`, `safetensors`, `fine-tuning`, `voicehub-native`, `native-runtime`, `preencoded-stage-training`, `restricted-pickle-conversion` |
 | Reusable components | `encodec` |
 | Normalized output | `TTSOutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>13 documented languages</summary>
+
+`de`, `en`, `es`, `fr`, `hi`, `it`, `ja`, `ko`, `pl`, `pt`, `ru`, `tr`, `zh`
+
+</details>
 
 ## Configuration
 

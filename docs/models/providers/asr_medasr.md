@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the asr_medasr integration.
 ---
 
-# MedASR
+# MedASR {.vh-model-title}
 
 ## Usage
 
@@ -46,9 +46,19 @@ contracts, so the documented support stays aligned with code. [Open the `asr_med
 | Task | Automatic speech recognition |
 | Architecture | `lasr-ctc` |
 | Runtime | `VoiceHub-native` |
+| Languages | `en` |
 | Capabilities | `automatic-speech-recognition`, `medical`, `gated-checkpoint`, `safetensors`, `fine-tuning`, `voicehub-native`, `native-runtime` |
 | Reusable components | — |
 | Normalized output | `ASROutput` |
+
+### Language support
+
+<details class="vh-language-support" markdown>
+<summary>1 documented language</summary>
+
+`en`
+
+</details>
 
 ## Configuration
 

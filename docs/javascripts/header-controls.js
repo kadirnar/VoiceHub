@@ -301,6 +301,34 @@
     });
   };
 
+  const initializeSemanticHighlights = () => {
+    const optimizationRoute = /\/(?:guides\/[^/]*optimization[^/]*|project\/adding-an-optimization)\/?$/;
+    const modelRoute = /\/models\/providers\/[^/]+\/?$/;
+    const currentPath = window.location.pathname.replace(/index\.html$/, "");
+    const isOptimizationPage = optimizationRoute.test(currentPath);
+
+    document.body.classList.toggle("vh-optimization-page", isOptimizationPage);
+    document.querySelectorAll(".md-nav__link[href]").forEach((link) => {
+      if (!(link instanceof HTMLAnchorElement)) return;
+      let target;
+      try {
+        target = new URL(link.href, window.location.href).pathname.replace(/index\.html$/, "");
+      } catch (error) {
+        return;
+      }
+      link.classList.toggle(
+        "vh-model-link",
+        modelRoute.test(target) && !target.endsWith("/models/providers/"),
+      );
+      link.classList.toggle("vh-optimization-link", optimizationRoute.test(target));
+    });
+
+    if (!isOptimizationPage) return;
+    document.querySelectorAll(".md-typeset code:not(pre code)").forEach((term) => {
+      term.classList.add("vh-optimization-term");
+    });
+  };
+
   const initializeScrollableRegions = () => {
     const normalizeScrollableRegions = () => {
       document.querySelectorAll(".md-typeset__table").forEach((region, index) => {
@@ -472,6 +500,7 @@
     initializeLanguageControl();
     initializeThemeControl();
     initializeCodeBlockLandmarks();
+    initializeSemanticHighlights();
     initializeScrollableRegions();
     initializeContentTabFocus();
     initializeSequentialFocusBoundary();

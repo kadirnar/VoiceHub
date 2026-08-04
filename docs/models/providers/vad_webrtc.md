@@ -2,7 +2,7 @@
 description: Public API, checkpoint, training, and optimization guide for the vad_webrtc integration.
 ---
 
-# WebRTCVAD
+# WebRTCVAD {.vh-model-title}
 
 ## Usage
 
@@ -45,9 +45,14 @@ contracts, so the documented support stays aligned with code.
 | Task | Voice activity detection |
 | Architecture | `webrtc-vad` |
 | Runtime | `VoiceHub-native` |
+| Languages | Not text-language conditioned |
 | Capabilities | `voice-activity-detection`, `fixed-point`, `voicehub-native`, `native-runtime`, `streaming` |
 | Reusable components | — |
 | Normalized output | `VADOutput` |
+
+### Language support
+
+The public VAD contract does not select a spoken language; validate checkpoint acoustic coverage on the target languages and recording conditions.
 
 ## Configuration
 
