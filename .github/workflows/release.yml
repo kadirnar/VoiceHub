@@ -156,7 +156,7 @@ jobs:
         run: python scripts/check_documentation_dom.py site
 
       - name: Validate responsive documentation and keyboard behavior
-        run: python scripts/check_documentation_visual.py site
+        run: python scripts/check_documentation_visual_shards.py site
 
       - name: Validate wheel, sdist, and editable installations
         run: python scripts/check_distribution.py
