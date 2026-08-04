@@ -82,12 +82,22 @@ class SpeechInferenceConfig:
 
     def save_pretrained(self, save_directory: str | Path) -> Path:
         output_path = Path(save_directory).expanduser() / self.config_name
-        write_json_file(output_path, self.to_dict())
+        values = self.to_dict()
+        reject_serialized_secrets(
+            values,
+            owner=self.__class__.__name__,
+        )
+        write_json_file(output_path, values)
         return output_path
 
     def __repr__(self) -> str:
-        values = ", ".join(f"{key}={value!r}" for key, value in sorted(self.to_dict().items()))
-        return f"{self.__class__.__name__}({values})"
+        values = self.to_dict()
+        reject_serialized_secrets(
+            values,
+            owner=self.__class__.__name__,
+        )
+        fields = ", ".join(f"{key}={value!r}" for key, value in sorted(values.items()))
+        return f"{self.__class__.__name__}({fields})"
 
 
 class ASRInferenceConfig(SpeechInferenceConfig):

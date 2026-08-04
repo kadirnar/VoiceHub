@@ -533,6 +533,12 @@ export either as an inference export or as a component weight warm start;
 XTTS GPT, CosyVoice component, and F5 EMA files are not advertised as complete
 source-loadable model directories.
 
+The adapter-supplied recipe manifest is portable metadata, not a credential
+store. `Trainer.save_model()` rejects nested credential-shaped fields before
+model or native-export state is written or the destination is created, then
+rechecks the final manifest before output. Safe descriptive fields such as
+`token_count` remain serializable.
+
 An exact checkpoint may retain optimized state only because its pass manifest
 is part of the resume identity and every Trainer pass is explicitly
 persistent. A public/final portable artifact uses canonical state instead. A

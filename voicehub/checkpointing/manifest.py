@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from voicehub.checkpointing.errors import CheckpointFormatError, CheckpointIntegrityError
+from voicehub.hub import read_json_file
+from voicehub.serialization_utils import reject_serialized_secrets
 
 MANIFEST_NAME = "voicehub_manifest.json"
 CURRENT_FORMAT_VERSION = 1
@@ -176,6 +178,10 @@ class VoiceHubManifest:
         )
         if not isinstance(self.metadata, Mapping):
             raise TypeError("Manifest `metadata` must be a mapping.")
+        reject_serialized_secrets(
+            self.metadata,
+            owner=self.__class__.__name__,
+        )
         try:
             json.dumps(self.metadata, allow_nan=False)
         except (TypeError, ValueError) as error:
@@ -183,6 +189,10 @@ class VoiceHubManifest:
         object.__setattr__(self, "metadata", dict(self.metadata))
 
     def to_dict(self) -> dict[str, Any]:
+        reject_serialized_secrets(
+            self.metadata,
+            owner=self.__class__.__name__,
+        )
         return {
             "format_version": self.format_version,
             "architecture": self.architecture,
@@ -264,23 +274,28 @@ class VoiceHubManifest:
         if not path.is_file():
             raise FileNotFoundError(f"VoiceHub manifest was not found: {path}")
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            value = read_json_file(path)
+        except (OSError, ValueError) as error:
             raise CheckpointFormatError(f"Could not parse VoiceHub manifest {path}: {error}.") from error
         return cls.from_dict(value)
 
     def save(self, directory: str | Path) -> Path:
         root = Path(directory).expanduser()
-        root.mkdir(parents=True, exist_ok=True)
-        path = root / MANIFEST_NAME
+        payload = self.to_dict()
+        reject_serialized_secrets(
+            payload,
+            owner=self.__class__.__name__,
+        )
         encoded = (
             json.dumps(
-                self.to_dict(),
+                payload,
                 ensure_ascii=False,
                 indent=2,
                 sort_keys=True,
                 allow_nan=False,
             ) + "\n")
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / MANIFEST_NAME
         temporary_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(

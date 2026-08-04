@@ -12,6 +12,21 @@ from voicehub.errors import UnknownModelError
 from voicehub.models.manifests import BuiltinModelManifest, discover_builtin_model_manifests
 from voicehub.tasks import SpeechTask
 
+_DEFAULT_PROCESSOR_BY_TASK = {
+    SpeechTask.TEXT_TO_SPEECH: (
+        "voicehub.processing_utils",
+        "VoiceHubProcessor",
+    ),
+    SpeechTask.AUTOMATIC_SPEECH_RECOGNITION: (
+        "voicehub.processing_utils",
+        "AudioProcessor",
+    ),
+    SpeechTask.VOICE_ACTIVITY_DETECTION: (
+        "voicehub.processing_utils",
+        "AudioProcessor",
+    ),
+}
+
 
 def _normalize_identifier(value: str, *, name: str) -> str:
     if not isinstance(value, str):
@@ -38,6 +53,8 @@ class ModelSpec:
     architecture: str | None = None
     components: tuple[str, ...] = ()
     default_for_task: bool = False
+    processor_module: str | None = None
+    processor_class: str | None = None
 
     def __post_init__(self) -> None:
         model_type = _normalize_identifier(self.model_type, name="model_type")
@@ -70,6 +87,20 @@ class ModelSpec:
         if not isinstance(self.default_for_task, bool):
             raise TypeError("default_for_task must be a boolean.")
 
+        processor_module = self.processor_module
+        processor_class = self.processor_class
+        if processor_module is None and processor_class is None:
+            processor_module, processor_class = _DEFAULT_PROCESSOR_BY_TASK[task]
+        elif processor_module is None or processor_class is None:
+            raise ValueError("processor_module and processor_class must be declared together.")
+        for field_name, value in (
+            ("processor_module", processor_module),
+            ("processor_class", processor_class),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field_name} must be a non-empty string.")
+            object.__setattr__(self, field_name, value.strip())
+
         capabilities = ((self.capabilities, ) if isinstance(self.capabilities, str) else tuple(
             self.capabilities))
         if any(not isinstance(capability, str) or not capability.strip() for capability in capabilities):
@@ -101,6 +132,19 @@ class ModelSpec:
     def supports_task(self, task: SpeechTask | str) -> bool:
         """Return whether this implementation belongs to *task*."""
         return self.task is SpeechTask.coerce(task)
+
+    @property
+    def display_name(self) -> str:
+        """Return a presentation label without changing the registry key."""
+        suffixes = (
+            "ForTextToSpeech",
+            "ForSpeechRecognition",
+            "ForVoiceActivityDetection",
+        )
+        return next(
+            (self.class_name[:-len(suffix)] for suffix in suffixes if self.class_name.endswith(suffix)),
+            self.class_name,
+        )
 
     @property
     def is_voicehub_native(self) -> bool:
@@ -162,6 +206,14 @@ class ModelSpec:
                 raise TypeError(f"`{name}` must be a class.")
             if (not value.__module__ or not value.__name__ or value.__qualname__ != value.__name__):
                 raise ValueError(f"`{name}` must have an importable module and name.")
+        processor_type = getattr(model_class, "processor_class", None)
+        if processor_type is not None:
+            if not isinstance(processor_type, type):
+                raise TypeError("`model_class.processor_class` must be a class.")
+            if (not processor_type.__module__ or not processor_type.__name__ or
+                    processor_type.__qualname__ != processor_type.__name__):
+                raise ValueError("`model_class.processor_class` must have an importable "
+                                 "module and name.")
         return cls(
             model_type=model_type,
             module=model_class.__module__,
@@ -175,6 +227,8 @@ class ModelSpec:
             architecture=architecture,
             components=components,
             default_for_task=default_for_task,
+            processor_module=(None if processor_type is None else processor_type.__module__),
+            processor_class=(None if processor_type is None else processor_type.__name__),
         )
 
 

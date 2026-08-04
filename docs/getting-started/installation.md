@@ -1,175 +1,202 @@
 ---
-description: Install VoiceHub from PyPI, Git, a wheel, or an editable checkout and verify the environment.
+description: Install VoiceHub with uv, pip, conda, or an editable checkout and configure model caching.
 ---
 
 # Installation
 
-VoiceHub supports Python 3.10 through 3.12. The default installation contains
-all built-in TTS, ASR, and VAD code. Checkpoints are downloaded separately
-when a model is loaded.
+VoiceHub works with PyTorch. It supports Python 3.10 through 3.12 and requires
+PyTorch 2.8. The default package contains the built-in TTS, ASR, and VAD code;
+model checkpoints are resolved separately when they are needed.
 
-Registered native runtime paths are checked in CI to import only the Python
-standard library, VoiceHub, and PyTorch. Optional compiler or kernel packages
-are used only when a compatible optimization policy selects them; eager
-fallback remains available.
+The development documentation may describe behavior newer than the package
+currently published on PyPI. Check the
+[release-readiness report](../project/release-readiness.md) before validating a
+release candidate.
 
-## 1. Create an environment
+## Virtual environment
 
-=== "Linux and macOS"
-
-    ```bash
-    python3 -m venv .venv
-    source .venv/bin/activate
-    python -m pip install --upgrade pip
-    ```
-
-=== "Windows PowerShell"
-
-    ```powershell
-    py -3.12 -m venv .venv
-    .venv\Scripts\Activate.ps1
-    python -m pip install --upgrade pip
-    ```
-
-Confirm that `python` and `pip` use the same environment:
+[uv](https://docs.astral.sh/uv/) is a fast Python package and project manager.
+It creates isolated environments by default and can replace the environment
+and package-management commands used by `pip`. Install uv using its
+[official instructions](https://docs.astral.sh/uv/getting-started/installation/),
+then create an environment for VoiceHub:
 
 ```bash
-python --version
-python -m pip --version
+uv venv .venv
+source .venv/bin/activate
 ```
 
-## 2. Install PyTorch
+On Windows PowerShell, activate the same environment with:
 
-VoiceHub requires PyTorch 2.8. Accelerator builds depend on the operating
-system, driver, and hardware. Select the correct command from the
-[PyTorch installer](https://pytorch.org/get-started/locally/), then verify it:
-
-```bash
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```powershell
+.venv\Scripts\Activate.ps1
 ```
 
-CPU-only users can let `pip` resolve PyTorch in the next step.
+If you prefer `pip`, create the environment with `python -m venv .venv` and
+replace `uv pip install` below with `python -m pip install`.
 
-## 3. Install VoiceHub
+## Python
 
-Install the released package:
+Install the published package:
 
 ```bash
-python -m pip install voicehub
+uv pip install voicehub
 ```
 
-Add fine-tuning tools only when needed:
+Add dataset, evaluation, and reporting dependencies only when you need
+fine-tuning:
 
 ```bash
-python -m pip install "voicehub[training]"
+uv pip install "voicehub[training]"
 ```
 
-The training extra adds dataset, evaluation, and reporting packages. It does
-not change which model integrations are registered.
-
-## Other installation modes
-
-Install the current Git branch:
+VoiceHub's package constraint selects PyTorch 2.8. For a hardware-specific
+build, choose the matching command from the
+[PyTorch installer](https://pytorch.org/get-started/locally/) before installing
+VoiceHub. A CPU-only environment can use:
 
 ```bash
-python -m pip install \
-  "voicehub @ git+https://github.com/kadirnar/voicehub.git@main"
+uv pip install "torch>=2.8,<2.9" \
+  --index-url https://download.pytorch.org/whl/cpu
+uv pip install voicehub
 ```
 
-Install a downloaded wheel:
+Verify lightweight discovery without downloading a checkpoint or importing
+PyTorch:
 
-```bash
-python -m pip install dist/voicehub-0.3.0-py3-none-any.whl
-```
-
-Create an editable development checkout:
-
-```bash
-git clone https://github.com/kadirnar/voicehub.git
-cd voicehub
-python -m pip install -e ".[test,training]"
-```
-
-## Verify the installation
-
-Lightweight discovery does not load model weights:
-
-```bash
-python - <<'PY'
+```python
 import sys
+
 import voicehub
 
 models = voicehub.list_model_specs(task=None)
 print("VoiceHub:", voicehub.__version__)
 print("Registered models:", len(models))
 print("PyTorch imported during discovery:", "torch" in sys.modules)
-PY
 ```
 
-Inspect the selected accelerator separately:
+Inspect accelerator availability separately because model memory and precision
+requirements are checkpoint-specific:
 
 ```bash
-python - <<'PY'
-import torch
-
-print("PyTorch:", torch.__version__)
-print("CUDA available:", torch.cuda.is_available())
-if torch.cuda.is_available():
-    print("Device:", torch.cuda.get_device_name(0))
-    print("BF16:", torch.cuda.is_bf16_supported())
-PY
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
-Finally, construct one model lazily. This validates the registry and
-configuration without downloading its checkpoint:
+### Source install
+
+Installing from source provides the current `main` branch rather than the
+published package. It is useful for testing unreleased fixes, but the branch
+can change between installs. Pin a commit instead of `main` for a reproducible
+environment.
+
+```bash
+uv pip install "voicehub @ git+https://github.com/kadirnar/voicehub.git@main"
+```
+
+Confirm the installed version and dependency-light registry:
+
+```bash
+python -c "import voicehub; print(voicehub.__version__, len(voicehub.list_model_specs()))"
+```
+
+### Editable install
+
+An editable install links the environment to a local checkout. Source edits
+are immediately visible without reinstalling the package.
+
+```bash
+git clone https://github.com/kadirnar/voicehub.git
+cd voicehub
+uv pip install -e ".[test,training,docs]"
+```
+
+Keep the checkout while using the editable environment. Update it explicitly:
+
+```bash
+cd voicehub
+git pull
+```
+
+## conda
+
+[conda](https://docs.conda.io/projects/conda/en/stable/) can own the Python
+environment while uv or pip installs VoiceHub inside it. This workflow does
+not assume a separately published `conda-forge::voicehub` package.
+
+```bash
+conda create -n voicehub python=3.12 -y
+conda activate voicehub
+python -m pip install uv
+uv pip install voicehub
+```
+
+Use the source-install command instead of the last line when validating the
+current development branch.
+
+## Set up
+
+After installation, configure where Hub-backed model files are cached and
+whether network access is allowed. Legal terms, access tokens, and hardware
+requirements remain specific to each model page.
+
+### Cache directory
+
+VoiceHub's shared Hub transport uses the same cache roots as the Hugging Face
+ecosystem. An explicit `cache_dir` argument has the highest priority, followed
+by these locations:
+
+1. `HF_HUB_CACHE`
+2. `HUGGINGFACE_HUB_CACHE`
+3. `HF_HOME/hub`
+4. `XDG_CACHE_HOME/huggingface/hub`
+5. `~/.cache/huggingface/hub`
+
+Pass a directory directly when one service should not depend on process-wide
+environment variables:
 
 ```python
-from voicehub import AutoModelForTextToSpeech
+from voicehub import AutoConfig
 
-model = AutoModelForTextToSpeech.from_pretrained(
+config = AutoConfig.from_pretrained(
     "parler-tts/parler-tts-mini-v1",
     model_type="parlertts",
-    device="cuda",
-    lazy_load=True,
+    cache_dir="/srv/voicehub-cache",
 )
-print(model.config.model_type)
+print(config.model_type)
 ```
 
-The first inference call loads the checkpoint. Use `model.load()` when a
-service should fail during startup instead of on its first request.
+Pin an immutable checkpoint revision in production. A moving branch may be
+refreshed when the model is loaded again.
 
-## Validate release artifacts
+### Offline mode
 
-Maintainers can check all supported package layouts with one command:
+Load and run the required model once with network access so its configuration,
+weights, processor assets, and model-specific files are present. Then set
+either `HF_HUB_OFFLINE=1` or `VOICEHUB_OFFLINE=1` to prevent VoiceHub's shared
+Hub transport from making HTTP requests:
 
 ```bash
-python scripts/check_distribution.py
+VOICEHUB_OFFLINE=1 python app.py
 ```
 
-The script builds a wheel and source distribution, installs the wheel, sdist,
-and editable checkout into separate temporary environments, imports VoiceHub,
-and verifies required tokenizer, configuration, kernel, typing, and watermark
-files. It uses `--no-deps` by default so it does not download PyTorch three
-times.
+Use `local_files_only=True` for an explicit call-level boundary. This example
+checks only the cached configuration; follow the selected model page for its
+complete checkpoint and processor inventory.
 
-Run the complete dependency check on a release machine:
+```python
+from voicehub import AutoConfig
 
-```bash
-python scripts/check_distribution.py --with-dependencies
+config = AutoConfig.from_pretrained(
+    "parler-tts/parler-tts-mini-v1",
+    model_type="parlertts",
+    local_files_only=True,
+)
+print(config.name_or_path)
 ```
 
-## Common errors
+An offline cache miss raises `FileNotFoundError` with the requested repository,
+revision, file, and cache location. Do not report an offline model path as
+verified until its complete checkpoint-specific inference succeeds.
 
-- `No matching distribution found`: check the Python version and platform.
-- `torch.cuda.is_available()` is `False`: install a PyTorch build compatible
-  with the local driver and hardware.
-- Out of memory: choose a smaller checkpoint or reduce batch size. Do not
-  change precision or quantize until the model's support matrix confirms the
-  quality boundary.
-- A checkpoint cannot be loaded: verify `model_type`, repository access,
-  revision, artifact format, and checkpoint license.
-- An optimization is rejected: start in eager mode and inspect the returned
-  optimization plan before enabling optional kernels or compilation.
-
-Continue with the [quickstart](quickstart.md), then use the
-[model catalog](../models/index.md) to choose a model.
+Continue with the [quickstart](quickstart.md), then select a checkpoint from
+the [model catalog](../models/index.md).

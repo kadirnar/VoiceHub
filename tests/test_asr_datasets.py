@@ -889,6 +889,52 @@ class ASRDatasetManifestTests(unittest.TestCase):
         )
         self.assertEqual(seamless[0]["target_language"], "deu")
 
+    def test_json_and_tabular_manifests_reject_ambiguous_json_before_dataset_construction(self):
+        ambiguities = (
+            (
+                "duplicate",
+                '{"score":"discarded-secret","score":1}',
+                r"Duplicate JSON object key 'score'",
+            ),
+            (
+                "constant",
+                '{"score":NaN}',
+                r"non-finite JSON constant 'NaN'",
+            ),
+            (
+                "overflow",
+                '{"score":1e400}',
+                r"score.*non-finite",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, metadata, diagnostic in ambiguities:
+                record = f'{{"text":"Safe record","audio":"sample.wav","metadata":{metadata}}}'
+                escaped_metadata = metadata.replace('"', '""')
+                documents = (
+                    ("json", record),
+                    ("jsonl", record + "\n"),
+                    (
+                        "csv",
+                        "text,audio,metadata\n" + f'Safe record,sample.wav,"{escaped_metadata}"\n',
+                    ),
+                )
+                for suffix, document in documents:
+                    with self.subTest(name=name, suffix=suffix):
+                        manifest = root / f"{name}.{suffix}"
+                        manifest.write_text(document, encoding="utf-8")
+                        with self.assertRaises(ValueError) as captured:
+                            ASRDataset.from_manifest(
+                                manifest,
+                                architecture="ctc",
+                                validate=False,
+                            )
+                        rendered = str(captured.exception)
+                        self.assertIn(str(manifest.resolve()), rendered)
+                        self.assertRegex(rendered, diagnostic)
+                        self.assertNotIn("discarded-secret", rendered)
+
     def test_sensevoice_and_seamless_upstream_records_are_accepted_directly(self):
         sensevoice = ASRDataset(
             [{
@@ -1218,6 +1264,84 @@ class ASRDatasetManifestTests(unittest.TestCase):
                 destination.read_text(encoding="utf-8"),
                 "keep-me\n",
             )
+
+    def test_jsonl_rejects_credentials_before_destination_mutation(self):
+        credential = "must-not-appear-in-errors"
+        dataset = ASRDataset(
+            [{
+                "audio": "sample.wav",
+                "text": "Unsafe manifest record.",
+                "metadata": {
+                    "api_key": credential,
+                },
+            }],
+            architecture="ctc",
+            validate=False,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            existing = root / "existing.jsonl"
+            existing.write_text("keep-me\n", encoding="utf-8")
+            missing_parent = root / "new" / "records.jsonl"
+
+            for destination in (existing, missing_parent):
+                with self.assertRaisesRegex(
+                        ValueError,
+                        r"ASR dataset record 0.*metadata\.api_key",
+                ) as captured:
+                    dataset.to_jsonl(destination)
+                self.assertNotIn(credential, str(captured.exception))
+
+            self.assertEqual(existing.read_text(encoding="utf-8"), "keep-me\n")
+            self.assertFalse(missing_parent.parent.exists())
+
+    def test_manifest_loader_rejects_credentials_and_keeps_safe_metadata(self):
+        credential = "must-not-appear-in-errors"
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            unsafe = root / "unsafe.jsonl"
+            unsafe.write_text(
+                json.dumps({
+                    "audio": "sample.wav",
+                    "text": "Unsafe manifest record.",
+                    "metadata": {
+                        "authorization": credential,
+                    },
+                }) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                    ValueError,
+                    r"ASR manifest record 0.*metadata\.authorization",
+            ) as captured:
+                ASRDataset.from_manifest(
+                    unsafe,
+                    architecture="ctc",
+                    validate=False,
+                )
+
+            safe = root / "safe.jsonl"
+            safe.write_text(
+                json.dumps({
+                    "audio": "sample.wav",
+                    "text": "Safe manifest record.",
+                    "metadata": {
+                        "token_count": 512,
+                    },
+                }) + "\n",
+                encoding="utf-8",
+            )
+            restored = ASRDataset.from_manifest(
+                safe,
+                architecture="ctc",
+                validate=False,
+            )
+
+        self.assertNotIn(credential, str(captured.exception))
+        self.assertEqual(restored[0]["metadata"]["token_count"], 512)
 
     def test_fingerprint_covers_content_order_and_transform_version(self):
         records = [

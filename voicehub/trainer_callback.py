@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from voicehub.hub import read_json_file
+from voicehub.serialization_utils import reject_serialized_secrets
 from voicehub.trainer_utils import IntervalStrategy, write_json
 
 
@@ -32,14 +33,19 @@ class TrainerState:
     is_hyper_param_search: bool = False
     trial_name: str | None = None
 
+    def __post_init__(self) -> None:
+        reject_serialized_secrets(asdict(self), owner=self.__class__.__name__)
+
     def save_to_json(self, json_path: str | Path) -> Path:
         """Persist state in a human-readable checkpoint file."""
-        return write_json(json_path, asdict(self))
+        payload = asdict(self)
+        reject_serialized_secrets(payload, owner=self.__class__.__name__)
+        return write_json(json_path, payload)
 
     @classmethod
     def load_from_json(cls, json_path: str | Path) -> TrainerState:
         """Restore state from a checkpoint."""
-        payload = json.loads(Path(json_path).expanduser().read_text(encoding="utf-8"))
+        payload = read_json_file(Path(json_path).expanduser())
         return cls(**payload)
 
 

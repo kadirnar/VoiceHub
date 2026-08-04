@@ -40,8 +40,6 @@ theme:
     - content.tabs.link
     - navigation.footer
     - navigation.sections
-    - navigation.tabs
-    - navigation.tabs.sticky
     - navigation.top
     - navigation.tracking
     - search.highlight
@@ -53,117 +51,136 @@ nav:
   - Get started:
       - Overview: index.md
       - Installation: getting-started/installation.md
-      - First generation: getting-started/quickstart.md
-  - Models:
-      - Overview: models/providers/index.md
-      # BEGIN GENERATED MODEL GUIDE NAVIGATION
-      - Text to speech:
-          - "bark": models/providers/bark.md
-          - "chatterbox": models/providers/chatterbox.md
-          - "conversationtts": models/providers/conversationtts.md
-          - "cosyvoice": models/providers/cosyvoice.md
-          - "csm": models/providers/csm.md
-          - "dia": models/providers/dia.md
-          - "echo": models/providers/echo.md
-          - "f5tts": models/providers/f5tts.md
-          - "fishtts": models/providers/fishtts.md
-          - "gptsovits": models/providers/gptsovits.md
-          - "higgstts": models/providers/higgstts.md
-          - "inflecttts": models/providers/inflecttts.md
-          - "irodoritts": models/providers/irodoritts.md
-          - "kokoro": models/providers/kokoro.md
-          - "llasa": models/providers/llasa.md
-          - "melotts": models/providers/melotts.md
-          - "mosstts": models/providers/mosstts.md
-          - "neutts": models/providers/neutts.md
-          - "omnivoice": models/providers/omnivoice.md
-          - "openvoice": models/providers/openvoice.md
-          - "orpheustts": models/providers/orpheustts.md
-          - "outetts": models/providers/outetts.md
-          - "parlertts": models/providers/parlertts.md
-          - "qwen3tts": models/providers/qwen3tts.md
-          - "speecht5": models/providers/speecht5.md
-          - "styletts2": models/providers/styletts2.md
-          - "supertonic": models/providers/supertonic.md
-          - "vibevoice": models/providers/vibevoice.md
-          - "vits": models/providers/vits.md
-          - "voxcpm": models/providers/voxcpm.md
-          - "vui": models/providers/vui.md
-          - "xtts": models/providers/xtts.md
-          - "zonos": models/providers/zonos.md
-          - "zonos2": models/providers/zonos2.md
-      - Automatic speech recognition:
-          - "asr_cohere": models/providers/asr_cohere.md
-          - "asr_espnet": models/providers/asr_espnet.md
-          - "asr_faster_whisper": models/providers/asr_faster_whisper.md
-          - "asr_funasr": models/providers/asr_funasr.md
-          - "asr_granite_speech": models/providers/asr_granite_speech.md
-          - "asr_hubert": models/providers/asr_hubert.md
-          - "asr_medasr": models/providers/asr_medasr.md
-          - "asr_moonshine": models/providers/asr_moonshine.md
-          - "asr_nemo": models/providers/asr_nemo.md
-          - "asr_nemotron": models/providers/asr_nemotron.md
-          - "asr_openai_whisper": models/providers/asr_openai_whisper.md
-          - "asr_parakeet_tdt": models/providers/asr_parakeet_tdt.md
-          - "asr_qwen3": models/providers/asr_qwen3.md
-          - "asr_seamless_m4t_v2": models/providers/asr_seamless_m4t_v2.md
-          - "asr_speechbrain": models/providers/asr_speechbrain.md
-          - "asr_tiron": models/providers/asr_tiron.md
-          - "asr_transformers": models/providers/asr_transformers.md
-          - "asr_vibevoice": models/providers/asr_vibevoice.md
-          - "asr_wav2vec2": models/providers/asr_wav2vec2.md
-          - "asr_wavlm": models/providers/asr_wavlm.md
-          - "asr_wenet": models/providers/asr_wenet.md
-          - "asr_whisper": models/providers/asr_whisper.md
-          - "asr_whisperx": models/providers/asr_whisperx.md
-      - Voice activity detection:
-          - "vad_auditok": models/providers/vad_auditok.md
-          - "vad_funasr": models/providers/vad_funasr.md
-          - "vad_nemo": models/providers/vad_nemo.md
-          - "vad_pyannote": models/providers/vad_pyannote.md
-          - "vad_pyannote_brouhaha": models/providers/vad_pyannote_brouhaha.md
-          - "vad_pyannote_segmentation": models/providers/vad_pyannote_segmentation.md
-          - "vad_sherpa_onnx": models/providers/vad_sherpa_onnx.md
-          - "vad_silero": models/providers/vad_silero.md
-          - "vad_speechbrain": models/providers/vad_speechbrain.md
-          - "vad_transformers": models/providers/vad_transformers.md
-          - "vad_webrtc": models/providers/vad_webrtc.md
-      # END GENERATED MODEL GUIDE NAVIGATION
-      - Catalogs and support:
-          - TTS model catalog: models/index.md
-          - TTS capabilities: models/tts-capabilities.md
-          - ASR and VAD support: models/asr-vad-support.md
-          - TTS training support: models/training-support.md
-          - XTTS v2 native DVAE: models/xtts2.md
-  - Guides:
+      - Quickstart: getting-started/quickstart.md
+  - Base classes:
+      - Models:
+          - Catalogs and support:
+              - TTS model catalog: models/index.md
+              - TTS capabilities: models/tts-capabilities.md
+              - ASR and VAD support: models/asr-vad-support.md
+              - XTTS v2 native DVAE: models/xtts2.md
+          - Contribute:
+              - Add a model: project/adding-a-model.md
+              - Add an ASR or VAD provider: project/adding-speech-provider.md
+              - Add an optimization: project/adding-an-optimization.md
+      - Preprocessors:
+          - Data preparation: guides/data-preparation.md
+          - ASR and VAD data: guides/speech-data.md
+      - Architecture:
+          - Library architecture: concepts/architecture.md
+          - Trainer architecture: concepts/trainer.md
+  - Inference:
       - Overview: guides/index.md
-      - TTS inference: guides/inference.md
-      - Speech recognition: guides/speech-recognition.md
-      - Voice activity detection: guides/voice-activity-detection.md
-      - Data preparation: guides/data-preparation.md
-      - ASR and VAD data: guides/speech-data.md
-      - Training: guides/training.md
-      - TTS optimization: guides/tts-optimization.md
+      - Pipeline API:
+          - Pipeline: guides/inference.md
+          - Speech recognition: guides/speech-recognition.md
+          - Voice activity detection: guides/voice-activity-detection.md
+      - Serving:
+          - LLM TTS serving: guides/llm-serving.md
+  - Training:
+      - Get started:
+          - Trainer overview: guides/trainer.md
+          - Fine-tuning: guides/training.md
+      - Model support: models/training-support.md
+  - Quantization and optimization:
+      - Overview: guides/optimization-overview.md
+      - TTS optimization workflow: guides/tts-optimization.md
       - Codec optimization: guides/codec-optimization.md
       - Diffusion and flow optimization: guides/diffusion-optimization.md
       - VITS-family optimization: guides/vits-optimization.md
-      - LLM TTS serving: guides/llm-serving.md
-      - TTS model benchmarks: guides/tts-model-benchmarks.md
-      - RTX 4090 speech benchmarks: guides/rtx-4090-speech-benchmarks.md
-      - RTX 5090 TTS benchmarks: guides/rtx-5090-tts-benchmarks.md
-      - Notebooks: guides/notebook.md
-  - API reference: reference/api.md
-  - Project:
-      - Library architecture: concepts/architecture.md
-      - Trainer architecture: concepts/trainer.md
-      - Roadmap: project/roadmap.md
-      - Release readiness: project/release-readiness.md
-      - Transformers parity: project/transformers-parity.md
-      - Add a TTS model: project/adding-a-model.md
-      - Add an ASR or VAD provider: project/adding-speech-provider.md
-      - Add an optimization: project/adding-an-optimization.md
-      - Translations: project/translations.md
-      - Model audit: project/model-audit.md
+  - Ecosystem integrations:
+      - Notebooks with examples: guides/notebook.md
+  - Resources:
+      - Benchmarks:
+          - TTS model benchmarks: guides/tts-model-benchmarks.md
+          - RTX 4090 speech benchmarks: guides/rtx-4090-speech-benchmarks.md
+          - RTX 5090 TTS benchmarks: guides/rtx-5090-tts-benchmarks.md
+      - Project:
+          - Roadmap: project/roadmap.md
+          - Release readiness: project/release-readiness.md
+          - Transformers parity: project/transformers-parity.md
+          - Translations: project/translations.md
+          - Model audit: project/model-audit.md
+  - API:
+      - Main Classes:
+          - Auto Classes: models/providers/index.md
+          - Models: reference/models.md
+          - Public exports: reference/public-api.md
+      - Models:
+          # BEGIN GENERATED MODEL GUIDE NAVIGATION
+          - Text to speech:
+              - "Bark": models/providers/bark.md
+              - "Chatterbox": models/providers/chatterbox.md
+              - "ConversationTTS": models/providers/conversationtts.md
+              - "CosyVoice": models/providers/cosyvoice.md
+              - "CSM": models/providers/csm.md
+              - "Dia": models/providers/dia.md
+              - "EchoTTS": models/providers/echo.md
+              - "F5TTS": models/providers/f5tts.md
+              - "FishTTS": models/providers/fishtts.md
+              - "GPTSoVITS": models/providers/gptsovits.md
+              - "HiggsTTS": models/providers/higgstts.md
+              - "InflectTTS": models/providers/inflecttts.md
+              - "IrodoriTTS": models/providers/irodoritts.md
+              - "Kokoro": models/providers/kokoro.md
+              - "Llasa": models/providers/llasa.md
+              - "MeloTTS": models/providers/melotts.md
+              - "MossTTS": models/providers/mosstts.md
+              - "NeuTTS": models/providers/neutts.md
+              - "OmniVoice": models/providers/omnivoice.md
+              - "OpenVoice": models/providers/openvoice.md
+              - "OrpheusTTS": models/providers/orpheustts.md
+              - "OuteTTS": models/providers/outetts.md
+              - "ParlerTTS": models/providers/parlertts.md
+              - "Qwen3TTS": models/providers/qwen3tts.md
+              - "SpeechT5": models/providers/speecht5.md
+              - "StyleTTS2": models/providers/styletts2.md
+              - "Supertonic": models/providers/supertonic.md
+              - "VibeVoice": models/providers/vibevoice.md
+              - "Vits": models/providers/vits.md
+              - "VoxCPM": models/providers/voxcpm.md
+              - "Vui": models/providers/vui.md
+              - "XTTS": models/providers/xtts.md
+              - "Zonos": models/providers/zonos.md
+              - "Zonos2": models/providers/zonos2.md
+          - Automatic speech recognition:
+              - "Cohere": models/providers/asr_cohere.md
+              - "ESPnetASR": models/providers/asr_espnet.md
+              - "FasterWhisper": models/providers/asr_faster_whisper.md
+              - "FunASR": models/providers/asr_funasr.md
+              - "GraniteSpeech": models/providers/asr_granite_speech.md
+              - "Hubert": models/providers/asr_hubert.md
+              - "MedASR": models/providers/asr_medasr.md
+              - "Moonshine": models/providers/asr_moonshine.md
+              - "NeMoASR": models/providers/asr_nemo.md
+              - "Nemotron": models/providers/asr_nemotron.md
+              - "OpenAIWhisper": models/providers/asr_openai_whisper.md
+              - "ParakeetTDT": models/providers/asr_parakeet_tdt.md
+              - "Qwen3ASR": models/providers/asr_qwen3.md
+              - "SeamlessM4Tv2": models/providers/asr_seamless_m4t_v2.md
+              - "SpeechBrainASR": models/providers/asr_speechbrain.md
+              - "Tiron": models/providers/asr_tiron.md
+              - "TransformersASR": models/providers/asr_transformers.md
+              - "VibeVoice": models/providers/asr_vibevoice.md
+              - "Wav2Vec2": models/providers/asr_wav2vec2.md
+              - "WavLM": models/providers/asr_wavlm.md
+              - "WeNetASR": models/providers/asr_wenet.md
+              - "Whisper": models/providers/asr_whisper.md
+              - "WhisperX": models/providers/asr_whisperx.md
+          - Voice activity detection:
+              - "AuditokVAD": models/providers/vad_auditok.md
+              - "FunASRVAD": models/providers/vad_funasr.md
+              - "NeMoVAD": models/providers/vad_nemo.md
+              - "PyannoteBrouhahaVAD": models/providers/vad_pyannote_brouhaha.md
+              - "PyannoteSegmentationVAD": models/providers/vad_pyannote_segmentation.md
+              - "PyannoteVAD": models/providers/vad_pyannote.md
+              - "SherpaONNXVAD": models/providers/vad_sherpa_onnx.md
+              - "SileroVAD": models/providers/vad_silero.md
+              - "SpeechBrainVAD": models/providers/vad_speechbrain.md
+              - "TransformersVAD": models/providers/vad_transformers.md
+              - "WebRTCVAD": models/providers/vad_webrtc.md
+          # END GENERATED MODEL GUIDE NAVIGATION
+      - Full API reference: reference/api.md
 
 plugins:
   - search:
@@ -183,11 +200,20 @@ plugins:
           build: true
           nav_translations:
             Get started: Hızlı Başlangıç
+            Base classes: Temel sınıflar
+            Inference: Çıkarım
+            Quantization and optimization: Kuantizasyon ve optimizasyon
+            Ecosystem integrations: Ekosistem entegrasyonları
+            Resources: Kaynaklar
+            API: API
+            Main Classes: Ana sınıflar
+            Full API reference: Tam API referansı
+            Public exports: Genel API dışa aktarımları
             Installation: Kurulum
-            First generation: İlk ses üretimi
+            Quickstart: İlk ses üretimi
             Guides: Rehberler
             Overview: Genel Bakış
-            TTS inference: TTS çıkarımı
+            Pipeline: İşlem hattı
             Speech recognition: Konuşma tanıma
             Voice activity detection: Ses etkinliği algılama
             Data preparation: Veri hazırlama
@@ -202,7 +228,8 @@ plugins:
             Trainer architecture: Eğitici mimarisi
             API reference: API Referansı
             Project: Proje
-            Add a TTS model: TTS modeli ekleme
+            Contribute: Katkıda bulunun
+            Add a model: Model ekleme
             Add an ASR or VAD provider: ASR veya VAD sağlayıcısı ekleme
             Translations: Çeviriler
             Model audit: Model denetimi
@@ -211,11 +238,20 @@ plugins:
           build: true
           nav_translations:
             Get started: Inicio rápido
+            Base classes: Clases base
+            Inference: Inferencia
+            Quantization and optimization: Cuantización y optimización
+            Ecosystem integrations: Integraciones del ecosistema
+            Resources: Recursos
+            API: API
+            Main Classes: Clases principales
+            Full API reference: Referencia de API completa
+            Public exports: Exportaciones públicas
             Installation: Instalación
-            First generation: Primera generación
+            Quickstart: Primera generación
             Guides: Guías
             Overview: Descripción general
-            TTS inference: Inferencia TTS
+            Pipeline: Pipeline
             Speech recognition: Reconocimiento de voz
             Voice activity detection: Detección de actividad de voz
             Data preparation: Preparación de datos
@@ -230,7 +266,8 @@ plugins:
             Trainer architecture: Arquitectura del entrenador
             API reference: Referencia de API
             Project: Proyecto
-            Add a TTS model: Añadir un modelo TTS
+            Contribute: Contribuir
+            Add a model: Añadir un modelo
             Add an ASR or VAD provider: Añadir un proveedor de ASR o VAD
             Translations: Traducciones
             Model audit: Auditoría de modelos
@@ -239,11 +276,20 @@ plugins:
           build: true
           nav_translations:
             Get started: Démarrage rapide
+            Base classes: Classes de base
+            Inference: Inférence
+            Quantization and optimization: Quantification et optimisation
+            Ecosystem integrations: Intégrations de l’écosystème
+            Resources: Ressources
+            API: API
+            Main Classes: Classes principales
+            Full API reference: Référence API complète
+            Public exports: Exportations publiques
             Installation: Installation
-            First generation: Première génération
+            Quickstart: Première génération
             Guides: Guides
             Overview: Vue d’ensemble
-            TTS inference: Inférence TTS
+            Pipeline: Pipeline
             Speech recognition: Reconnaissance vocale
             Voice activity detection: Détection d’activité vocale
             Data preparation: Préparation des données
@@ -258,7 +304,8 @@ plugins:
             Trainer architecture: Architecture de l’entraîneur
             API reference: Référence API
             Project: Projet
-            Add a TTS model: Ajouter un modèle TTS
+            Contribute: Contribuer
+            Add a model: Ajouter un modèle
             Add an ASR or VAD provider: Ajouter un fournisseur ASR ou VAD
             Translations: Traductions
             Model audit: Audit des modèles
@@ -267,11 +314,20 @@ plugins:
           build: true
           nav_translations:
             Get started: Schnellstart
+            Base classes: Basisklassen
+            Inference: Inferenz
+            Quantization and optimization: Quantisierung und Optimierung
+            Ecosystem integrations: Ökosystem-Integrationen
+            Resources: Ressourcen
+            API: API
+            Main Classes: Hauptklassen
+            Full API reference: Vollständige API-Referenz
+            Public exports: Öffentliche Exporte
             Installation: Installation
-            First generation: Erste Generierung
+            Quickstart: Erste Generierung
             Guides: Anleitungen
             Overview: Überblick
-            TTS inference: TTS-Inferenz
+            Pipeline: Pipeline
             Speech recognition: Spracherkennung
             Voice activity detection: Sprachaktivitätserkennung
             Data preparation: Datenvorbereitung
@@ -286,7 +342,8 @@ plugins:
             Trainer architecture: Trainerarchitektur
             API reference: API-Referenz
             Project: Projekt
-            Add a TTS model: TTS-Modell hinzufügen
+            Contribute: Mitwirken
+            Add a model: Modell hinzufügen
             Add an ASR or VAD provider: ASR- oder VAD-Anbieter hinzufügen
             Translations: Übersetzungen
             Model audit: Modell-Audit
@@ -295,11 +352,20 @@ plugins:
           build: true
           nav_translations:
             Get started: Início rápido
+            Base classes: Classes base
+            Inference: Inferência
+            Quantization and optimization: Quantização e otimização
+            Ecosystem integrations: Integrações do ecossistema
+            Resources: Recursos
+            API: API
+            Main Classes: Classes principais
+            Full API reference: Referência completa da API
+            Public exports: Exportações públicas
             Installation: Instalação
-            First generation: Primeira geração
+            Quickstart: Primeira geração
             Guides: Guias
             Overview: Visão geral
-            TTS inference: Inferência TTS
+            Pipeline: Pipeline
             Speech recognition: Reconhecimento de fala
             Voice activity detection: Detecção de atividade de voz
             Data preparation: Preparação de dados
@@ -314,7 +380,8 @@ plugins:
             Trainer architecture: Arquitetura do treinador
             API reference: Referência da API
             Project: Projeto
-            Add a TTS model: Adicionar um modelo TTS
+            Contribute: Contribuir
+            Add a model: Adicionar um modelo
             Add an ASR or VAD provider: Adicionar um provedor ASR ou VAD
             Translations: Traduções
             Model audit: Auditoria de modelos
@@ -323,11 +390,20 @@ plugins:
           build: true
           nav_translations:
             Get started: 快速开始
+            Base classes: 基础类
+            Inference: 推理
+            Quantization and optimization: 量化和优化
+            Ecosystem integrations: 生态系统集成
+            Resources: 资源
+            API: API
+            Main Classes: 主要类
+            Full API reference: 完整 API 参考
+            Public exports: 公共导出
             Installation: 安装
-            First generation: 首次生成
+            Quickstart: 首次生成
             Guides: 指南
             Overview: 概览
-            TTS inference: TTS 推理
+            Pipeline: 流水线
             Speech recognition: 语音识别
             Voice activity detection: 语音活动检测
             Data preparation: 数据准备
@@ -342,7 +418,8 @@ plugins:
             Trainer architecture: 训练器架构
             API reference: API 参考
             Project: 项目
-            Add a TTS model: 添加 TTS 模型
+            Contribute: 贡献
+            Add a model: 添加模型
             Add an ASR or VAD provider: 添加 ASR 或 VAD 提供程序
             Translations: 翻译
             Model audit: 模型审核
@@ -351,11 +428,20 @@ plugins:
           build: true
           nav_translations:
             Get started: クイックスタート
+            Base classes: 基底クラス
+            Inference: 推論
+            Quantization and optimization: 量子化と最適化
+            Ecosystem integrations: エコシステム連携
+            Resources: リソース
+            API: API
+            Main Classes: メインクラス
+            Full API reference: 完全な API リファレンス
+            Public exports: 公開エクスポート
             Installation: インストール
-            First generation: 最初の生成
+            Quickstart: 最初の生成
             Guides: ガイド
             Overview: 概要
-            TTS inference: TTS 推論
+            Pipeline: パイプライン
             Speech recognition: 音声認識
             Voice activity detection: 音声区間検出
             Data preparation: データ準備
@@ -370,7 +456,8 @@ plugins:
             Trainer architecture: トレーナーアーキテクチャ
             API reference: API リファレンス
             Project: プロジェクト
-            Add a TTS model: TTS モデルを追加
+            Contribute: 貢献
+            Add a model: モデルを追加
             Add an ASR or VAD provider: ASR または VAD プロバイダーを追加
             Translations: 翻訳
             Model audit: モデル監査
@@ -379,11 +466,20 @@ plugins:
           build: true
           nav_translations:
             Get started: 빠른 시작
+            Base classes: 기본 클래스
+            Inference: 추론
+            Quantization and optimization: 양자화 및 최적화
+            Ecosystem integrations: 생태계 통합
+            Resources: 리소스
+            API: API
+            Main Classes: 주요 클래스
+            Full API reference: 전체 API 참조
+            Public exports: 공개 내보내기
             Installation: 설치
-            First generation: 첫 음성 생성
+            Quickstart: 첫 음성 생성
             Guides: 가이드
             Overview: 개요
-            TTS inference: TTS 추론
+            Pipeline: 파이프라인
             Speech recognition: 음성 인식
             Voice activity detection: 음성 활동 감지
             Data preparation: 데이터 준비
@@ -398,7 +494,8 @@ plugins:
             Trainer architecture: 트레이너 아키텍처
             API reference: API 레퍼런스
             Project: 프로젝트
-            Add a TTS model: TTS 모델 추가
+            Contribute: 기여
+            Add a model: 모델 추가
             Add an ASR or VAD provider: ASR 또는 VAD 공급자 추가
             Translations: 번역
             Model audit: 모델 감사
@@ -407,11 +504,20 @@ plugins:
           build: true
           nav_translations:
             Get started: Быстрый старт
+            Base classes: Базовые классы
+            Inference: Инференс
+            Quantization and optimization: Квантизация и оптимизация
+            Ecosystem integrations: Интеграции экосистемы
+            Resources: Ресурсы
+            API: API
+            Main Classes: Основные классы
+            Full API reference: Полный справочник API
+            Public exports: Публичные экспорты
             Installation: Установка
-            First generation: Первый синтез
+            Quickstart: Первый синтез
             Guides: Руководства
             Overview: Обзор
-            TTS inference: TTS-инференс
+            Pipeline: Пайплайн
             Speech recognition: Распознавание речи
             Voice activity detection: Детекция речевой активности
             Data preparation: Подготовка данных
@@ -426,7 +532,8 @@ plugins:
             Trainer architecture: Архитектура тренера
             API reference: Справочник API
             Project: Проект
-            Add a TTS model: Добавить модель TTS
+            Contribute: Участие
+            Add a model: Добавление модели
             Add an ASR or VAD provider: Добавить провайдер ASR или VAD
             Translations: Переводы
             Model audit: Аудит моделей
@@ -435,11 +542,20 @@ plugins:
           build: true
           nav_translations:
             Get started: البدء السريع
+            Base classes: الفئات الأساسية
+            Inference: الاستدلال
+            Quantization and optimization: التكميم والتحسين
+            Ecosystem integrations: تكاملات المنظومة
+            Resources: الموارد
+            API: API
+            Main Classes: الفئات الرئيسية
+            Full API reference: مرجع API الكامل
+            Public exports: التصديرات العامة
             Installation: التثبيت
-            First generation: أول توليد صوتي
+            Quickstart: أول توليد صوتي
             Guides: الأدلة
             Overview: نظرة عامة
-            TTS inference: استدلال تحويل النص إلى كلام
+            Pipeline: مسار المعالجة
             Speech recognition: التعرّف على الكلام
             Voice activity detection: اكتشاف النشاط الصوتي
             Data preparation: إعداد البيانات
@@ -454,7 +570,8 @@ plugins:
             Trainer architecture: بنية المدرّب
             API reference: مرجع API
             Project: المشروع
-            Add a TTS model: إضافة نموذج TTS
+            Contribute: المساهمة
+            Add a model: إضافة نموذج
             Add an ASR or VAD provider: إضافة موفّر ASR أو VAD
             Translations: الترجمات
             Model audit: تدقيق النماذج
@@ -485,9 +602,15 @@ extra_css:
   - stylesheets/extra.css
 
 extra_javascript:
+  - javascripts/header-controls.js
+  - javascripts/page-actions.js
   - javascripts/mobile-drawer.js
 
 extra:
+  docs_version:
+    label: main
+    release: "0.3.0"
+    published: "0.1.6"
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/kadirnar/voicehub

@@ -1,0 +1,33 @@
+{# VoiceHub override: keep the native Material palette lifecycle in a reference-sized control. #}
+<form class="md-header__option vh-theme-control" data-md-component="palette">
+  {% for option in config.theme.palette %}
+    {% set scheme  = option.scheme  | d("default", true) %}
+    {% set primary = option.primary | d("indigo", true) %}
+    {% set accent  = option.accent  | d("indigo", true) %}
+    <input
+      class="md-option"
+      data-md-color-media="{{ option.media }}"
+      data-md-color-scheme="{{ scheme | replace(' ', '-') }}"
+      data-md-color-primary="{{ primary | replace(' ', '-') }}"
+      data-md-color-accent="{{ accent | replace(' ', '-') }}"
+      {% if option.toggle %}aria-label="{{ option.toggle.name }}"{% else %}aria-hidden="true"{% endif %}
+      type="radio"
+      name="__palette"
+      id="__palette_{{ loop.index0 }}"
+      tabindex="-1"
+    >
+    {% if option.toggle %}
+      <button
+        type="button"
+        class="md-header__button md-icon vh-theme-toggle"
+        title="{{ option.toggle.name }}"
+        aria-label="{{ option.toggle.name }}"
+        data-vh-theme-toggle
+        data-vh-theme-target="__palette_{{ loop.index % loop.length }}"
+        hidden
+      >
+        {% include ".icons/" ~ option.toggle.icon ~ ".svg" %}
+      </button>
+    {% endif %}
+  {% endfor %}
+</form>

@@ -11,6 +11,8 @@ from numbers import Real
 from pathlib import Path
 from typing import Any
 
+from voicehub.hub import read_json_file
+from voicehub.serialization_utils import reject_serialized_secrets
 from voicehub.trainer_utils import IntervalStrategy, SchedulerType, write_json
 
 
@@ -231,6 +233,8 @@ class TrainingArguments:
         if self.greater_is_better is None and self.metric_for_best_model is not None:
             self.greater_is_better = not self.metric_for_best_model.endswith("loss")
 
+        TrainingArguments._validated_serialization_payload(self)
+
     @staticmethod
     def _normalize_report_to(value: list[str] | str) -> list[str]:
         if isinstance(value, str):
@@ -309,8 +313,7 @@ class TrainingArguments:
             return self.warmup_steps
         return int(num_training_steps * self.warmup_ratio)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serializable representation."""
+    def _serialization_payload(self) -> dict[str, Any]:
         values = asdict(self)
         values.pop("evaluation_strategy", None)
         for key in (
@@ -323,10 +326,19 @@ class TrainingArguments:
             values[key] = value.value if isinstance(value, Enum) else value
         return values
 
+    def _validated_serialization_payload(self) -> dict[str, Any]:
+        values = TrainingArguments._serialization_payload(self)
+        reject_serialized_secrets(values, owner=self.__class__.__name__)
+        return values
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable representation."""
+        return TrainingArguments._validated_serialization_payload(self)
+
     def to_json_string(self) -> str:
         """Serialize arguments as stable, readable JSON."""
         return json.dumps(
-            self.to_dict(),
+            TrainingArguments._validated_serialization_payload(self),
             ensure_ascii=False,
             indent=2,
             sort_keys=True,
@@ -334,10 +346,12 @@ class TrainingArguments:
 
     def save_json(self, json_file: str | Path) -> Path:
         """Save arguments for checkpoint reproducibility."""
-        return write_json(json_file, self.to_dict())
+        payload = TrainingArguments._validated_serialization_payload(self)
+        return write_json(json_file, payload)
 
     @classmethod
     def from_json_file(cls, json_file: str | Path) -> TrainingArguments:
         """Restore arguments saved by :meth:`save_json`."""
-        payload = json.loads(Path(json_file).expanduser().read_text(encoding="utf-8"))
+        payload = read_json_file(Path(json_file).expanduser())
+        reject_serialized_secrets(payload, owner=cls.__name__)
         return cls(**payload)

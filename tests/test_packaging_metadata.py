@@ -255,6 +255,11 @@ class PackagingMetadataTests(unittest.TestCase):
             "on Coqui's Python-version-limited trainer distribution.",
         )
 
+    def test_test_extra_keeps_numba_compatible_with_supported_python(self):
+        requirements = _requirements_by_distribution(self.extras["test"])
+        self.assertIn("numba", requirements)
+        self.assertEqual(str(requirements["numba"].specifier), ">=0.59")
+
     def test_wandb_is_training_only(self):
         inference_distributions = {_distribution_name(requirement) for requirement in self.dependencies}
         training_distributions = {_distribution_name(requirement) for requirement in self.extras["training"]}

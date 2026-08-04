@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from voicehub.architectures.csm import CSMArchitectureConfig, CSMModel
-    from voicehub.models.csm.inference import CSMTTS, CSMConfig, CSMForTextToSpeech
+    from voicehub.models.csm.configuration_csm import CSMConfig
+    from voicehub.models.csm.inference import CSMTTS, CSMForTextToSpeech
 
 _PUBLIC_IMPORTS = {
     "CSMArchitectureConfig": (
@@ -18,7 +19,7 @@ _PUBLIC_IMPORTS = {
         "CSMModel",
     ),
     "CSMConfig": (
-        "voicehub.models.csm.inference",
+        "voicehub.models.csm.configuration_csm",
         "CSMConfig",
     ),
     "CSMForTextToSpeech": (

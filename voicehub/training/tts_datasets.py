@@ -12,6 +12,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from voicehub.json_utils import parse_json_value
+from voicehub.serialization_utils import reject_serialized_secrets
 from voicehub.training.data_contracts import TTSDataArchitecture, _field_present, get_tts_dataset_spec
 from voicehub.training.dataset_base import SpeechDataset
 from voicehub.training.tts_batching import EpochLengthBatchSampler, TTSBatchingConfig
@@ -376,28 +378,34 @@ class TTSDataset(SpeechDataset):
     ) -> Path:
         """Write a portable JSON Lines manifest and return its path."""
         destination = Path(path).expanduser().resolve()
-        destination.parent.mkdir(parents=True, exist_ok=True)
         relative_root = (
             destination.parent if relative_to is None else Path(relative_to).expanduser().resolve())
-        with destination.open("w", encoding="utf-8", newline="\n") as stream:
-            for index, record in enumerate(self._records):
-                serializable = self._portable_record(
-                    record,
-                    relative_to=relative_root,
-                )
-                try:
-                    line = json.dumps(
+        lines: list[str] = []
+        for index, record in enumerate(self._records):
+            serializable = self._portable_record(
+                record,
+                relative_to=relative_root,
+            )
+            reject_serialized_secrets(
+                serializable,
+                owner=f"TTS dataset record {index}",
+            )
+            try:
+                lines.append(
+                    json.dumps(
                         serializable,
                         ensure_ascii=False,
                         sort_keys=True,
                         separators=(",", ":"),
-                    )
-                except (TypeError, ValueError) as exc:
-                    raise TypeError(
-                        f"TTS record {index} contains values that cannot be written "
-                        "to JSON Lines. Store tensors/features separately and put "
-                        "their paths in the manifest.") from exc
-                stream.write(line + "\n")
+                    ) + "\n")
+            except (TypeError, ValueError) as exc:
+                raise TypeError(
+                    f"TTS record {index} contains values that cannot be written "
+                    "to JSON Lines. Store tensors/features separately and put "
+                    "their paths in the manifest.") from exc
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.writelines(lines)
         return destination
 
     def resume_fingerprint(self) -> dict[str, Any]:
@@ -640,7 +648,7 @@ def _read_manifest(path: Path, *, delimiter: str | None) -> list[dict[str, Any]]
     suffix = path.suffix.lower()
     if suffix == ".json":
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = parse_json_value(path.read_bytes(), source=path)
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid TTS JSON manifest {path}: {exc}.") from exc
         if not isinstance(payload, list):
@@ -656,10 +664,16 @@ def _read_manifest(path: Path, *, delimiter: str | None) -> list[dict[str, Any]]
             reader = csv.DictReader(stream, delimiter=selected_delimiter)
             if not reader.fieldnames:
                 raise ValueError(f"TTS tabular manifest {path} has no header.")
-            records = [{
-                key: _coerce_tabular_value(value)
-                for key, value in row.items() if key is not None and value not in (None, "")
-            } for row in reader]
+            records = []
+            for line_number, row in enumerate(reader, start=2):
+                records.append({
+                    key:
+                    _coerce_tabular_value(
+                        value,
+                        source=f"TTS tabular manifest {path}:{line_number} field {key!r}",
+                    )
+                    for key, value in row.items() if key is not None and value not in (None, "")
+                })
     else:
         records = []
         with path.open(encoding="utf-8") as stream:
@@ -667,7 +681,10 @@ def _read_manifest(path: Path, *, delimiter: str | None) -> list[dict[str, Any]]
                 if not line.strip():
                     continue
                 try:
-                    record = json.loads(line)
+                    record = parse_json_value(
+                        line,
+                        source=f"{path}:{line_number}",
+                    )
                 except json.JSONDecodeError as exc:
                     raise ValueError(
                         f"Invalid TTS JSON Lines record at {path}:{line_number}: "
@@ -677,16 +694,26 @@ def _read_manifest(path: Path, *, delimiter: str | None) -> list[dict[str, Any]]
                 records.append(dict(record))
     if not records:
         raise ValueError(f"No TTS records found in manifest {path}.")
-    return records
+    normalized = []
+    for index, record in enumerate(records):
+        if not isinstance(record, Mapping):
+            raise TypeError(f"TTS manifest record {index} in {path} must be an object.")
+        value = dict(record)
+        reject_serialized_secrets(
+            value,
+            owner=f"TTS manifest record {index}",
+        )
+        normalized.append(value)
+    return normalized
 
 
-def _coerce_tabular_value(value: str) -> Any:
+def _coerce_tabular_value(value: str, *, source: str) -> Any:
     stripped = value.strip()
     if not stripped:
         return ""
     if stripped[0] in "[{\"" or stripped in ("true", "false", "null"):
         try:
-            return json.loads(stripped)
+            return parse_json_value(stripped, source=source)
         except json.JSONDecodeError:
             return stripped
     return stripped

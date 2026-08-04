@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from voicehub.errors import LLMBackendRequestError
+from voicehub.json_utils import parse_json_value
 from voicehub.llm_serving.configuration import LLMBackendConfig
 
 
@@ -177,11 +178,14 @@ class HTTPBackendClient:
             accept="application/json",
         )
         try:
-            document = json.loads(response.body)
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            document = parse_json_value(
+                response.body,
+                source=f"{self.config.backend.value} response for {route}",
+            )
+        except (UnicodeDecodeError, ValueError) as error:
             raise LLMBackendRequestError(
                 f"{self.config.backend.value} returned malformed JSON "
-                f"for {route}.") from error
+                f"for {route}: {error}.") from error
         if not isinstance(document, dict):
             raise LLMBackendRequestError(
                 f"{self.config.backend.value} returned a non-object JSON "

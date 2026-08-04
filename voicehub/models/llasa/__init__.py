@@ -1,6 +1,29 @@
-"""LLaSA text-to-speech backend."""
+"""Lazy LLaSA text-to-speech exports."""
 
-from voicehub.models.llasa.configuration_llasa import LlasaConfig
-from voicehub.models.llasa.inference import LlasaForTextToSpeech, LlasaTTS
+from __future__ import annotations
 
-__all__ = ["LlasaConfig", "LlasaForTextToSpeech", "LlasaTTS"]
+from importlib import import_module
+from typing import Any
+
+_PACKAGE = "voicehub.models.llasa."
+_EXPORTS = {
+    "LlasaConfig": _PACKAGE + "configuration_llasa",
+    "LlasaForTextToSpeech": _PACKAGE + "inference",
+    "LlasaTTS": _PACKAGE + "inference",
+}
+
+__all__ = sorted(_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_name = _EXPORTS[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted((*globals(), *_EXPORTS))

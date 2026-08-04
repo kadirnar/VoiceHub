@@ -459,6 +459,91 @@ class ModelScaffoldTests(unittest.TestCase):
             ):
                 discover_builtin_model_manifests(root / "voicehub/models")
 
+    def test_inactive_ambiguous_manifest_stays_undiscovered(self):
+        documents = (
+            '{"builtin":false,"audit":"discarded-secret","audit":1}',
+            '{"builtin":false,"audit":NaN}',
+            '{"builtin":false,"audit":1e400}',
+        )
+        for document in documents:
+            with self.subTest(document=document), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                package = root / "voicehub/models/auroratts"
+                package.mkdir(parents=True)
+                (package / "model-integration.json").write_text(
+                    document,
+                    encoding="utf-8",
+                )
+
+                self.assertEqual(
+                    discover_builtin_model_manifests(root / "voicehub/models"),
+                    (),
+                )
+
+    def test_active_manifest_and_source_reject_ambiguous_json_before_discovery(self):
+        ambiguities = (
+            (
+                "duplicate",
+                r"Duplicate JSON object key 'model_type'",
+            ),
+            (
+                "constant",
+                r"non-finite JSON constant 'NaN'",
+            ),
+            (
+                "overflow",
+                r"\$\.audit.*non-finite",
+            ),
+        )
+        for artifact in ("model-integration.json", "SOURCE.json"):
+            for ambiguity, diagnostic in ambiguities:
+                with self.subTest(
+                        artifact=artifact,
+                        ambiguity=ambiguity,
+                ), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    self._complete_scaffold(root)
+                    package = root / "voicehub/models/auroratts"
+                    manifest_path = package / "model-integration.json"
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    manifest["builtin"] = True
+                    manifest_path.write_text(
+                        json.dumps(manifest, sort_keys=True) + "\n",
+                        encoding="utf-8",
+                    )
+                    source_path = package / "source/SOURCE.json"
+                    target = manifest_path if artifact == "model-integration.json" else source_path
+                    document = json.dumps(
+                        json.loads(target.read_text(encoding="utf-8")),
+                        sort_keys=True,
+                    )
+                    if ambiguity == "duplicate":
+                        document = document.replace(
+                            '"model_type": "auroratts"',
+                            '"model_type": "discarded-secret", "model_type": "auroratts"',
+                            1,
+                        )
+                    else:
+                        value = "NaN" if ambiguity == "constant" else "1e400"
+                        document = document[:-1] + f', "audit": {value}}}'
+                    target.write_text(document + "\n", encoding="utf-8")
+
+                    with self.assertRaisesRegex(ValueError, diagnostic) as discovered:
+                        discover_builtin_model_manifests(root / "voicehub/models")
+                    discovery_error = str(discovered.exception)
+                    self.assertIn(str(target), discovery_error)
+                    self.assertNotIn("discarded-secret", discovery_error)
+
+                    checker_errors = "\n".join(check_model_scaffold(root, "auroratts"))
+                    self.assertIn(artifact, checker_errors)
+                    self.assertRegex(checker_errors, diagnostic)
+                    self.assertNotIn("discarded-secret", checker_errors)
+
+                    if artifact == "model-integration.json":
+                        with self.assertRaisesRegex(ScaffoldError, diagnostic) as catalog:
+                            render_builtin_catalog_fragments(root, "auroratts")
+                        self.assertNotIn("discarded-secret", str(catalog.exception))
+
     def test_activated_manifest_needs_no_central_catalog_entry(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+from numbers import Integral
 from pathlib import Path
 from typing import Any
 
 from voicehub.hub_transport import download_hugging_face_file
+from voicehub.json_utils import parse_json_object
 from voicehub.path_utils import is_explicit_local_path
+
+DEFAULT_MAX_JSON_BYTES = 64 * 1024 * 1024
 
 
 def resolve_pretrained_file(
@@ -47,19 +53,56 @@ def resolve_pretrained_file(
     )
 
 
-def read_json_file(path: str | Path) -> dict[str, Any]:
-    """Read a UTF-8 JSON object."""
-    with Path(path).open(encoding="utf-8") as handle:
-        value = json.load(handle)
-    if not isinstance(value, dict):
-        raise ValueError(f"Expected a JSON object in {path}.")
-    return value
+def read_json_file(
+    path: str | Path,
+    *,
+    max_bytes: int = DEFAULT_MAX_JSON_BYTES,
+) -> dict[str, Any]:
+    """Read one bounded finite UTF-8 JSON object without ambiguity."""
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, Integral):
+        raise TypeError("`max_bytes` must be an integer.")
+    if max_bytes <= 0:
+        raise ValueError("`max_bytes` must be greater than zero.")
+
+    source = Path(path)
+    size = source.stat().st_size
+    if size > max_bytes:
+        raise ValueError(f"JSON artifact {source} is {size} bytes; the configured limit is {max_bytes}.")
+    with source.open("rb") as stream:
+        document = stream.read(max_bytes + 1)
+    if len(document) > max_bytes:
+        raise ValueError(f"JSON artifact {source} exceeds the configured {max_bytes}-byte limit.")
+    return parse_json_object(document, source=source)
 
 
 def write_json_file(path: str | Path, value: dict[str, Any]) -> None:
-    """Write stable, human-readable UTF-8 JSON."""
+    """Atomically write stable, human-readable UTF-8 JSON."""
     output_path = Path(path)
+    encoded = (json.dumps(
+        value,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+        allow_nan=False,
+    ) + "\n")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as handle:
-        json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
-        handle.write("\n")
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                newline="\n",
+                dir=output_path.parent,
+                prefix=f".{output_path.name}.",
+                suffix=".tmp",
+                delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, output_path)
+    except BaseException:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise

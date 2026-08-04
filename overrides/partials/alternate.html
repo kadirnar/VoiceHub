@@ -1,0 +1,16 @@
+{# VoiceHub override: use the same compact native language selector as the reference. #}
+<select
+  class="vh-language-select"
+  aria-label="{{ lang.t('select.language') }}"
+  data-vh-language-select
+>
+  {% for alt in config.extra.alternate %}
+    <option
+      value="{{ alt.link | url }}"
+      lang="{{ alt.lang }}"
+      {% if alt.lang == config.theme.language %}selected{% endif %}
+    >
+      {{ alt.lang | upper }}
+    </option>
+  {% endfor %}
+</select>

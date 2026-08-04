@@ -1,6 +1,7 @@
 import ast
 import inspect
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,10 +16,12 @@ from voicehub.auto import (
     AutoModelForSpeechRecognition,
     AutoModelForTextToSpeech,
     AutoModelForVoiceActivityDetection,
+    AutoProcessor,
 )
 from voicehub.automodel import MODEL_TYPE_TO_MODEL_CLASS_NAME, AutoInferenceModel
 from voicehub.components import MODEL_COMPONENTS, components_for_model
 from voicehub.configuration_utils import VoiceHubConfig
+from voicehub.processing_utils import VoiceHubProcessor
 from voicehub.registry import (
     MODEL_ALIASES,
     MODEL_REGISTRY,
@@ -103,6 +106,14 @@ class _ExtensionASRConfig(VoiceHubConfig):
     model_type = "test-auto-register-asr"
 
 
+class _ExtensionProcessor(VoiceHubProcessor):
+    pass
+
+
+class _ExtensionASRModelWithProcessor(_FakeASRModel):
+    processor_class = _ExtensionProcessor
+
+
 class SpeechTaskRegistryTests(unittest.TestCase):
     ASR_MODEL_TYPE = "test-speech-registry-asr"
     ASR_ALIAS = "test-speech-registry-stt"
@@ -174,8 +185,160 @@ class SpeechTaskRegistryTests(unittest.TestCase):
         self.assertEqual(asr_spec.architecture, "test-speech-family")
         self.assertEqual(asr_spec.components, ())
         self.assertFalse(asr_spec.default_for_task)
+        self.assertEqual(
+            (
+                tts_spec.processor_module,
+                tts_spec.processor_class,
+            ),
+            (
+                "voicehub.processing_utils",
+                "VoiceHubProcessor",
+            ),
+        )
+        self.assertEqual(
+            (
+                asr_spec.processor_module,
+                asr_spec.processor_class,
+            ),
+            (
+                "voicehub.processing_utils",
+                "AudioProcessor",
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "declared together"):
+            replace(asr_spec, processor_class=None)
         self.assertTrue(asr_spec.supports_task("asr"))
         self.assertFalse(asr_spec.supports_task("vad"))
+
+    def test_all_registered_processors_load_without_heavy_backends(self):
+        code = """
+import json
+import sys
+
+from voicehub import AutoProcessor, VoiceHubConfig, list_model_specs
+
+processor_classes = set()
+input_contracts = {}
+for spec in list_model_specs(task=None):
+    config = VoiceHubConfig()
+    config.model_type = spec.model_type
+    constructed = AutoProcessor.from_config(config)
+    loaded = AutoProcessor.from_pretrained(
+        "",
+        config=config,
+        local_files_only=True,
+    )
+    if spec.task.value == "text-to-speech":
+        values = loaded("processor contract")
+    else:
+        values = loaded([0.0, 0.0], sampling_rate=16_000)
+    processor_classes.add(loaded.__class__.__name__)
+    input_contracts[spec.model_type] = sorted(values)
+    if constructed.__class__ is not loaded.__class__:
+        raise AssertionError(
+            f"Processor class changed while loading {spec.model_type!r}."
+        )
+
+heavy_modules = sorted(
+    name for name in (
+        "torch",
+        "transformers",
+        "faster_whisper",
+        "nemo",
+        "speechbrain",
+        "funasr",
+        "espnet2",
+        "wenet",
+    )
+    if name in sys.modules
+)
+print(json.dumps({
+    "count": len(input_contracts),
+    "heavy_modules": heavy_modules,
+    "input_contracts": input_contracts,
+    "processor_classes": sorted(processor_classes),
+}))
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        result = json.loads(completed.stdout)
+
+        self.assertEqual(result["count"], 68)
+        self.assertEqual(result["heavy_modules"], [])
+        self.assertEqual(
+            result["processor_classes"],
+            ["AudioProcessor", "VoiceHubProcessor"],
+        )
+        for spec in list_model_specs(task=None):
+            with self.subTest(model_type=spec.model_type):
+                expected_keys = (["text"]
+                                 if spec.task is SpeechTask.TEXT_TO_SPEECH else ["audio", "sampling_rate"])
+                self.assertEqual(
+                    result["input_contracts"][spec.model_type],
+                    expected_keys,
+                )
+
+    def test_all_registered_configs_load_without_heavy_backends(self):
+        code = """
+import json
+import sys
+
+from voicehub import AutoConfig, list_model_specs
+
+config_classes = {}
+for spec in list_model_specs(task=None):
+    config = AutoConfig.for_model(spec.model_type)
+    if config.model_type != spec.model_type:
+        raise AssertionError(
+            f"Config type {config.model_type!r} does not match {spec.model_type!r}."
+        )
+    if config.architectures != [spec.class_name]:
+        raise AssertionError(
+            f"Config architectures do not match {spec.model_type!r}."
+        )
+    json.dumps(config.to_dict(), sort_keys=True)
+    config_classes[spec.model_type] = config.__class__.__name__
+
+heavy_modules = sorted(
+    name for name in (
+        "torch",
+        "transformers",
+        "faster_whisper",
+        "nemo",
+        "speechbrain",
+        "funasr",
+        "espnet2",
+        "wenet",
+    )
+    if name in sys.modules
+)
+print(json.dumps({
+    "config_classes": config_classes,
+    "count": len(config_classes),
+    "heavy_modules": heavy_modules,
+}))
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=Path(__file__).resolve().parents[1],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        result = json.loads(completed.stdout)
+
+        self.assertEqual(result["count"], 68)
+        self.assertEqual(result["heavy_modules"], [])
+        self.assertEqual(
+            set(result["config_classes"]),
+            {spec.model_type
+             for spec in list_model_specs(task=None)},
+        )
 
     def test_registry_enforces_one_declarative_default_per_task(self):
         first = replace(
@@ -302,6 +465,30 @@ class SpeechTaskRegistryTests(unittest.TestCase):
         self.assertIsInstance(model, _FakeASRModel)
         self.assertEqual(model.init_kwargs["marker"], "extension")
         self.assertEqual(model.config.sample_rate, 22_050)
+
+    def test_auto_factory_records_custom_processor_metadata(self):
+        model_type = _ExtensionASRConfig.model_type
+        try:
+            spec = AutoModelForSpeechRecognition.register(
+                _ExtensionASRConfig,
+                _ExtensionASRModelWithProcessor,
+                default_model_path="acme/extension-asr",
+            )
+            config = AutoConfig.for_model(model_type)
+            processor = AutoProcessor.from_config(
+                config,
+                marker="extension-processor",
+            )
+        finally:
+            AutoModel.unregister(model_type, missing_ok=True)
+
+        self.assertEqual(spec.processor_module, __name__)
+        self.assertEqual(spec.processor_class, "_ExtensionProcessor")
+        self.assertIsInstance(processor, _ExtensionProcessor)
+        self.assertEqual(
+            processor.init_kwargs,
+            {"marker": "extension-processor"},
+        )
 
     def test_auto_factory_declares_components_without_a_shared_model_map(self):
         model_type = _ExtensionASRConfig.model_type
@@ -464,6 +651,42 @@ class SpeechTaskRegistryTests(unittest.TestCase):
                     self.assertFalse(model.is_loaded)
                     self.assertFalse(restored_model.is_loaded)
                     self.assertFalse((destination / "native_export").exists())
+
+    def test_all_registered_configs_reject_secrets_added_after_construction(self):
+        for spec in list_model_specs():
+            with self.subTest(model_type=spec.model_type, task=spec.task.value):
+                config = AutoConfig.for_model(spec.model_type)
+                config.runtime_credentials = {
+                    "token": "must-not-be-persisted",
+                }
+
+                with self.assertRaisesRegex(ValueError, "runtime secrets"):
+                    config.to_dict()
+
+    def test_all_registered_configs_reject_embedded_generation_secrets(self):
+        for spec in list_model_specs():
+            with self.subTest(model_type=spec.model_type, task=spec.task.value):
+                with self.assertRaises(ValueError) as context:
+                    AutoConfig.for_model(
+                        spec.model_type,
+                        generation_config={
+                            "provider_options": {
+                                "api_key": "must-not-be-persisted",
+                            },
+                        },
+                    )
+
+                message = str(context.exception).lower()
+                self.assertTrue(
+                    any(
+                        marker in message for marker in (
+                            "authentication",
+                            "credential",
+                            "secret",
+                            "token",
+                        )),
+                    message,
+                )
 
     def test_explicit_model_type_cannot_override_a_different_typed_config(self):
         self._register_task_backends()

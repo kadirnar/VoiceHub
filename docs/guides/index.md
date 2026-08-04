@@ -49,21 +49,19 @@ and training examples plus the complete Dia lifecycle.
 
 ## Inference
 
-Use the [TTS inference guide](inference.md) to:
+Use the [Pipeline guide](inference.md) to:
 
-- discover models without importing their ML runtimes;
-- load Hub checkpoints and local artifacts;
-- configure deterministic generation;
-- provide voice, language, style, and reference conditioning;
-- consume the normalized `TTSOutput`; and
-- keep serving optimizations separate from the training graph.
+- select TTS, ASR, or VAD through one task-aware entry point;
+- load Hub checkpoints, local artifacts, or configured model objects;
+- consume normalized `TTSOutput`, `ASROutput`, or `VADOutput` values;
+- keep batching and chunking limits explicit; and
+- preserve lazy loading and portable save/reload behavior.
 
 Use the [speech recognition guide](speech-recognition.md) and
 [voice activity detection guide](voice-activity-detection.md) to:
 
 - discover providers through task-filtered registry metadata;
 - load file, array, tensor, mapping, or `AudioInput` audio;
-- consume normalized `ASROutput` and `VADOutput` values;
 - configure timestamps, long-form decoding, thresholds, and segmentation; and
 - distinguish native, optimized, and upstream-managed runtimes.
 

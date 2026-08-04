@@ -8,40 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from voicehub.architectures.csm.runtime import CSMCodec, CSMRuntime, load_csm_runtime
-from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
 from voicehub.models._shared import finish_audio_output, seeded_inference
-
-
-class CSMConfig(VoiceHubConfig):
-    """Configuration for VoiceHub's source-faithful native CSM runtime."""
-
-    model_type = "csm"
-
-    def __init__(
-        self,
-        *,
-        torch_dtype: str = "bfloat16",
-        sample_rate: int = 24_000,
-        revision: str | None = None,
-        cache_dir: str | None = None,
-        local_files_only: bool = False,
-        load_codec: bool = True,
-        codec_path: str | None = None,
-        verify_integrity: bool = False,
-        verify_checkpoint_integrity: bool = False,
-        **kwargs,
-    ) -> None:
-        super().__init__(sample_rate=sample_rate, **kwargs)
-        self.torch_dtype = torch_dtype
-        self.revision = revision
-        self.cache_dir = cache_dir
-        self.local_files_only = local_files_only
-        self.load_codec = load_codec
-        self.codec_path = codec_path
-        self.verify_integrity = verify_integrity
-        self.verify_checkpoint_integrity = verify_checkpoint_integrity
+from voicehub.models.csm.configuration_csm import CSMConfig
 
 
 class CSMForTextToSpeech(PreTrainedTTSModel):

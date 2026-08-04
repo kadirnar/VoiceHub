@@ -29,7 +29,12 @@ from voicehub.architectures.wenet_u2pp.decoding import (
 )
 from voicehub.architectures.wenet_u2pp.metadata import (
     GIGASPEECH_ARCHIVE_SHA256,
+    GIGASPEECH_ARCHIVE_SIZE,
     GIGASPEECH_CHECKPOINT_LICENSE,
+    GIGASPEECH_MIRROR_FILENAME,
+    GIGASPEECH_MIRROR_REPOSITORY,
+    GIGASPEECH_MIRROR_REVISION,
+    GIGASPEECH_MODEL_URL,
     GIGASPEECH_STATE_VALUES,
     GIGASPEECH_TENSOR_COUNT,
     GIGASPEECH_TENSOR_FINGERPRINT,
@@ -132,6 +137,18 @@ class NativeWeNetArchitectureTests(unittest.TestCase):
         self.assertEqual(shapes["ctc.ctc_lo.weight"], (4_999, 512))
         self.assertEqual(len(WENET_SOURCE_REVISION), 40)
         self.assertEqual(len(GIGASPEECH_ARCHIVE_SHA256), 64)
+        self.assertEqual(GIGASPEECH_ARCHIVE_SIZE, 503_845_602)
+        self.assertEqual(GIGASPEECH_MIRROR_REPOSITORY, "openspeech/wenet-models")
+        self.assertEqual(
+            GIGASPEECH_MIRROR_REVISION,
+            "90acd57d17169a15d5ceab462c6e7db3bd003921",
+        )
+        self.assertEqual(
+            GIGASPEECH_MODEL_URL,
+            "https://huggingface.co/openspeech/wenet-models/resolve/"
+            "90acd57d17169a15d5ceab462c6e7db3bd003921/"
+            f"{GIGASPEECH_MIRROR_FILENAME}",
+        )
         self.assertEqual(GIGASPEECH_CHECKPOINT_LICENSE, "NOT DECLARED")
 
     def test_tiny_graph_computes_exact_hybrid_loss_and_backward(self):

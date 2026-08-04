@@ -14,6 +14,8 @@ from types import MappingProxyType
 from typing import Any
 
 from voicehub.dependencies import resolve_import_path
+from voicehub.json_utils import parse_json_value
+from voicehub.serialization_utils import reject_serialized_secrets
 from voicehub.training.asr_data_contracts import ASRDataArchitecture, get_asr_dataset_spec
 from voicehub.training.dataset_base import SpeechDataset
 
@@ -492,6 +494,10 @@ class ASRDataset(SpeechDataset):
                 record,
                 relative_to=relative_root,
             )
+            reject_serialized_secrets(
+                serializable,
+                owner=f"ASR dataset record {index}",
+            )
             try:
                 lines.append(
                     json.dumps(
@@ -779,14 +785,20 @@ def _read_manifest(path: Path, *, delimiter: str | None) -> list[dict[str, Any]]
             reader = csv.DictReader(stream, delimiter=selected_delimiter)
             if not reader.fieldnames:
                 raise ValueError(f"ASR tabular manifest {path} has no header.")
-            records = [{
-                key: _coerce_tabular_value(value)
-                for key, value in row.items() if key is not None and value not in (None, "")
-            } for row in reader]
+            records = []
+            for line_number, row in enumerate(reader, start=2):
+                records.append({
+                    key:
+                    _coerce_tabular_value(
+                        value,
+                        source=f"ASR tabular manifest {path}:{line_number} field {key!r}",
+                    )
+                    for key, value in row.items() if key is not None and value not in (None, "")
+                })
     elif suffix == ".json":
         source = path.read_text(encoding="utf-8")
         try:
-            payload = json.loads(source)
+            payload = parse_json_value(source, source=path)
         except json.JSONDecodeError:
             records = _read_json_lines(path)
         else:
@@ -804,7 +816,12 @@ def _read_manifest(path: Path, *, delimiter: str | None) -> list[dict[str, Any]]
     for index, record in enumerate(records):
         if not isinstance(record, Mapping):
             raise TypeError(f"ASR manifest record {index} in {path} must be an object.")
-        normalized.append(dict(record))
+        value = dict(record)
+        reject_serialized_secrets(
+            value,
+            owner=f"ASR manifest record {index}",
+        )
+        normalized.append(value)
     return normalized
 
 
@@ -815,7 +832,10 @@ def _read_json_lines(path: Path) -> list[dict[str, Any]]:
             if not line.strip():
                 continue
             try:
-                record = json.loads(line)
+                record = parse_json_value(
+                    line,
+                    source=f"{path}:{line_number}",
+                )
             except json.JSONDecodeError as exc:
                 raise ValueError(
                     f"Invalid ASR JSON Lines record at {path}:{line_number}: "
@@ -847,13 +867,13 @@ def _read_key_value_file(path: Path, *, owner: str) -> dict[str, str]:
     return records
 
 
-def _coerce_tabular_value(value: str) -> Any:
+def _coerce_tabular_value(value: str, *, source: str) -> Any:
     stripped = value.strip()
     if not stripped:
         return ""
     if stripped[0] in "[{\"" or stripped in ("true", "false", "null"):
         try:
-            return json.loads(stripped)
+            return parse_json_value(stripped, source=source)
         except json.JSONDecodeError:
             return stripped
     return stripped

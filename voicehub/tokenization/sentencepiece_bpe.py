@@ -16,6 +16,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from voicehub.json_utils import parse_json_value
 from voicehub.tokenization.assets import (
     DEFAULT_MAX_ASSET_BYTES,
     DEFAULT_MAX_JSON_DEPTH,
@@ -29,19 +30,6 @@ from voicehub.tokenization.assets import (
 from voicehub.tokenization.base import BatchEncoding, Encoding
 
 _MAX_TOKEN_ID = 2**31 - 1
-
-
-def _reject_json_constant(value: str) -> None:
-    raise ValueError(f"Non-finite JSON constant {value!r} is forbidden.")
-
-
-def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise TokenizerAssetError(f"Tokenizer JSON contains duplicate key {key!r}.")
-        result[key] = value
-    return result
 
 
 def _validate_json_bounds(
@@ -126,14 +114,8 @@ def load_sentencepiece_bpe(
             raise ValueError(f"`{name}` must be greater than zero.")
     payload = read_bounded_asset(path, max_bytes=max_bytes)
     try:
-        document = json.loads(
-            payload.decode("utf-8"),
-            parse_constant=_reject_json_constant,
-            object_pairs_hook=_reject_duplicate_keys,
-        )
-    except TokenizerAssetError:
-        raise
-    except (UnicodeDecodeError, ValueError, json.JSONDecodeError, RecursionError) as error:
+        document = parse_json_value(payload, source=Path(path).expanduser())
+    except (ValueError, RecursionError) as error:
         raise TokenizerAssetError(f"Invalid tokenizer JSON: {error}.") from error
     _validate_json_bounds(
         document,

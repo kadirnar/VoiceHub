@@ -257,6 +257,38 @@ class HuggingFaceAssetTests(unittest.TestCase):
         self.assertTrue(assets.use_regex)
         self.assertEqual(tokenizer.encode("hello").input_ids, (259, ))
 
+    def test_tokenizer_json_rejects_ambiguous_json_before_model_interpretation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tokenizer.json"
+            _write_tokenizer_json(path)
+            valid = path.read_text(encoding="utf-8")
+            cases = (
+                (
+                    "duplicate",
+                    valid.replace('"model": {', '"model": "discarded-secret", "model": {', 1),
+                    r"Duplicate JSON object key 'model'",
+                ),
+                (
+                    "constant",
+                    valid[:-1] + ', "metadata": {"score": NaN}}',
+                    r"non-finite JSON constant 'NaN'",
+                ),
+                (
+                    "overflow",
+                    valid[:-1] + ', "metadata": {"score": 1e400}}',
+                    r"\$\.metadata\.score.*non-finite",
+                ),
+            )
+            for name, document, diagnostic in cases:
+                with self.subTest(name=name):
+                    path.write_text(document, encoding="utf-8")
+                    with self.assertRaises(TokenizerAssetError) as captured:
+                        load_huggingface_byte_bpe(path)
+                    rendered = str(captured.exception)
+                    self.assertIn(str(path), rendered)
+                    self.assertRegex(rendered, diagnostic)
+                    self.assertNotIn("discarded-secret", rendered)
+
     def test_tokenizer_json_rejects_merges_missing_from_vocabulary(self):
         document = {
             "model": {

@@ -617,6 +617,134 @@ class HubTransportTests(unittest.TestCase):
                     token="never-leak",
                 )
 
+    def test_hub_api_rejects_ambiguous_json_before_using_a_commit(self):
+        documents = {
+            "duplicate": (
+                '{"sha":"discarded-secret-value","sha":"' + ("8" * 40) + '"}',
+                "Duplicate JSON object key 'sha'",
+            ),
+            "constant": (
+                '{"sha":"' + ("8" * 40) + '","metadata":{"score":NaN}}',
+                "non-finite.*NaN",
+            ),
+            "overflow": (
+                '{"sha":"' + ("8" * 40) + '","metadata":{"score":1e400}}',
+                r"\$\.metadata\.score.*non-finite",
+            ),
+        }
+        for name, (document, message) in documents.items():
+            requests = []
+
+            def open_request(request, *, timeout):
+                del timeout
+                requests.append(request)
+                if len(requests) > 1:
+                    raise AssertionError("Hub tree lookup must not run")
+                content = document.encode("utf-8")
+                return _Response(content, {"Content-Length": str(len(content))})
+
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory, patch(
+                    "voicehub.hub_transport._URL_OPENER.open",
+                    side_effect=open_request,
+            ):
+                with self.assertRaisesRegex(HubDownloadError, message) as raised:
+                    download_hugging_face_snapshot(
+                        "owner/model",
+                        cache_dir=directory,
+                        token="runtime-only-token",
+                    )
+
+                self.assertEqual(len(requests), 1)
+                self.assertNotIn("discarded-secret-value", str(raised.exception))
+                self.assertNotIn("runtime-only-token", str(raised.exception))
+
+    def test_ambiguous_file_cache_metadata_is_an_offline_cache_miss(self):
+        content = b"cached"
+        commit = "9" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            with patch(
+                    "voicehub.hub_transport._URL_OPENER.open",
+                    return_value=_Response(
+                        content,
+                        {
+                            "Content-Length": str(len(content)),
+                            "X-Repo-Commit": commit,
+                        },
+                    ),
+            ):
+                download_hugging_face_file(
+                    "owner/model",
+                    "model.bin",
+                    cache_dir=directory,
+                )
+
+            metadata_paths = tuple(Path(directory).glob("voicehub/repos/*/refs/**/*.json"))
+            self.assertEqual(len(metadata_paths), 1)
+            metadata_path = metadata_paths[0]
+            encoded = metadata_path.read_text(encoding="utf-8")
+            metadata_path.write_text(
+                '{"repo_id":"discarded-secret-value",' + encoded[1:],
+                encoding="utf-8",
+            )
+
+            self.assertIsNone(
+                get_cached_hugging_face_commit(
+                    "owner/model",
+                    "model.bin",
+                    cache_dir=directory,
+                ))
+            with self.assertRaisesRegex(FileNotFoundError, "not available"):
+                download_hugging_face_file(
+                    "owner/model",
+                    "model.bin",
+                    cache_dir=directory,
+                    local_files_only=True,
+                )
+
+    def test_ambiguous_snapshot_cache_manifest_is_an_offline_cache_miss(self):
+        commit = "a" * 40
+        content = b"{}"
+        responses = [
+            self._json_response({"sha": commit}),
+            self._json_response([{
+                "path": "config.json",
+                "size": len(content),
+                "type": "file",
+            }]),
+            _Response(
+                content,
+                {
+                    "Content-Length": str(len(content)),
+                    "X-Repo-Commit": commit,
+                },
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            with patch(
+                    "voicehub.hub_transport._URL_OPENER.open",
+                    side_effect=responses,
+            ):
+                download_hugging_face_snapshot(
+                    "owner/model",
+                    cache_dir=directory,
+                )
+
+            manifest_paths = tuple(Path(directory).glob("voicehub/repos/*/snapshot_refs/*.json"))
+            self.assertEqual(len(manifest_paths), 1)
+            manifest_path = manifest_paths[0]
+            encoded = manifest_path.read_text(encoding="utf-8")
+            manifest_path.write_text(
+                '{"repo_id":"discarded-secret-value",' + encoded[1:],
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(FileNotFoundError, "not available"):
+                download_hugging_face_snapshot(
+                    "owner/model",
+                    cache_dir=directory,
+                    local_files_only=True,
+                )
+
     def test_snapshot_failure_never_publishes_a_complete_manifest(self):
         commit = "4" * 40
         first = b"first"

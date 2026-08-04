@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, BinaryIO
 
 from voicehub.checkpointing.errors import CheckpointFormatError
+from voicehub.json_utils import parse_json_object
 
 _HEADER_LENGTH_BYTES = 8
 _DEFAULT_MAX_HEADER_BYTES = 100 * 1024 * 1024
@@ -59,15 +60,6 @@ def _torch():
             "Native checkpoint loading requires PyTorch, VoiceHub's compute "
             "runtime.") from error
     return torch
-
-
-def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise CheckpointFormatError(f"Safetensors header contains duplicate key {key!r}.")
-        result[key] = value
-    return result
 
 
 def _read_exact(stream: BinaryIO, size: int, *, context: str) -> bytes:
@@ -256,16 +248,12 @@ class SafeTensorReader(AbstractContextManager["SafeTensorReader"]):
             context="JSON header",
         )
         try:
-            header = json.loads(
-                encoded_header.decode("utf-8"),
-                object_pairs_hook=_reject_duplicate_json_keys,
+            header = parse_json_object(
+                encoded_header,
+                source=f"Safetensors header {self.path}",
             )
-        except CheckpointFormatError:
-            raise
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise CheckpointFormatError(f"Safetensors header is not valid UTF-8 JSON: {error}.") from error
-        if not isinstance(header, dict):
-            raise CheckpointFormatError("Safetensors header must be a JSON object.")
+        except ValueError as error:
+            raise CheckpointFormatError(str(error)) from error
 
         raw_metadata = header.pop("__metadata__", {})
         if not isinstance(raw_metadata, dict) or any(not isinstance(key, str) or not isinstance(value, str)
@@ -489,17 +477,13 @@ class SafeTensorIndex:
         if not index_path.is_file():
             raise FileNotFoundError(f"Safetensors index file was not found: {index_path}")
         try:
-            value = json.loads(
-                index_path.read_text(encoding="utf-8"),
-                object_pairs_hook=_reject_duplicate_json_keys,
+            value = parse_json_object(
+                index_path.read_bytes(),
+                source=f"Safetensors index {index_path}",
             )
-        except CheckpointFormatError:
-            raise
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        except (OSError, ValueError) as error:
             raise CheckpointFormatError(
                 f"Could not parse Safetensors index {index_path}: {error}.") from error
-        if not isinstance(value, dict):
-            raise CheckpointFormatError("Safetensors index must contain a JSON object.")
         weight_map = value.get("weight_map")
         metadata = value.get("metadata", {})
         if (not isinstance(weight_map, dict) or not weight_map or

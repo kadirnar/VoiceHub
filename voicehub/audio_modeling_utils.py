@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from importlib import import_module
@@ -13,6 +12,7 @@ from typing import Any
 
 from voicehub.base_model import BaseSpeechModel
 from voicehub.configuration_utils import VoiceHubConfig, reject_serialized_secrets
+from voicehub.hub import read_json_file
 from voicehub.inference_configuration import ASRInferenceConfig, SpeechInferenceConfig, VADInferenceConfig
 from voicehub.inference_strategy import InferenceStrategy, get_inference_strategy
 from voicehub.modeling_outputs import ASROutput, VADOutput
@@ -180,7 +180,7 @@ class PreTrainedAudioModel(
         if has_voicehub_state:
             config_path = source / "config.json"
             if config_path.is_file():
-                saved_config = json.loads(config_path.read_text(encoding="utf-8"))
+                saved_config = read_json_file(config_path)
                 base_model = saved_config.get("name_or_path")
                 if isinstance(base_model, str) and base_model.strip():
                     config.name_or_path = base_model
@@ -310,6 +310,7 @@ class PreTrainedAudioModel(
                 )
             except TypeError:
                 state = torch.load(state_path, map_location=self.device)
+            state = self._validated_portable_model_state(state)
             if isinstance(state, Mapping) and "__voicehub_training_adapter__" in state:
                 adapter = self.get_training_adapter()
                 adapter.setup()

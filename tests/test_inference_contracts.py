@@ -59,6 +59,27 @@ class LifecycleModel(PreTrainedTTSModel):
         )
 
 
+class PortableStateRuntime:
+
+    def __init__(self):
+        self.loaded_states = []
+        self.evaluated = False
+
+    def load_state_dict(self, state):
+        self.loaded_states.append(state)
+
+    def eval(self):
+        self.evaluated = True
+        return self
+
+
+class PortableStateLifecycleModel(LifecycleModel):
+
+    def _load_pretrained_model(self) -> None:
+        self.load_count += 1
+        self.model = PortableStateRuntime()
+
+
 class RequiredReferenceModel(LifecycleModel):
 
     def _validate_generation_inputs(self, model_inputs):
@@ -285,6 +306,59 @@ class InferenceLifecycleTests(unittest.TestCase):
             model.load_for_training()
 
         self.assertEqual(model.training_prepare_count, 1)
+
+    def test_tts_portable_state_rejects_credentials_before_runtime_mutation(self):
+        credential = "must-not-appear-in-errors"
+        unsafe_state = {
+            "__voicehub_training_adapter__": "inference-contract",
+            "metadata": {
+                "api_key": credential,
+            },
+        }
+        safe_state = {
+            "weight": "safe",
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            InferenceConfig().save_pretrained(directory)
+            state_path = Path(directory) / "model_state.pt"
+            state_path.write_bytes(b"patched-test-state")
+            model = PortableStateLifecycleModel.from_pretrained(
+                directory,
+                device="cpu",
+            )
+            adapter_events = []
+            model.get_training_adapter = lambda: SimpleNamespace(
+                setup=lambda: adapter_events.append("setup"),
+                load_state_dict=lambda *args, **kwargs: adapter_events.append("load"),
+                eval=lambda: adapter_events.append("eval"),
+            )
+            fake_torch = SimpleNamespace(load=lambda *args, **kwargs: unsafe_state)
+
+            with patch(
+                    "voicehub.modeling_utils.import_module",
+                    return_value=fake_torch,
+            ), self.assertRaisesRegex(
+                    ValueError,
+                    r"VoiceHub portable model state.*metadata\.api_key",
+            ) as captured:
+                model.load()
+
+            self.assertNotIn(credential, str(captured.exception))
+            self.assertEqual(adapter_events, [])
+            self.assertEqual(model.model.loaded_states, [])
+            self.assertEqual(model._pending_model_state_path.resolve(), state_path.resolve())
+
+            fake_torch.load = lambda *args, **kwargs: safe_state
+            with patch(
+                    "voicehub.modeling_utils.import_module",
+                    return_value=fake_torch,
+            ):
+                model.load()
+
+        self.assertEqual(model.model.loaded_states, [safe_state])
+        self.assertTrue(model.model.evaluated)
+        self.assertIsNone(model._pending_model_state_path)
 
     def test_backend_preflight_runs_before_model_allocation(self):
         model = RequiredReferenceModel()

@@ -8,6 +8,7 @@ from numbers import Integral, Real
 from pathlib import Path
 from typing import Any
 
+from voicehub.configuration_utils import reject_serialized_secrets
 from voicehub.hub import read_json_file, resolve_pretrained_file, write_json_file
 from voicehub.serialization_utils import serialize_paths
 
@@ -48,6 +49,10 @@ class TTSGenerationConfig:
             "max_new_tokens": max_new_tokens,
             **kwargs,
         }
+        reject_serialized_secrets(
+            values,
+            owner=self.__class__.__name__,
+        )
         for key, value in values.items():
             if value is not None:
                 setattr(self, key, value)
@@ -100,7 +105,12 @@ class TTSGenerationConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a deep copy for generation or JSON serialization."""
-        return serialize_paths(deepcopy(self.__dict__))
+        values = deepcopy(self.__dict__)
+        reject_serialized_secrets(
+            values,
+            owner=self.__class__.__name__,
+        )
+        return serialize_paths(values)
 
     @classmethod
     def from_dict(cls, values: dict[str, Any], **kwargs):
@@ -146,7 +156,12 @@ class TTSGenerationConfig:
     def save_pretrained(self, save_directory: str | Path) -> Path:
         """Save generation defaults as ``generation_config.json``."""
         output_path = Path(save_directory).expanduser() / GENERATION_CONFIG_NAME
-        write_json_file(output_path, self.to_dict())
+        values = self.to_dict()
+        reject_serialized_secrets(
+            values,
+            owner=self.__class__.__name__,
+        )
+        write_json_file(output_path, values)
         return output_path
 
     def update(self, **kwargs) -> dict[str, Any]:
@@ -164,5 +179,10 @@ class TTSGenerationConfig:
         return unused
 
     def __repr__(self) -> str:
-        fields = ", ".join(f"{key}={value!r}" for key, value in sorted(self.to_dict().items()))
+        values = self.to_dict()
+        reject_serialized_secrets(
+            values,
+            owner=self.__class__.__name__,
+        )
+        fields = ", ".join(f"{key}={value!r}" for key, value in sorted(values.items()))
         return f"{self.__class__.__name__}({fields})"

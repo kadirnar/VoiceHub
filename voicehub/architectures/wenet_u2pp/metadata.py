@@ -11,9 +11,15 @@ WENET_CHECKPOINT_LISTING_URL = (
 GIGASPEECH_MODEL_NAME = "gigaspeech-u2pp-conformer"
 GIGASPEECH_MODEL_VERSION = "20210728"
 GIGASPEECH_ARCHIVE_FILENAME = "20210728_u2pp_conformer_exp.tar.gz"
-GIGASPEECH_MODEL_URL = (
+GIGASPEECH_UPSTREAM_URL = (
     "http://mobvoi-speech-public.ufile.ucloud.cn/public/wenet/gigaspeech/"
     "20210728_u2pp_conformer_exp.tar.gz")
+GIGASPEECH_MIRROR_REPOSITORY = "openspeech/wenet-models"
+GIGASPEECH_MIRROR_REVISION = "90acd57d17169a15d5ceab462c6e7db3bd003921"
+GIGASPEECH_MIRROR_FILENAME = "gigaspeech_u2pp_conformer_exp.tar.gz"
+GIGASPEECH_MODEL_URL = (
+    f"https://huggingface.co/{GIGASPEECH_MIRROR_REPOSITORY}/resolve/"
+    f"{GIGASPEECH_MIRROR_REVISION}/{GIGASPEECH_MIRROR_FILENAME}")
 GIGASPEECH_ARCHIVE_SIZE = 503_845_602
 GIGASPEECH_ARCHIVE_SHA256 = ("061ccfa51d64ebe7ea091a5a13ae31e37d9c36f4eface5c7bafc80bd4a06b26e")
 GIGASPEECH_WEIGHTS_SHA256 = ("d8a5a94f08fd30ba1c10fb031da91c86c014710ad699379f76316c63b057b424")
@@ -29,12 +35,15 @@ GIGASPEECH_CHECKPOINT_LICENSE = "NOT DECLARED"
 GIGASPEECH_CHECKPOINT_PROVIDER = "external-archive"
 GIGASPEECH_DOCUMENTATION_PATH = "path/to/converted-wenet-u2pp"
 GIGASPEECH_CHECKPOINT_STATUS = (
-    "Upstream archive unavailable (HTTP 404 verified 2026-08-02); "
-    "use a previously downloaded, fingerprint-verified local artifact")
+    "Original upstream archive unavailable (HTTP 404 and TLS failures "
+    "verified 2026-08-04); exact bytes are available from the immutable "
+    f"{GIGASPEECH_MIRROR_REPOSITORY} mirror at {GIGASPEECH_MIRROR_REVISION}")
 GIGASPEECH_DOCUMENTATION_NOTE = (
     "The registry identifier is not a Hugging Face repository and the "
-    "published upstream archive is currently unavailable. Replace the path "
-    "below with a VoiceHub-native directory containing model.safetensors, "
-    "config.json, tokenizer.model, and units.txt.")
+    "original upstream archive endpoints are unavailable. VoiceHub verifies "
+    "an immutable mirror against the published 503,845,602-byte archive's "
+    "SHA-256. Convert that trust-gated pickle archive first, then replace the "
+    "path below with the resulting VoiceHub-native directory containing "
+    "model.safetensors, config.json, tokenizer.model, and units.txt.")
 
 __all__ = [name for name in globals() if name.startswith(("GIGASPEECH_", "WENET_"))]

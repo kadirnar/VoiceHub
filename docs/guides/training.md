@@ -158,7 +158,7 @@ print(metrics, artifact)
 
 `checkpoint-N/` is an exact Trainer resume artifact containing optimizer,
 scheduler, random state, callbacks, sampler, strategy, and recipe topology.
-Resume only from a complete compatible checkpoint:
+Credential fields are rejected, but binary pickle state still requires a trusted, integrity-checked checkpoint:
 
 ```python
 trainer.train(resume_from_checkpoint=True)

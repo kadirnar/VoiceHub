@@ -69,6 +69,10 @@ class VoiceHubProcessor:
     ):
         """Load optional processor configuration from local or Hub storage."""
         source = Path(pretrained_model_name_or_path).expanduser()
+        cache_dir = kwargs.pop("cache_dir", None)
+        revision = kwargs.pop("revision", None)
+        token = kwargs.pop("token", None)
+        local_files_only = kwargs.pop("local_files_only", False)
         try:
             if source.is_file() and source.name == PROCESSOR_NAME:
                 processor_path = source
@@ -77,10 +81,10 @@ class VoiceHubProcessor:
                     pretrained_model_name_or_path,
                     PROCESSOR_NAME,
                     subfolder=subfolder,
-                    cache_dir=kwargs.pop("cache_dir", None),
-                    revision=kwargs.pop("revision", None),
-                    token=kwargs.pop("token", None),
-                    local_files_only=kwargs.pop("local_files_only", False),
+                    cache_dir=cache_dir,
+                    revision=revision,
+                    token=token,
+                    local_files_only=local_files_only,
                 )
             values = read_json_file(processor_path)
         except FileNotFoundError:
@@ -91,7 +95,12 @@ class VoiceHubProcessor:
     def save_pretrained(self, save_directory: str | Path) -> Path:
         """Save processor construction options."""
         output_path = Path(save_directory).expanduser() / PROCESSOR_NAME
-        write_json_file(output_path, self.to_dict())
+        values = self.to_dict()
+        reject_serialized_secrets(
+            values,
+            owner=self.__class__.__name__,
+        )
+        write_json_file(output_path, values)
         return output_path
 
 

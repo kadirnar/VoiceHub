@@ -312,6 +312,11 @@ in `/v1`.
   `input_ids`, `stream`, or `response_format`. Do not put credentials in it.
 - HTTP redirects fail closed. VoiceHub never forwards Bearer credentials or
   custom runtime headers to a redirect target.
+- JSON request bodies reject non-finite values. Bounded JSON responses reject
+  duplicate object keys, `NaN`, infinities, and numeric overflow before the
+  vLLM or SGLang protocol adapter interprets token IDs or usage metadata.
+  Diagnostics identify the backend route and offending key or numeric path
+  without echoing the discarded value.
 - A local reference clip is read by the client, limited to 64 MiB, and sent
   as a data URL. Existing base64 audio data URLs are validated and subject to
   the same decoded-size limit; HTTP(S) reference URLs are also accepted.

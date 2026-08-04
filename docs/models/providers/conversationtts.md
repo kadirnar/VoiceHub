@@ -2,15 +2,9 @@
 description: Public API, checkpoint, training, and optimization guide for the conversationtts integration.
 ---
 
-# `conversationtts` model guide
+# ConversationTTS
 
-## Overview
-
-`conversationtts` is a VoiceHub **text to speech**
-integration. This page is generated from the model registry and its executable
-data and training contracts, so the documented support stays aligned with code. [Open the `conversationtts` Colab notebook](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/models/conversationtts.ipynb).
-
-## Quickstart
+## Usage
 
 ```bash
 python -m pip install voicehub
@@ -23,6 +17,7 @@ python -m pip install voicehub
 
 ```python
 from pathlib import Path
+
 
 from voicehub import AutoModelForTextToSpeech, TTSGenerationConfig
 
@@ -49,7 +44,12 @@ Use only authorized recordings for reference voice, transcription, detection,
 or evaluation. The example selects a concrete device; verify checkpoint-specific
 hardware needs and pin an immutable revision before production use.
 
-## Supported tasks and capabilities
+## Overview
+
+ConversationTTS uses the canonical model type `conversationtts` and is a
+VoiceHub **text to speech** integration. This page is
+generated from the model registry and its executable data and training
+contracts, so the documented support stays aligned with code. [Open the `conversationtts` Colab notebook](https://colab.research.google.com/github/kadirnar/voicehub/blob/main/notebooks/models/conversationtts.ipynb).
 
 | Property | Value |
 | --- | --- |
@@ -58,8 +58,50 @@ hardware needs and pin an immutable revision before production use.
 | Runtime | `VoiceHub-native` |
 | Capabilities | `text-to-speech`, `voice-cloning`, `conversation`, `multilingual`, `fine-tuning`, `safetensors`, `voicehub-native`, `native-runtime`, `raw-audio-fine-tuning`, `preencoded-code-fine-tuning`, `noncommercial` |
 | Reusable components | — |
+| Normalized output | `TTSOutput` |
 
-### Data contract
+## Configuration
+
+Load the registered configuration without constructing the model. The canonical
+key remains serializable even though the page uses a presentation label.
+
+```python
+from voicehub import AutoConfig
+
+config = AutoConfig.for_model('conversationtts')
+print(config.model_type)
+```
+
+| Property | Value |
+| --- | --- |
+| Canonical model type | `conversationtts` |
+| Configuration class | `ConversationTTSConfig` |
+| Architecture class | `ConversationTTSForTextToSpeech` |
+
+## Processing
+
+`AutoProcessor` resolves the processor declared by the registered model. Creating
+the processor does not allocate model weights.
+
+```python
+from voicehub import AutoProcessor
+
+processor = AutoProcessor.from_pretrained(
+    'AudioFoundation/SpeechFoundation',
+    model_type='conversationtts',
+)
+print(type(processor).__name__)
+```
+
+Processor behavior remains model-owned when text normalization, audio loading,
+feature extraction, or reference speech requires provider-specific semantics.
+
+## Inference
+
+The Usage example returns `TTSOutput` through `AutoModelForTextToSpeech`. Inputs are validated
+against the task and data contracts below before model-specific execution.
+
+### Input and output contract
 
 | Property | Value |
 | --- | --- |
@@ -80,24 +122,7 @@ Autoregressive text/audio-token or codec-language-model data. Follow the [shared
 manifest loading, audio validation, leakage-safe splits, and model-owned
 preprocessing.
 
-## Checkpoints, provenance, and license
-
-| Property | Value |
-| --- | --- |
-| Default checkpoint | [`AudioFoundation/SpeechFoundation`](https://huggingface.co/AudioFoundation/SpeechFoundation) |
-| Checkpoint status | Registry default; pin an immutable revision for production and reproducible evidence |
-| Implementation | `voicehub.models.conversationtts.modeling_conversationtts.ConversationTTSForTextToSpeech` |
-| Configuration | `voicehub.models.conversationtts.configuration_conversationtts.ConversationTTSConfig` |
-| Source provenance | `voicehub/models/conversationtts/source/SOURCE.json` |
-| License | [CC-BY-NC-4.0](https://github.com/Audio-Foundation-Models/ConversationTTS) |
-
-Source, checkpoints, datasets, and evaluation tools are non-commercial. Commercial use: **not allowed**.
-
-The default checkpoint identifies the expected family, not every compatible
-variant. Confirm the selected checkpoint's revision, access terms, provenance,
-and license before downloading or redistributing it.
-
-## Optimization and training support
+## Training and optimization
 
 All public optimizations enter this model through the shared
 `BaseSpeechModel` lifecycle. Use `available_optimization_passes()` to discover
@@ -125,13 +150,78 @@ trainer. Follow the [shared training workflow](../../guides/training.md) for a
 one-step smoke test, validation, checkpoint resume, optimization, and portable
 export.
 
+## Checkpoints, provenance, license, and limitations
+
+| Property | Value |
+| --- | --- |
+| Default checkpoint | [`AudioFoundation/SpeechFoundation`](https://huggingface.co/AudioFoundation/SpeechFoundation) |
+| Checkpoint status | Registry default; pin an immutable revision for production and reproducible evidence |
+| Optional dependency extra | Core package |
+| Hardware and runtime | Usage selects `cuda`; verify checkpoint-specific requirements |
+| Real-checkpoint evidence | [Release evidence](../../project/release-readiness.md); a registry default alone is not execution evidence |
+| Implementation | `voicehub.models.conversationtts.modeling_conversationtts.ConversationTTSForTextToSpeech` |
+| Configuration | `voicehub.models.conversationtts.configuration_conversationtts.ConversationTTSConfig` |
+| Source provenance | `voicehub/models/conversationtts/source/SOURCE.json` |
+| License | [CC-BY-NC-4.0](https://github.com/Audio-Foundation-Models/ConversationTTS) |
+
+Source, checkpoints, datasets, and evaluation tools are non-commercial. Commercial use: **not allowed**.
+
+The default checkpoint identifies the expected family, not every compatible
+variant. Confirm the selected checkpoint's revision, access terms, provenance,
+and license before downloading or redistributing it.
+
+### Limitations
+
+- No integration-specific checkpoint limitation is registered. Verify the selected checkpoint revision and its documented runtime requirements.
+- The Usage example selects `cuda`; validate memory, precision,
+  and optional dependency requirements on the target system.
+- Public optimizations fail closed when the runtime or hardware cannot satisfy
+  their validation contract; an unavailable pass is not reported as applied.
+- Contract tests do not substitute for released-checkpoint evidence. Consult the
+  linked release record before treating a checkpoint path as verified.
+
 ## Public API
+
+The stable configuration and model facades keep source inspection local while
+the task auto class owns pretrained loading and normalized output behavior.
+
+### `ConversationTTSConfig`
+
+[View `ConversationTTSConfig` source](https://github.com/kadirnar/voicehub/blob/main/voicehub/models/conversationtts/configuration_conversationtts.py)
+
+```text
+ConversationTTSConfig(**config_kwargs)
+```
+
+### `ConversationTTSForTextToSpeech`
+
+[View `ConversationTTSForTextToSpeech` source](https://github.com/kadirnar/voicehub/blob/main/voicehub/models/conversationtts/modeling_conversationtts.py)
+
+```text
+AutoModelForTextToSpeech.from_pretrained(
+    pretrained_model_name_or_path,
+    *,
+    model_type='conversationtts',
+    config=None,
+    **model_kwargs,
+)
+```
+
+The loader returns `ConversationTTSForTextToSpeech` through the shared task-specific factory.
+
+```python
+from voicehub import get_model_spec
+
+spec = get_model_spec('conversationtts')
+print(spec.display_name, spec.task.value)
+```
 
 | Purpose | Public object |
 | --- | --- |
 | Discover | `get_model_spec('conversationtts')` |
 | Load and run | `AutoModelForTextToSpeech` |
 | Configure | `ConversationTTSConfig` |
+| Process | `AutoProcessor` |
 | Model implementation | `ConversationTTSForTextToSpeech` |
 | Normalized output | `TTSOutput` |
 | Training contract | `get_training_spec('conversationtts')` |

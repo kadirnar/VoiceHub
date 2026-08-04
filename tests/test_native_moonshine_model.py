@@ -267,6 +267,42 @@ class MoonshineTokenizerTests(unittest.TestCase):
                     eos_token_id=2,
                 )
 
+    def test_tokenizer_json_rejects_ambiguous_json_before_graph_interpretation(self):
+        valid = json.dumps(tiny_tokenizer_document(), ensure_ascii=False)
+        cases = (
+            (
+                "duplicate",
+                valid.replace('"model": {', '"model": "discarded-secret", "model": {', 1),
+                r"Duplicate JSON object key 'model'",
+            ),
+            (
+                "constant",
+                valid[:-1] + ', "metadata": {"score": NaN}}',
+                r"non-finite JSON constant 'NaN'",
+            ),
+            (
+                "overflow",
+                valid[:-1] + ', "metadata": {"score": 1e400}}',
+                r"\$\.metadata\.score.*non-finite",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tokenizer.json"
+            for name, document, diagnostic in cases:
+                with self.subTest(name=name):
+                    path.write_text(document, encoding="utf-8")
+                    with self.assertRaises(TokenizerAssetError) as captured:
+                        SentencePieceBPETokenizer.from_tokenizer_json(
+                            path,
+                            pad_token_id=2,
+                            bos_token_id=1,
+                            eos_token_id=2,
+                        )
+                    rendered = str(captured.exception)
+                    self.assertIn(str(path), rendered)
+                    self.assertRegex(rendered, diagnostic)
+                    self.assertNotIn("discarded-secret", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

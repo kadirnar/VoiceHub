@@ -1,11 +1,30 @@
-"""ZONOS2 model family."""
+"""Lazy ZONOS2 model-family exports."""
 
-from voicehub.models.zonos2.inference import Zonos2Config, Zonos2ForTextToSpeech, Zonos2TTS
-from voicehub.models.zonos2.training import Zonos2TrainingAdapter
+from __future__ import annotations
 
-__all__ = [
-    "Zonos2Config",
-    "Zonos2ForTextToSpeech",
-    "Zonos2TTS",
-    "Zonos2TrainingAdapter",
-]
+from importlib import import_module
+from typing import Any
+
+_PACKAGE = "voicehub.models.zonos2."
+_EXPORTS = {
+    "Zonos2Config": _PACKAGE + "configuration_zonos2",
+    "Zonos2ForTextToSpeech": _PACKAGE + "inference",
+    "Zonos2TTS": _PACKAGE + "inference",
+    "Zonos2TrainingAdapter": _PACKAGE + "training",
+}
+
+__all__ = sorted(_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_name = _EXPORTS[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    value = getattr(import_module(module_name), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted((*globals(), *_EXPORTS))
