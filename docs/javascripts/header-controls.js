@@ -390,23 +390,52 @@
       }
     };
 
-    document.querySelectorAll('.tabbed-set > input[type="radio"][id]').forEach((input) => {
-      if (!(input instanceof HTMLInputElement) || !(input.parentElement instanceof HTMLElement)) return;
-      const label = Array.from(
-        input.parentElement.querySelectorAll(".tabbed-labels > label[for]"),
-      ).find((candidate) => candidate instanceof HTMLLabelElement && candidate.htmlFor === input.id);
+    const revealLabel = (label) => {
       if (!(label instanceof HTMLLabelElement)) return;
-
-      input.addEventListener("focus", () => {
-        requestAnimationFrame(() => {
-          label.scrollIntoView({ behavior: "instant", block: "nearest", inline: "nearest" });
-          keepLabelInViewport(label);
-          requestAnimationFrame(() => keepLabelInViewport(label));
-        });
-        label.classList.add("vh-content-tab--focus");
+      requestAnimationFrame(() => {
+        label.scrollIntoView({ behavior: "instant", block: "nearest", inline: "nearest" });
+        keepLabelInViewport(label);
+        requestAnimationFrame(() => keepLabelInViewport(label));
       });
-      input.addEventListener("blur", () => {
-        label.classList.remove("vh-content-tab--focus");
+    };
+
+    document.querySelectorAll(".tabbed-set").forEach((tabSet) => {
+      if (!(tabSet instanceof HTMLElement)) return;
+      const inputs = Array.from(
+        tabSet.querySelectorAll(':scope > input[type="radio"][id]:not(:disabled)'),
+      ).filter((input) => input instanceof HTMLInputElement);
+      if (!inputs.length) return;
+
+      inputs.forEach((input) => {
+        const label = Array.from(
+          tabSet.querySelectorAll(".tabbed-labels > label[for]"),
+        ).find((candidate) => candidate instanceof HTMLLabelElement && candidate.htmlFor === input.id);
+        if (!(label instanceof HTMLLabelElement)) return;
+
+        input.addEventListener("focus", () => {
+          revealLabel(label);
+          label.classList.add("vh-content-tab--focus");
+        });
+        input.addEventListener("blur", () => {
+          label.classList.remove("vh-content-tab--focus");
+        });
+      });
+
+      tabSet.addEventListener("keydown", (event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        if (!(event.target instanceof HTMLInputElement) || !inputs.includes(event.target)) return;
+        const direction = event.key === "ArrowRight" || event.key === "ArrowDown"
+          ? 1
+          : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+        if (!direction) return;
+
+        event.preventDefault();
+        const currentIndex = inputs.indexOf(event.target);
+        const nextInput = inputs[(currentIndex + direction + inputs.length) % inputs.length];
+        nextInput.focus({ preventScroll: true });
+        nextInput.checked = true;
+        nextInput.dispatchEvent(new Event("input", { bubbles: true }));
+        nextInput.dispatchEvent(new Event("change", { bubbles: true }));
       });
     });
   };

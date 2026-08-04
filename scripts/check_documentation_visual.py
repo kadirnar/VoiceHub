@@ -3373,9 +3373,19 @@ def _validate_quickstart_tabs(page: Page, case: str) -> None:
         if not target_id:
             raise DocumentationVisualError(
                 f"{case}: Quickstart tab set {set_index + 1} has an input without an id.")
-        inputs.first.focus()
+        inputs.first.evaluate("input => input.focus({preventScroll: true})")
         for step_index in range(1, target_index + 1):
+            step_source = inputs.nth(step_index - 1)
+            step_source.evaluate(
+                """input => input.ownerDocument.addEventListener("keydown", event => {
+                  input.dataset.vhArrowDefaultPrevented = String(event.defaultPrevented);
+                }, {once: true})""")
             page.keyboard.press("ArrowRight")
+            step_source_handle = step_source.element_handle()
+            page.wait_for_function(
+                "input => input.dataset.vhArrowDefaultPrevented === 'true'",
+                arg=step_source_handle,
+            )
             step_target = inputs.nth(step_index)
             page.wait_for_function(
                 "input => input.checked && document.activeElement === input",
