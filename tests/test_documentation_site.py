@@ -2069,6 +2069,10 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn('querySelectorAll(".md-typeset .tabbed-labels")', script)
         self.assertIn('region.dataset.vhScrollableTabs = "true"', script)
         self.assertIn(
+            'label.scrollIntoView({ block: "nearest", inline: "nearest" })',
+            script,
+        )
+        self.assertIn(
             'region.setAttribute("aria-label", `Scrollable options ${index + 1}`)',
             script,
         )
