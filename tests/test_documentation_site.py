@@ -1345,7 +1345,11 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             1,
         )[1].split("def _validate_quickstart_page_copy", 1)[0]
         self.assertIn("for step_index in range(1, target_index + 1):", quickstart_tabs)
+        self.assertIn('inputs.first.evaluate("input => input.focus({preventScroll: true})")', quickstart_tabs)
+        self.assertIn("step_source.element_handle()", quickstart_tabs)
+        self.assertIn('input.ownerDocument.addEventListener("keydown"', quickstart_tabs)
         self.assertIn('page.keyboard.press("ArrowRight")', quickstart_tabs)
+        self.assertIn("input.dataset.vhArrowDefaultPrevented === 'true'", quickstart_tabs)
         self.assertIn("step_target.element_handle()", quickstart_tabs)
         self.assertIn("document.activeElement === input", quickstart_tabs)
         self.assertIn("requestAnimationFrame", quickstart_tabs)
@@ -1361,7 +1365,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn("_reset_quickstart_tabs(page)", quickstart_interaction)
 
         stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
-        self.assertIn("scroll-margin: 0.25rem;", stylesheet)
+        self.assertIn("scroll-margin: 1rem;", stylesheet)
         for declaration in (
                 "--vh-content-gutter: 24px;",
                 "margin-inline: var(--vh-content-gutter);",
@@ -2098,6 +2102,11 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn('labels.scrollBy({ behavior: "instant"', script)
         self.assertIn('window.scrollBy({ behavior: "instant"', script)
         self.assertIn("requestAnimationFrame(() => keepLabelInViewport(label))", script)
+        self.assertIn('tabSet.addEventListener("keydown", (event) => {', script)
+        self.assertIn("event.preventDefault();", script)
+        self.assertIn("nextInput.focus({ preventScroll: true });", script)
+        self.assertIn('nextInput.dispatchEvent(new Event("input", { bubbles: true }))', script)
+        self.assertIn('nextInput.dispatchEvent(new Event("change", { bubbles: true }))', script)
         self.assertIn(
             'region.setAttribute("aria-label", `Scrollable options ${index + 1}`)',
             script,

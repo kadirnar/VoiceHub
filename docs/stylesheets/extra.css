@@ -857,7 +857,7 @@ body.vh-search-open {
 }
 
 .md-typeset .tabbed-labels > label {
-  scroll-margin: 0.25rem;
+  scroll-margin: 1rem;
 }
 
 .md-typeset .tabbed-labels > label.vh-content-tab--focus {
