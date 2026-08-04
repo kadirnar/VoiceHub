@@ -792,6 +792,52 @@ class TTSDatasetManifestTests(unittest.TestCase):
         self.assertEqual(dataset[0]["ref_audio"], str((root / "reference.wav").resolve()))
         self.assertEqual(dataset.variant_names, ("single-speaker-sft", ))
 
+    def test_json_and_tabular_manifests_reject_ambiguous_json_before_dataset_construction(self):
+        ambiguities = (
+            (
+                "duplicate",
+                '{"score":"discarded-secret","score":1}',
+                r"Duplicate JSON object key 'score'",
+            ),
+            (
+                "constant",
+                '{"score":NaN}',
+                r"non-finite JSON constant 'NaN'",
+            ),
+            (
+                "overflow",
+                '{"score":1e400}',
+                r"score.*non-finite",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, metadata, diagnostic in ambiguities:
+                record = f'{{"text":"Safe record","audio":"sample.wav","metadata":{metadata}}}'
+                escaped_metadata = metadata.replace('"', '""')
+                documents = (
+                    ("json", f"[{record}]"),
+                    ("jsonl", record + "\n"),
+                    (
+                        "csv",
+                        "text,audio,metadata\n" + f'Safe record,sample.wav,"{escaped_metadata}"\n',
+                    ),
+                )
+                for suffix, document in documents:
+                    with self.subTest(name=name, suffix=suffix):
+                        manifest = root / f"{name}.{suffix}"
+                        manifest.write_text(document, encoding="utf-8")
+                        with self.assertRaises(ValueError) as captured:
+                            TTSDataset.from_manifest(
+                                manifest,
+                                architecture="vits",
+                                validate=False,
+                            )
+                        rendered = str(captured.exception)
+                        self.assertIn(str(manifest), rendered)
+                        self.assertRegex(rendered, diagnostic)
+                        self.assertNotIn("discarded-secret", rendered)
+
     def test_ljspeech_layout_uses_normalized_text_and_audio_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1050,6 +1096,112 @@ class TTSDatasetManifestTests(unittest.TestCase):
         self.assertEqual(payload["audio"], "audio.wav")
         self.assertEqual(restored[0]["audio"], str(audio.resolve()))
         self.assertEqual(restored[0]["text"], "Hello")
+
+    def test_jsonl_rejects_credentials_before_destination_mutation(self):
+        credential = "must-not-appear-in-errors"
+        dataset = TTSDataset(
+            [{
+                "text": "Unsafe manifest record",
+                "audio": "sample.wav",
+                "metadata": {
+                    "api_key": credential,
+                },
+            }],
+            architecture="vits",
+            validate=False,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            existing = root / "existing.jsonl"
+            existing.write_text("keep-me\n", encoding="utf-8")
+            missing_parent = root / "new" / "records.jsonl"
+
+            for destination in (existing, missing_parent):
+                with self.assertRaisesRegex(
+                        ValueError,
+                        r"TTS dataset record 0.*metadata\.api_key",
+                ) as captured:
+                    dataset.to_jsonl(destination)
+                self.assertNotIn(credential, str(captured.exception))
+
+            self.assertEqual(existing.read_text(encoding="utf-8"), "keep-me\n")
+            self.assertFalse(missing_parent.parent.exists())
+
+    def test_jsonl_serialization_failure_does_not_truncate_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "records.jsonl"
+            destination.write_text("keep-me\n", encoding="utf-8")
+            dataset = TTSDataset(
+                [
+                    {
+                        "text": "Serializable record",
+                        "audio": "one.wav",
+                    },
+                    {
+                        "text": "Invalid record",
+                        "audio": "two.wav",
+                        "metadata": object(),
+                    },
+                ],
+                architecture="vits",
+                validate=False,
+            )
+
+            with self.assertRaisesRegex(TypeError, "record 1"):
+                dataset.to_jsonl(destination)
+
+            self.assertEqual(
+                destination.read_text(encoding="utf-8"),
+                "keep-me\n",
+            )
+
+    def test_manifest_loader_rejects_credentials_and_keeps_safe_metadata(self):
+        credential = "must-not-appear-in-errors"
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            unsafe = root / "unsafe.jsonl"
+            unsafe.write_text(
+                json.dumps({
+                    "text": "Unsafe manifest record",
+                    "audio": "sample.wav",
+                    "metadata": {
+                        "authorization": credential,
+                    },
+                }) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                    ValueError,
+                    r"TTS manifest record 0.*metadata\.authorization",
+            ) as captured:
+                TTSDataset.from_manifest(
+                    unsafe,
+                    architecture="vits",
+                    validate=False,
+                )
+
+            safe = root / "safe.jsonl"
+            safe.write_text(
+                json.dumps({
+                    "text": "Safe manifest record",
+                    "audio": "sample.wav",
+                    "metadata": {
+                        "token_count": 512,
+                    },
+                }) + "\n",
+                encoding="utf-8",
+            )
+            restored = TTSDataset.from_manifest(
+                safe,
+                architecture="vits",
+                validate=False,
+            )
+
+        self.assertNotIn(credential, str(captured.exception))
+        self.assertEqual(restored[0]["metadata"]["token_count"], 512)
 
 
 class TTSModelManifestIntegrationTests(unittest.TestCase):

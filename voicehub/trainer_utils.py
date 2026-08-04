@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import random
 from collections.abc import Iterator, Sized
@@ -11,6 +10,8 @@ from enum import Enum
 from importlib import import_module
 from pathlib import Path
 from typing import Any, NamedTuple
+
+from voicehub.hub import read_json_file, write_json_file
 
 PREFIX_CHECKPOINT_DIR = "checkpoint"
 TRAINER_STATE_NAME = "trainer_state.json"
@@ -198,7 +199,7 @@ def get_last_checkpoint(folder: str | Path) -> str | None:
             if not complete.is_file():
                 continue
             try:
-                payload = json.loads(manifest.read_text(encoding="utf-8"))
+                payload = read_json_file(manifest)
             except (OSError, TypeError, ValueError):
                 continue
             format_version = payload.get("format_version")
@@ -334,9 +335,5 @@ def denumpify_detensorize(metrics: dict[str, Any]) -> dict[str, Any]:
 def write_json(path: str | Path, payload: dict[str, Any]) -> Path:
     """Write a deterministic UTF-8 JSON document."""
     output_path = Path(path).expanduser()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    write_json_file(output_path, payload)
     return output_path

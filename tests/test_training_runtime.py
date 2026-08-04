@@ -678,6 +678,398 @@ class TrainingRuntimeTests(unittest.TestCase):
             )
             self.assertIn("resume_signature", manifest)
 
+    def test_resume_fingerprints_reject_credentials_and_keep_safe_metrics(self):
+
+        class FingerprintedObject:
+
+            def __init__(self, fingerprint):
+                self.fingerprint = fingerprint
+
+            def resume_fingerprint(self):
+                return self.fingerprint
+
+        safe_fingerprint = {
+            "dataset_id": "public-corpus",
+            "token_count": 512,
+        }
+        self.assertEqual(
+            Trainer._resume_fingerprint(
+                FingerprintedObject(safe_fingerprint),
+                owner="train_dataset",
+            ),
+            safe_fingerprint,
+        )
+
+        credential = "must-not-appear-in-errors"
+        for owner in (
+                "train_dataset",
+                "data_collator",
+                "callback 'example.StatefulCallback'",
+                "optimizer 'main'",
+                "scheduler 'main'",
+        ):
+            with self.subTest(owner=owner):
+                with self.assertRaisesRegex(
+                        ValueError,
+                        rf"{owner}\.resume_fingerprint.*metadata\.api_key",
+                ) as captured:
+                    Trainer._resume_fingerprint(
+                        FingerprintedObject({
+                            "metadata": {
+                                "api_key": credential,
+                            },
+                        }),
+                        owner=owner,
+                    )
+                self.assertNotIn(credential, str(captured.exception))
+
+    def test_checkpoint_save_rejects_a_subclass_secret_atomically(self):
+
+        class CredentialManifestTrainer(Trainer):
+
+            def _checkpoint_manifest(self, checkpoint):
+                manifest = super()._checkpoint_manifest(checkpoint)
+                manifest["metadata"] = {
+                    "credentials": {
+                        "api_key": "must-not-be-persisted",
+                    },
+                }
+                return manifest
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                    ValueError,
+                    r"Trainer checkpoint manifest.*metadata\.credentials",
+            ):
+                CredentialManifestTrainer(
+                    model=self._dropout_model(),
+                    args=TrainingArguments(
+                        output_dir=directory,
+                        max_steps=1,
+                        per_device_train_batch_size=2,
+                        logging_strategy="no",
+                        save_steps=1,
+                        use_cpu=True,
+                    ),
+                    train_dataset=self._dataset(2),
+                ).train()
+
+            output = Path(directory)
+            self.assertFalse((output / "checkpoint-1").exists())
+            self.assertEqual(
+                list(output.glob(".checkpoint-1.incomplete-*")),
+                [],
+            )
+
+    def test_checkpoint_binary_state_rejects_credentials_atomically(self):
+        import torch
+
+        credential = "must-not-appear-in-errors"
+
+        class CredentialStateCallback(TrainerCallback):
+
+            def state_dict(self):
+                return {
+                    "metrics": {
+                        "token_count": 512,
+                    },
+                    "metadata": {
+                        "api_key": credential,
+                    },
+                }
+
+        class CredentialOptimizer(torch.optim.SGD):
+
+            def state_dict(self):
+                state = super().state_dict()
+                state["metadata"] = {
+                    "api_key": credential,
+                }
+                return state
+
+        for owner, callback, use_credential_optimizer in (
+            ("Trainer runtime checkpoint state", CredentialStateCallback(), False),
+            ("Trainer optimizer checkpoint state", None, True),
+        ):
+            with self.subTest(owner=owner), tempfile.TemporaryDirectory() as directory:
+                model = self._dropout_model()
+                optimizers = (None, None)
+                if use_credential_optimizer:
+                    optimizer = CredentialOptimizer(model.parameters(), lr=1e-3)
+                    scheduler = torch.optim.lr_scheduler.LambdaLR(
+                        optimizer,
+                        lambda _: 1.0,
+                    )
+                    optimizers = (optimizer, scheduler)
+                with self.assertRaisesRegex(
+                        ValueError,
+                        rf"{owner}.*metadata\.api_key",
+                ) as captured:
+                    Trainer(
+                        model=model,
+                        args=TrainingArguments(
+                            output_dir=directory,
+                            max_steps=1,
+                            per_device_train_batch_size=2,
+                            logging_strategy="no",
+                            save_steps=1,
+                            use_cpu=True,
+                        ),
+                        train_dataset=self._dataset(2),
+                        callbacks=([callback] if callback is not None else None),
+                        optimizers=optimizers,
+                    ).train()
+
+                self.assertNotIn(credential, str(captured.exception))
+                output = Path(directory)
+                self.assertFalse((output / "checkpoint-1").exists())
+                self.assertEqual(
+                    list(output.glob(".checkpoint-1.incomplete-*")),
+                    [],
+                )
+
+    def test_safe_callback_checkpoint_state_round_trips(self):
+
+        class SafeStateCallback(TrainerCallback):
+
+            def __init__(self, token_count):
+                self.token_count = token_count
+
+            def state_dict(self):
+                return {
+                    "metrics": {
+                        "token_count": self.token_count,
+                    },
+                }
+
+            def load_state_dict(self, state_dict):
+                self.token_count = int(state_dict["metrics"]["token_count"])
+
+        with tempfile.TemporaryDirectory() as directory:
+            Trainer(
+                model=self._dropout_model(),
+                args=TrainingArguments(
+                    output_dir=directory,
+                    max_steps=1,
+                    per_device_train_batch_size=2,
+                    logging_strategy="no",
+                    save_steps=1,
+                    use_cpu=True,
+                ),
+                train_dataset=self._dataset(2),
+                callbacks=[SafeStateCallback(512)],
+            ).train()
+
+            restored = SafeStateCallback(0)
+            Trainer(
+                model=self._dropout_model(),
+                args=TrainingArguments(
+                    output_dir=directory,
+                    max_steps=1,
+                    per_device_train_batch_size=2,
+                    logging_strategy="no",
+                    save_strategy="no",
+                    use_cpu=True,
+                ),
+                train_dataset=self._dataset(2),
+                callbacks=[restored],
+            ).train(resume_from_checkpoint=True)
+
+            self.assertEqual(restored.token_count, 512)
+
+    def test_checkpoint_binary_state_rejects_credentials_before_restoration(self):
+        credential = "must-not-appear-in-errors"
+
+        class CredentialCheckpointTrainer(Trainer):
+
+            def _validate_checkpoint_manifest(self, checkpoint):
+                return None
+
+            def _torch_load(self, path):
+                if path.name == "optimizer.pt":
+                    return {
+                        "metadata": {
+                            "api_key": credential,
+                        },
+                    }
+                return super()._torch_load(path)
+
+        with tempfile.TemporaryDirectory() as directory:
+            Trainer(
+                model=self._dropout_model(),
+                args=TrainingArguments(
+                    output_dir=directory,
+                    max_steps=1,
+                    per_device_train_batch_size=2,
+                    logging_strategy="no",
+                    save_steps=1,
+                    use_cpu=True,
+                ),
+                train_dataset=self._dataset(2),
+            ).train()
+            checkpoint = Path(directory) / "checkpoint-1"
+            resumed = CredentialCheckpointTrainer(
+                model=self._dropout_model(),
+                args=TrainingArguments(
+                    output_dir=directory,
+                    max_steps=1,
+                    per_device_train_batch_size=2,
+                    logging_strategy="no",
+                    save_strategy="no",
+                    use_cpu=True,
+                ),
+                train_dataset=self._dataset(2),
+            )
+            restored_models = []
+            resumed._load_model = restored_models.append
+
+            with self.assertRaisesRegex(
+                    ValueError,
+                    r"Trainer optimizer checkpoint state.*metadata\.api_key",
+            ) as captured:
+                resumed._load_checkpoint(checkpoint)
+
+            self.assertNotIn(credential, str(captured.exception))
+            self.assertEqual(restored_models, [])
+
+    def test_checkpoint_model_state_rejects_credentials_before_restoration(self):
+        import torch
+
+        credential = "must-not-appear-in-errors"
+
+        class TrackingModel(torch.nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.projection = torch.nn.Linear(1, 1)
+                self.dropout = torch.nn.Dropout(0.25)
+                self.load_state_dict_calls = 0
+
+            def forward(self, input_values, labels):
+                predictions = self.projection(self.dropout(input_values))
+                return {
+                    "loss": torch.nn.functional.mse_loss(
+                        predictions,
+                        labels,
+                    ),
+                    "logits": predictions,
+                }
+
+            def load_state_dict(self, state_dict, *args, **kwargs):
+                self.load_state_dict_calls += 1
+                return super().load_state_dict(state_dict, *args, **kwargs)
+
+        class CredentialModelStateTrainer(Trainer):
+
+            def _validate_checkpoint_manifest(self, checkpoint):
+                return None
+
+            def _torch_load(self, path):
+                if path.name == MODEL_STATE_NAME:
+                    return {
+                        "metadata": {
+                            "api_key": credential,
+                        },
+                    }
+                return super()._torch_load(path)
+
+        with tempfile.TemporaryDirectory() as directory:
+            Trainer(
+                model=self._dropout_model(),
+                args=TrainingArguments(
+                    output_dir=directory,
+                    max_steps=1,
+                    per_device_train_batch_size=2,
+                    logging_strategy="no",
+                    save_steps=1,
+                    use_cpu=True,
+                ),
+                train_dataset=self._dataset(2),
+            ).train()
+            checkpoint = Path(directory) / "checkpoint-1"
+
+            unsafe_model = TrackingModel()
+            resumed = CredentialModelStateTrainer(
+                model=unsafe_model,
+                args=TrainingArguments(
+                    output_dir=directory,
+                    max_steps=1,
+                    per_device_train_batch_size=2,
+                    logging_strategy="no",
+                    save_strategy="no",
+                    use_cpu=True,
+                ),
+                train_dataset=self._dataset(2),
+            )
+            with self.assertRaisesRegex(
+                    ValueError,
+                    r"Trainer model artifact state.*metadata\.api_key",
+            ) as captured:
+                resumed._load_checkpoint(checkpoint)
+
+            self.assertNotIn(credential, str(captured.exception))
+            self.assertEqual(unsafe_model.load_state_dict_calls, 0)
+
+            safe_model = TrackingModel()
+            Trainer(
+                model=safe_model,
+                args=TrainingArguments(
+                    output_dir=directory,
+                    use_cpu=True,
+                ),
+            )._load_model(checkpoint)
+
+            self.assertEqual(safe_model.load_state_dict_calls, 1)
+
+    def test_checkpoint_load_rejects_credentials_before_restoration(self):
+        credential = "must-not-appear-in-errors"
+        with tempfile.TemporaryDirectory() as directory:
+            Trainer(
+                model=self._dropout_model(),
+                args=TrainingArguments(
+                    output_dir=directory,
+                    max_steps=1,
+                    per_device_train_batch_size=2,
+                    logging_strategy="no",
+                    save_steps=1,
+                    use_cpu=True,
+                ),
+                train_dataset=self._dataset(2),
+            ).train()
+            checkpoint = Path(directory) / "checkpoint-1"
+            manifest_path = checkpoint / CHECKPOINT_MANIFEST_NAME
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["metadata"] = {
+                "api_key": credential,
+            }
+            manifest_path.write_text(
+                json.dumps(manifest),
+                encoding="utf-8",
+            )
+
+            resumed = Trainer(
+                model=self._dropout_model(),
+                args=TrainingArguments(
+                    output_dir=directory,
+                    max_steps=1,
+                    per_device_train_batch_size=2,
+                    logging_strategy="no",
+                    save_strategy="no",
+                    use_cpu=True,
+                ),
+                train_dataset=self._dataset(2),
+            )
+            restored_models = []
+            resumed._load_model = restored_models.append
+            with self.assertRaisesRegex(
+                    ValueError,
+                    r"Trainer checkpoint manifest.*metadata\.api_key",
+            ) as captured:
+                resumed._load_checkpoint(checkpoint)
+
+            self.assertNotIn(credential, str(captured.exception))
+            self.assertEqual(restored_models, [])
+
     def test_exact_resume_rejects_a_changed_schedule(self):
 
         class StopAfterOne(TrainerCallback):
@@ -955,6 +1347,186 @@ class TrainingRuntimeTests(unittest.TestCase):
             NATIVE_EXPORT_DIR,
         )
 
+    def test_training_recipe_manifest_rejects_secrets_before_artifact_mutation(self):
+        import torch
+
+        credential = "must-not-appear-in-errors"
+
+        class TrackingModel(torch.nn.Linear):
+
+            def __init__(self):
+                super().__init__(1, 1)
+                self.state_dict_calls = 0
+
+            def state_dict(self, *args, **kwargs):
+                self.state_dict_calls += 1
+                return super().state_dict(*args, **kwargs)
+
+        class RecipeAdapter(CausalLMTrainingAdapter):
+
+            def __init__(self, model, spec, metadata):
+                super().__init__(model, spec)
+                self.metadata = metadata
+
+            def artifact_manifest(self):
+                manifest = super().artifact_manifest()
+                manifest["run_metadata"] = self.metadata
+                return manifest
+
+        spec = ModelTrainingSpec(
+            model_type="orpheustts",
+            family=TrainingFamily.CAUSAL_LM,
+            module_paths=("model", ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            unsafe_model = TrackingModel()
+            unsafe_destination = Path(directory) / "unsafe-artifact"
+            unsafe_trainer = Trainer(
+                model=unsafe_model,
+                args=TrainingArguments(
+                    output_dir=directory,
+                    use_cpu=True,
+                ),
+                training_adapter=RecipeAdapter(
+                    unsafe_model,
+                    spec,
+                    {
+                        "provider_options": {
+                            "api_key": credential,
+                        },
+                    },
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "runtime secrets") as captured:
+                unsafe_trainer.save_model(
+                    unsafe_destination,
+                    include_native_export=False,
+                )
+            self.assertNotIn(credential, str(captured.exception))
+            self.assertEqual(unsafe_model.state_dict_calls, 0)
+            self.assertFalse(unsafe_destination.exists())
+
+            safe_model = TrackingModel()
+            safe_destination = Path(directory) / "safe-artifact"
+            safe_trainer = Trainer(
+                model=safe_model,
+                args=TrainingArguments(
+                    output_dir=directory,
+                    use_cpu=True,
+                ),
+                training_adapter=RecipeAdapter(
+                    safe_model,
+                    spec,
+                    {
+                        "token_count": 512,
+                        "dataset_id": "speech/train",
+                    },
+                ),
+            )
+            safe_trainer.save_model(
+                safe_destination,
+                include_native_export=False,
+            )
+            recipe = json.loads((safe_destination / TRAINING_RECIPE_NAME).read_text(encoding="utf-8", ))
+
+        self.assertEqual(
+            recipe["run_metadata"],
+            {
+                "token_count": 512,
+                "dataset_id": "speech/train",
+            },
+        )
+
+    def test_model_artifact_state_rejects_secrets_at_both_write_boundaries(self):
+        import torch
+
+        credential = "must-not-appear-in-errors"
+
+        class ArtifactStateModel(torch.nn.Linear):
+
+            def __init__(self, metadata, *, mutate_on_save=False):
+                super().__init__(1, 1)
+                self.metadata = metadata
+                self.mutate_on_save = mutate_on_save
+                self.artifact_state = None
+                self.save_pretrained_calls = 0
+
+            def state_dict(self, *args, **kwargs):
+                self.artifact_state = super().state_dict(*args, **kwargs)
+                self.artifact_state["run_metadata"] = self.metadata
+                return self.artifact_state
+
+            def save_pretrained(self, _directory):
+                self.save_pretrained_calls += 1
+                if self.mutate_on_save:
+                    self.artifact_state["run_metadata"] = {
+                        "api_key": credential,
+                    }
+
+        with tempfile.TemporaryDirectory() as directory:
+            unsafe_destination = Path(directory) / "unsafe-artifact"
+            unsafe_model = ArtifactStateModel({
+                "api_key": credential,
+            })
+            unsafe_trainer = Trainer(
+                model=unsafe_model,
+                args=TrainingArguments(
+                    output_dir=directory,
+                    use_cpu=True,
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "Trainer model artifact state") as captured:
+                unsafe_trainer.save_model(unsafe_destination)
+            self.assertNotIn(credential, str(captured.exception))
+            self.assertEqual(unsafe_model.save_pretrained_calls, 0)
+            self.assertFalse(unsafe_destination.exists())
+
+            mutated_destination = Path(directory) / "mutated-artifact"
+            mutated_model = ArtifactStateModel(
+                {
+                    "token_count": 512,
+                },
+                mutate_on_save=True,
+            )
+            mutated_trainer = Trainer(
+                model=mutated_model,
+                args=TrainingArguments(
+                    output_dir=directory,
+                    use_cpu=True,
+                ),
+            )
+            with self.assertRaisesRegex(ValueError, "Trainer model artifact state") as captured:
+                mutated_trainer.save_model(mutated_destination)
+            self.assertNotIn(credential, str(captured.exception))
+            self.assertEqual(mutated_model.save_pretrained_calls, 1)
+            self.assertFalse((mutated_destination / MODEL_STATE_NAME).exists())
+
+            safe_destination = Path(directory) / "safe-artifact"
+            safe_model = ArtifactStateModel({
+                "dataset_id": "speech/train",
+                "token_count": 512,
+            })
+            safe_trainer = Trainer(
+                model=safe_model,
+                args=TrainingArguments(
+                    output_dir=directory,
+                    use_cpu=True,
+                ),
+            )
+            safe_trainer.save_model(safe_destination)
+            saved_state = torch.load(
+                safe_destination / MODEL_STATE_NAME,
+                weights_only=False,
+            )
+
+        self.assertEqual(
+            saved_state["run_metadata"],
+            {
+                "dataset_id": "speech/train",
+                "token_count": 512,
+            },
+        )
+
     def test_checkpoint_discovery_skips_corrupt_latest_checkpoint(self):
         with tempfile.TemporaryDirectory() as directory:
             Trainer(
@@ -976,6 +1548,141 @@ class TrainingRuntimeTests(unittest.TestCase):
                 Path(get_last_checkpoint(directory)).name,
                 "checkpoint-1",
             )
+
+    def test_checkpoint_discovery_skips_ambiguous_or_non_finite_manifest(self):
+        documents = (
+            (
+                "duplicate",
+                '{"format_version": 1, "global_step": 2, "global_step": 2, '
+                '"required_files": []}',
+            ),
+            (
+                "non-finite",
+                '{"format_version": 1, "global_step": 2, "required_files": [], '
+                '"metadata": {"loss": 1e10000}}',
+            ),
+        )
+
+        for name, document in documents:
+            with self.subTest(document=name):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    first = root / "checkpoint-1"
+                    first.mkdir()
+                    (first / CHECKPOINT_COMPLETE_NAME).write_text(
+                        "complete\n",
+                        encoding="utf-8",
+                    )
+                    (first / CHECKPOINT_MANIFEST_NAME).write_text(
+                        json.dumps({
+                            "format_version": 1,
+                            "global_step": 1,
+                            "required_files": [],
+                        }),
+                        encoding="utf-8",
+                    )
+                    second = root / "checkpoint-2"
+                    second.mkdir()
+                    (second / CHECKPOINT_COMPLETE_NAME).write_text(
+                        "complete\n",
+                        encoding="utf-8",
+                    )
+                    (second / CHECKPOINT_MANIFEST_NAME).write_text(
+                        document,
+                        encoding="utf-8",
+                    )
+
+                    self.assertEqual(
+                        Path(get_last_checkpoint(root)).name,
+                        "checkpoint-1",
+                    )
+
+    def test_checkpoint_json_loaders_reject_before_model_or_runtime_restore(self):
+        documents = (
+            (
+                "manifest-duplicate",
+                '{"format_version": 1, "format_version": 1, '
+                '"global_step": 2, "required_files": []}',
+                {},
+                "Duplicate JSON object key 'format_version'",
+            ),
+            (
+                "manifest-overflow",
+                '{"format_version": 1, "global_step": 2, "required_files": [], '
+                '"metadata": {"loss": 1e10000}}',
+                {},
+                "$.metadata.loss",
+            ),
+            (
+                "optimization-duplicate",
+                json.dumps({
+                    "format_version": 1,
+                    "global_step": 2,
+                    "required_files": ["optimization_manifest.json"],
+                    "optimization_plan": {
+                        "format_version": 1,
+                    },
+                }),
+                {
+                    "optimization_manifest.json": '{"format_version": 1, "format_version": 1}',
+                },
+                "Duplicate JSON object key 'format_version'",
+            ),
+            (
+                "trainer-state-duplicate",
+                json.dumps({
+                    "format_version": 1,
+                    "global_step": 2,
+                    "required_files": ["trainer_state.json"],
+                }),
+                {
+                    "trainer_state.json": '{"global_step": 2, "global_step": 2}',
+                },
+                "Duplicate JSON object key 'global_step'",
+            ),
+            (
+                "trainer-state-overflow",
+                json.dumps({
+                    "format_version": 1,
+                    "global_step": 2,
+                    "required_files": ["trainer_state.json"],
+                }),
+                {
+                    "trainer_state.json": '{"global_step": 2, "log_history": [{"loss": 1e10000}]}',
+                },
+                "$.log_history[0].loss",
+            ),
+        )
+
+        for name, manifest, artifacts, expected_detail in documents:
+            with self.subTest(document=name):
+                with tempfile.TemporaryDirectory() as directory:
+                    checkpoint = Path(directory) / "checkpoint-2"
+                    checkpoint.mkdir()
+                    (checkpoint / CHECKPOINT_COMPLETE_NAME).write_text(
+                        "complete\n",
+                        encoding="utf-8",
+                    )
+                    (checkpoint / CHECKPOINT_MANIFEST_NAME).write_text(
+                        manifest,
+                        encoding="utf-8",
+                    )
+                    for filename, document in artifacts.items():
+                        (checkpoint / filename).write_text(
+                            document,
+                            encoding="utf-8",
+                        )
+
+                    trainer = object.__new__(Trainer)
+                    restored_models = []
+                    trainer._load_model = restored_models.append
+                    with self.assertRaises(ValueError) as captured:
+                        trainer._load_checkpoint(checkpoint)
+
+                rendered_error = str(captured.exception)
+                self.assertIn(str(checkpoint), rendered_error)
+                self.assertIn(expected_detail, rendered_error)
+                self.assertEqual(restored_models, [])
 
     def test_pretrained_round_trip_restores_trainer_model_state(self):
         import torch

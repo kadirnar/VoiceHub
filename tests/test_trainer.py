@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from voicehub import (
@@ -48,6 +49,26 @@ class EventRecorder(TrainerCallback):
         return control
 
 
+@dataclass
+class UnsafeTrainerState(TrainerState):
+    """Bypass construction validation to exercise the final write boundary."""
+
+    provider_options: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self):
+        pass
+
+
+@dataclass
+class UnsafeTrainingArguments(TrainingArguments):
+    """Bypass construction validation to exercise final write checks."""
+
+    provider_options: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self):
+        pass
+
+
 class TrainerApiTests(unittest.TestCase):
 
     def test_training_arguments_round_trip_and_alias(self):
@@ -70,6 +91,171 @@ class TrainerApiTests(unittest.TestCase):
 
         self.assertEqual(restored.to_dict(), arguments.to_dict())
         self.assertNotIn("evaluation_strategy", payload)
+
+    def test_training_arguments_reject_runtime_secrets_at_every_artifact_boundary(self):
+        credential = "must-not-appear-in-errors"
+
+        @dataclass
+        class ExtendedTrainingArguments(TrainingArguments):
+            provider_options: dict[str, object] = field(default_factory=dict)
+
+        with self.assertRaisesRegex(ValueError, "runtime secrets") as captured:
+            ExtendedTrainingArguments(
+                provider_options={
+                    "credentials": {
+                        "api_key": credential,
+                    },
+                }, )
+        self.assertNotIn(credential, str(captured.exception))
+
+        unsafe = UnsafeTrainingArguments(
+            provider_options={
+                "metrics": {
+                    "token_count": 512,
+                },
+            }, )
+        unsafe.provider_options["authorization"] = credential
+        for operation in (
+                unsafe.to_dict,
+                unsafe.to_json_string,
+        ):
+            with self.subTest(operation=operation.__name__):
+                with self.assertRaisesRegex(ValueError, "runtime secrets") as captured:
+                    operation()
+                self.assertNotIn(credential, str(captured.exception))
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "training_args.json"
+            with self.assertRaisesRegex(ValueError, "runtime secrets") as captured:
+                unsafe.save_json(path)
+            self.assertNotIn(credential, str(captured.exception))
+            self.assertFalse(path.exists())
+
+    def test_training_arguments_loader_rejects_secrets_before_construction(self):
+        construction_events = []
+        credential = "must-not-appear-in-errors"
+
+        @dataclass
+        class TrackingTrainingArguments(TrainingArguments):
+            provider_options: dict[str, object] = field(default_factory=dict)
+
+            def __post_init__(self):
+                construction_events.append("constructed")
+                super().__post_init__()
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "training_args.json"
+            path.write_text(
+                json.dumps({
+                    "provider_options": {
+                        "api_key": credential,
+                    },
+                }),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "runtime secrets") as captured:
+                TrackingTrainingArguments.from_json_file(path)
+
+        self.assertEqual(construction_events, [])
+        self.assertNotIn(credential, str(captured.exception))
+
+    def test_training_arguments_safe_subclass_fields_round_trip(self):
+
+        @dataclass
+        class ExtendedTrainingArguments(TrainingArguments):
+            run_metadata: dict[str, object] = field(default_factory=dict)
+
+        arguments = ExtendedTrainingArguments(
+            run_metadata={
+                "token_count": 512,
+                "dataset_id": "speech/train",
+            }, )
+        with tempfile.TemporaryDirectory() as directory:
+            path = arguments.save_json(Path(directory) / "training_args.json")
+            restored = ExtendedTrainingArguments.from_json_file(path)
+        self.assertEqual(restored.to_dict(), arguments.to_dict())
+
+    def test_training_json_loaders_reject_ambiguous_data_before_construction(self):
+        construction_events = []
+
+        @dataclass
+        class TrackingTrainingArguments(TrainingArguments):
+
+            def __post_init__(self):
+                construction_events.append("training-arguments")
+                super().__post_init__()
+
+        @dataclass
+        class TrackingTrainerState(TrainerState):
+
+            def __post_init__(self):
+                construction_events.append("trainer-state")
+                super().__post_init__()
+
+        documents = (
+            (
+                "training-arguments-duplicate",
+                TrackingTrainingArguments.from_json_file,
+                '{"output_dir": "discarded-secret", "output_dir": "trainer-output"}',
+                "Duplicate JSON object key 'output_dir'",
+            ),
+            (
+                "training-arguments-overflow",
+                TrackingTrainingArguments.from_json_file,
+                '{"learning_rate": 1e10000}',
+                "$.learning_rate",
+            ),
+            (
+                "trainer-state-duplicate",
+                TrackingTrainerState.load_from_json,
+                '{"log_history": [{"loss": 0.4, "loss": 0.3}]}',
+                "Duplicate JSON object key 'loss'",
+            ),
+            (
+                "trainer-state-overflow",
+                TrackingTrainerState.load_from_json,
+                '{"log_history": [{"loss": 1e10000}]}',
+                "$.log_history[0].loss",
+            ),
+        )
+
+        for name, loader, document, expected_detail in documents:
+            with self.subTest(document=name):
+                construction_events.clear()
+                with tempfile.TemporaryDirectory() as directory:
+                    source = Path(directory) / f"{name}.json"
+                    source.write_text(document, encoding="utf-8")
+
+                    with self.assertRaises(ValueError) as captured:
+                        loader(source)
+
+                rendered_error = str(captured.exception)
+                self.assertIn(str(source), rendered_error)
+                self.assertIn(expected_detail, rendered_error)
+                self.assertNotIn("discarded-secret", rendered_error)
+                self.assertEqual(construction_events, [])
+
+    @unittest.skipUnless(TORCH_AVAILABLE, "PyTorch is an optional training extra")
+    def test_trainer_export_rejects_unsafe_arguments_before_creating_destination(self):
+        import torch
+
+        credential = "must-not-appear-in-errors"
+        arguments = UnsafeTrainingArguments(
+            provider_options={
+                "api_key": credential,
+            },
+            use_cpu=True,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "artifact"
+            trainer = Trainer(
+                model=torch.nn.Linear(1, 1),
+                args=arguments,
+            )
+            with self.assertRaisesRegex(ValueError, "runtime secrets") as captured:
+                trainer.save_model(destination)
+            self.assertNotIn(credential, str(captured.exception))
+            self.assertFalse(destination.exists())
 
     def test_training_arguments_validate_incompatible_values(self):
         with self.assertRaisesRegex(ValueError, "greater than zero"):
@@ -135,12 +321,86 @@ class TrainerApiTests(unittest.TestCase):
             log_history=[{
                 "loss": 0.4,
                 "step": 12
+            }, {
+                "token_count": 512,
+                "step": 12,
             }],
         )
         with tempfile.TemporaryDirectory() as directory:
             path = state.save_to_json(Path(directory) / "trainer_state.json")
             restored = TrainerState.load_from_json(path)
         self.assertEqual(restored, state)
+
+    def test_trainer_state_rejects_nested_runtime_secrets_at_construction(self):
+        with self.assertRaisesRegex(ValueError, "runtime secrets"):
+            TrainerState(
+                log_history=[{
+                    "provider_options": {
+                        "authorization": "Bearer must-not-be-persisted",
+                    },
+                }])
+
+    def test_trainer_state_loader_rejects_nested_runtime_secrets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "trainer_state.json"
+            path.write_text(
+                json.dumps({
+                    "log_history": [{
+                        "provider_options": {
+                            "api_key": "must-not-be-persisted",
+                        },
+                    }],
+                }),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "runtime secrets"):
+                TrainerState.load_from_json(path)
+
+    def test_trainer_state_rejects_mutated_secrets_before_writing(self):
+        state = TrainerState()
+        state.log_history.append({
+            "provider_options": {
+                "api_key": "must-not-be-persisted",
+            },
+        })
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "artifact" / "trainer_state.json"
+            with self.assertRaisesRegex(ValueError, "runtime secrets"):
+                state.save_to_json(path)
+
+            self.assertFalse(path.parent.exists())
+
+    def test_trainer_state_writer_validates_final_subclass_payload(self):
+        state = UnsafeTrainerState(provider_options={
+            "api_key": "must-not-be-persisted",
+        })
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "artifact" / "trainer_state.json"
+            with self.assertRaisesRegex(ValueError, "runtime secrets"):
+                state.save_to_json(path)
+
+            self.assertFalse(path.parent.exists())
+
+    def test_trainer_log_rejects_runtime_secrets_before_state_or_callbacks(self):
+        recorder = EventRecorder()
+        trainer = Trainer(
+            model=object(),
+            args=TrainingArguments(disable_tqdm=True),
+            callbacks=[recorder],
+        )
+
+        with self.assertRaisesRegex(ValueError, "runtime secrets"):
+            trainer.log({
+                "provider_options": {
+                    "api_key": "must-not-be-persisted",
+                },
+            })
+
+        self.assertEqual(trainer.state.log_history, [])
+        self.assertEqual(recorder.events, [])
 
     def test_training_output_uses_loss_first_mapping_contract(self):
         output = TTSTrainingOutput(

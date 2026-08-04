@@ -17,6 +17,7 @@ from typing import Any, Callable
 from voicehub.data_collator import default_data_collator
 from voicehub.dependencies import import_optional
 from voicehub.errors import UnknownModelError
+from voicehub.hub import read_json_file
 from voicehub.integrations import get_reporting_integration_callbacks
 from voicehub.modeling_utils import PreTrainedSpeechModel
 from voicehub.optimization.capabilities import OptimizationContext, OptimizationMode, bind_registered_architecture
@@ -27,6 +28,7 @@ from voicehub.optimization.passes import (
     OptimizationPassRegistry,
     OptimizationResult,
 )
+from voicehub.serialization_utils import reject_serialized_secrets
 from voicehub.trainer_callback import (
     CallbackHandler,
     DefaultFlowCallback,
@@ -1768,6 +1770,7 @@ class Trainer:
         if self.state.epoch is not None:
             normalized["epoch"] = round(self.state.epoch, 4)
         output = {**normalized, "step": self.state.global_step}
+        reject_serialized_secrets(output, owner="Trainer.log")
         self.state.log_history.append(output)
         self.control = self.callback_handler.on_log(
             self.args,
@@ -2221,6 +2224,26 @@ class Trainer:
         )
         return output
 
+    @staticmethod
+    def _training_recipe_manifest(adapter: BaseTrainingAdapter, ) -> dict[str, Any]:
+        manifest = adapter.artifact_manifest()
+        if not isinstance(manifest, Mapping):
+            raise TypeError("Training adapter artifact manifests must be mappings.")
+        manifest = dict(manifest)
+        reject_serialized_secrets(
+            manifest,
+            owner="Trainer training recipe manifest",
+        )
+        return manifest
+
+    @staticmethod
+    def _validated_model_artifact_state(state: Any) -> Any:
+        reject_serialized_secrets(
+            state,
+            owner="Trainer model artifact state",
+        )
+        return state
+
     def save_model(
         self,
         output_dir: str | Path | None = None,
@@ -2236,6 +2259,10 @@ class Trainer:
         """
         if not isinstance(portable, bool):
             raise TypeError("`portable` must be a boolean.")
+        self.args.to_dict()
+        recipe_manifest = (
+            self._training_recipe_manifest(self.training_adapter)
+            if self.training_adapter is not None else None)
         torch = self._import_torch()
         runtime = self.training_strategy.unwrap_model(self.model_wrapped)
         state_to_save = None
@@ -2243,6 +2270,8 @@ class Trainer:
             state_to_save = (self._training_optimization_result.portable_state_dict(runtime))
         elif hasattr(runtime, "state_dict"):
             state_to_save = runtime.state_dict()
+        if state_to_save is not None:
+            state_to_save = self._validated_model_artifact_state(state_to_save)
         destination = Path(output_dir or self.args.output_dir).expanduser()
         destination.mkdir(parents=True, exist_ok=True)
         if isinstance(self.model, PreTrainedSpeechModel):
@@ -2253,9 +2282,11 @@ class Trainer:
         elif hasattr(self.model, "save_pretrained"):
             self.model.save_pretrained(destination)
         if state_to_save is not None:
-            torch.save(state_to_save, destination / MODEL_STATE_NAME)
+            torch.save(
+                self._validated_model_artifact_state(state_to_save),
+                destination / MODEL_STATE_NAME,
+            )
         if self.training_adapter is not None:
-            recipe_manifest = self.training_adapter.artifact_manifest()
             if include_native_export:
                 native_destination = destination / NATIVE_EXPORT_DIR
                 native_destination.mkdir(parents=True, exist_ok=True)
@@ -2264,6 +2295,10 @@ class Trainer:
                     native_destination.rmdir()
                 if native_destination.is_dir():
                     recipe_manifest["native_export_path"] = (NATIVE_EXPORT_DIR)
+            reject_serialized_secrets(
+                recipe_manifest,
+                owner="Trainer training recipe manifest",
+            )
             write_json(
                 destination / TRAINING_RECIPE_NAME,
                 recipe_manifest,
@@ -2326,6 +2361,29 @@ class Trainer:
         """Save Trainer state at the root output directory."""
         return self.state.save_to_json(Path(self.args.output_dir) / TRAINER_STATE_NAME)
 
+    @staticmethod
+    def _validated_checkpoint_state(
+        state: Any,
+        *,
+        owner: str,
+    ) -> Any:
+        reject_serialized_secrets(state, owner=owner)
+        return state
+
+    @classmethod
+    def _save_checkpoint_state(
+        cls,
+        torch,
+        state: Any,
+        destination: Path,
+        *,
+        owner: str,
+    ) -> None:
+        torch.save(
+            cls._validated_checkpoint_state(state, owner=owner),
+            destination,
+        )
+
     def _save_checkpoint(self) -> Path:
         torch = self._import_torch()
         checkpoint = (Path(self.args.output_dir) / f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}")
@@ -2339,13 +2397,17 @@ class Trainer:
                 portable=False,
             )
             self.state.save_to_json(temporary / TRAINER_STATE_NAME)
-            torch.save(
+            self._save_checkpoint_state(
+                torch,
                 self.optimizer.state_dict(),
                 temporary / OPTIMIZER_NAME,
+                owner="Trainer optimizer checkpoint state",
             )
-            torch.save(
+            self._save_checkpoint_state(
+                torch,
                 self.lr_scheduler.state_dict(),
                 temporary / SCHEDULER_NAME,
+                owner="Trainer scheduler checkpoint state",
             )
             rng_state = {"cpu": torch.random.get_rng_state()}
             if torch.cuda.is_available():
@@ -2356,19 +2418,33 @@ class Trainer:
                     rng_state["mps"] = mps.get_rng_state()
                 except RuntimeError:
                     pass
-            torch.save(rng_state, temporary / RNG_STATE_NAME)
+            self._save_checkpoint_state(
+                torch,
+                rng_state,
+                temporary / RNG_STATE_NAME,
+                owner="Trainer random checkpoint state",
+            )
             if self._scaler is not None:
-                torch.save(
+                self._save_checkpoint_state(
+                    torch,
                     self._scaler.state_dict(),
                     temporary / SCALER_STATE_NAME,
+                    owner="Trainer scaler checkpoint state",
                 )
-            torch.save(
+            self._save_checkpoint_state(
+                torch,
                 self._runtime_checkpoint_state(),
                 temporary / TRAINING_RUNTIME_STATE_NAME,
+                owner="Trainer runtime checkpoint state",
+            )
+            checkpoint_manifest = self._checkpoint_manifest(temporary)
+            reject_serialized_secrets(
+                checkpoint_manifest,
+                owner="Trainer checkpoint manifest",
             )
             write_json(
                 temporary / CHECKPOINT_MANIFEST_NAME,
-                self._checkpoint_manifest(temporary),
+                checkpoint_manifest,
             )
             (temporary / CHECKPOINT_COMPLETE_NAME).write_text(
                 "complete\n",
@@ -2487,6 +2563,10 @@ class Trainer:
             raise TypeError(
                 f"{owner}.resume_fingerprint must return JSON-compatible "
                 "deterministic data.") from exc
+        reject_serialized_secrets(
+            normalized,
+            owner=f"{owner}.resume_fingerprint",
+        )
         return normalized
 
     def _build_resume_signature(self) -> dict[str, Any]:
@@ -2756,6 +2836,17 @@ class Trainer:
         except TypeError:
             return torch.load(path, map_location=self.args.device)
 
+    def _load_checkpoint_state(
+        self,
+        path: Path,
+        *,
+        owner: str,
+    ) -> Any:
+        return self._validated_checkpoint_state(
+            self._torch_load(path),
+            owner=owner,
+        )
+
     def _load_model(self, checkpoint: str | Path) -> None:
         state_path = Path(checkpoint) / MODEL_STATE_NAME
         if not state_path.is_file():
@@ -2763,37 +2854,69 @@ class Trainer:
         runtime = self.training_strategy.unwrap_model(self.model_wrapped)
         if not hasattr(runtime, "load_state_dict"):
             raise TypeError("The trainable model does not implement `load_state_dict()`.")
-        runtime.load_state_dict(self._torch_load(state_path))
+        runtime.load_state_dict(self._validated_model_artifact_state(self._torch_load(state_path), ))
 
     def _load_checkpoint(self, checkpoint: str | Path) -> None:
         checkpoint_path = Path(checkpoint)
         self._validate_checkpoint_directory(checkpoint_path)
         self._validate_checkpoint_manifest(checkpoint_path)
-        self._load_model(checkpoint_path)
         state_path = checkpoint_path / TRAINER_STATE_NAME
-        if state_path.is_file():
-            self.state = TrainerState.load_from_json(state_path)
         optimizer_path = checkpoint_path / OPTIMIZER_NAME
         scheduler_path = checkpoint_path / SCHEDULER_NAME
-        if optimizer_path.is_file():
-            self.optimizer.load_state_dict(self._torch_load(optimizer_path))
-        if scheduler_path.is_file():
-            self.lr_scheduler.load_state_dict(self._torch_load(scheduler_path))
         scaler_path = checkpoint_path / SCALER_STATE_NAME
-        if scaler_path.is_file() and self._scaler is not None:
-            self._scaler.load_state_dict(self._torch_load(scaler_path))
         runtime_path = checkpoint_path / TRAINING_RUNTIME_STATE_NAME
-        if runtime_path.is_file():
-            self._load_runtime_checkpoint_state(self._torch_load(runtime_path), )
         rng_path = checkpoint_path / RNG_STATE_NAME
-        if rng_path.is_file():
-            self._deferred_rng_state["torch"] = self._torch_load(rng_path)
+
+        trainer_state = (TrainerState.load_from_json(state_path) if state_path.is_file() else None)
+        optimizer_state = (
+            self._load_checkpoint_state(
+                optimizer_path,
+                owner="Trainer optimizer checkpoint state",
+            ) if optimizer_path.is_file() else None)
+        scheduler_state = (
+            self._load_checkpoint_state(
+                scheduler_path,
+                owner="Trainer scheduler checkpoint state",
+            ) if scheduler_path.is_file() else None)
+        scaler_state = (
+            self._load_checkpoint_state(
+                scaler_path,
+                owner="Trainer scaler checkpoint state",
+            ) if scaler_path.is_file() and self._scaler is not None else None)
+        runtime_state = (
+            self._load_checkpoint_state(
+                runtime_path,
+                owner="Trainer runtime checkpoint state",
+            ) if runtime_path.is_file() else None)
+        rng_state = (
+            self._load_checkpoint_state(
+                rng_path,
+                owner="Trainer random checkpoint state",
+            ) if rng_path.is_file() else None)
+
+        self._load_model(checkpoint_path)
+        if trainer_state is not None:
+            self.state = trainer_state
+        if optimizer_state is not None:
+            self.optimizer.load_state_dict(optimizer_state)
+        if scheduler_state is not None:
+            self.lr_scheduler.load_state_dict(scheduler_state)
+        if scaler_state is not None:
+            self._scaler.load_state_dict(scaler_state)
+        if runtime_state is not None:
+            self._load_runtime_checkpoint_state(runtime_state)
+        if rng_state is not None:
+            self._deferred_rng_state["torch"] = rng_state
 
     def _validate_checkpoint_manifest(self, checkpoint: Path) -> None:
         manifest_path = checkpoint / CHECKPOINT_MANIFEST_NAME
         if not manifest_path.is_file():
             return
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = read_json_file(manifest_path)
+        reject_serialized_secrets(
+            manifest,
+            owner="Trainer checkpoint manifest",
+        )
         format_version = manifest.get("format_version")
         if (isinstance(format_version, bool) or not isinstance(format_version, int) or format_version <= 0):
             raise ValueError("Checkpoint manifest has no valid format_version.")
@@ -2813,8 +2936,7 @@ class Trainer:
             raise FileNotFoundError(
                 "Checkpoint is incomplete; missing required files: " + ", ".join(sorted(missing_files)))
         if OPTIMIZATION_MANIFEST_NAME in required_files:
-            optimization_record = json.loads(
-                (checkpoint / OPTIMIZATION_MANIFEST_NAME).read_text(encoding="utf-8"))
+            optimization_record = read_json_file(checkpoint / OPTIMIZATION_MANIFEST_NAME)
             if optimization_record != manifest.get("optimization_plan"):
                 raise ValueError("Checkpoint optimization manifest does not match its "
                                  "checkpoint record.")
@@ -2845,7 +2967,7 @@ class Trainer:
                 f"({directory_step} != {checkpoint_step}).")
         trainer_state_path = checkpoint / TRAINER_STATE_NAME
         if trainer_state_path.is_file():
-            trainer_state = json.loads(trainer_state_path.read_text(encoding="utf-8"), )
+            trainer_state = read_json_file(trainer_state_path)
             if trainer_state.get("global_step") != checkpoint_step:
                 raise ValueError("Checkpoint Trainer state does not match its manifest "
                                  "global_step.")
