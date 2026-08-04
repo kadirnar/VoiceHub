@@ -33,6 +33,14 @@ _FACTORY_NAME_BY_TASK = {
     SpeechTask.VOICE_ACTIVITY_DETECTION: "AutoModelForVoiceActivityDetection",
 }
 
+_PROCESSOR_HUB_KWARGS = (
+    "subfolder",
+    "cache_dir",
+    "revision",
+    "token",
+    "local_files_only",
+)
+
 
 def _get_task_model_spec(
     model_type: str,
@@ -89,6 +97,7 @@ class AutoConfig:
                 config_path = resolve_pretrained_file(
                     pretrained_model_name_or_path,
                     "config.json",
+                    subfolder=kwargs.get("subfolder", ""),
                     cache_dir=kwargs.get("cache_dir"),
                     revision=kwargs.get("revision"),
                     token=kwargs.get("token"),
@@ -536,15 +545,22 @@ class AutoProcessor:
         raise OSError("AutoProcessor must be created with from_config/from_pretrained.")
 
     @classmethod
+    def _get_processor_class(
+        cls,
+        config: VoiceHubConfig,
+    ) -> type[VoiceHubProcessor]:
+        """Resolve the declared processor class without constructing it."""
+        spec = get_model_spec(config.model_type)
+        return _load_class(spec.processor_module, spec.processor_class)
+
+    @classmethod
     def from_config(
         cls,
         config: VoiceHubConfig,
         **kwargs,
     ) -> VoiceHubProcessor:
         """Construct the processor class declared by the model."""
-        spec = get_model_spec(config.model_type)
-        model_class = _load_class(spec.module, spec.class_name)
-        return model_class.processor_class(**kwargs)
+        return cls._get_processor_class(config)(**kwargs)
 
     @classmethod
     def from_pretrained(
@@ -553,23 +569,44 @@ class AutoProcessor:
         *,
         model_type: str | None = None,
         config: VoiceHubConfig | None = None,
+        config_kwargs: Mapping[str, object] | None = None,
         **kwargs,
     ) -> VoiceHubProcessor:
         """Construct a processor without importing a model runtime."""
+        if config_kwargs is None:
+            config_values = {}
+        elif isinstance(config_kwargs, Mapping):
+            config_values = dict(config_kwargs)
+        else:
+            raise TypeError("`config_kwargs` must be a mapping or None.")
+        if any(not isinstance(key, str) or not key for key in config_values):
+            raise ValueError("`config_kwargs` keys must be non-empty strings.")
+        if "model_type" in config_values:
+            raise ValueError(
+                "Pass `model_type` as the top-level factory argument, not "
+                "inside `config_kwargs`.")
+        if config is not None and config_values:
+            raise TypeError("Pass configuration through either `config` or "
+                            "`config_kwargs`, not both.")
+
         if config is None:
             if model_type is None:
-                config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
+                config = AutoConfig.from_pretrained(
+                    pretrained_model_name_or_path,
+                    **config_values,
+                )
             else:
                 config = AutoConfig.for_model(
                     model_type,
                     name_or_path=pretrained_model_name_or_path,
+                    **config_values,
                 )
-        processor = cls.from_config(config, **kwargs)
-        source = Path(pretrained_model_name_or_path).expanduser()
-        processor_path = source / "processor_config.json"
-        if source.is_dir() and processor_path.is_file():
-            return processor.__class__.from_pretrained(
-                pretrained_model_name_or_path,
-                **kwargs,
-            )
-        return processor
+        processor_class = cls._get_processor_class(config)
+        processor_values = dict(kwargs)
+        for name in _PROCESSOR_HUB_KWARGS:
+            if name in config_values:
+                processor_values.setdefault(name, config_values[name])
+        return processor_class.from_pretrained(
+            pretrained_model_name_or_path,
+            **processor_values,
+        )

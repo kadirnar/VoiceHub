@@ -84,6 +84,13 @@ from voicehub.optimization import (
     list_vits_model_optimization_support,
     resolve_tts_optimization,
 )
+from voicehub.pipelines import (
+    AutomaticSpeechRecognitionPipeline,
+    Pipeline,
+    TextToSpeechPipeline,
+    VoiceActivityDetectionPipeline,
+    pipeline,
+)
 from voicehub.policies import ModelLicenseSpec
 from voicehub.processing_utils import AudioProcessor, BatchFeature, VoiceHubProcessor
 from voicehub.registry import (
@@ -286,6 +293,7 @@ __all__ = [
     "AudioFieldSchema",
     "AudioInput",
     "AudioProcessor",
+    "AutomaticSpeechRecognitionPipeline",
     "AutoConfig",
     "AutoInferenceModel",
     "AutoModel",
@@ -376,6 +384,7 @@ __all__ = [
     "OptimizerBundle",
     "OptionalDependencyError",
     "PredictionOutput",
+    "Pipeline",
     "PreTrainedASRModel",
     "PreTrainedAudioModel",
     "PreTrainedSpeechModel",
@@ -418,6 +427,7 @@ __all__ = [
     "TTSOptimizationSupport",
     "TTSTrainingOutput",
     "TTSTrainingOptimizationProfile",
+    "TextToSpeechPipeline",
     "TorchTrainingStrategy",
     "TokenGenerationRequest",
     "TokenGenerationResult",
@@ -442,6 +452,7 @@ __all__ = [
     "VoiceHubConfig",
     "VoiceHubError",
     "VoiceHubProcessor",
+    "VoiceActivityDetectionPipeline",
     "VITSTrainingAdapter",
     "VITSDiscriminatorLoss",
     "VITSCUDAGraphPolicy",
@@ -499,6 +510,7 @@ __all__ = [
     "masked_diffusion_regression_loss",
     "multi_codebook_cross_entropy",
     "optimize_codec",
+    "pipeline",
     "register_inference_strategy",
     "register_llm_backend_support",
     "register_model_alias",

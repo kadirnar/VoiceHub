@@ -763,6 +763,45 @@ class HTTPBackendTests(unittest.TestCase):
             client.post_json_document("/generate", {})
         self.assertEqual(undeclared.read_limit, 5)
 
+    def test_json_response_rejects_ambiguous_keys_and_non_finite_numbers(self):
+        client = HTTPBackendClient(LLMBackendConfig(
+            backend="sglang",
+            endpoint="http://localhost:30000",
+        ))
+        ambiguities = (
+            (
+                "duplicate",
+                b'{"token_ids":["discarded-secret"],"token_ids":[7]}',
+                r"Duplicate JSON object key 'token_ids'",
+            ),
+            (
+                "constant",
+                b'{"meta":{"score":NaN}}',
+                r"non-finite JSON constant 'NaN'",
+            ),
+            (
+                "overflow",
+                b'{"meta":{"score":1e400}}',
+                r"\$\.meta\.score.*non-finite",
+            ),
+        )
+
+        for name, body, diagnostic in ambiguities:
+            with self.subTest(name=name):
+                with patch(
+                        "voicehub.llm_serving.http.urlopen",
+                        return_value=_FakeHTTPResponse(body),
+                ), self.assertRaisesRegex(
+                        LLMBackendRequestError,
+                        diagnostic,
+                ) as raised:
+                    client.post_json_document("/generate", {"input_ids": [1]})
+
+                rendered = str(raised.exception)
+                self.assertIn("sglang", rendered)
+                self.assertIn("/generate", rendered)
+                self.assertNotIn("discarded-secret", rendered)
+
     def test_redirects_fail_closed_without_forwarding_runtime_secrets(self):
         target_requests = []
 

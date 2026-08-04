@@ -6,7 +6,7 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS = {
-    "F5TTSConfig": "voicehub.models.f5tts.inference",
+    "F5TTSConfig": "voicehub.models.f5tts.configuration_f5tts",
     "F5TTSForTextToSpeech": "voicehub.models.f5tts.inference",
 }
 

@@ -17,10 +17,10 @@ from voicehub.architectures.zonos.frontend import ZonosPhonemeFrontend
 from voicehub.architectures.zonos.metadata import ZONOS_SPEAKER_SAFE_CHECKPOINT_PUBLISHED, ZONOS_TRANSFORMER_REPOSITORY
 from voicehub.architectures.zonos.runtime import NativeZonosRuntime
 from voicehub.architectures.zonos.sampling import ZonosSamplingOptions
-from voicehub.configuration_utils import VoiceHubConfig
 from voicehub.modeling_outputs import TTSOutput
 from voicehub.modeling_utils import PreTrainedTTSModel
 from voicehub.models._shared import finish_audio_output, seeded_inference
+from voicehub.models.zonos.configuration_zonos import ZonosConfig
 from voicehub.processing.waveform import load_pcm_wave
 
 
@@ -223,54 +223,6 @@ def _stack_audio_codes(
         padded[index, :, :example.shape[-1]] = example
         resolved_lengths[index] = example.shape[-1]
     return padded, resolved_lengths
-
-
-class ZonosConfig(VoiceHubConfig):
-    """Loading and execution settings for native Zonos v0.1."""
-
-    model_type = "zonos"
-
-    def __init__(
-        self,
-        *,
-        torch_dtype: str | None = "auto",
-        sample_rate: int = 44_100,
-        cache_dir: str | None = None,
-        revision: str | None = None,
-        token: str | bool | None = None,
-        local_files_only: bool = False,
-        verify_artifacts: bool = False,
-        decode_audio: bool = True,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(sample_rate=sample_rate, **kwargs)
-        self.torch_dtype = torch_dtype
-        self.cache_dir = cache_dir
-        self.revision = revision
-        self.token = token
-        self.local_files_only = local_files_only
-        self.verify_artifacts = verify_artifacts
-        self.decode_audio = decode_audio
-        self.validate()
-
-    def validate(self) -> None:
-        for name in (
-                "local_files_only",
-                "verify_artifacts",
-                "decode_audio",
-        ):
-            if not isinstance(getattr(self, name), bool):
-                raise TypeError(f"`{name}` must be a boolean.")
-        if (isinstance(self.sample_rate, bool) or not isinstance(self.sample_rate, int) or
-                self.sample_rate <= 0):
-            raise ValueError("`sample_rate` must be a positive integer.")
-        if self.sample_rate != 44_100:
-            raise ValueError("The published Zonos v0.1 codec operates at 44,100 Hz.")
-
-    def to_dict(self) -> dict[str, Any]:
-        values = super().to_dict()
-        values.pop("token", None)
-        return values
 
 
 class ZonosForTextToSpeech(PreTrainedTTSModel):
