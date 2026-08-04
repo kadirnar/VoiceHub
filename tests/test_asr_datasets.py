@@ -931,7 +931,7 @@ class ASRDatasetManifestTests(unittest.TestCase):
                                 validate=False,
                             )
                         rendered = str(captured.exception)
-                        self.assertIn(str(manifest), rendered)
+                        self.assertIn(str(manifest.resolve()), rendered)
                         self.assertRegex(rendered, diagnostic)
                         self.assertNotIn("discarded-secret", rendered)
 
