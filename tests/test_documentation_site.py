@@ -2285,7 +2285,13 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn("const viewportMargin = 4", script)
         self.assertIn('labels.scrollBy({ behavior: "instant"', script)
         self.assertIn('window.scrollBy({ behavior: "instant"', script)
-        self.assertIn("requestAnimationFrame(() => keepLabelInViewport(label))", script)
+        self.assertIn("const revealLabel = (input, label) =>", script)
+        self.assertIn("if (document.activeElement !== input) return;", script)
+        self.assertIn(
+            "if (document.activeElement === input) keepLabelInViewport(label);",
+            script,
+        )
+        self.assertIn("revealLabel(input, label);", script)
         self.assertIn('tabSet.addEventListener("keydown", (event) => {', script)
         self.assertIn("event.preventDefault();", script)
         self.assertIn("nextInput.focus({ preventScroll: true });", script)
