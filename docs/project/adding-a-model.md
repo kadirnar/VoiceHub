@@ -10,14 +10,26 @@ provenance and license records, CPU-safe tests, and a generated model page.
 Put model-specific code in its package and use shared VoiceHub contracts for
 loading, outputs, optimization, training, and serialization.
 
-<ol class="vh-process vh-process--seven" role="list" aria-label="Model integration workflow">
-  <li><span class="vh-process__number" aria-hidden="true">01</span><strong>Audit</strong><span class="vh-process__detail">Record the checkpoint, source revision, license, inputs, outputs, and training boundary.</span></li>
-  <li><span class="vh-process__number" aria-hidden="true">02</span><strong>Configure</strong><span class="vh-process__detail">Create a JSON-serializable config with a unique model type.</span></li>
-  <li><span class="vh-process__number" aria-hidden="true">03</span><strong>Wrap</strong><span class="vh-process__detail">Implement the task base class and keep heavyweight imports inside the load hook.</span></li>
-  <li><span class="vh-process__number" aria-hidden="true">04</span><strong>Register</strong><span class="vh-process__detail">Connect the config and model to one auto factory.</span></li>
-  <li><span class="vh-process__number" aria-hidden="true">05</span><strong>Describe</strong><span class="vh-process__detail">Declare owned architecture capabilities and honest training metadata.</span></li>
-  <li><span class="vh-process__number" aria-hidden="true">06</span><strong>Test</strong><span class="vh-process__detail">Cover lazy import, factory loading, output type, save/reload, and optimization validation.</span></li>
-  <li><span class="vh-process__number" aria-hidden="true">07</span><strong>Document</strong><span class="vh-process__detail">Generate the provider page and navigation from registry metadata.</span></li>
+The current Transformers reference is
+[Add a model with modular transformers](https://huggingface.co/docs/transformers/main/en/modular_transformers).
+It reduces contribution boilerplate while generating explicit standalone files
+for each model. VoiceHub maps that mental model to a manifest-driven scaffold:
+reuse stable speech components through composition, then keep the generated
+configuration, runtime, and task wrapper explicit and locally readable.
+VoiceHub does not generate a provider runtime through inheritance because a
+speech integration may own checkpoint conversion, audio processing, codecs,
+or streaming state. The legacy `add_new_model` guide remains an upstream
+secondary path, not the representative route for this page.
+
+<ol class="vh-process vh-process--eight" role="list" aria-label="Model integration workflow">
+  <li><span class="vh-process__number" aria-hidden="true">01</span><strong>Create</strong><span class="vh-process__detail">Create the explicit package and optional owned architecture with the scaffold.</span></li>
+  <li><span class="vh-process__number" aria-hidden="true">02</span><strong>Audit</strong><span class="vh-process__detail">Pin checkpoint and source revisions, copy legal text, and state the evidence boundary.</span></li>
+  <li><span class="vh-process__number" aria-hidden="true">03</span><strong>Configure</strong><span class="vh-process__detail">Define a JSON-serializable config with a unique model type.</span></li>
+  <li><span class="vh-process__number" aria-hidden="true">04</span><strong>Wrap</strong><span class="vh-process__detail">Implement the task base class and keep heavyweight imports inside the load hook.</span></li>
+  <li><span class="vh-process__number" aria-hidden="true">05</span><strong>Register</strong><span class="vh-process__detail">Activate one lazy manifest or an explicit extension registrar.</span></li>
+  <li><span class="vh-process__number" aria-hidden="true">06</span><strong>Support</strong><span class="vh-process__detail">Declare owned capabilities plus honest training and optimization boundaries.</span></li>
+  <li><span class="vh-process__number" aria-hidden="true">07</span><strong>Test</strong><span class="vh-process__detail">Cover lazy import, factory loading, normalized output, persistence, and optimization.</span></li>
+  <li><span class="vh-process__number" aria-hidden="true">08</span><strong>Document</strong><span class="vh-process__detail">Generate the provider page and navigation from registry metadata.</span></li>
 </ol>
 
 ## 1. Create the package
@@ -59,6 +71,21 @@ voicehub/models/auroratts/
 tests/test_auroratts.py
 docs/models/providers/auroratts.md  # generated after registration
 ```
+
+Every step owns a predictable file boundary. Generic registry, optimization,
+and documentation tests discover the new integration; they do not require a
+provider entry.
+
+| Step | Owned files or generated artifacts |
+| --- | --- |
+| 1. Create the package | `voicehub/models/<model_type>/`; optional `voicehub/architectures/<model_type>/` |
+| 2. Record provenance and license | `source/SOURCE.json`, `source/THIRD_PARTY_LICENSE`, and any required `NOTICE` or `COPYING` file |
+| 3. Define the config | `configuration_<model_type>.py` |
+| 4. Implement the task wrapper | `modeling_<model_type>.py`, `runtime.py`, and model-local processing or conversion modules |
+| 5. Register once | `model-integration.json` and `registration.py`; legacy central fragments only while migrating an existing declaration |
+| 6. Declare training and optimization support | The manifest, optional `voicehub/architectures/<model_type>/` registration, and model-local training or optimization factories |
+| 7. Test the contract | `tests/test_<model_type>.py`; registry-wide tests discover the activated integration without a provider list edit |
+| 8. Generate the model page | `docs/models/providers/<model_type>.md` and the generated navigation block in `mkdocs.yml` |
 
 If VoiceHub owns the executable graph, put it in
 `voicehub/architectures/auroratts/`. Keep reviewed upstream code and its
@@ -189,7 +216,11 @@ provider-specific object.
 ## 5. Register once
 
 The auto factories use the config's `model_type` and store lazy import paths.
-No central auto-factory mapping needs to change.
+No central auto-factory mapping needs to change. Registration also records the
+model class's `processor_class` as lazy `ModelSpec` metadata. Models that retain
+the shared task-default processor need no extra declaration; an extension that
+sets a custom importable processor class keeps that class without forcing model
+wrapper import during `AutoProcessor` discovery.
 
 ```python
 from voicehub import AutoModelForTextToSpeech
@@ -238,6 +269,14 @@ and it requires no edit to `voicehub/models/registry.py` or
 `voicehub/training/specs.py`. An inactive or invalid work-in-progress manifest
 is never registered. A central declaration and an activated manifest for the
 same model fail as a duplicate.
+
+Activation is also a strict JSON trust boundary. An activated
+`model-integration.json` and its required `source/SOURCE.json` reject duplicate
+keys, `NaN`, infinities, and numeric overflow before registry or training-spec
+construction. The scaffold checker and read-only catalog report the same
+source-aware diagnostics without echoing a discarded value. An inactive
+work-in-progress manifest remains undiscovered, including while its JSON is
+temporarily incomplete or ambiguous.
 
 The read-only legacy renderer remains available when auditing or migrating a
 central declaration:

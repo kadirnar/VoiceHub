@@ -27,14 +27,19 @@ SITE_CONFIG_PATH = REPOSITORY_ROOT / "mkdocs.yml"
 GENERATOR_PATH = "scripts/generate_model_pages.py"
 COLAB_ROOT = ("https://colab.research.google.com/github/kadirnar/voicehub/"
               "blob/main/notebooks/models")
-NAVIGATION_START = "      # BEGIN GENERATED MODEL GUIDE NAVIGATION"
-NAVIGATION_END = "      # END GENERATED MODEL GUIDE NAVIGATION"
+NAVIGATION_START = "          # BEGIN GENERATED MODEL GUIDE NAVIGATION"
+NAVIGATION_END = "          # END GENERATED MODEL GUIDE NAVIGATION"
+AUTO_CLASSES_NAVIGATION_ENTRY = "          - Auto Classes: models/providers/index.md"
+MODEL_GUIDES_NAVIGATION_SECTION = "      - Models:\n"
+FULL_API_NAVIGATION_ENTRY = "      - Full API reference: reference/api.md"
 MODEL_PAGE_SECTIONS = (
+    "Usage",
     "Overview",
-    "Quickstart",
-    "Supported tasks and capabilities",
-    "Checkpoints, provenance, and license",
-    "Optimization and training support",
+    "Configuration",
+    "Processing",
+    "Inference",
+    "Training and optimization",
+    "Checkpoints, provenance, license, and limitations",
     "Public API",
 )
 
@@ -81,7 +86,14 @@ def _inference_code(spec) -> str:
         rendered = "\n".join(f"    {line}" for line in options)
         if rendered:
             rendered += "\n"
+        reference_setup = ""
+        if any("REFERENCE_" in line for line in options):
+            reference_setup = '''
+REFERENCE_AUDIO = Path("reference.wav")
+REFERENCE_TEXT = "This transcript must exactly match the authorized reference audio."
+'''
         return f'''from pathlib import Path
+{reference_setup}
 
 from voicehub import AutoModelForTextToSpeech, TTSGenerationConfig
 
@@ -209,6 +221,38 @@ def _source_provenance(spec) -> str:
         if candidate.is_file():
             return f"`{candidate.relative_to(REPOSITORY_ROOT).as_posix()}`"
     return "No integration-specific bundled `SOURCE.json` is declared for this registry entry."
+
+
+def _module_source_path(module: str) -> Path:
+    """Resolve a declared lazy module to its stable repository source."""
+    module_path = REPOSITORY_ROOT / Path(*module.split("."))
+    source_path = module_path.with_suffix(".py")
+    if source_path.is_file():
+        return source_path.relative_to(REPOSITORY_ROOT)
+    package_source = module_path / "__init__.py"
+    if package_source.is_file():
+        return package_source.relative_to(REPOSITORY_ROOT)
+    raise RuntimeError(f"Declared module {module!r} has no repository source file")
+
+
+def _module_source_link(module: str, label: str) -> str:
+    source_path = _module_source_path(module).as_posix()
+    return f"[{label}](https://github.com/kadirnar/voicehub/blob/main/{source_path})"
+
+
+def _example_device(spec) -> str:
+    return "cpu" if spec.task.value == "voice-activity-detection" else "cuda"
+
+
+def _processor_code(spec) -> str:
+    checkpoint, _ = _checkpoint(spec)
+    return f'''from voicehub import AutoProcessor
+
+processor = AutoProcessor.from_pretrained(
+    {checkpoint!r},
+    model_type={spec.model_type!r},
+)
+print(type(processor).__name__)'''
 
 
 def _variant_dependencies(variant) -> str:
@@ -353,19 +397,25 @@ def render_page(spec) -> str:
     factory = _factory_name(spec)
     output = _output_name(spec)
     source_provenance = _source_provenance(spec)
+    config_source = _module_source_link(
+        spec.config_module,
+        f"View `{spec.config_class}` source",
+    )
+    model_source = _module_source_link(
+        spec.module,
+        f"View `{spec.class_name}` source",
+    )
+    dependency_extra = (f"`voicehub[{spec.install_extra}]`" if spec.install_extra else "Core package")
+    checkpoint_note = checkpoint_metadata.note or (
+        "No integration-specific checkpoint limitation is registered. Verify the selected "
+        "checkpoint revision and its documented runtime requirements.")
     return f'''---
 description: Public API, checkpoint, training, and optimization guide for the {spec.model_type} integration.
 ---
 
-# `{spec.model_type}` model guide
+# {spec.display_name}
 
-## Overview
-
-`{spec.model_type}` is a VoiceHub **{TASK_LABELS[spec.task.value].lower()}**
-integration. This page is generated from the model registry and its executable
-data and training contracts, so the documented support stays aligned with code.{notebook}
-
-## Quickstart
+## Usage
 
 ```bash
 {_install_command(spec)}
@@ -381,7 +431,12 @@ Use only authorized recordings for reference voice, transcription, detection,
 or evaluation. The example selects a concrete device; verify checkpoint-specific
 hardware needs and pin an immutable revision before production use.
 
-## Supported tasks and capabilities
+## Overview
+
+{spec.display_name} uses the canonical model type `{spec.model_type}` and is a
+VoiceHub **{TASK_LABELS[spec.task.value].lower()}** integration. This page is
+generated from the model registry and its executable data and training
+contracts, so the documented support stays aligned with code.{notebook}
 
 | Property | Value |
 | --- | --- |
@@ -390,29 +445,48 @@ hardware needs and pin an immutable revision before production use.
 | Runtime | `{'VoiceHub-native' if spec.is_voicehub_native else 'provider adapter'}` |
 | Capabilities | {_code_list(spec.capabilities)} |
 | Reusable components | {components} |
+| Normalized output | `{output}` |
 
-### Data contract
+## Configuration
 
-{_dataset_section(spec)}
+Load the registered configuration without constructing the model. The canonical
+key remains serializable even though the page uses a presentation label.
 
-## Checkpoints, provenance, and license
+```python
+from voicehub import AutoConfig
+
+config = AutoConfig.for_model({spec.model_type!r})
+print(config.model_type)
+```
 
 | Property | Value |
 | --- | --- |
-| Default checkpoint | {checkpoint} |
-| Checkpoint status | {_cell(checkpoint_metadata.status)} |
-| Implementation | `{spec.module}.{spec.class_name}` |
-| Configuration | `{spec.config_module}.{spec.config_class}` |
-| Source provenance | {source_provenance} |
-| License | {license_value} |
+| Canonical model type | `{spec.model_type}` |
+| Configuration class | `{spec.config_class}` |
+| Architecture class | `{spec.class_name}` |
 
-{license_text}
+## Processing
 
-The default checkpoint identifies the expected family, not every compatible
-variant. Confirm the selected checkpoint's revision, access terms, provenance,
-and license before downloading or redistributing it.
+`AutoProcessor` resolves the processor declared by the registered model. Creating
+the processor does not allocate model weights.
 
-## Optimization and training support
+```python
+{_processor_code(spec)}
+```
+
+Processor behavior remains model-owned when text normalization, audio loading,
+feature extraction, or reference speech requires provider-specific semantics.
+
+## Inference
+
+The Usage example returns `{output}` through `{factory}`. Inputs are validated
+against the task and data contracts below before model-specific execution.
+
+### Input and output contract
+
+{_dataset_section(spec)}
+
+## Training and optimization
 
 All public optimizations enter this model through the shared
 `BaseSpeechModel` lifecycle. Use `available_optimization_passes()` to discover
@@ -424,13 +498,78 @@ runtime or hardware cannot satisfy a pass.
 
 {_training_section(spec)}
 
+## Checkpoints, provenance, license, and limitations
+
+| Property | Value |
+| --- | --- |
+| Default checkpoint | {checkpoint} |
+| Checkpoint status | {_cell(checkpoint_metadata.status)} |
+| Optional dependency extra | {dependency_extra} |
+| Hardware and runtime | Usage selects `{_example_device(spec)}`; verify checkpoint-specific requirements |
+| Real-checkpoint evidence | [Release evidence](../../project/release-readiness.md); a registry default alone is not execution evidence |
+| Implementation | `{spec.module}.{spec.class_name}` |
+| Configuration | `{spec.config_module}.{spec.config_class}` |
+| Source provenance | {source_provenance} |
+| License | {license_value} |
+
+{license_text}
+
+The default checkpoint identifies the expected family, not every compatible
+variant. Confirm the selected checkpoint's revision, access terms, provenance,
+and license before downloading or redistributing it.
+
+### Limitations
+
+- {checkpoint_note}
+- The Usage example selects `{_example_device(spec)}`; validate memory, precision,
+  and optional dependency requirements on the target system.
+- Public optimizations fail closed when the runtime or hardware cannot satisfy
+  their validation contract; an unavailable pass is not reported as applied.
+- Contract tests do not substitute for released-checkpoint evidence. Consult the
+  linked release record before treating a checkpoint path as verified.
+
 ## Public API
+
+The stable configuration and model facades keep source inspection local while
+the task auto class owns pretrained loading and normalized output behavior.
+
+### `{spec.config_class}`
+
+{config_source}
+
+```text
+{spec.config_class}(**config_kwargs)
+```
+
+### `{spec.class_name}`
+
+{model_source}
+
+```text
+{factory}.from_pretrained(
+    pretrained_model_name_or_path,
+    *,
+    model_type={spec.model_type!r},
+    config=None,
+    **model_kwargs,
+)
+```
+
+The loader returns `{spec.class_name}` through the shared task-specific factory.
+
+```python
+from voicehub import get_model_spec
+
+spec = get_model_spec({spec.model_type!r})
+print(spec.display_name, spec.task.value)
+```
 
 | Purpose | Public object |
 | --- | --- |
 | Discover | `get_model_spec({spec.model_type!r})` |
 | Load and run | `{factory}` |
 | Configure | `{spec.config_class}` |
+| Process | `AutoProcessor` |
 | Model implementation | `{spec.class_name}` |
 | Normalized output | `{output}` |
 | Training contract | `get_training_spec({spec.model_type!r})` |
@@ -448,22 +587,103 @@ def render_index(specs) -> str:
     """Render the generated provider-guide index."""
     lines = [
         "---",
-        "description: One compact, contract-aligned page for every registered VoiceHub model.",
+        "description: Auto configuration, processing, task dispatch, and discovery for every registered VoiceHub model.",
         "---",
         "",
-        "# Model guides",
+        "# Auto Classes",
         "",
-        "Every registered model has one focused page with the same six sections: overview,",
-        "quickstart, capabilities, checkpoint and license status, optimization and training,",
-        "and public API. Hub-backed models also link to a dedicated Colab notebook.",
+        "Auto classes choose a registered configuration, processor, or task-specific model",
+        "from a checkpoint and its canonical `model_type`. They keep discovery lazy, so",
+        "listing the registry or reading this page does not import a model runtime.",
         "",
-        f"Generated by `{GENERATOR_PATH}`. Edit registry and contract metadata, then rerun the generator.",
+        "## Choose an Auto class",
+        "",
+        "| Workflow | Public class | Normalized output |",
+        "| --- | --- | --- |",
+        "| Text to speech | `AutoModelForTextToSpeech` | `TTSOutput` |",
+        "| Automatic speech recognition | `AutoModelForSpeechRecognition` | `ASROutput` |",
+        "| Voice activity detection | `AutoModelForVoiceActivityDetection` | `VADOutput` |",
+        "",
+        "Use `AutoModel` only when the checkpoint configuration already identifies its task.",
+        "Prefer a task-specific class when the expected output contract is known.",
+        "",
+        "## AutoConfig",
+        "",
+        "`AutoConfig` resolves the registered configuration class without constructing the",
+        "model. A local `config.json` may provide `model_type`; raw checkpoint files require",
+        "the explicit canonical identifier.",
+        "",
+        "```python",
+        "from voicehub import AutoConfig",
+        "",
+        "config = AutoConfig.from_pretrained(",
+        "    \"microsoft/speecht5_tts\",",
+        "    model_type=\"speecht5\",",
+        ")",
+        "print(config.model_type)",
+        "```",
+        "",
+        "## AutoProcessor",
+        "",
+        "`AutoProcessor` builds the processor paired with the registered model configuration",
+        "without allocating the model itself.",
+        "",
+        "```python",
+        "from voicehub import AutoProcessor",
+        "",
+        "processor = AutoProcessor.from_pretrained(",
+        "    \"microsoft/speecht5_tts\",",
+        "    model_type=\"speecht5\",",
+        ")",
+        "```",
+        "",
+        "## Task-specific AutoModel classes",
+        "",
+        "The task-specific factories preserve one output and failure contract across every",
+        "registered TTS, ASR, or VAD integration.",
+        "",
+        "```python",
+        "from voicehub import (",
+        "    AutoModelForSpeechRecognition,",
+        "    AutoModelForTextToSpeech,",
+        "    AutoModelForVoiceActivityDetection,",
+        ")",
+        "",
+        "for auto_class in (",
+        "    AutoModelForTextToSpeech,",
+        "    AutoModelForSpeechRecognition,",
+        "    AutoModelForVoiceActivityDetection,",
+        "):",
+        "    for spec in auto_class.available_models():",
+        "        print(spec.display_name, spec.model_type)",
+        "",
+        "model = AutoModelForTextToSpeech.from_pretrained(",
+        "    \"microsoft/speecht5_tts\",",
+        "    model_type=\"speecht5\",",
+        "    device=\"cpu\",",
+        "    lazy_load=True,",
+        ")",
+        "```",
+        "",
+        "Extensions register through the same auto-class contract. Follow the",
+        "[model contribution workflow](../../project/adding-a-model.md) so configuration,",
+        "runtime, provenance, tests, optimization support, and documentation stay complete.",
+        "",
+        "## Registered models",
+        "",
+        "Every entry below has one generated guide with the same eight required sections.",
+        "Hub-backed models also link to a dedicated Colab notebook.",
+        "",
+        f"Generated by `{GENERATOR_PATH}` from lazy registry metadata.",
         "",
     ]
     for task in TASK_ORDER:
-        task_specs = [spec for spec in specs if spec.task.value == task]
+        task_specs = sorted(
+            (spec for spec in specs if spec.task.value == task),
+            key=lambda spec: (spec.display_name.casefold(), spec.model_type),
+        )
         lines.extend((
-            f"## {TASK_LABELS[task]}",
+            f"### {TASK_LABELS[task]}",
             "",
             "| Model | Default checkpoint | Training | Notebook |",
             "| --- | --- | --- | --- |",
@@ -475,7 +695,7 @@ def render_index(specs) -> str:
                 f"[Colab]({COLAB_ROOT}/{spec.model_type}.ipynb)"
                 if checkpoint_metadata.is_hugging_face else "—")
             lines.append(
-                f"| [`{spec.model_type}`]({spec.model_type}.md) | {checkpoint} | "
+                f"| [`{spec.display_name}`]({spec.model_type}.md) | {checkpoint} | "
                 f"`{spec.training.support.value}` | {notebook} |")
         lines.append("")
     return "\n".join(lines)
@@ -487,23 +707,58 @@ def render_navigation(specs) -> str:
     for task in TASK_ORDER:
         task_specs = sorted(
             (spec for spec in specs if spec.task.value == task),
-            key=lambda spec: spec.model_type,
+            key=lambda spec: (spec.display_name.casefold(), spec.model_type),
         )
-        lines.append(f"      - {TASK_LABELS[task]}:")
+        lines.append(f"          - {TASK_LABELS[task]}:")
         lines.extend(
-            f'          - "{spec.model_type}": models/providers/{spec.model_type}.md' for spec in task_specs)
+            f'              - "{spec.display_name}": models/providers/{spec.model_type}.md'
+            for spec in task_specs)
     lines.append(NAVIGATION_END)
     return "\n".join(lines)
 
 
 def render_site_config(specs) -> str:
-    """Replace only the generated model-navigation block in ``mkdocs.yml``."""
+    """Render model APIs in the Transformers-equivalent API hierarchy."""
     source = SITE_CONFIG_PATH.read_text(encoding="utf-8")
     if source.count(NAVIGATION_START) != 1 or source.count(NAVIGATION_END) != 1:
         raise RuntimeError("mkdocs.yml must contain exactly one generated model navigation block")
     prefix, remainder = source.split(NAVIGATION_START, 1)
     _, suffix = remainder.split(NAVIGATION_END, 1)
-    return f"{prefix}{render_navigation(specs)}{suffix}"
+    if prefix.endswith(MODEL_GUIDES_NAVIGATION_SECTION):
+        prefix = prefix[:-len(MODEL_GUIDES_NAVIGATION_SECTION)]
+    suffix = suffix.removeprefix("\n")
+    source = f"{prefix}{suffix}"
+
+    base_prefix, base_remainder = source.split("  - Base classes:\n", 1)
+    base_navigation, following_navigation = base_remainder.split("  - Inference:\n", 1)
+    base_navigation = base_navigation.replace(f"{AUTO_CLASSES_NAVIGATION_ENTRY}\n", "", 1)
+    base_navigation = base_navigation.replace("      - Models:\n\n", "      - Models:\n", 1)
+    source = (f"{base_prefix}  - Base classes:\n{base_navigation}"
+              f"  - Inference:\n{following_navigation}")
+
+    api_prefix, api_remainder = source.split("  - API:\n", 1)
+    api_navigation, plugins = api_remainder.split("\nplugins:", 1)
+    if AUTO_CLASSES_NAVIGATION_ENTRY not in api_navigation:
+        main_classes = "      - Main Classes:\n"
+        if api_navigation.count(main_classes) != 1:
+            raise RuntimeError("mkdocs.yml must contain exactly one API Main Classes section")
+        api_navigation = api_navigation.replace(
+            main_classes,
+            f"{main_classes}{AUTO_CLASSES_NAVIGATION_ENTRY}\n",
+            1,
+        )
+    if api_navigation.count(FULL_API_NAVIGATION_ENTRY) != 1:
+        raise RuntimeError("mkdocs.yml must contain exactly one Full API reference entry")
+    api_navigation = api_navigation.replace(
+        FULL_API_NAVIGATION_ENTRY,
+        f"{MODEL_GUIDES_NAVIGATION_SECTION}{render_navigation(specs)}\n"
+        f"{FULL_API_NAVIGATION_ENTRY}",
+        1,
+    )
+    rendered = f"{api_prefix}  - API:\n{api_navigation}\nplugins:{plugins}"
+    if rendered.count(AUTO_CLASSES_NAVIGATION_ENTRY) != 1:
+        raise RuntimeError("Auto Classes must appear exactly once under API Main Classes")
+    return rendered
 
 
 def generated_files() -> dict[Path, str]:

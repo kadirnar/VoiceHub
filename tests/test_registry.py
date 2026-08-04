@@ -8,7 +8,7 @@ import warnings
 from importlib import import_module
 from pathlib import Path
 
-from voicehub import AutoInferenceModel, PreTrainedTTSModel
+from voicehub import AutoInferenceModel, PreTrainedTTSModel, list_model_specs
 from voicehub.components import MODEL_COMPONENTS, components_for_model
 from voicehub.dependencies import import_optional
 from voicehub.errors import OptionalDependencyError, UnknownModelError
@@ -88,6 +88,15 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 class RegistryTests(unittest.TestCase):
+
+    def test_registry_exposes_display_names_without_changing_canonical_keys(self):
+        specs = list_model_specs(task=None)
+        self.assertEqual(len(specs), 68)
+        for spec in specs:
+            with self.subTest(model_type=spec.model_type):
+                self.assertTrue(spec.display_name[0].isupper())
+                self.assertNotEqual(spec.display_name, spec.model_type)
+                self.assertEqual(get_model_spec(spec.model_type).model_type, spec.model_type)
 
     def test_all_issue_models_are_registered(self):
         registered = {spec.model_type for spec in AutoInferenceModel.available_models()}

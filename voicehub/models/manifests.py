@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from voicehub.json_utils import parse_json_value
 from voicehub.tasks import SpeechTask
 
 _CLASS_PREFIX_PATTERN = re.compile(r"[A-Z][A-Za-z0-9]*")
@@ -107,8 +108,11 @@ def _validate_activation_artifacts(path: Path, model_type: str) -> None:
 
     source_path = package / "source" / "SOURCE.json"
     try:
-        source = json.loads(source_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        source = parse_json_value(
+            source_path.read_bytes(),
+            source=source_path,
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as error:
         raise ValueError(f"{source_path}: activated source manifest is invalid: {error}.") from error
     checkpoint = source.get("checkpoint") if isinstance(source, dict) else None
     revision = checkpoint.get("revision") if isinstance(checkpoint, dict) else None
@@ -127,13 +131,18 @@ def _validate_activation_artifacts(path: Path, model_type: str) -> None:
 def _parse_active_manifest(path: Path) -> BuiltinModelManifest | None:
     """Parse one manifest only after its explicit built-in activation flag."""
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        document = path.read_bytes()
+        payload = json.loads(document)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         # Work-in-progress scaffolds must not break normal VoiceHub imports.
         # The scaffold checker reports their precise syntax or I/O error.
         return None
     if not isinstance(payload, dict) or payload.get("builtin") is not True:
         return None
+    try:
+        payload = parse_json_value(document, source=path)
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ValueError(f"{path}: activated model manifest is invalid: {error}.") from error
     if payload.get("format_version") != _SUPPORTED_FORMAT_VERSION:
         raise ValueError(
             f"{path}: format_version must be {_SUPPORTED_FORMAT_VERSION} for built-in discovery.")

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import math
 import re
 import sys
 import textwrap
@@ -27,6 +28,55 @@ MODEL_PAGE_SECTIONS = (
     "Optimization and training support",
     "Public API",
 )
+
+
+class _StrictJSONError(ValueError):
+    """Internal error for ambiguous standalone scaffold artifacts."""
+
+
+def _unique_json_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise _StrictJSONError(f"Duplicate JSON object key {key!r}.")
+        value[key] = item
+    return value
+
+
+def _reject_json_constant(value):
+    raise _StrictJSONError(f"Unsupported non-finite JSON constant {value!r}.")
+
+
+def _json_path_for_key(path, key):
+    return f"{path}.{key}" if key.isidentifier() else f"{path}[{key!r}]"
+
+
+def _validate_finite_json_numbers(value, *, path="$"):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _validate_finite_json_numbers(
+                item,
+                path=_json_path_for_key(path, key),
+            )
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_finite_json_numbers(item, path=f"{path}[{index}]")
+    elif isinstance(value, float) and not math.isfinite(value):
+        raise _StrictJSONError(f"{path} contains a non-finite JSON number.")
+
+
+def _parse_strict_json(document, *, source):
+    """Mirror the runtime JSON contract without importing VoiceHub."""
+    try:
+        value = json.loads(
+            document,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+        _validate_finite_json_numbers(value)
+    except _StrictJSONError as error:
+        raise ValueError(f"Invalid JSON artifact {source}: {error}") from error
+    return value
 
 
 class ScaffoldError(ValueError):
@@ -701,8 +751,11 @@ def render_builtin_catalog_fragments(
             f"{normalized_model_type}: missing {_display_relative_path(manifest_path, root)}; "
             "run scaffold_model.py create first.")
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
+        manifest = _parse_strict_json(
+            manifest_path.read_bytes(),
+            source=manifest_path,
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as error:
         raise ScaffoldError(f"{normalized_model_type}: invalid model-integration.json: {error}.") from error
     if not isinstance(manifest, dict):
         raise ScaffoldError(f"{normalized_model_type}: model-integration.json must contain an object.")
@@ -1008,8 +1061,11 @@ def check_model_scaffold(output_root: Path, model_type: str) -> tuple[str, ...]:
             f"{normalized_model_type}: missing {_display_relative_path(manifest_path, root)}; "
             "run scaffold_model.py create first.", )
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
+        manifest = _parse_strict_json(
+            manifest_path.read_bytes(),
+            source=manifest_path,
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as error:
         return (f"{normalized_model_type}: invalid model-integration.json: {error}.", )
     if not isinstance(manifest, dict):
         return (f"{normalized_model_type}: model-integration.json must contain an object.", )
@@ -1155,8 +1211,11 @@ def check_model_scaffold(output_root: Path, model_type: str) -> tuple[str, ...]:
     source_path = package / "source" / "SOURCE.json"
     if source_path.is_file():
         try:
-            source = json.loads(source_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as error:
+            source = _parse_strict_json(
+                source_path.read_bytes(),
+                source=source_path,
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as error:
             errors.append(f"{normalized_model_type}: SOURCE.json is invalid: {error}.")
         else:
             if not isinstance(source, dict):

@@ -16,24 +16,30 @@ from voicehub.optimization.capabilities import (
     OptimizationContext,
     normalize_optimization_kind,
 )
+from voicehub.serialization_utils import reject_serialized_secrets
 
 _JSON_SCALARS = (str, int, float, bool, type(None))
 
 
 def canonical_json_tree(value: Any, *, path: str) -> Any:
     """Return a strict JSON tree without coercing keys or custom objects."""
+    reject_serialized_secrets(value, owner=path)
+    return _canonical_json_tree(value, path=path)
+
+
+def _canonical_json_tree(value: Any, *, path: str) -> Any:
     if isinstance(value, Mapping):
         if any(not isinstance(key, str) for key in value):
             raise TypeError(f"{path} contains a non-string mapping key.")
         output = {}
         for key in sorted(value):
-            output[key] = canonical_json_tree(
+            output[key] = _canonical_json_tree(
                 value[key],
                 path=f"{path}.{key}",
             )
         return output
     if isinstance(value, (tuple, list)):
-        return [canonical_json_tree(item, path=f"{path}[{index}]") for index, item in enumerate(value)]
+        return [_canonical_json_tree(item, path=f"{path}[{index}]") for index, item in enumerate(value)]
     if isinstance(value, float) and not math.isfinite(value):
         raise ValueError(f"{path} contains a non-finite number.")
     if isinstance(value, _JSON_SCALARS):

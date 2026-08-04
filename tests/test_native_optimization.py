@@ -655,6 +655,98 @@ class NativeOptimizationTests(unittest.TestCase):
             )
         self.assertFalse(optimization_pass.applied)
 
+    def test_optimization_manifest_rejects_runtime_credentials(self):
+        credential = "credential-sentinel-value"
+
+        class CredentialManifestPass(OptimizationPass):
+            pass_id = "test.credential-manifest"
+            pass_version = "1"
+            capabilities = OptimizationCapabilities(
+                modes=(OptimizationMode.INFERENCE, ),
+                reversible=True,
+            )
+
+            def __init__(
+                self,
+                *,
+                configuration=None,
+                metadata=None,
+                runtime_status=None,
+            ):
+                self.configuration = configuration or {}
+                self.metadata = metadata or {}
+                self.runtime_status = runtime_status
+                self.apply_calls = 0
+                self.restore_calls = 0
+
+            def manifest_configuration(self):
+                return self.configuration
+
+            def apply(self, model, context):
+                self.apply_calls += 1
+                return PassResult(model=model, metadata=self.metadata)
+
+            def restore(self, model, state, context):
+                self.restore_calls += 1
+                return model
+
+            def runtime_manifest_status(self, result):
+                return self.runtime_status
+
+        unsafe_configuration = CredentialManifestPass(
+            configuration={
+                "provider_options": {
+                    "api_key": credential,
+                },
+            }, )
+        with self.assertRaisesRegex(ValueError, "provider_options.api_key") as raised:
+            OptimizationPassManager().apply(
+                object(),
+                (unsafe_configuration, ),
+                OptimizationContext(mode="inference"),
+            )
+        self.assertNotIn(credential, str(raised.exception))
+        self.assertEqual(unsafe_configuration.apply_calls, 0)
+
+        unsafe_metadata = CredentialManifestPass(
+            configuration={"token_count": 3},
+            metadata={
+                "provider_options": {
+                    "password": credential,
+                },
+            },
+        )
+        with self.assertRaises(OptimizationApplicationError) as raised:
+            OptimizationPassManager().apply(
+                object(),
+                (unsafe_metadata, ),
+                OptimizationContext(mode="inference"),
+            )
+        self.assertIn("provider_options.password", str(raised.exception))
+        self.assertNotIn(credential, str(raised.exception))
+        self.assertEqual(unsafe_metadata.apply_calls, 1)
+        self.assertEqual(unsafe_metadata.restore_calls, 1)
+
+        mutable_status = {"token_count": 5}
+        safe_pass = CredentialManifestPass(
+            configuration={"token_count": 3},
+            metadata={"token_count": 4},
+            runtime_status=mutable_status,
+        )
+        result = OptimizationPassManager().apply(
+            object(),
+            (safe_pass, ),
+            OptimizationContext(mode="inference"),
+        )
+        self.assertEqual(
+            result.manifest()["passes"][0]["runtime_status"]["token_count"],
+            5,
+        )
+        mutable_status["provider_options"] = {"auth_token": credential}
+        with self.assertRaisesRegex(ValueError, "provider_options.auth_token") as raised:
+            result.manifest()
+        self.assertNotIn(credential, str(raised.exception))
+
     def test_same_identity_with_different_configuration_has_distinct_manifest(self):
         first = OptimizationPassManager().apply(
             0,
