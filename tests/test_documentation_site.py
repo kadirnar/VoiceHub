@@ -1021,7 +1021,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         ):
             self.assertIn(fragment, script)
 
-    def test_brand_palette_uses_non_blue_multicolor_transitions(self):
+    def test_brand_palette_uses_cheerful_multicolor_transitions(self):
         stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
         mark = (DOCS_ROOT / "assets" / "voicehub-mark.svg").read_text(encoding="utf-8")
 
@@ -1044,10 +1044,12 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
 
         header = stylesheet.split(".md-header {", 1)[1].split("}", 1)[0]
         header_tokens = (
-            "var(--vh-header-rose)",
-            "var(--vh-header-plum)",
+            "var(--vh-header-fuchsia)",
             "var(--vh-header-coral)",
-            "var(--vh-header-amber)",
+            "var(--vh-header-tangerine)",
+            "var(--vh-header-sunshine)",
+            "var(--vh-header-mint)",
+            "var(--vh-header-violet)",
         )
         for token in header_tokens:
             self.assertIn(token, header)
@@ -1055,16 +1057,21 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             [header.index(token) for token in header_tokens],
             sorted(header.index(token) for token in header_tokens),
         )
-        self.assertIn("var(--vh-page-glow-rose)", stylesheet)
-        self.assertIn("var(--vh-page-glow-amber)", stylesheet)
+        for token in (
+                "var(--vh-page-glow-coral)",
+                "var(--vh-page-glow-sunshine)",
+                "var(--vh-page-glow-mint)",
+                "var(--vh-page-glow-violet)",
+        ):
+            self.assertIn(token, stylesheet)
         back_to_top_state = stylesheet.split(
             ".md-top:is(:hover, :focus-visible) {",
             1,
         )[1].split("}", 1)[0]
         self.assertIn("background: var(--vh-surface-soft);", back_to_top_state)
         self.assertIn("color: var(--vh-accent);", back_to_top_state)
-        self.assertEqual(mark.count("<stop"), 4)
-        for color in ("#86198f", "#be123c", "#c2410c", "#047857"):
+        self.assertEqual(mark.count("<stop"), 5)
+        for color in ("#a21caf", "#c0265e", "#c2410c", "#047857", "#6d28d9"):
             self.assertIn(f'stop-color="{color}"', mark)
 
     def test_model_api_reference_matches_transformers_contract(self):
@@ -2089,9 +2096,9 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 '"header_height": 65',
                 '"header_height": 64',
                 '"rgb(255, 255, 255)"',
-                '"rgb(43, 32, 38)"',
-                '"rgb(33, 27, 31)"',
-                '"rgb(247, 241, 244)"',
+                '"rgb(41, 35, 41)"',
+                '"rgb(28, 24, 32)"',
+                '"rgb(249, 245, 247)"',
                 '".md-sidebar--primary"',
                 '".md-sidebar--secondary"',
                 '"a.md-nav__link--active"',
@@ -2303,6 +2310,10 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn('tabSet.addEventListener("keydown", (event) => {', script)
         self.assertIn("event.preventDefault();", script)
         self.assertIn("nextInput.focus({ preventScroll: true });", script)
+        self.assertLess(
+            script.index('nextInput.dispatchEvent(new Event("change", { bubbles: true }));'),
+            script.index("nextInput.focus({ preventScroll: true });"),
+        )
         self.assertIn('nextInput.dispatchEvent(new Event("input", { bubbles: true }))', script)
         self.assertIn('nextInput.dispatchEvent(new Event("change", { bubbles: true }))', script)
         self.assertIn(
@@ -2314,9 +2325,9 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         for fragment in (
                 ".md-typeset p a,",
                 "--md-code-hl-operator-color: #7e22ce;",
-                "--md-code-hl-variable-color: #6b5b63;",
+                "--md-code-hl-variable-color: #665c63;",
                 "--md-code-hl-constant-color: #fbbf24;",
-                "--md-code-hl-keyword-color: #d8b4fe;",
+                "--md-code-hl-keyword-color: #e9d5ff;",
                 "--md-code-hl-number-color: #fb7185;",
                 ".md-copyright {",
                 ".md-typeset__table:focus-visible {",

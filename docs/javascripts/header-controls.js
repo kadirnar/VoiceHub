@@ -494,10 +494,10 @@
         event.preventDefault();
         const currentIndex = inputs.indexOf(event.target);
         const nextInput = inputs[(currentIndex + direction + inputs.length) % inputs.length];
-        nextInput.focus({ preventScroll: true });
         nextInput.checked = true;
         nextInput.dispatchEvent(new Event("input", { bubbles: true }));
         nextInput.dispatchEvent(new Event("change", { bubbles: true }));
+        nextInput.focus({ preventScroll: true });
       });
     });
   };
