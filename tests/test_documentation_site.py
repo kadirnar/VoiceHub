@@ -1007,6 +1007,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 ".md-typeset code.vh-optimization-term",
                 ".md-nav__link.vh-model-link",
                 ".md-nav__link.vh-optimization-link",
+                "body.vh-optimization-page .md-typeset h1",
         ):
             self.assertIn(selector, stylesheet)
         for fragment in (
@@ -1019,6 +1020,52 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 "initializeSemanticHighlights();",
         ):
             self.assertIn(fragment, script)
+
+    def test_brand_palette_uses_non_blue_multicolor_transitions(self):
+        stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
+        mark = (DOCS_ROOT / "assets" / "voicehub-mark.svg").read_text(encoding="utf-8")
+
+        for legacy_fragment in (
+                "--vh-indigo",
+                "--vh-header-start",
+                "--vh-header-end",
+                "#2563eb",
+                "#1e40af",
+                "#2878ed",
+                "#1d5fd1",
+                "#0891b2",
+                "#1fb6c9",
+                "rgba(74, 144, 255",
+                "rgba(125, 211, 252",
+        ):
+            with self.subTest(legacy_fragment=legacy_fragment):
+                self.assertNotIn(legacy_fragment, stylesheet)
+                self.assertNotIn(legacy_fragment, mark)
+
+        header = stylesheet.split(".md-header {", 1)[1].split("}", 1)[0]
+        header_tokens = (
+            "var(--vh-header-rose)",
+            "var(--vh-header-plum)",
+            "var(--vh-header-coral)",
+            "var(--vh-header-amber)",
+        )
+        for token in header_tokens:
+            self.assertIn(token, header)
+        self.assertEqual(
+            [header.index(token) for token in header_tokens],
+            sorted(header.index(token) for token in header_tokens),
+        )
+        self.assertIn("var(--vh-page-glow-rose)", stylesheet)
+        self.assertIn("var(--vh-page-glow-amber)", stylesheet)
+        back_to_top_state = stylesheet.split(
+            ".md-top:is(:hover, :focus-visible) {",
+            1,
+        )[1].split("}", 1)[0]
+        self.assertIn("background: var(--vh-surface-soft);", back_to_top_state)
+        self.assertIn("color: var(--vh-accent);", back_to_top_state)
+        self.assertEqual(mark.count("<stop"), 4)
+        for color in ("#86198f", "#be123c", "#c2410c", "#047857"):
+            self.assertIn(f'stop-color="{color}"', mark)
 
     def test_model_api_reference_matches_transformers_contract(self):
         config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
@@ -2040,7 +2087,9 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 '"header_height": 65',
                 '"header_height": 64',
                 '"rgb(255, 255, 255)"',
-                '"rgb(31, 33, 41)"',
+                '"rgb(43, 32, 38)"',
+                '"rgb(33, 27, 31)"',
+                '"rgb(247, 241, 244)"',
                 '".md-sidebar--primary"',
                 '".md-sidebar--secondary"',
                 '"a.md-nav__link--active"',
@@ -2236,7 +2285,13 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn("const viewportMargin = 4", script)
         self.assertIn('labels.scrollBy({ behavior: "instant"', script)
         self.assertIn('window.scrollBy({ behavior: "instant"', script)
-        self.assertIn("requestAnimationFrame(() => keepLabelInViewport(label))", script)
+        self.assertIn("const revealLabel = (input, label) =>", script)
+        self.assertIn("if (document.activeElement !== input) return;", script)
+        self.assertIn(
+            "if (document.activeElement === input) keepLabelInViewport(label);",
+            script,
+        )
+        self.assertIn("revealLabel(input, label);", script)
         self.assertIn('tabSet.addEventListener("keydown", (event) => {', script)
         self.assertIn("event.preventDefault();", script)
         self.assertIn("nextInput.focus({ preventScroll: true });", script)
@@ -2250,11 +2305,11 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
         for fragment in (
                 ".md-typeset p a,",
-                "--md-code-hl-operator-color: #5d3bb3;",
-                "--md-code-hl-variable-color: #686a72;",
-                "--md-code-hl-constant-color: #a18ff0;",
-                "--md-code-hl-keyword-color: #7c9cef;",
-                "--md-code-hl-number-color: #f17b6d;",
+                "--md-code-hl-operator-color: #7e22ce;",
+                "--md-code-hl-variable-color: #6b5b63;",
+                "--md-code-hl-constant-color: #fbbf24;",
+                "--md-code-hl-keyword-color: #d8b4fe;",
+                "--md-code-hl-number-color: #fb7185;",
                 ".md-copyright {",
                 ".md-typeset__table:focus-visible {",
                 ".md-typeset pre > code:focus-visible,",
@@ -2427,7 +2482,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             ".md-typeset .tabbed-labels > label.vh-content-tab--focus {",
             1,
         )[1].split("}", 1)[0]
-        self.assertIn("outline: 2px solid var(--vh-indigo);", content_tab_focus)
+        self.assertIn("outline: 2px solid var(--vh-accent);", content_tab_focus)
         self.assertIn("outline-offset: 2px;", content_tab_focus)
 
     def test_all_visible_root_navigation_branches_activate_and_restore(self):
@@ -2544,7 +2599,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn("box-shadow:", active_state)
         self.assertIn("border-radius:", active_state)
         self.assertIn(".md-nav__link[href].focus-visible", stylesheet)
-        self.assertIn("outline: 2px solid var(--vh-indigo)", focus_state)
+        self.assertIn("outline: 2px solid var(--vh-accent)", focus_state)
         self.assertIn("outline-offset: 2px", focus_state)
 
     def test_right_table_of_contents_tracks_the_active_heading(self):
@@ -2593,7 +2648,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 "padding: 0;",
                 "background: transparent;",
                 "box-shadow: none;",
-                "color: var(--vh-indigo);",
+                "color: var(--vh-accent);",
                 "font-weight: 700;",
         ):
             self.assertIn(declaration, active_state)
@@ -2852,7 +2907,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         for fragment in (
                 ':is(.md-content__button[rel="edit"], .md-footer__link, .md-top)'
                 ":is(:focus-visible, .focus-visible)",
-                "outline: 2px solid var(--vh-indigo)",
+                "outline: 2px solid var(--vh-accent)",
                 "outline-offset: 2px",
         ):
             self.assertIn(fragment, stylesheet)
