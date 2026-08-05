@@ -1021,7 +1021,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         ):
             self.assertIn(fragment, script)
 
-    def test_brand_palette_uses_cheerful_multicolor_transitions(self):
+    def test_theme_uses_reference_neutral_surfaces_with_voicehub_accents(self):
         stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
         mark = (DOCS_ROOT / "assets" / "voicehub-mark.svg").read_text(encoding="utf-8")
 
@@ -1029,6 +1029,17 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 "--vh-indigo",
                 "--vh-header-start",
                 "--vh-header-end",
+                "--vh-header-fuchsia",
+                "--vh-header-coral",
+                "--vh-header-tangerine",
+                "--vh-header-sunshine",
+                "--vh-header-mint",
+                "--vh-header-violet",
+                "--vh-header-glow",
+                "--vh-page-glow-coral",
+                "--vh-page-glow-sunshine",
+                "--vh-page-glow-mint",
+                "--vh-page-glow-violet",
                 "#2563eb",
                 "#1e40af",
                 "#2878ed",
@@ -1043,27 +1054,21 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 self.assertNotIn(legacy_fragment, mark)
 
         header = stylesheet.split(".md-header {", 1)[1].split("}", 1)[0]
-        header_tokens = (
-            "var(--vh-header-fuchsia)",
-            "var(--vh-header-coral)",
-            "var(--vh-header-tangerine)",
-            "var(--vh-header-sunshine)",
-            "var(--vh-header-mint)",
-            "var(--vh-header-violet)",
-        )
-        for token in header_tokens:
-            self.assertIn(token, header)
-        self.assertEqual(
-            [header.index(token) for token in header_tokens],
-            sorted(header.index(token) for token in header_tokens),
-        )
-        for token in (
-                "var(--vh-page-glow-coral)",
-                "var(--vh-page-glow-sunshine)",
-                "var(--vh-page-glow-mint)",
-                "var(--vh-page-glow-violet)",
-        ):
-            self.assertIn(token, stylesheet)
+        self.assertIn("border-bottom: 1px solid var(--vh-line);", header)
+        self.assertIn("background: var(--vh-surface);", header)
+        self.assertIn("box-shadow: none;", header)
+        self.assertIn("color: var(--vh-ink);", header)
+        self.assertNotIn("gradient", header)
+
+        body = stylesheet.split("body {", 1)[1].split("}", 1)[0]
+        self.assertIn("background-image: none;", body)
+        self.assertIn('"Source Sans 3", "Source Sans Pro"', body)
+
+        active_navigation = stylesheet.split(".md-nav__link--active {", 1)[1].split("}", 1)[0]
+        self.assertIn("background: var(--vh-active-bg);", active_navigation)
+        self.assertIn("color: var(--vh-active-text);", active_navigation)
+        self.assertIn("box-shadow: none;", active_navigation)
+
         back_to_top_state = stylesheet.split(
             ".md-top:is(:hover, :focus-visible) {",
             1,
@@ -2096,9 +2101,9 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 '"header_height": 65',
                 '"header_height": 64',
                 '"rgb(255, 255, 255)"',
-                '"rgb(41, 35, 41)"',
-                '"rgb(28, 24, 32)"',
-                '"rgb(249, 245, 247)"',
+                '"rgb(17, 24, 39)"',
+                '"rgb(11, 15, 25)"',
+                '"rgb(243, 244, 246)"',
                 '".md-sidebar--primary"',
                 '".md-sidebar--secondary"',
                 '"a.md-nav__link--active"',
@@ -2331,7 +2336,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 "--md-code-hl-constant-color: #fbbf24;",
                 "--md-code-hl-keyword-color: #e9d5ff;",
                 "--md-code-hl-number-color: #fb7185;",
-                ".md-copyright {",
+                ".md-copyright,",
                 ".md-typeset__table:focus-visible {",
                 ".md-typeset pre > code:focus-visible,",
                 ".md-typeset .tabbed-labels:focus-visible {",
@@ -2661,7 +2666,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             target_state,
         )
 
-        selector = ".md-sidebar--secondary .md-nav__link--active {"
+        selector = ".md-nav--secondary .md-nav__link--active {"
         self.assertIn(selector, stylesheet)
         active_state = stylesheet.split(selector, 1)[1].split("}", 1)[0]
         for declaration in (
