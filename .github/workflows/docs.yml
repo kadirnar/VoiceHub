@@ -68,7 +68,7 @@ jobs:
           retention-days: 14
 
       - name: Validate responsive documentation and keyboard behavior
-        run: python scripts/check_documentation_visual.py site
+        run: python scripts/check_documentation_visual_shards.py site
 
       - name: Upload GitHub Pages artifact
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'

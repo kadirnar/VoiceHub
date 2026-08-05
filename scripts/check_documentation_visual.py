@@ -96,15 +96,16 @@ VIEWPORTS = (
         "secondary_width": 0,
     },
 )
+VIEWPORTS_BY_NAME = {viewport["name"]: viewport for viewport in VIEWPORTS}
 
 PALETTES = {
     "default": {
         "background": "rgb(255, 255, 255)",
-        "text": "rgb(23, 32, 51)",
+        "text": "rgb(43, 32, 38)",
     },
     "slate": {
-        "background": "rgb(31, 33, 41)",
-        "text": "rgb(232, 233, 239)",
+        "background": "rgb(33, 27, 31)",
+        "text": "rgb(247, 241, 244)",
     },
 }
 
@@ -3475,10 +3476,21 @@ def validate_site(
     *,
     screenshot_baselines_path: Path | None = None,
     update_screenshot_baselines: bool = False,
+    viewport_names: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     if not site_directory.is_dir():
         raise DocumentationVisualError(
             f"Rendered site directory does not exist: {site_directory}. Run mkdocs build first.")
+
+    requested_viewport_names = set(viewport_names or VIEWPORTS_BY_NAME)
+    unknown_viewport_names = requested_viewport_names - VIEWPORTS_BY_NAME.keys()
+    if unknown_viewport_names:
+        raise DocumentationVisualError(f"Unknown viewport names: {sorted(unknown_viewport_names)!r}.")
+    selected_viewports = tuple(
+        viewport for viewport in VIEWPORTS if viewport["name"] in requested_viewport_names)
+    selected_non_mobile_viewports = tuple(
+        viewport for viewport in selected_viewports if viewport["name"] != "mobile")
+    selected_viewport_names = {viewport["name"] for viewport in selected_viewports}
 
     handler = partial(_QuietRequestHandler, directory=str(site_directory.resolve()))
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -3569,7 +3581,7 @@ def validate_site(
                 page = browser.new_page()
                 axe = Axe()
                 for palette in PALETTES:
-                    for viewport in VIEWPORTS:
+                    for viewport in selected_viewports:
                         page.set_viewport_size({
                             "width": viewport["width"],
                             "height": viewport["height"],
@@ -3813,7 +3825,7 @@ def validate_site(
                 if not update_screenshot_baselines:
                     for palette in PALETTES:
                         activation_method = ROOT_BRANCH_ACTIVATION_METHOD_BY_PALETTE[palette]
-                        for viewport in VIEWPORTS[:2]:
+                        for viewport in selected_non_mobile_viewports:
                             page.set_viewport_size({
                                 "width": viewport["width"],
                                 "height": viewport["height"],
@@ -3845,7 +3857,7 @@ def validate_site(
 
                     for palette in PALETTES:
                         activation_method = NESTED_BRANCH_ACTIVATION_METHOD_BY_PALETTE[palette]
-                        for viewport in VIEWPORTS[:2]:
+                        for viewport in selected_non_mobile_viewports:
                             page.set_viewport_size({
                                 "width": viewport["width"],
                                 "height": viewport["height"],
@@ -3879,7 +3891,7 @@ def validate_site(
 
                     for palette in PALETTES:
                         activation_method = PAGE_ACTION_METHOD_BY_PALETTE[palette]
-                        for viewport in VIEWPORTS:
+                        for viewport in selected_viewports:
                             page.set_viewport_size({
                                 "width": viewport["width"],
                                 "height": viewport["height"],
@@ -3916,7 +3928,7 @@ def validate_site(
 
                     for palette in PALETTES:
                         activation_method = SOURCE_ACTIVATION_METHOD_BY_PALETTE[palette]
-                        for viewport in VIEWPORTS[:2]:
+                        for viewport in selected_non_mobile_viewports:
                             page.set_viewport_size({
                                 "width": viewport["width"],
                                 "height": viewport["height"],
@@ -3949,7 +3961,7 @@ def validate_site(
                     for palette in PALETTES:
                         activation_method = THEME_ACTIVATION_METHOD_BY_PALETTE[palette]
                         target_palette = THEME_TARGET_BY_PALETTE[palette]
-                        for viewport in VIEWPORTS[:2]:
+                        for viewport in selected_non_mobile_viewports:
                             page.set_viewport_size({
                                 "width": viewport["width"],
                                 "height": viewport["height"],
@@ -3983,7 +3995,7 @@ def validate_site(
                     for palette in PALETTES:
                         activation_method = LANGUAGE_ACTIVATION_METHOD_BY_PALETTE[palette]
                         target_locale = LANGUAGE_TARGET_BY_PALETTE[palette]
-                        for viewport in VIEWPORTS[:2]:
+                        for viewport in selected_non_mobile_viewports:
                             page.set_viewport_size({
                                 "width": viewport["width"],
                                 "height": viewport["height"],
@@ -4017,7 +4029,7 @@ def validate_site(
 
                     for palette in PALETTES:
                         activation_method = VERSION_ACTIVATION_METHOD_BY_PALETTE[palette]
-                        for viewport in VIEWPORTS:
+                        for viewport in selected_viewports:
                             page.set_viewport_size({
                                 "width": viewport["width"],
                                 "height": viewport["height"],
@@ -4047,7 +4059,7 @@ def validate_site(
                                     version_keyboard_activation_cases += 1
 
                     for palette in PALETTES:
-                        for viewport in VIEWPORTS:
+                        for viewport in selected_viewports:
                             page.set_viewport_size({
                                 "width": viewport["width"],
                                 "height": viewport["height"],
@@ -4078,36 +4090,37 @@ def validate_site(
                                 else:
                                     search_keyboard_activation_cases += 1
 
-                    page.set_viewport_size({"width": 1440, "height": 900})
-                    for palette in PALETTES:
-                        for relative_path in REPRESENTATIVE_ROUTES:
-                            route_url = _route_url(base_url, relative_path)
-                            for activation_method in TOC_ACTIVATION_METHODS:
-                                case = (
-                                    f"{relative_path} / desktop / {palette} / "
-                                    f"TOC {activation_method} activation")
-                                page.goto(route_url, wait_until="networkidle")
-                                _set_keyboard_palette(page, palette)
-                                _validate_table_of_contents_activation(
-                                    page,
-                                    case,
-                                    activation_method,
-                                )
-                                case_axe_core = _validate_accessibility(axe, page, case)
-                                if axe_core != case_axe_core:
-                                    raise DocumentationVisualError(
-                                        f"{case}: Axe engine changed from {axe_core!r} "
-                                        f"to {case_axe_core!r}.")
-                                toc_activation_cases += 1
-                                toc_interaction_accessibility_cases += 1
-                                if activation_method == "pointer":
-                                    toc_pointer_activation_cases += 1
-                                else:
-                                    toc_keyboard_activation_cases += 1
+                    if "desktop" in selected_viewport_names:
+                        page.set_viewport_size({"width": 1440, "height": 900})
+                        for palette in PALETTES:
+                            for relative_path in REPRESENTATIVE_ROUTES:
+                                route_url = _route_url(base_url, relative_path)
+                                for activation_method in TOC_ACTIVATION_METHODS:
+                                    case = (
+                                        f"{relative_path} / desktop / {palette} / "
+                                        f"TOC {activation_method} activation")
+                                    page.goto(route_url, wait_until="networkidle")
+                                    _set_keyboard_palette(page, palette)
+                                    _validate_table_of_contents_activation(
+                                        page,
+                                        case,
+                                        activation_method,
+                                    )
+                                    case_axe_core = _validate_accessibility(axe, page, case)
+                                    if axe_core != case_axe_core:
+                                        raise DocumentationVisualError(
+                                            f"{case}: Axe engine changed from {axe_core!r} "
+                                            f"to {case_axe_core!r}.")
+                                    toc_activation_cases += 1
+                                    toc_interaction_accessibility_cases += 1
+                                    if activation_method == "pointer":
+                                        toc_pointer_activation_cases += 1
+                                    else:
+                                        toc_keyboard_activation_cases += 1
 
                     keyboard_url = _route_url(base_url, KEYBOARD_ROUTE)
                     for palette in PALETTES:
-                        for viewport in VIEWPORTS:
+                        for viewport in selected_viewports:
                             page.set_viewport_size({
                                 "width": viewport["width"],
                                 "height": viewport["height"],
@@ -4128,12 +4141,13 @@ def validate_site(
                                         f"to {case_axe_core!r}.")
                                 interactive_accessibility_cases += 1
 
-                    page.set_viewport_size({"width": 390, "height": 844})
-                    for key, palette in DRAWER_ACTIVATION_CASES:
-                        page.goto(keyboard_url, wait_until="networkidle")
-                        _set_keyboard_palette(page, palette)
-                        _validate_mobile_drawer_activation(page, key, palette)
-                        keyboard_activation_cases += 1
+                    if "mobile" in selected_viewport_names:
+                        page.set_viewport_size({"width": 390, "height": 844})
+                        for key, palette in DRAWER_ACTIVATION_CASES:
+                            page.goto(keyboard_url, wait_until="networkidle")
+                            _set_keyboard_palette(page, palette)
+                            _validate_mobile_drawer_activation(page, key, palette)
+                            keyboard_activation_cases += 1
             finally:
                 browser.close()
     finally:
@@ -4149,7 +4163,10 @@ def validate_site(
             "schema_version": SCREENSHOT_SCHEMA_VERSION,
         }
 
-    baseline_keys = set(screenshot_baselines["cases"])
+    baseline_keys = {
+        key
+        for key in screenshot_baselines["cases"] if key.rsplit("|", 2)[1] in selected_viewport_names
+    }
     actual_keys = set(screenshot_signatures)
     if baseline_keys != actual_keys:
         raise DocumentationVisualError(
@@ -4241,7 +4258,7 @@ def validate_site(
         "version_interaction_accessibility_cases": version_interaction_accessibility_cases,
         "version_keyboard_activation_cases": version_keyboard_activation_cases,
         "version_pointer_activation_cases": version_pointer_activation_cases,
-        "viewports": len(VIEWPORTS),
+        "viewports": len(selected_viewports),
     }
 
 
@@ -4264,6 +4281,13 @@ def main() -> int:
         action="store_true",
         help="Print a reviewed replacement screenshot signature manifest",
     )
+    parser.add_argument(
+        "--viewport",
+        action="append",
+        choices=tuple(VIEWPORTS_BY_NAME),
+        dest="viewport_names",
+        help="Validate only this viewport; repeat to select multiple viewports",
+    )
     args = parser.parse_args()
     print(
         json.dumps(
@@ -4271,6 +4295,7 @@ def main() -> int:
                 args.site_directory,
                 screenshot_baselines_path=args.screenshot_baselines,
                 update_screenshot_baselines=args.update_screenshot_baselines,
+                viewport_names=tuple(args.viewport_names) if args.viewport_names else None,
             ),
             indent=2,
             sort_keys=True,

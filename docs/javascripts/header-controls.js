@@ -418,12 +418,15 @@
       }
     };
 
-    const revealLabel = (label) => {
-      if (!(label instanceof HTMLLabelElement)) return;
+    const revealLabel = (input, label) => {
+      if (!(input instanceof HTMLInputElement) || !(label instanceof HTMLLabelElement)) return;
       requestAnimationFrame(() => {
+        if (document.activeElement !== input) return;
         label.scrollIntoView({ behavior: "instant", block: "nearest", inline: "nearest" });
         keepLabelInViewport(label);
-        requestAnimationFrame(() => keepLabelInViewport(label));
+        requestAnimationFrame(() => {
+          if (document.activeElement === input) keepLabelInViewport(label);
+        });
       });
     };
 
@@ -441,7 +444,7 @@
         if (!(label instanceof HTMLLabelElement)) return;
 
         input.addEventListener("focus", () => {
-          revealLabel(label);
+          revealLabel(input, label);
           label.classList.add("vh-content-tab--focus");
         });
         input.addEventListener("blur", () => {
