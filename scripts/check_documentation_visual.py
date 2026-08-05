@@ -697,6 +697,16 @@ def _rendered_state(page: Page) -> dict[str, Any]:
             scheme: document.body.dataset.mdColorScheme,
             article: rectangle(".md-content__inner"),
             header: rectangle(".md-header"),
+            railControls: rectangle(".vh-doc-rail-controls"),
+            productControl: rectangle(".vh-doc-rail-controls > .md-header__title"),
+            searchControl: rectangle(".vh-doc-rail-controls > .md-search"),
+            utilityControl: rectangle(".vh-doc-rail-utility"),
+            versionControl: rectangle("[data-vh-version-control] > summary"),
+            languageControl: rectangle("[data-vh-language-select]"),
+            themeControl: rectangle("[data-vh-theme-toggle]:not([hidden])"),
+            sourceControl: rectangle(".vh-source-link"),
+            sourceIcon: rectangle(".vh-source-link .md-source__icon"),
+            sourceFacts: rectangle(".vh-source-link .md-source__facts"),
             primary: rectangle(".md-sidebar--primary"),
             secondary: rectangle(".md-sidebar--secondary"),
             overflow: document.documentElement.scrollWidth -
@@ -1432,6 +1442,58 @@ def _validate_case(
     if viewport["width"] >= 960 and state["inactiveFocusableCount"] != 0:
         raise DocumentationVisualError(
             f"{case}: inactive branches expose {state['inactiveFocusableCount']} focusables.")
+
+    if viewport["width"] >= 960:
+        control_names = (
+            "railControls",
+            "productControl",
+            "searchControl",
+            "utilityControl",
+            "versionControl",
+            "languageControl",
+            "themeControl",
+            "sourceControl",
+            "sourceIcon",
+        )
+        missing_controls = [name for name in control_names if state[name] is None]
+        if missing_controls:
+            raise DocumentationVisualError(f"{case}: desktop rail controls are missing {missing_controls!r}.")
+        rail = state["railControls"]
+        product = state["productControl"]
+        search = state["searchControl"]
+        utility = state["utilityControl"]
+        _assert_close(case, "rail controls height", rail["height"], 145)
+        _assert_close(case, "rail title top padding", product["y"] - rail["y"], 13)
+        _assert_close(case, "rail title-to-search gap", search["y"] - product["y"] - product["height"], 15)
+        _assert_close(case, "rail search-to-utility gap", utility["y"] - search["y"] - search["height"], 15)
+        _assert_close(
+            case,
+            "rail utility bottom padding",
+            rail["y"] + rail["height"] - utility["y"] - utility["height"],
+            15,
+        )
+        utility_center = utility["y"] + utility["height"] / 2
+        for control_name in ("versionControl", "languageControl", "themeControl", "sourceControl"):
+            control = state[control_name]
+            _assert_close(
+                case,
+                f"{control_name} vertical center",
+                control["y"] + control["height"] / 2,
+                utility_center,
+            )
+            _assert_close(case, f"{control_name} height", control["height"], 30)
+        source = state["sourceControl"]
+        source_children = ("sourceIcon", )
+        if state["sourceFacts"] is not None:
+            source_children += ("sourceFacts", )
+        for child_name in source_children:
+            child = state[child_name]
+            if (child["x"] < source["x"] or child["x"] + child["width"] > source["x"] + source["width"] or
+                    child["y"] < source["y"] or
+                    child["y"] + child["height"] > source["y"] + source["height"]):
+                raise DocumentationVisualError(
+                    f"{case}: {child_name} escapes the repository control: "
+                    f"child={child!r}, source={source!r}.")
 
     for selector, fields in (
         ("article", ("x", "width")),
@@ -2698,10 +2760,10 @@ def _validate_source_activation(
         "tabIndex": 0,
         "visible": True,
         "withinViewport": True,
-        "x": 198,
-        "y": 155,
-        "width": 55,
-        "height": 16,
+        "x": 203,
+        "y": 165,
+        "width": 48,
+        "height": 30,
     }
     if source_state != expected_state:
         raise DocumentationVisualError(
@@ -2822,7 +2884,7 @@ def _validate_theme_activation(
     if source_state["tabIndex"] != 0 or not source_state["visible"] or not source_state["withinViewport"]:
         raise DocumentationVisualError(
             f"{case}: source toggle is not a visible in-viewport native tab stop: {source_state!r}.")
-    for field, expected in (("x", 152), ("y", 151), ("width", 34), ("height", 24)):
+    for field, expected in (("x", 163), ("y", 165), ("width", 34), ("height", 30)):
         _assert_close(case, f"source theme {field}", source_state[field], expected)
     if _rendered_state(page)["overflow"] != 0:
         raise DocumentationVisualError(f"{case}: source theme control introduced overflow.")

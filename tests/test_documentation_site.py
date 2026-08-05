@@ -1661,7 +1661,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         for declaration in (
                 "--vh-global-header-height: 3.25rem;",
                 "--vh-doc-rail-width: 13.5rem;",
-                "--vh-doc-rail-controls-height: 6.4rem;",
+                "--vh-doc-rail-controls-height: 7.25rem;",
         ):
             self.assertIn(declaration, stylesheet)
         desktop_shell = stylesheet.split(
@@ -1687,6 +1687,17 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn("height: var(--vh-doc-rail-controls-height);", desktop_shell)
         self.assertIn("padding-top: var(--vh-doc-rail-controls-height);", desktop_shell)
         self.assertIn("max-width: none;", desktop_shell)
+        for declaration in (
+                "grid-template-columns: minmax(0, 1fr) 2.4rem 1.7rem 2.4rem;",
+                "column-gap: 0.3rem;",
+                "height: 1.5rem;",
+                "transform: none;",
+        ):
+            self.assertIn(declaration, desktop_shell)
+        self.assertIn(
+            ".vh-doc-rail-utility .vh-source-link .md-source__repository {",
+            desktop_shell,
+        )
 
     def test_desktop_documentation_shell_tracks_the_reference_scroll_offset(self):
         script = HEADER_CONTROL_SCRIPT_PATH.read_text(encoding="utf-8")
