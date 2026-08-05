@@ -12,11 +12,11 @@ responsive states, accessibility, and screenshots have been checked.
 
 | Property | Value |
 | --- | --- |
-| Retrieved | 2026-08-03 |
+| Retrieved | 2026-08-05 |
 | Transformers branch | `main` |
-| Transformers commit | `d09f53a801f45ad73ec3510e17972024234bc0fd` |
-| `_toctree.yml` SHA-256 | `f7d0504e36cd7c312968b549af4fe02b6ee7b3c23d8023986e6a5824680c8f3a` |
-| Rendered reference | `https://huggingface.co/docs/transformers/main/en/index` |
+| Transformers commit | `838763bf4372a5d0e5643fbd76f88294fb66277f` |
+| `_toctree.yml` SHA-256 | `9081408c4dc6b97cdcfb940f49868cddd51bd565aa56400f88d12a111dd485ea` |
+| Rendered reference | `https://huggingface.co/docs/transformers/index` |
 | VoiceHub route | `/voicehub/` |
 
 The modern VoiceHub color tokens and speech-specific content are intentional
@@ -3934,4 +3934,48 @@ Three Triton and two compiled CUDA-extension paths remain hardware-limited and
 unpassed. Pull-request Pages deployment was skipped and is not counted. No tag,
 merge, release, publisher change, or PyPI publication was performed. The
 protected untracked `uv.lock` remained unchanged at SHA-256
+`48f7d98d6eab756580348b081e8fc891d3a5dd2847433e41766b3b45854a70b1`.
+
+## Current neutral documentation-theme evidence
+
+This documentation-shell slice refreshed the official Transformers reference
+on 2026-08-05 at `main` commit
+`838763bf4372a5d0e5643fbd76f88294fb66277f`. The retrieved `_toctree.yml`
+digest was
+`9081408c4dc6b97cdcfb940f49868cddd51bd565aa56400f88d12a111dd485ea`.
+The rendered Home reference used a 65-pixel global row, 270-pixel left and
+right rails, an 804-pixel desktop article at x = 318, white and near-black
+foundations, thin neutral dividers, compact group labels, and a high-contrast
+active navigation pill.
+
+VoiceHub now uses the same restrained visual grammar while retaining its own
+logo and focused rose, violet, green, and teal semantic accents. The previous
+rainbow global header, page-wide radial glows, gradient tabs, gradient titles,
+gradient primary buttons, elevated tables, and elevated process cards were
+removed. Light mode now uses `#ffffff` with `#111827` text; dark mode uses the
+reference's `#0b0f19` foundation with `#f3f4f6` text. Header, documentation
+rails, search, selectors, footer, tables, cards, and process steps use solid
+surfaces and thin borders. Primary navigation uses a white-on-neutral active
+pill, while every right-table-of-contents instance retains transparent,
+accent-only tracking. Desktop and tablet root groups use compact small-cap
+typography without changing their accessible text or existing geometry.
+
+The first screenshot update exposed insufficient light-footer contrast and is
+not counted. Later full interaction probes exposed a tablet active-label
+inheritance error, a compact mobile header contrast error, long-label wrapping,
+and a model-page sticky-TOC contrast error; those failed runs are also excluded.
+The corrected local macOS matrix passed 60 rendered and Axe cases, 60 reviewed
+screenshot cases, 342 keyboard cases, 32 root-branch activations, 24 nested-
+branch activations, 40 TOC activations, and 4,604 native focus steps across all
+ten representative routes, both palettes, and desktop, tablet, and mobile
+viewports. The strict multilingual build and rendered DOM inventory passed
+after this evidence edit. The refreshed Linux screenshot signature candidate
+remains subject to exact pull-request CI validation and is not counted as a
+Linux pass here.
+
+This slice changes no documentation route, public Python API, model registry,
+checkpoint, optimization, packaging contract, or publication state. VoiceHub's
+brand mark remains multicolor, but decorative brand gradients no longer define
+the documentation shell. The protected untracked `uv.lock` remained unchanged
+at SHA-256
 `48f7d98d6eab756580348b081e8fc891d3a5dd2847433e41766b3b45854a70b1`.

@@ -101,11 +101,11 @@ VIEWPORTS_BY_NAME = {viewport["name"]: viewport for viewport in VIEWPORTS}
 PALETTES = {
     "default": {
         "background": "rgb(255, 255, 255)",
-        "text": "rgb(41, 35, 41)",
+        "text": "rgb(17, 24, 39)",
     },
     "slate": {
-        "background": "rgb(28, 24, 32)",
-        "text": "rgb(249, 245, 247)",
+        "background": "rgb(11, 15, 25)",
+        "text": "rgb(243, 244, 246)",
     },
 }
 
@@ -885,7 +885,7 @@ def _validate_root_branch_activation(
         "nav.md-nav--primary > ul.md-nav__list > li.md-nav__item > "
         "button.md-nav__link[data-vh-nav-toggle]")
     buttons = page.locator(selector)
-    root_labels = tuple(value.strip() for value in buttons.all_inner_texts())
+    root_labels = tuple(value.strip() for value in buttons.all_text_contents())
     if root_labels != TOP_LEVEL_NAVIGATION:
         raise DocumentationVisualError(
             f"{case}: root branch order is {root_labels!r}, expected {TOP_LEVEL_NAVIGATION!r}.")
