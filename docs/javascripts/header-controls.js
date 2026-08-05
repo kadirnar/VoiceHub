@@ -387,6 +387,7 @@
 
   const initializeContentTabFocus = () => {
     let focusRequestId = 0;
+    const focusSettleFrames = 6;
 
     const scrollElementBy = (element, { left = 0, top = 0 }) => {
       if (!(element instanceof HTMLElement)) return;
@@ -444,15 +445,16 @@
         document.activeElement === input
         && input.dataset.vhFocusRequest === String(requestId)
       );
-      requestAnimationFrame(() => {
+      const settleLabel = (frame) => {
         if (!isCurrentRequest()) return;
         keepLabelInViewport(label);
-        requestAnimationFrame(() => {
-          if (!isCurrentRequest()) return;
-          keepLabelInViewport(label);
-          input.dataset.vhFocusSettled = String(requestId);
-        });
-      });
+        if (frame < focusSettleFrames) {
+          requestAnimationFrame(() => settleLabel(frame + 1));
+          return;
+        }
+        input.dataset.vhFocusSettled = String(requestId);
+      };
+      requestAnimationFrame(() => settleLabel(1));
     };
 
     document.querySelectorAll(".tabbed-set").forEach((tabSet) => {
@@ -494,10 +496,10 @@
         event.preventDefault();
         const currentIndex = inputs.indexOf(event.target);
         const nextInput = inputs[(currentIndex + direction + inputs.length) % inputs.length];
-        nextInput.focus({ preventScroll: true });
         nextInput.checked = true;
         nextInput.dispatchEvent(new Event("input", { bubbles: true }));
         nextInput.dispatchEvent(new Event("change", { bubbles: true }));
+        nextInput.focus({ preventScroll: true });
       });
     });
   };

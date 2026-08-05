@@ -101,11 +101,11 @@ VIEWPORTS_BY_NAME = {viewport["name"]: viewport for viewport in VIEWPORTS}
 PALETTES = {
     "default": {
         "background": "rgb(255, 255, 255)",
-        "text": "rgb(43, 32, 38)",
+        "text": "rgb(41, 35, 41)",
     },
     "slate": {
-        "background": "rgb(33, 27, 31)",
-        "text": "rgb(247, 241, 244)",
+        "background": "rgb(28, 24, 32)",
+        "text": "rgb(249, 245, 247)",
     },
 }
 
