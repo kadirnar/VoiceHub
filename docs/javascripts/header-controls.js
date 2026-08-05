@@ -386,19 +386,42 @@
   };
 
   const initializeContentTabFocus = () => {
+    let focusRequestId = 0;
+
+    const scrollElementBy = (element, { left = 0, top = 0 }) => {
+      if (!(element instanceof HTMLElement)) return;
+      const previousScrollBehavior = element.style.scrollBehavior;
+      element.style.scrollBehavior = "auto";
+      element.scrollLeft += left;
+      element.scrollTop += top;
+      element.style.scrollBehavior = previousScrollBehavior;
+    };
+
+    const scrollViewportBy = (top) => {
+      const scrollingElement = document.scrollingElement;
+      if (scrollingElement instanceof HTMLElement) {
+        scrollElementBy(scrollingElement, { top });
+      } else {
+        window.scrollBy({ behavior: "instant", top });
+      }
+    };
+
     const keepLabelInViewport = (label) => {
       if (!(label instanceof HTMLLabelElement)) return;
       const labels = label.parentElement;
       const viewportMargin = 4;
       let bounds = label.getBoundingClientRect();
       if (labels instanceof HTMLElement) {
-        if (bounds.left < viewportMargin) {
-          labels.scrollBy({ behavior: "instant", left: bounds.left - viewportMargin });
-        } else if (bounds.right > window.innerWidth - viewportMargin) {
-          labels.scrollBy({
-            behavior: "instant",
-            left: bounds.right - (window.innerWidth - viewportMargin),
-          });
+        const labelsBounds = labels.getBoundingClientRect();
+        const visibleLeft = Math.max(viewportMargin, labelsBounds.left + viewportMargin);
+        const visibleRight = Math.min(
+          window.innerWidth - viewportMargin,
+          labelsBounds.right - viewportMargin,
+        );
+        if (bounds.left < visibleLeft) {
+          scrollElementBy(labels, { left: bounds.left - visibleLeft });
+        } else if (bounds.right > visibleRight) {
+          scrollElementBy(labels, { left: bounds.right - visibleRight });
         }
       }
 
@@ -409,23 +432,25 @@
         : 0;
       const viewportTop = Math.max(viewportMargin, headerBottom + viewportMargin);
       if (bounds.top < viewportTop) {
-        window.scrollBy({ behavior: "instant", top: bounds.top - viewportTop });
+        scrollViewportBy(bounds.top - viewportTop);
       } else if (bounds.bottom > window.innerHeight - viewportMargin) {
-        window.scrollBy({
-          behavior: "instant",
-          top: bounds.bottom - (window.innerHeight - viewportMargin),
-        });
+        scrollViewportBy(bounds.bottom - (window.innerHeight - viewportMargin));
       }
     };
 
-    const revealLabel = (input, label) => {
+    const revealLabel = (input, label, requestId) => {
       if (!(input instanceof HTMLInputElement) || !(label instanceof HTMLLabelElement)) return;
+      const isCurrentRequest = () => (
+        document.activeElement === input
+        && input.dataset.vhFocusRequest === String(requestId)
+      );
       requestAnimationFrame(() => {
-        if (document.activeElement !== input) return;
-        label.scrollIntoView({ behavior: "instant", block: "nearest", inline: "nearest" });
+        if (!isCurrentRequest()) return;
         keepLabelInViewport(label);
         requestAnimationFrame(() => {
-          if (document.activeElement === input) keepLabelInViewport(label);
+          if (!isCurrentRequest()) return;
+          keepLabelInViewport(label);
+          input.dataset.vhFocusSettled = String(requestId);
         });
       });
     };
@@ -444,10 +469,16 @@
         if (!(label instanceof HTMLLabelElement)) return;
 
         input.addEventListener("focus", () => {
-          revealLabel(input, label);
+          const requestId = ++focusRequestId;
+          input.dataset.vhFocusRequest = String(requestId);
+          delete input.dataset.vhFocusSettled;
+          revealLabel(input, label, requestId);
           label.classList.add("vh-content-tab--focus");
         });
         input.addEventListener("blur", () => {
+          focusRequestId += 1;
+          delete input.dataset.vhFocusRequest;
+          delete input.dataset.vhFocusSettled;
           label.classList.remove("vh-content-tab--focus");
         });
       });

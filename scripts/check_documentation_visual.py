@@ -3396,6 +3396,7 @@ def _validate_quickstart_tabs(page: Page, case: str) -> None:
         target_handle = target.element_handle()
         page.wait_for_function(
             """async input => {
+              const focusRequest = input.dataset.vhFocusRequest;
               const readState = () => {
                 const label = input.parentElement?.querySelector(
                   `.tabbed-labels > label[for='${input.id}']`
@@ -3418,6 +3419,8 @@ def _validate_quickstart_tabs(page: Page, case: str) -> None:
               const viewportTolerance = 1;
               const stableTolerance = 0.25;
               return input.checked && document.activeElement === input &&
+                focusRequest && input.dataset.vhFocusRequest === focusRequest &&
+                input.dataset.vhFocusSettled === focusRequest &&
                 before && after && after.width > 0 && after.height > 0 &&
                 Math.abs(after.left - before.left) <= stableTolerance &&
                 Math.abs(after.right - before.right) <= stableTolerance &&
