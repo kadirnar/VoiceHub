@@ -1,4 +1,4 @@
-<h1 align="center">Unified Inference, Training, and Optimization for TTS, ASR, and VAD</h2>
+<h2 align="center">Unified Inference, Training, and Optimization for TTS, ASR, and VAD</h2>
 
 <div align="center">
   <img width="100%" alt="Abstract sound waves representing VoiceHub's unified speech toolkit" src="https://raw.githubusercontent.com/kadirnar/voicehub/main/assets/readme-hero.png">
