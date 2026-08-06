@@ -9,12 +9,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AI_ROOT = PROJECT_ROOT / ".ai"
-CANONICAL_GUIDANCE = {
-    "AGENTS.md": ".ai/AGENTS.md",
-    "GOAL.md": ".ai/GOAL.md",
-    "LOOP.md": ".ai/LOOP.md",
-    "CLAUDE.md": ".ai/AGENTS.md",
-}
+ROOT_GUIDANCE_NAMES = ("AGENTS.md", "GOAL.md", "LOOP.md", "CLAUDE.md")
 REQUIRED_AI_FILES = (
     AI_ROOT / "AGENTS.md",
     AI_ROOT / "GOAL.md",
@@ -22,11 +17,6 @@ REQUIRED_AI_FILES = (
     AI_ROOT / "review-rules.md",
 )
 FRONTMATTER_PATTERN = re.compile(r"\A---\n(?P<body>.*?)\n---\n", re.DOTALL)
-
-
-def normalize_pointer_target(target: str) -> str:
-    """Return a repository-relative pointer with portable separators."""
-    return target.replace("\\", "/")
 
 
 class AIGuidanceContractTests(unittest.TestCase):
@@ -38,20 +28,14 @@ class AIGuidanceContractTests(unittest.TestCase):
                 self.assertTrue(
                     filepath.read_text(encoding="utf-8").strip(), f"Empty AI guidance: {filepath}")
 
-    def test_root_guidance_points_to_canonical_files(self) -> None:
-        for root_name, expected_target in CANONICAL_GUIDANCE.items():
+    def test_root_guidance_is_absent(self) -> None:
+        for root_name in ROOT_GUIDANCE_NAMES:
             root_path = PROJECT_ROOT / root_name
             with self.subTest(root_name=root_name):
-                self.assertTrue(root_path.exists(), f"Missing root compatibility file: {root_name}")
-                if root_path.is_symlink():
-                    actual_target = os.readlink(root_path)
-                else:
-                    # Git may materialize a symlink as a text pointer on Windows.
-                    actual_target = root_path.read_text(encoding="utf-8").strip()
-                self.assertEqual(normalize_pointer_target(actual_target), expected_target)
-
-    def test_windows_style_pointer_targets_are_portable(self) -> None:
-        self.assertEqual(normalize_pointer_target(r".ai\AGENTS.md"), ".ai/AGENTS.md")
+                self.assertFalse(
+                    os.path.lexists(root_path),
+                    f"Root guidance must not duplicate or point to .ai/: {root_name}",
+                )
 
     def test_guidance_concerns_have_one_canonical_owner(self) -> None:
         canonical_text = {

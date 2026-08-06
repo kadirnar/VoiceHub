@@ -10,9 +10,9 @@ Repository guidance has one canonical owner per concern:
 - `.ai/review-rules.md` defines first-pass pull-request review rules.
 - `.ai/skills/` contains task-specific quality workflows.
 
-Read `.ai/GOAL.md` and `.ai/LOOP.md` completely before planning or editing. Root
-`AGENTS.md`, `GOAL.md`, `LOOP.md`, and `CLAUDE.md` are compatibility symlinks;
-never copy canonical guidance into them or edit them as separate sources.
+Read `.ai/GOAL.md` and `.ai/LOOP.md` completely before planning or editing.
+Canonical guidance exists only under `.ai/`; do not add root-level copies,
+pointers, or compatibility symlinks.
 
 Write user-facing explanations and final reports in English. Keep source code,
 identifiers, comments, docstrings, configuration, commit messages, pull-request
