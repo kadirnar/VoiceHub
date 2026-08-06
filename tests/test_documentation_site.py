@@ -2130,15 +2130,21 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 '"a.md-nav__link--active"',
                 '"overflow"',
                 '"--viewport"',
+                '"--palette"',
                 "selected_viewports",
+                "selected_palette_names",
         ):
             self.assertIn(fragment, checker)
 
         shard_checker = DOCUMENTATION_VISUAL_SHARD_CHECK_PATH.read_text(encoding="utf-8")
         for fragment in (
-                "ThreadPoolExecutor(max_workers=len(VIEWPORT_NAMES))",
+                "ThreadPoolExecutor(max_workers=len(selected_viewports))",
                 '"--viewport"',
                 "EXPECTED_TOTALS",
+                "VIEWPORT_SPECIFIC_EXPECTATIONS",
+                "MINIMUM_FOCUS_STEPS_BY_VIEWPORT",
+                "_validate_viewport_summary",
+                "_validate_viewport_palette_summary",
                 '"cases": 60',
                 '"keyboard_cases": 342',
                 '"screenshot_cases": 60',
@@ -2219,10 +2225,12 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             docs_workflow,
         )
         self.assertIn("name: documentation-screenshot-signatures-linux", docs_workflow)
-        self.assertLess(
-            docs_workflow.index("--update-screenshot-baselines"),
-            docs_workflow.index("run: python scripts/check_documentation_visual_shards.py site"),
-        )
+        self.assertIn("name: documentation-site", docs_workflow)
+        self.assertIn("viewport: [desktop, tablet, mobile]", docs_workflow)
+        self.assertIn("palette: [default, slate]", docs_workflow)
+        self.assertIn('--viewport "${{ matrix.viewport }}"', docs_workflow)
+        self.assertIn('--palette "${{ matrix.palette }}"', docs_workflow)
+        self.assertIn("needs: [build, screenshots, visual]", docs_workflow)
 
         release_workflow = (REPOSITORY_ROOT / ".github" / "workflows" /
                             "release.yml").read_text(encoding="utf-8")
@@ -2267,6 +2275,56 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
                 "Viewport shard inventory differs",
         ):
             namespace["_aggregate_summaries"](missing)
+
+        expected_viewport_summary = namespace["_expected_viewport_summary"]
+        expected_viewport_palette_summary = namespace["_expected_viewport_palette_summary"]
+        minimum_focus_steps = namespace["MINIMUM_FOCUS_STEPS_BY_VIEWPORT"]
+        minimum_palette_focus_steps = namespace["MINIMUM_FOCUS_STEPS_BY_VIEWPORT_PALETTE"]
+        validate_viewport_summary = namespace["_validate_viewport_summary"]
+        validate_viewport_palette_summary = namespace["_validate_viewport_palette_summary"]
+        for viewport in viewport_names:
+            with self.subTest(viewport=viewport):
+                self.assertEqual(
+                    sum(minimum_palette_focus_steps[viewport].values()),
+                    minimum_focus_steps[viewport],
+                )
+                summary = {
+                    "axe_core": "axe-core test",
+                    "palettes": 2,
+                    "representative_routes": 10,
+                    "focus_steps": minimum_focus_steps[viewport],
+                    **expected_viewport_summary(viewport),
+                }
+                self.assertEqual(validate_viewport_summary(viewport, summary), summary)
+
+                incomplete_viewport = dict(summary)
+                incomplete_viewport["cases"] -= 1
+                with self.assertRaisesRegex(
+                        namespace["DocumentationVisualShardError"],
+                        f"{viewport} visual contract coverage differs",
+                ):
+                    validate_viewport_summary(viewport, incomplete_viewport)
+
+                for palette in namespace["PALETTE_NAMES"]:
+                    palette_summary = {
+                        "axe_core": "axe-core test",
+                        "palettes": 1,
+                        "representative_routes": 10,
+                        "focus_steps": minimum_palette_focus_steps[viewport][palette],
+                        **expected_viewport_palette_summary(viewport, palette),
+                    }
+                    self.assertEqual(
+                        validate_viewport_palette_summary(viewport, palette, palette_summary),
+                        palette_summary,
+                    )
+
+                    incomplete_palette = dict(palette_summary)
+                    incomplete_palette["screenshot_cases"] -= 1
+                    with self.assertRaisesRegex(
+                            namespace["DocumentationVisualShardError"],
+                            f"{viewport}/{palette} visual contract coverage differs",
+                    ):
+                        validate_viewport_palette_summary(viewport, palette, incomplete_palette)
 
     def test_representative_routes_have_a_rendered_axe_accessibility_contract(self):
         checker = DOCUMENTATION_VISUAL_CHECK_PATH.read_text(encoding="utf-8")
@@ -2507,7 +2565,7 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         ):
             self.assertIn(fragment, checker)
 
-        matrix = checker.split("for palette in PALETTES:", 1)[1].split(
+        matrix = checker.split("for palette in selected_palette_names:", 1)[1].split(
             'page.set_viewport_size({"width": 1440, "height": 900})',
             1,
         )[0]
