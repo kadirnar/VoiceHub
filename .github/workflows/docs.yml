@@ -65,14 +65,15 @@ jobs:
           path: site
 
   visual:
-    name: Visual documentation (${{ matrix.viewport }})
+    name: Visual documentation (${{ matrix.viewport }} / ${{ matrix.palette }})
     needs: build
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 6
       matrix:
         viewport: [desktop, tablet, mobile]
+        palette: [default, slate]
 
     steps:
       - name: Checkout
@@ -107,6 +108,7 @@ jobs:
         run: >-
           python scripts/check_documentation_visual_shards.py site
           --viewport "${{ matrix.viewport }}"
+          --palette "${{ matrix.palette }}"
 
   screenshots:
     name: Capture Linux screenshot signatures

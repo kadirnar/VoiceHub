@@ -17,6 +17,7 @@ from typing import Any
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 VISUAL_CHECK_PATH = REPOSITORY_ROOT / "scripts" / "check_documentation_visual.py"
 VIEWPORT_NAMES = ("desktop", "tablet", "mobile")
+PALETTE_NAMES = ("default", "slate")
 SHARED_SUMMARY_FIELDS = ("axe_core", "palettes", "representative_routes")
 EXPECTED_TOTALS = {
     "accessibility_cases": 60,
@@ -197,6 +198,54 @@ MINIMUM_FOCUS_STEPS_BY_VIEWPORT = {
     "tablet": 1550,
     "mobile": 1250,
 }
+PALETTE_METHOD_CASE_FIELDS = (
+    ("language_keyboard_activation_cases", "language_pointer_activation_cases"),
+    ("nested_branch_keyboard_activation_cases", "nested_branch_pointer_activation_cases"),
+    ("page_action_keyboard_cases", "page_action_pointer_cases"),
+    ("root_branch_keyboard_activation_cases", "root_branch_pointer_activation_cases"),
+    ("source_keyboard_activation_cases", "source_pointer_activation_cases"),
+    ("theme_keyboard_activation_cases", "theme_pointer_activation_cases"),
+    ("version_keyboard_activation_cases", "version_pointer_activation_cases"),
+)
+KEYBOARD_CASE_FIELDS = (
+    "contribution_interaction_cases",
+    "focus_cycle_cases",
+    "home_interaction_cases",
+    "installation_code_interaction_cases",
+    "installation_page_interaction_cases",
+    "keyboard_activation_cases",
+    "language_keyboard_activation_cases",
+    "model_api_interaction_cases",
+    "model_index_interaction_cases",
+    "nested_branch_keyboard_activation_cases",
+    "optimization_interaction_cases",
+    "page_action_keyboard_cases",
+    "pipeline_interaction_cases",
+    "quickstart_interaction_cases",
+    "quickstart_page_interaction_cases",
+    "root_branch_keyboard_activation_cases",
+    "search_keyboard_activation_cases",
+    "source_keyboard_activation_cases",
+    "speecht5_interaction_cases",
+    "theme_keyboard_activation_cases",
+    "toc_keyboard_activation_cases",
+    "trainer_interaction_cases",
+    "version_keyboard_activation_cases",
+)
+MINIMUM_FOCUS_STEPS_BY_VIEWPORT_PALETTE = {
+    "desktop": {
+        "default": 850,
+        "slate": 850,
+    },
+    "tablet": {
+        "default": 775,
+        "slate": 775,
+    },
+    "mobile": {
+        "default": 626,
+        "slate": 624,
+    },
+}
 
 
 class DocumentationVisualShardError(RuntimeError):
@@ -218,6 +267,7 @@ def _run_shard(
     viewport: str,
     site_directory: Path,
     screenshot_baselines_path: Path | None,
+    palette: str | None = None,
 ) -> ShardResult:
     command = [
         sys.executable,
@@ -226,6 +276,8 @@ def _run_shard(
         "--viewport",
         viewport,
     ]
+    if palette is not None:
+        command.extend(("--palette", palette))
     if screenshot_baselines_path is not None:
         command.extend(("--screenshot-baselines", str(screenshot_baselines_path)))
     started = time.monotonic()
@@ -336,11 +388,11 @@ def _expected_viewport_summary(viewport: str) -> dict[str, int]:
     return expected
 
 
-def _validate_viewport_summary(viewport: str, summary: dict[str, Any]) -> dict[str, Any]:
+def _validate_shared_summary(label: str, summary: dict[str, Any], *, palettes: int) -> None:
     shared_mismatches = {
         "palettes": {
             "actual": summary.get("palettes"),
-            "expected": 2,
+            "expected": palettes,
         },
         "representative_routes": {
             "actual": summary.get("representative_routes"),
@@ -358,7 +410,11 @@ def _validate_viewport_summary(viewport: str, summary: dict[str, Any]) -> dict[s
         }
     if shared_mismatches:
         raise DocumentationVisualShardError(
-            f"{viewport} shared visual contract coverage differs: {shared_mismatches!r}.")
+            f"{label} shared visual contract coverage differs: {shared_mismatches!r}.")
+
+
+def _validate_viewport_summary(viewport: str, summary: dict[str, Any]) -> dict[str, Any]:
+    _validate_shared_summary(viewport, summary, palettes=len(PALETTE_NAMES))
 
     expected = _expected_viewport_summary(viewport)
     mismatches = {
@@ -375,6 +431,52 @@ def _validate_viewport_summary(viewport: str, summary: dict[str, Any]) -> dict[s
     if summary.get("focus_steps", 0) < minimum_focus_steps:
         raise DocumentationVisualShardError(
             f"{viewport} native focus coverage is unexpectedly low: "
+            f"{summary.get('focus_steps')!r}; expected at least {minimum_focus_steps}.")
+    return summary
+
+
+def _expected_viewport_palette_summary(viewport: str, palette: str) -> dict[str, int]:
+    viewport_expected = _expected_viewport_summary(viewport)
+    expected = {}
+    for field, value in viewport_expected.items():
+        if field == "viewports":
+            expected[field] = value
+            continue
+        if value % len(PALETTE_NAMES):
+            raise DocumentationVisualShardError(
+                f"{viewport} coverage field {field!r} cannot be divided across palettes: {value!r}.")
+        expected[field] = value // len(PALETTE_NAMES)
+
+    for keyboard_field, pointer_field in PALETTE_METHOD_CASE_FIELDS:
+        cases = (viewport_expected[keyboard_field] + viewport_expected[pointer_field]) // len(PALETTE_NAMES)
+        expected[keyboard_field] = cases if palette == "default" else 0
+        expected[pointer_field] = cases if palette == "slate" else 0
+    expected["keyboard_cases"] = sum(expected[field] for field in KEYBOARD_CASE_FIELDS)
+    return expected
+
+
+def _validate_viewport_palette_summary(
+    viewport: str,
+    palette: str,
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    label = f"{viewport}/{palette}"
+    _validate_shared_summary(label, summary, palettes=1)
+    expected = _expected_viewport_palette_summary(viewport, palette)
+    mismatches = {
+        field: {
+            "actual": summary.get(field),
+            "expected": value,
+        }
+        for field, value in expected.items() if summary.get(field) != value
+    }
+    if mismatches:
+        raise DocumentationVisualShardError(f"{label} visual contract coverage differs: {mismatches!r}.")
+
+    minimum_focus_steps = MINIMUM_FOCUS_STEPS_BY_VIEWPORT_PALETTE[viewport][palette]
+    if summary.get("focus_steps", 0) < minimum_focus_steps:
+        raise DocumentationVisualShardError(
+            f"{label} native focus coverage is unexpectedly low: "
             f"{summary.get('focus_steps')!r}; expected at least {minimum_focus_steps}.")
     return summary
 
@@ -398,7 +500,14 @@ def main() -> int:
         choices=VIEWPORT_NAMES,
         help="Validate one fail-closed viewport shard (default: run and aggregate all viewports)",
     )
+    parser.add_argument(
+        "--palette",
+        choices=PALETTE_NAMES,
+        help="Validate one fail-closed palette within a selected viewport",
+    )
     args = parser.parse_args()
+    if args.palette and not args.viewport:
+        parser.error("--palette requires --viewport")
     site_directory = args.site_directory.resolve()
     screenshot_baselines_path = (args.screenshot_baselines.resolve() if args.screenshot_baselines else None)
     selected_viewports = (args.viewport, ) if args.viewport else VIEWPORT_NAMES
@@ -410,14 +519,24 @@ def main() -> int:
                 viewport,
                 site_directory,
                 screenshot_baselines_path,
-            ): viewport
+                args.palette,
+            ):
+            viewport
             for viewport in selected_viewports
         }
         results_by_viewport = {futures[future]: future.result() for future in as_completed(futures)}
     results = tuple(results_by_viewport[viewport] for viewport in selected_viewports)
     try:
         summaries = _parse_summaries(results)
-        if args.viewport:
+        if args.viewport and args.palette:
+            summary = _validate_viewport_palette_summary(
+                args.viewport,
+                args.palette,
+                summaries[args.viewport],
+            )
+            aggregate = {field: summary[field] for field in SHARED_SUMMARY_FIELDS}
+            aggregate["totals"] = {field: summary[field] for field in EXPECTED_TOTALS}
+        elif args.viewport:
             summary = _validate_viewport_summary(args.viewport, summaries[args.viewport])
             aggregate = {field: summary[field] for field in SHARED_SUMMARY_FIELDS}
             aggregate["totals"] = {field: summary[field] for field in EXPECTED_TOTALS}
