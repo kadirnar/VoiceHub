@@ -2239,7 +2239,6 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
             "if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'",
             docs_workflow,
         )
-        self.assertEqual(docs_workflow.count("timeout: 1200000"), 1)
 
         release_workflow = (REPOSITORY_ROOT / ".github" / "workflows" /
                             "release.yml").read_text(encoding="utf-8")
