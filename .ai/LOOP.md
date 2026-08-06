@@ -1,117 +1,69 @@
 # VoiceHub Transformers Parity Loop
 
-This file defines the repository-local iteration policy for advancing
-`.ai/GOAL.md`. Each iteration closes one highest-impact bounded gap between
-VoiceHub and the current official Hugging Face Transformers library or
-documentation experience.
+This file owns the iteration process. Product requirements belong in
+`.ai/GOAL.md`; repository safety and delivery rules belong in `.ai/AGENTS.md`.
 
 ## Start Every Iteration
 
-1. Re-read `.ai/AGENTS.md`, `.ai/GOAL.md`, `.ai/LOOP.md`, new user messages,
-   `git status`, and the current release and parity evidence.
-1. Preserve every existing user change. Never modify, stage, delete, or
-   overwrite the untracked `uv.lock` file.
-1. Read the complete task-specific skill under `.ai/skills/` when the selected
-   work matches its description. For review tasks, also read
-   `.ai/review-rules.md`.
-1. Verify the current Transformers references from official Hugging Face
-   documentation and the `huggingface/transformers` repository. Record the
-   upstream revision or retrieval date used for a parity decision.
-1. Refresh these inventories:
-   - Transformers navigation entries mapped to VoiceHub routes;
-   - representative page pairs and their structural, responsive, and visual
-     comparison status;
-   - shared documentation components and interaction states;
-   - registered models, uppercase-first display names, model pages, and
-     navigation entries;
-   - public VoiceHub contracts mapped to the corresponding Transformers mental
-     model;
-   - public optimizations and their complete-registry support;
-   - model-contribution steps and every file each step requires.
+1. Read `.ai/AGENTS.md`, `.ai/GOAL.md`, `.ai/LOOP.md`, new user messages, and
+   `git status`.
+1. Record the current branch, exact candidate commit, user-owned changes, and
+   relevant parity or release evidence.
+1. Read the complete task-specific skill routed by `.ai/AGENTS.md`. For review
+   tasks, also read `.ai/review-rules.md`.
+1. When a decision depends on current Transformers behavior, verify the exact
+   official page or repository revision and record the SHA or retrieval date.
 
 ## Select One Gap
 
-Rank remaining gaps in this order:
+Choose one highest-impact bounded gap in this order:
 
-1. broken public behavior, data safety, packaging, or supported-platform tests;
-1. documentation shell, layout, or interaction differences from Transformers;
-1. navigation hierarchy, route mapping, or representative page-template gaps;
-1. missing model pages, navigation entries, or uppercase-first display names;
-1. public API or lifecycle differences that make a Transformers workflow
-   unfamiliar or inconsistent;
-1. public optimizations without complete registry-wide support;
-1. provider-name branching, architecture duplication, deep abstractions, or
-   unnecessary contribution boilerplate;
-1. unsupported, stale, redundant, or difficult-to-scan documentation content.
+1. broken public behavior, data safety, packaging, or supported-platform gates;
+1. documentation shell, layout, interaction, navigation, or page-template gaps;
+1. missing model pages, navigation entries, or display-name defects;
+1. unfamiliar or inconsistent public lifecycle behavior;
+1. public optimizations without complete registry support;
+1. provider branching, duplicated architecture, deep abstractions, or excessive
+   contribution boilerplate;
+1. stale, redundant, unsupported, or difficult-to-scan content.
 
-Select only the highest-impact gap that can be completed as one coherent
-vertical slice. Define its observable completion evidence before editing. Do
-not create cosmetic work merely to keep the loop active.
+Define observable completion evidence before editing. Do not add cosmetic work
+merely to keep an iteration active.
 
 ## Implement the Slice
 
-1. Use the official Transformers page, source file, component, or public
-   workflow as the structural reference. Keep VoiceHub prose, examples,
-   branding, and speech semantics original.
-1. For documentation parity, map one or more explicit page pairs and match:
-   - header, sidebar, breadcrumbs, content column, right table of contents, and
-     footer geometry;
-   - heading hierarchy, spacing, typography, tables, callouts, tabs, code
-     blocks, copy actions, links, and API signatures;
-   - active, hover, focus, expanded, collapsed, loading, error, light, dark,
-     desktop, tablet, and mobile states.
-1. Treat the modern VoiceHub color palette as the only default visual
-   deviation. Any other difference requires an explicit technical or
-   speech-domain justification in the parity inventory.
-1. For public library behavior, preserve Transformers-style naming, lifecycle,
-   loading, saving, processing, task dispatch, and output conventions while
-   keeping model-specific graphs and checkpoint conversion local.
-1. Keep shared interfaces small, inheritance shallow, and dependencies lazy.
-   Replace provider-name conditionals with capability-based behavior.
-1. For a model integration, require configuration, runtime or architecture,
-   normalized input and output, lazy registry wiring, provenance, license,
-   CPU-safe tests, optimization coverage, and a generated model page.
-1. Ensure every user-facing model display name starts with an uppercase letter.
-   Do not change required internal registry keys, Python module names, or remote
-   checkpoint identifiers merely for presentation casing.
-1. For an optimization, test application, validation, restoration, reporting,
-   serialization, unsupported hardware behavior, and semantic output across
-   every registered model. Never treat a silent skip as support.
+1. Apply `.ai/GOAL.md`, `.ai/AGENTS.md`, and the selected skill without
+   restating their rules in the changed artifact.
+1. Keep the slice coherent and update shared generators or contracts instead
+   of hand-editing repeated outputs.
+1. Preserve VoiceHub-specific speech semantics, provenance, lazy dependency
+   boundaries, and public compatibility.
+1. Record intentional deviations from the official Transformers reference;
+   never imply parity from naming or source inspection alone.
 
 ## Verify the Slice
 
 1. Run the narrowest focused regression first.
-1. For documentation changes, build the strict site and compare the mapped
-   VoiceHub and Transformers pages at matching desktop, tablet, and mobile
-   viewports. Check DOM hierarchy, navigation behavior, keyboard access,
-   overflow, anchors, light/dark themes, and screenshots. Do not report visual
-   parity without rendered comparison evidence.
-1. Run registry, model-page, model-name, API, optimization, packaging, and
-   broader tests in proportion to the changed contract.
-1. A failed, skipped, unavailable, inaccessible, or hardware-limited check is
-   not a pass. Record the exact pending gate.
-1. Re-read the diff and remove accidental complexity, copied upstream prose,
-   stale routes, unsupported claims, duplicated styling, and unrelated
-   formatting changes.
+1. Run the skill-mandated and contract-specific checks, followed by broader
+   gates proportional to risk.
+1. For visual work, require rendered light/dark evidence at matching desktop,
+   tablet, and mobile viewports, including DOM, navigation, keyboard,
+   accessibility, overflow, anchor, and screenshot checks.
+1. Re-read the diff for accidental complexity, duplicated guidance, copied
+   upstream prose, stale routes, unsupported claims, and unrelated formatting.
+1. Report failed, skipped, unavailable, inaccessible, or hardware-limited gates
+   precisely; none counts as a pass.
 
-## Deliver Through Pull Requests
+## Deliver the Slice
 
-- Never commit or push directly to `main`.
-- Codex may create focused commits on a non-`main` topic branch, push that
-  branch, and create or update a pull request without requesting separate
-  permission for each of those steps.
-- Keep each pull request limited to the selected vertical slice and include the
-  reference mapping, user-visible result, files changed, checks executed,
-  visual evidence when applicable, and remaining gaps.
-- The user is the only person who merges pull requests. Codex must not merge a
-  pull request.
-- Tagging, creating a GitHub release, or publishing to PyPI is outside this
-  loop and requires an explicit user request for that exact publication action.
+Follow the Git and pull-request policy in `.ai/AGENTS.md`. A pull request must
+connect the exact candidate commit to the reference, implementation, executed
+checks, evidence, and remaining gaps. Publication actions remain outside an
+ordinary iteration.
 
 ## Completion
 
-When every completion criterion in `.ai/GOAL.md` is supported by current
-evidence, make no additional repository changes. Present the final Transformers
-parity report, identify any explicitly accepted non-applicable mappings or
-unverified hardware paths, mark the Goal complete, disable recurring automation
-that uses this loop, and wait for the user's merge or publication decision.
+Stop changing the repository only when every criterion in `.ai/GOAL.md` has
+current evidence. Present the final parity report, including accepted
+non-applicable mappings and unverified hardware paths, then wait for the user's
+merge or publication decision.

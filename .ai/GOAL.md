@@ -162,11 +162,9 @@ and the modern color tokens may differ.
 - Preserve public API compatibility unless a breaking change is approved and
   shipped with a migration path.
 - Preserve lazy loading, normalized outputs, safe checkpoint boundaries,
-  provenance, licenses, and all existing user changes, especially `uv.lock`.
+  provenance, and licenses.
 - Do not add a model without registry integration, contract tests, a complete
   model page, provenance, licensing, and universal optimization coverage.
 - Do not claim exact Transformers parity for a route, component, interaction,
   platform, model, checkpoint, or optimization until its comparison evidence
   exists.
-- Do not commit or push directly to `main`. Repository changes must be delivered
-  through a focused topic branch and pull request. The user owns the merge.

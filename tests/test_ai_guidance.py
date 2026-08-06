@@ -53,6 +53,30 @@ class AIGuidanceContractTests(unittest.TestCase):
     def test_windows_style_pointer_targets_are_portable(self) -> None:
         self.assertEqual(normalize_pointer_target(r".ai\AGENTS.md"), ".ai/AGENTS.md")
 
+    def test_guidance_concerns_have_one_canonical_owner(self) -> None:
+        canonical_text = {
+            filepath.name: filepath.read_text(encoding="utf-8")
+            for filepath in (
+                AI_ROOT / "AGENTS.md",
+                AI_ROOT / "GOAL.md",
+                AI_ROOT / "LOOP.md",
+            )
+        }
+        owned_sections = {
+            "AGENTS.md": "## Git and Pull Request Policy",
+            "GOAL.md": "## Completion Criteria",
+            "LOOP.md": "## Start Every Iteration",
+        }
+
+        for owner, section in owned_sections.items():
+            with self.subTest(owner=owner, section=section):
+                self.assertIn(section, canonical_text[owner])
+                self.assertEqual(
+                    sum(section in text for text in canonical_text.values()),
+                    1,
+                    f"{section} must be owned only by .ai/{owner}",
+                )
+
     def test_skills_are_well_formed_and_routed(self) -> None:
         agents_text = (AI_ROOT / "AGENTS.md").read_text(encoding="utf-8")
         skill_directories = sorted(path for path in (AI_ROOT / "skills").iterdir() if path.is_dir())
