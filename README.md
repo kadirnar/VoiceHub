@@ -1,10 +1,11 @@
-<div align="center">
-  <img width="100%" alt="Abstract sound waves representing VoiceHub's unified speech toolkit" src="https://raw.githubusercontent.com/kadirnar/voicehub/main/assets/readme-hero.png">
-  <p>One Python interface for text-to-speech, speech recognition, and voice activity detection.</p>
-</div>
+# VoiceHub: One Python Interface for Text-to-Speech, Speech Recognition, and Voice Activity Detection
 
 Lazy model loading, normalized outputs, shared optimization controls, and
 training support—without downloading a model until you select one.
+
+<div align="center">
+  <img width="100%" alt="Abstract sound waves representing VoiceHub's unified speech toolkit" src="https://raw.githubusercontent.com/kadirnar/voicehub/main/assets/readme-hero.png">
+</div>
 
 ## Install
 
