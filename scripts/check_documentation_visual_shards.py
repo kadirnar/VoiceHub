@@ -89,6 +89,114 @@ EXPECTED_TOTALS = {
     "version_pointer_activation_cases": 30,
     "viewports": 3,
 }
+VIEWPORT_SPECIFIC_FIELDS = (
+    "keyboard_activation_cases",
+    "keyboard_cases",
+    "language_activation_cases",
+    "language_interaction_accessibility_cases",
+    "language_keyboard_activation_cases",
+    "language_pointer_activation_cases",
+    "nested_branch_activation_cases",
+    "nested_branch_interaction_accessibility_cases",
+    "nested_branch_keyboard_activation_cases",
+    "nested_branch_pointer_activation_cases",
+    "root_branch_activation_cases",
+    "root_branch_interaction_accessibility_cases",
+    "root_branch_keyboard_activation_cases",
+    "root_branch_pointer_activation_cases",
+    "search_keyboard_activation_cases",
+    "search_pointer_activation_cases",
+    "source_activation_cases",
+    "source_interaction_accessibility_cases",
+    "source_keyboard_activation_cases",
+    "source_pointer_activation_cases",
+    "theme_activation_cases",
+    "theme_interaction_accessibility_cases",
+    "theme_keyboard_activation_cases",
+    "theme_pointer_activation_cases",
+    "toc_activation_cases",
+    "toc_interaction_accessibility_cases",
+    "toc_keyboard_activation_cases",
+    "toc_pointer_activation_cases",
+)
+NON_MOBILE_SPECIFIC_EXPECTATIONS = {
+    "keyboard_activation_cases": 0,
+    "language_activation_cases": 20,
+    "language_interaction_accessibility_cases": 20,
+    "language_keyboard_activation_cases": 10,
+    "language_pointer_activation_cases": 10,
+    "nested_branch_activation_cases": 12,
+    "nested_branch_interaction_accessibility_cases": 12,
+    "nested_branch_keyboard_activation_cases": 6,
+    "nested_branch_pointer_activation_cases": 6,
+    "root_branch_activation_cases": 16,
+    "root_branch_interaction_accessibility_cases": 16,
+    "root_branch_keyboard_activation_cases": 8,
+    "root_branch_pointer_activation_cases": 8,
+    "search_keyboard_activation_cases": 20,
+    "search_pointer_activation_cases": 0,
+    "source_activation_cases": 20,
+    "source_interaction_accessibility_cases": 20,
+    "source_keyboard_activation_cases": 10,
+    "source_pointer_activation_cases": 10,
+    "theme_activation_cases": 20,
+    "theme_interaction_accessibility_cases": 20,
+    "theme_keyboard_activation_cases": 10,
+    "theme_pointer_activation_cases": 10,
+}
+VIEWPORT_SPECIFIC_EXPECTATIONS = {
+    "desktop": {
+        **NON_MOBILE_SPECIFIC_EXPECTATIONS,
+        "keyboard_cases": 148,
+        "toc_activation_cases": 40,
+        "toc_interaction_accessibility_cases": 40,
+        "toc_keyboard_activation_cases": 20,
+        "toc_pointer_activation_cases": 20,
+    },
+    "tablet": {
+        **NON_MOBILE_SPECIFIC_EXPECTATIONS,
+        "keyboard_cases": 128,
+        "toc_activation_cases": 0,
+        "toc_interaction_accessibility_cases": 0,
+        "toc_keyboard_activation_cases": 0,
+        "toc_pointer_activation_cases": 0,
+    },
+    "mobile": {
+        "keyboard_activation_cases": 2,
+        "keyboard_cases": 66,
+        "language_activation_cases": 0,
+        "language_interaction_accessibility_cases": 0,
+        "language_keyboard_activation_cases": 0,
+        "language_pointer_activation_cases": 0,
+        "nested_branch_activation_cases": 0,
+        "nested_branch_interaction_accessibility_cases": 0,
+        "nested_branch_keyboard_activation_cases": 0,
+        "nested_branch_pointer_activation_cases": 0,
+        "root_branch_activation_cases": 0,
+        "root_branch_interaction_accessibility_cases": 0,
+        "root_branch_keyboard_activation_cases": 0,
+        "root_branch_pointer_activation_cases": 0,
+        "search_keyboard_activation_cases": 0,
+        "search_pointer_activation_cases": 20,
+        "source_activation_cases": 0,
+        "source_interaction_accessibility_cases": 0,
+        "source_keyboard_activation_cases": 0,
+        "source_pointer_activation_cases": 0,
+        "theme_activation_cases": 0,
+        "theme_interaction_accessibility_cases": 0,
+        "theme_keyboard_activation_cases": 0,
+        "theme_pointer_activation_cases": 0,
+        "toc_activation_cases": 0,
+        "toc_interaction_accessibility_cases": 0,
+        "toc_keyboard_activation_cases": 0,
+        "toc_pointer_activation_cases": 0,
+    },
+}
+MINIMUM_FOCUS_STEPS_BY_VIEWPORT = {
+    "desktop": 1700,
+    "tablet": 1550,
+    "mobile": 1250,
+}
 
 
 class DocumentationVisualShardError(RuntimeError):
@@ -203,6 +311,74 @@ def _aggregate_summaries(summaries: dict[str, dict[str, Any]]) -> dict[str, Any]
     }
 
 
+def _expected_viewport_summary(viewport: str) -> dict[str, int]:
+    specific_expectations = VIEWPORT_SPECIFIC_EXPECTATIONS[viewport]
+    if set(specific_expectations) != set(VIEWPORT_SPECIFIC_FIELDS):
+        raise DocumentationVisualShardError(
+            f"{viewport} viewport-specific coverage fields differ: "
+            f"{sorted(set(specific_expectations) ^ set(VIEWPORT_SPECIFIC_FIELDS))!r}.")
+    for field in VIEWPORT_SPECIFIC_FIELDS:
+        total = sum(expectations[field] for expectations in VIEWPORT_SPECIFIC_EXPECTATIONS.values())
+        if total != EXPECTED_TOTALS[field]:
+            raise DocumentationVisualShardError(
+                f"Viewport-specific coverage for {field!r} totals {total!r}; "
+                f"expected {EXPECTED_TOTALS[field]!r}.")
+
+    expected = {}
+    for field, total in EXPECTED_TOTALS.items():
+        if field in specific_expectations:
+            expected[field] = specific_expectations[field]
+            continue
+        if total % len(VIEWPORT_NAMES):
+            raise DocumentationVisualShardError(
+                f"Shared coverage field {field!r} cannot be divided across viewports: {total!r}.")
+        expected[field] = total // len(VIEWPORT_NAMES)
+    return expected
+
+
+def _validate_viewport_summary(viewport: str, summary: dict[str, Any]) -> dict[str, Any]:
+    shared_mismatches = {
+        "palettes": {
+            "actual": summary.get("palettes"),
+            "expected": 2,
+        },
+        "representative_routes": {
+            "actual": summary.get("representative_routes"),
+            "expected": 10,
+        },
+    }
+    shared_mismatches = {
+        field: values
+        for field, values in shared_mismatches.items() if values["actual"] != values["expected"]
+    }
+    if not isinstance(summary.get("axe_core"), str) or summary["axe_core"] in ("", "unknown"):
+        shared_mismatches["axe_core"] = {
+            "actual": summary.get("axe_core"),
+            "expected": "a detected Axe engine version",
+        }
+    if shared_mismatches:
+        raise DocumentationVisualShardError(
+            f"{viewport} shared visual contract coverage differs: {shared_mismatches!r}.")
+
+    expected = _expected_viewport_summary(viewport)
+    mismatches = {
+        field: {
+            "actual": summary.get(field),
+            "expected": value,
+        }
+        for field, value in expected.items() if summary.get(field) != value
+    }
+    if mismatches:
+        raise DocumentationVisualShardError(f"{viewport} visual contract coverage differs: {mismatches!r}.")
+
+    minimum_focus_steps = MINIMUM_FOCUS_STEPS_BY_VIEWPORT[viewport]
+    if summary.get("focus_steps", 0) < minimum_focus_steps:
+        raise DocumentationVisualShardError(
+            f"{viewport} native focus coverage is unexpectedly low: "
+            f"{summary.get('focus_steps')!r}; expected at least {minimum_focus_steps}.")
+    return summary
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -217,11 +393,17 @@ def main() -> int:
         type=Path,
         help="Screenshot signature manifest passed to every viewport shard",
     )
+    parser.add_argument(
+        "--viewport",
+        choices=VIEWPORT_NAMES,
+        help="Validate one fail-closed viewport shard (default: run and aggregate all viewports)",
+    )
     args = parser.parse_args()
     site_directory = args.site_directory.resolve()
     screenshot_baselines_path = (args.screenshot_baselines.resolve() if args.screenshot_baselines else None)
+    selected_viewports = (args.viewport, ) if args.viewport else VIEWPORT_NAMES
     started = time.monotonic()
-    with ThreadPoolExecutor(max_workers=len(VIEWPORT_NAMES)) as executor:
+    with ThreadPoolExecutor(max_workers=len(selected_viewports)) as executor:
         futures = {
             executor.submit(
                 _run_shard,
@@ -229,13 +411,18 @@ def main() -> int:
                 site_directory,
                 screenshot_baselines_path,
             ): viewport
-            for viewport in VIEWPORT_NAMES
+            for viewport in selected_viewports
         }
         results_by_viewport = {futures[future]: future.result() for future in as_completed(futures)}
-    results = tuple(results_by_viewport[viewport] for viewport in VIEWPORT_NAMES)
+    results = tuple(results_by_viewport[viewport] for viewport in selected_viewports)
     try:
         summaries = _parse_summaries(results)
-        aggregate = _aggregate_summaries(summaries)
+        if args.viewport:
+            summary = _validate_viewport_summary(args.viewport, summaries[args.viewport])
+            aggregate = {field: summary[field] for field in SHARED_SUMMARY_FIELDS}
+            aggregate["totals"] = {field: summary[field] for field in EXPECTED_TOTALS}
+        else:
+            aggregate = _aggregate_summaries(summaries)
     except DocumentationVisualShardError as error:
         print(str(error), file=sys.stderr)
         return 1
