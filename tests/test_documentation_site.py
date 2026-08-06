@@ -1024,6 +1024,9 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
     def test_theme_uses_reference_neutral_surfaces_with_voicehub_accents(self):
         stylesheet = STYLESHEET_PATH.read_text(encoding="utf-8")
         mark = (DOCS_ROOT / "assets" / "voicehub-mark.svg").read_text(encoding="utf-8")
+        repository_mark = (REPOSITORY_ROOT / "assets" / "logo.svg").read_text(encoding="utf-8")
+
+        self.assertEqual(mark, repository_mark)
 
         for legacy_fragment in (
                 "--vh-indigo",
@@ -1075,9 +1078,16 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         )[1].split("}", 1)[0]
         self.assertIn("background: var(--vh-surface-soft);", back_to_top_state)
         self.assertIn("color: var(--vh-accent);", back_to_top_state)
-        self.assertEqual(mark.count("<stop"), 5)
-        for color in ("#a21caf", "#c0265e", "#c2410c", "#047857", "#6d28d9"):
+        self.assertEqual(mark.count("<stop"), 2)
+        self.assertEqual(mark.count("<rect"), 0)
+        self.assertEqual(mark.count("<path"), 1)
+        self.assertEqual(mark.count("<circle"), 0)
+        self.assertIn('fill="url(#voicehub-signal)"', mark)
+        self.assertIn('fill-rule="evenodd"', mark)
+        for color in ("#ff4f68", "#ff8a3d"):
             self.assertIn(f'stop-color="{color}"', mark)
+        for rejected_color in ("#111827", "#f8fafc", "#4f46e5", "#14b8a6"):
+            self.assertNotIn(rejected_color, mark)
 
     def test_model_api_reference_matches_transformers_contract(self):
         config = SITE_CONFIG_PATH.read_text(encoding="utf-8")
