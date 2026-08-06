@@ -1,7 +1,7 @@
-# VoiceHub: Unified Speech AI in Python
+<h1 align="center">VoiceHub: Unified Speech AI in Python</h1>
 
 <div align="center">
-  <img width="100%" alt="Abstract sound waves representing VoiceHub's unified speech toolkit" src="https://raw.githubusercontent.com/kadirnar/voicehub/main/assets/readme-hero.png">
+  <img width="720" alt="Abstract sound waves representing VoiceHub's unified speech toolkit" src="https://raw.githubusercontent.com/kadirnar/voicehub/main/assets/readme-hero.png">
 </div>
 
 ## Install
