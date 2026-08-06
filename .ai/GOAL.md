@@ -35,9 +35,9 @@ integration.
 
 Repository guidance must follow the Transformers `.ai/` convention. Canonical
 agent instructions, the product goal, the iteration loop, review rules, and
-task-specific skills live under `.ai/`. Root-level compatibility symlinks keep
-the guidance discoverable by hosted and local coding agents without creating
-duplicate sources of truth.
+task-specific skills live under `.ai/`. Root-level guidance copies, pointers,
+and compatibility symlinks are intentionally absent so `.ai/` remains the only
+discoverable source of truth.
 
 Skills must be concise, validated, and limited to fragile or repetitive quality
 workflows. They must strengthen the same product contract rather than introduce
@@ -154,8 +154,8 @@ and the modern color tokens may differ.
    traceable to reproducible tests, visual evidence, benchmarks, or official
    upstream sources.
 1. The canonical `.ai/` guidance, review rules, and task skills validate
-   successfully; root compatibility symlinks resolve to the canonical files and
-   no duplicate instruction source can drift independently.
+   successfully; no root-level guidance copy, pointer, or compatibility symlink
+   exists and no duplicate instruction source can drift independently.
 
 ## Constraints
 

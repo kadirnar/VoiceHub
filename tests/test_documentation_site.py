@@ -2231,6 +2231,14 @@ print(json.dumps({name: name in sys.modules for name in blocked}))
         self.assertIn('--viewport "${{ matrix.viewport }}"', docs_workflow)
         self.assertIn('--palette "${{ matrix.palette }}"', docs_workflow)
         self.assertIn("needs: [build, screenshots, visual]", docs_workflow)
+        self.assertEqual(
+            docs_workflow.count("github.event.pull_request.head.repo.full_name == github.repository"),
+            2,
+        )
+        self.assertNotIn(
+            "if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'",
+            docs_workflow,
+        )
 
         release_workflow = (REPOSITORY_ROOT / ".github" / "workflows" /
                             "release.yml").read_text(encoding="utf-8")
