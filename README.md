@@ -1,5 +1,5 @@
 <div align="center">
-  <img width="360" alt="VoiceHub" src="https://raw.githubusercontent.com/kadirnar/voicehub/main/assets/logo.png">
+  <img width="120" alt="VoiceHub" src="https://raw.githubusercontent.com/kadirnar/voicehub/main/assets/logo.svg">
   <h1>VoiceHub</h1>
   <p>One Python interface for text-to-speech, speech recognition, and voice activity detection.</p>
 </div>
