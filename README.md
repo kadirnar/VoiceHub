@@ -1,12 +1,8 @@
-# VoiceHub: A Unified Python Toolkit for Speech and Audio AI
+<h2 align="center">VoiceHub: A Unified Python Toolkit for Speech and Audio AI</h2>
 
 <div align="center">
   <img width="100%" alt="Abstract sound waves representing VoiceHub's unified speech toolkit" src="https://raw.githubusercontent.com/kadirnar/voicehub/main/assets/readme-hero.png">
-  <p>One Python interface for text-to-speech, speech recognition, and voice activity detection.</p>
 </div>
-
-Lazy model loading, normalized outputs, shared optimization controls, and
-training support—without downloading a model until you select one.
 
 ## Install
 
