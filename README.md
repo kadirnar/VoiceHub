@@ -1,16 +1,10 @@
 <div align="center">
   <img width="100%" alt="Abstract sound waves representing VoiceHub's unified speech toolkit" src="https://raw.githubusercontent.com/kadirnar/voicehub/main/assets/readme-hero.png">
-  <h1>VoiceHub</h1>
   <p>One Python interface for text-to-speech, speech recognition, and voice activity detection.</p>
 </div>
 
-VoiceHub provides lazy model loading, normalized outputs, shared optimization
-controls, and a common trainer. Model weights are downloaded only when a
-selected model is loaded.
-
-The 0.3 release line is an evidence-first unified open-speech runtime: its
-existing TTS, ASR, and VAD integrations are being hardened as one installable
-surface before the built-in provider catalogue grows again.
+Lazy model loading, normalized outputs, shared optimization controls, and
+training support—without downloading a model until you select one.
 
 ## Install
 
